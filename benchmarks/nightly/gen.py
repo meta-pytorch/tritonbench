@@ -76,6 +76,8 @@ def process_manual_options(
         run_configs[benchmark]["disabled"] = True
     for benchmark in extra_args:
         run_configs[benchmark]["args"] = extra_args[benchmark]["args"]
+    for benchmark, benchmark_config in options.get("enabled", {}).items():
+        run_configs[benchmark] = benchmark_config.copy()
     return run_configs
 
 

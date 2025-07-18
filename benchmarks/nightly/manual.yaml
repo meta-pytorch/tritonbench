@@ -7,6 +7,10 @@ disabled:
   - fp8_gemm_fwd
   - fp8_gemm_rowwise_fwd
   - fp8_gemm_rowwise_grouped_fwd
+enabled:
+  launch_latency:
+    op: launch_latency
+    args: --op launch_latency --metrics walltime
 extra_args:
   # triton_tutorial_flash_v2_opt does not work on Triton main branch
   bf16_flash_attention_fwd:

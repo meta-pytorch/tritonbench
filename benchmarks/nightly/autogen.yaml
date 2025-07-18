@@ -140,3 +140,6 @@ rope_bwd:
 swiglu_bwd:
   op: swiglu
   args: --op swiglu --baseline torch_swiglu --metrics speedup --bwd --only liger_swiglu,torch_swiglu
+launch_latency:
+  op: launch_latency
+  args: --op launch_latency --metrics walltime
