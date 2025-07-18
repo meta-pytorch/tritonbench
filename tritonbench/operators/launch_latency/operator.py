@@ -1,6 +1,8 @@
 import triton.language as tl
 from torch import zeros
 from torch._C import _cuda_getCurrentRawStream as get_raw_stream
+
+from torch._inductor.utils import triton_version_uses_attrs_dict
 from triton.compiler import CompiledKernel
 
 from tritonbench.utils.triton_op import (
@@ -10,7 +12,6 @@ from tritonbench.utils.triton_op import (
     register_metric,
 )
 
-from torch._inductor.utils import triton_version_uses_attrs_dict
 from .kernels import get_trivial_add_kernel, nop_kernel, nop_with_args_kernel
 
 
