@@ -10,6 +10,7 @@ from tritonbench.utils.triton_op import (
     register_metric,
 )
 
+from torch._inductor.utils import triton_version_uses_attrs_dict
 from .kernels import get_trivial_add_kernel, nop_kernel, nop_with_args_kernel
 
 
@@ -39,7 +40,10 @@ class Operator(BenchmarkOperator):
 
         else:
             bin = nop_with_args_kernel[1,](*args)
-            args = args[:-5]  # remove tl.constexpr args
+            # triton <= 3.3 does not include tl.constexpr args in call
+            # but triton 3.4 does
+            if not triton_version_uses_attrs_dict():
+                args = args[:-5]
         function = bin.function
         metadata = (
             bin.packed_metadata if hasattr(bin, "packed_metadata") else bin.metadata
