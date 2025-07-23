@@ -341,7 +341,7 @@ class Operator(BenchmarkOperator):
             fhma_input, needs_gradient=need_gradient
         )
 
-    @register_benchmark(enabled=False, label=f"cudnn-{torch.backends.cudnn.version()}")
+    @register_benchmark(enabled=False)
     def cudnn(self, q, k, v):
         os.environ["TORCH_CUDNN_SDPA_ENABLED"] = "1"
 
