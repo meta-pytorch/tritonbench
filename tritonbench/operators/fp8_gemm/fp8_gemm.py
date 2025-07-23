@@ -163,6 +163,22 @@ class Operator(BenchmarkOperator):
         flops = 2 * m * n * k
         return flops
 
+    def accuracy(self, fn, baseline_fn):
+        output = fn()
+        baseline_output = baseline_fn()
+
+        # Check for NaN values
+        if torch.isnan(output).any():
+            return False
+
+        try:
+            torch.testing.assert_close(
+                output, baseline_output, rtol=4, atol=0.2
+            )
+            return True
+        except Exception:
+            return False
+
     def plot(self):
         @triton.testing.perf_report(
             triton.testing.Benchmark(
