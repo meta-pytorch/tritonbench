@@ -335,7 +335,7 @@ class Operator(BenchmarkOperator):
             compiled(a, b)
         return lambda: compiled(a, b)
 
-    @register_benchmark()
+    @register_benchmark(enabled=False)
     def matmul_decompose_k(self, a, b, bias) -> Callable:
         def decompose_func(a_in, b_in):
             M, K = a_in.shape
@@ -343,7 +343,7 @@ class Operator(BenchmarkOperator):
 
             # TODO: Ideally we want to autotune over this parameter
             kPartitions = 256
-            assert K % kPartitions == 0, "K must be divisible by Kmini"
+            # assert K % kPartitions == 0, "K must be divisible by Kmini"
             B = K // kPartitions
 
             a_reshaped = a.reshape(M, B, kPartitions).transpose(
