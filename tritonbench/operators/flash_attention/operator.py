@@ -136,6 +136,17 @@ try:
 except (ImportError, IOError, AttributeError, TypeError):
     HAS_XFORMERS = False
 
+# [Optional] TLX backend
+try:
+    import triton.language.extra.tlx as tlx
+    from .tlx_attn_ws_pipelined_pingpong_hopper import (
+        attention as tlx_attn_ws_pipelined_pingpong_hopper,
+    )
+
+    HAS_TLX = True
+except (ImportError, IOError, AttributeError):
+    HAS_TLX = False
+
 from typing import Any, Generator, List
 
 from tritonbench.utils.input import input_filter
@@ -298,6 +309,16 @@ class Operator(BenchmarkOperator):
         return lambda: triton_tutorial_FA2_opt(
             q, k, v, self.causal, self.sm_scale, "tma"
         )
+
+    @register_benchmark(enabled=HAS_TLX)
+    def tlx_attn_ws_pipelined_pingpong_hopper(
+        self,
+        q: torch.Tensor,
+        k: torch.Tensor,
+        v: torch.Tensor,
+    ) -> Callable:
+        # TLX flash attention with Hopper optimizations
+        return lambda: tlx_attn_ws_pipelined_pingpong_hopper(q, k, v, self.sm_scale)
 
     def xformers_preprocess(
         self,
