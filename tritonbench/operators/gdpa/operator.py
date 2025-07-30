@@ -21,6 +21,7 @@ import gc
 from typing import Any, Callable, Generator, List, Optional
 
 import torch
+from tritonbench.operators.gdpa.gdpa_blackwell_tlx import gdpa_forward_tlx
 
 from tritonbench.utils.triton_op import (
     BenchmarkOperator,
@@ -152,13 +153,43 @@ class Operator(BenchmarkOperator):
     ):
         super().__init__(tb_args, extra_args=extra_args)
         args = parse_args(self.extra_args)
-        self.config_names = args.config.split(",")
+        self.config_names = ["default"]  # args.config.split(",")
         self.sparsity = args.sparsity
         self.batch = args.batch
         self.max_seq_len = args.max_seq_len
         self.dim = args.dim
         self.head = args.head
         self.kv_len = args.kv_len
+
+    @register_benchmark(enabled=False)
+    def tlx_gdpa_fwd(
+        self,
+        _config_name,
+        jagged_q,
+        jagged_k,
+        jagged_v,
+        jagged_data,
+        padded_data,
+        activation,
+    ):
+        def _inner():
+            real_output = gdpa_forward_tlx(
+                query=jagged_q,
+                key=jagged_k,
+                value=jagged_v,
+                query_offset=jagged_data["q_offsets"],
+                key_offset=jagged_data["k_offsets"],
+                output_offset=jagged_data["output_offsets"],
+                max_seq_len_q=jagged_data["max_seq_len_q"],
+                max_seq_len_kv=jagged_data["max_seq_len_k"],
+                activation=activation,
+                is_causal=False,
+                broadcast_q=jagged_data["broadcast_q"],
+                window_size=jagged_data["window_size"],
+            )
+            return real_output
+
+        return _inner
 
     @register_benchmark(baseline=True)
     def gdpa(
