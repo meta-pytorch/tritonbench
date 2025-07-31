@@ -406,7 +406,7 @@ class Operator(BenchmarkOperator):
 
     if not IS_B200:
 
-        @register_benchmark(enabled=HAS_FLASH_V3)
+        @register_benchmark(enabled=False)
         def flash_v3(
             self,
             q: torch.Tensor,
