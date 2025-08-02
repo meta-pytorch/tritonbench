@@ -248,7 +248,8 @@ def _do_dots(
         bufIdx_qk1, phase_qk1 = _get_bufidx_phase(accum_cnt_qk1, NUM_BUFFERS_QK)
         consumer_p1_view = tlx.local_view(producer_qk1, bufIdx_qk1)
         tlx.barrier_wait(
-            producer_o1_view, phase_o_outer, first
+            producer_o1_view,
+            phase_o_outer,  # , first FIXME
         )  # producer acquire for o1, only needed for first iteration
         tlx.barrier_wait(
             consumer_p1_view, phase_qk1
@@ -312,11 +313,12 @@ def _do_dots(
     # epilogue
     # commit to release q0, q1? FIXME
     release_q0_view = tlx.local_view(consumer_release_q0, bufIdx_q)
-    tlx.gen5_commit(release_q0_view)
-    release_q1_view = tlx.local_viwe(consumer_release_q1, bufIdx_q)
-    tlx.gen5_commit(release_q1_view)
+    # tlx.gen5_commit(release_q0_view)
+    release_q1_view = tlx.local_view(consumer_release_q1, bufIdx_q)
+    # tlx.gen5_commit(release_q1_view)
     tlx.barrier_wait(
-        producer_o1_view, phase_o_outer, first
+        producer_o1_view,
+        phase_o_outer,  # , first
     )  # producer acquire for o1 at the first iteration
     bufIdx_qk1, phase_qk1 = _get_bufidx_phase(accum_cnt_qk1, NUM_BUFFERS_QK)
     consumer_p1_view = tlx.local_view(producer_qk1, bufIdx_qk1)
@@ -598,6 +600,7 @@ def gdpa_kernel_tma_ws_blackwell(
                         accum_cnt += 1
 
         with tlx.async_task(num_warps=1):  # gemm
+            accum_cnt_q = 0
             accum_cnt_k = 0
             accum_cnt_qk = 0
             accum_cnt_outer = 0
@@ -641,6 +644,7 @@ def gdpa_kernel_tma_ws_blackwell(
                         producer_commit_o0,
                         producer_o1,
                         producer_commit_o1,
+                        accum_cnt_q,
                         accum_cnt_k,
                         accum_cnt_qk,
                         accum_cnt_outer,
@@ -650,6 +654,7 @@ def gdpa_kernel_tma_ws_blackwell(
                         NUM_BUFFERS_O,
                         BLOCK_N,
                     )
+                    accum_cnt_q += 1
                     accum_cnt_outer += 1
                     # signal producer commit of epi0 and epi1, we don't want to block the gemm partition
                     # to wait for the completion
