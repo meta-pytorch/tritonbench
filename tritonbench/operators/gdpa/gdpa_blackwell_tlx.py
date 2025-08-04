@@ -335,6 +335,9 @@ def _do_dots(
     # consumer_release_p1_view = tlx.local_view(producer_commit_qk1, bufIdx_qk)
     bufIdx_o, phase_o = _get_bufidx_phase(accum_cnt_o1, NUM_BUFFERS_O)
     producer_commit_o1_view = tlx.local_view(producer_commit_o1, bufIdx_o)
+    bufIdx_v, phase_v = _get_bufidx_phase(accum_cnt_o1, NUM_BUFFERS_K)
+    consumer_release_v_view = tlx.local_view(consumer_release_v, bufIdx_v)
+    o1_view = tlx.local_view(o1_buf, bufIdx_o)
     tlx.async_dot(
         p1_view,
         v_view,
