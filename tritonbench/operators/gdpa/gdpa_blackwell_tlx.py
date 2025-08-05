@@ -224,7 +224,10 @@ def _do_dots(
         consumer_p0_view, phase_p
     )  # consumer wait for p0 due to reuse of p0 and qk0
     # reinterpret qk0 as p0
-    p0_view = _reinterpret(qk0_buf, bufIdx_p)
+    # p0_view = _reinterpret(qk0_buf, bufIdx_p)
+    qk_view = tlx.local_view(qk0_buf, bufIdx_p)
+    p0_view = tlx.local_reinterpret(qk_view, tl.float16)
+
     bufIdx_o, phase_o = _get_bufidx_phase(accum_cnt_k, NUM_BUFFERS_O)
     producer_commit_o0_view = tlx.local_view(producer_commit_o0, bufIdx_o)
     o0_view = tlx.local_view(o0_buf, bufIdx_o)
@@ -276,7 +279,9 @@ def _do_dots(
         )  # NUM_BUFFERS_K is NUM_BUFFERS_V
         consumer_release_v_view = tlx.local_view(consumer_release_v, bufIdx_v)
         # reinterpret as p1
-        p1_view = _reinterpret(qk1_buf, bufIdx_qk1)
+        # p1_view = _reinterpret(qk1_buf, bufIdx_qk1)
+        qk_view = tlx.local_view(qk1_buf, bufIdx_qk1)
+        p1_view = tlx.local_reinterpret(qk_view, tl.float16)
         tlx.async_dot(
             p1_view,
             v_view,
@@ -301,7 +306,7 @@ def _do_dots(
         )
 
         # p0 dot v
-        tlx.barrier_wait(consumer_v, phase_k)  # consumer wait for v
+        tlx.barrier_wait(consumer_v_view, phase_k)  # consumer wait for v
         # no need to acquire o0 as this is the only partition updating it
         # tlx.barrier_wait(producer_o0)  # producer acquire for o0
         consumer_p0_view = tlx.local_view(producer_qk0, bufIdx_qk)
@@ -309,7 +314,10 @@ def _do_dots(
             consumer_p0_view, phase_qk
         )  # consumer wait for p0 use producer_qk0 due to reuse
         # reinterpret as p0
-        p0_view = _reinterpret(qk0_buf, bufIdx_qk)
+        # p0_view = _reinterpret(qk0_buf, bufIdx_qk)
+        qk_view = tlx.local_view(qk0_buf, bufIdx_qk)
+        p0_view = tlx.local_reinterpret(qk_view, tl.float16)
+
         v_view = tlx.local_view(v_buf, bufIdx_k)
         bufIdx_o, phase_o = _get_bufidx_phase(accum_cnt_k, NUM_BUFFERS_O)
         producer_commit_o0_view = tlx.local_view(producer_commit_o0, bufIdx_o)
@@ -339,7 +347,9 @@ def _do_dots(
     tlx.barrier_wait(
         consumer_p1_view, phase_qk1
     )  # consumer wait for p1 due to reuse of p1 and qk1
-    p1_view = _reinterpret(qk1_buf, bufIdx_qk1)
+    # p1_view = _reinterpret(qk1_buf, bufIdx_qk1)
+    qk_view = tlx.local_view(qk1_buf, bufIdx_qk1)
+    p1_view = tlx.local_reinterpret(qk_view, tl.float16)
 
     accum_cnt_qk1 += 1
     # release p0, p1 via producer_commit_qk0, qk1 barriers
@@ -576,16 +586,34 @@ def gdpa_kernel_tma_ws_blackwell(
                     for start_n in range(lo, hi, BLOCK_N):
                         start_n = tl.multiple_of(start_n, BLOCK_N)
                         ## communication channel for qk0, p0
-                        _do_activation(
-                            qk0_buf,
-                            qk_scale,
-                            producer_commit_qk0,
-                            producer_qk0,
-                            accum_cnt,
-                            V.dtype.element_ty,
-                            activation_enum_int,
-                            NUM_BUFFERS_QK,
-                        )
+                        # _do_activation(
+                        #    qk0_buf,
+                        #    qk_scale,
+                        #    producer_commit_qk0,
+                        #    producer_qk0,
+                        #    accum_cnt,
+                        #    V.dtype.element_ty,
+                        #    activation_enum_int,
+                        #    NUM_BUFFERS_QK,
+                        # )
+                        # qk in tmem, output p in tmem
+                        bufIdx = accum_cnt % NUM_BUFFERS_QK
+                        phase = (accum_cnt // NUM_BUFFERS_QK) & 1
+                        qk_view = tlx.local_view(qk0_buf, bufIdx)
+                        consumer_qk_view = tlx.local_view(producer_commit_qk0, bufIdx)
+                        tlx.barrier_wait(consumer_qk_view, phase)
+                        qk0 = tlx.local_load(qk_view, tlx.storage_kind.tmem)
+                        # ConsumerWait for qk, ProducerAcquire for p
+                        if activation_enum_int == 3:
+                            p0 = fast_gelu(qk0)
+                        else:
+                            p0 = qk0
+                        p0 *= qk_scale
+                        p0 = p0.to(V.dtype.element_ty)  # v_dtype)
+                        # p and qk reuse tmem space, single producer commit for p via consumer_release_qk
+                        consumer_release_qk_view = tlx.local_view(producer_qk0, bufIdx)
+                        tlx.barrier_arrive(consumer_release_qk_view, 1)
+
                         # wait for o0, o1 per iteration
                         bufIdx = accum_cnt % NUM_BUFFERS_O
                         phase = (accum_cnt // NUM_BUFFERS_O) & 1
@@ -646,16 +674,34 @@ def gdpa_kernel_tma_ws_blackwell(
                     for start_n in range(lo, hi, BLOCK_N):
                         start_n = tl.multiple_of(start_n, BLOCK_N)
                         ## communication channel for qk1, p1
-                        _do_activation(
-                            qk1_buf,
-                            qk_scale,
-                            producer_commit_qk1,
-                            producer_qk1,
-                            accum_cnt,
-                            V.dtype.element_ty,
-                            activation_enum_int,
-                            NUM_BUFFERS_QK,
-                        )
+                        # _do_activation(
+                        #    qk1_buf,
+                        #    qk_scale,
+                        #    producer_commit_qk1,
+                        #    producer_qk1,
+                        #    accum_cnt,
+                        #    V.dtype.element_ty,
+                        #    activation_enum_int,
+                        #    NUM_BUFFERS_QK,
+                        # )
+                        # qk in tmem, output p in tmem
+                        bufIdx = accum_cnt % NUM_BUFFERS_QK
+                        phase = (accum_cnt // NUM_BUFFERS_QK) & 1
+                        qk_view = tlx.local_view(qk1_buf, bufIdx)
+                        consumer_qk_view = tlx.local_view(producer_commit_qk1, bufIdx)
+                        tlx.barrier_wait(consumer_qk_view, phase)
+                        qk1 = tlx.local_load(qk_view, tlx.storage_kind.tmem)
+                        # ConsumerWait for qk, ProducerAcquire for p
+                        if activation_enum_int == 3:
+                            p1 = fast_gelu(qk1)
+                        else:
+                            p1 = qk1
+                        p1 *= qk_scale
+                        p1 = p1.to(V.dtype.element_ty)  # v_dtype)
+                        # p and qk reuse tmem space, single producer commit for p via consumer_release_qk
+                        consumer_release_qk_view = tlx.local_view(producer_qk1, bufIdx)
+                        tlx.barrier_arrive(consumer_release_qk_view, 1)
+
                         # wait for o0, o1 per iteration
                         bufIdx = accum_cnt % NUM_BUFFERS_O
                         phase = (accum_cnt // NUM_BUFFERS_O) & 1
@@ -710,41 +756,312 @@ def gdpa_kernel_tma_ws_blackwell(
                     N_CTX,
                 )
                 if start_m * BLOCK_M < qlen:
-                    accum_cnt_k, accum_cnt_qk = _do_dots(
-                        klen,
-                        q0_buf,
-                        q1_buf,
-                        k_buf,
-                        v_buf,
-                        qk0_buf,
-                        qk1_buf,
-                        o0_buf,
-                        o1_buf,
-                        consumer_q0,
-                        consumer_q1,
-                        consumer_k,
-                        consumer_v,
-                        producer_qk0,
-                        producer_commit_qk0,
-                        producer_qk1,
-                        producer_commit_qk1,
-                        consumer_release_k,
-                        consumer_release_v,
-                        consumer_release_q0,
-                        consumer_release_q1,
-                        producer_o0,
-                        producer_commit_o0,
-                        producer_o1,
-                        producer_commit_o1,
-                        accum_cnt_q,
-                        accum_cnt_k,
-                        accum_cnt_qk,
-                        accum_cnt_outer,
-                        NUM_BUFFERS_Q,
-                        NUM_BUFFERS_K,
-                        NUM_BUFFERS_QK,
-                        NUM_BUFFERS_O,
-                        BLOCK_N,
+                    # accum_cnt_k, accum_cnt_qk = _do_dots(
+                    #    klen,
+                    #    q0_buf,
+                    #    q1_buf,
+                    #    k_buf,
+                    #    v_buf,
+                    #    qk0_buf,
+                    #    qk1_buf,
+                    #    o0_buf,
+                    #    o1_buf,
+                    #    consumer_q0,
+                    #    consumer_q1,
+                    #    consumer_k,
+                    #    consumer_v,
+                    #    producer_qk0,
+                    #    producer_commit_qk0,
+                    #    producer_qk1,
+                    #    producer_commit_qk1,
+                    #    consumer_release_k,
+                    #    consumer_release_v,
+                    #    consumer_release_q0,
+                    #    consumer_release_q1,
+                    #    producer_o0,
+                    #    producer_commit_o0,
+                    #    producer_o1,
+                    #    producer_commit_o1,
+                    #    accum_cnt_q,
+                    #    accum_cnt_k,
+                    #    accum_cnt_qk,
+                    #    accum_cnt_outer,
+                    #    NUM_BUFFERS_Q,
+                    #    NUM_BUFFERS_K,
+                    #    NUM_BUFFERS_QK,
+                    #    NUM_BUFFERS_O,
+                    #    BLOCK_N,
+                    # )
+
+                    # prologue
+                    bufIdx_q, phase_q = _get_bufidx_phase(accum_cnt_q, NUM_BUFFERS_Q)
+                    bufIdx_k, phase_k = _get_bufidx_phase(accum_cnt_k, NUM_BUFFERS_K)
+                    bufIdx_qk, phase_qk = _get_bufidx_phase(
+                        accum_cnt_qk, NUM_BUFFERS_QK
+                    )
+                    accum_cnt_qk1 = accum_cnt_qk
+
+                    consumer_q0_view = tlx.local_view(consumer_q0, bufIdx_q)
+                    consumer_k_view = tlx.local_view(consumer_k, bufIdx_k)
+                    # producer_qk0_view = tlx.local_view(producer_qk0, bufIdx_qk)
+                    tlx.barrier_wait(consumer_q0_view, phase_q)  # consumer wait for q0
+                    tlx.barrier_wait(consumer_k_view, phase_k)  # consumer wait for k
+                    # Do we need the initial acquire here?
+                    # tlx.barrier_wait(producer_qk0_view, phase_qk)  # producer acquire for qk0
+                    # producer commit for qk0
+                    q0_view = tlx.local_view(q0_buf, bufIdx_q)
+                    k_view = tlx.local_view(k_buf, bufIdx_k)
+                    qk0_view = tlx.local_view(qk0_buf, bufIdx_qk)
+                    producer_commit_qk0_view = tlx.local_view(
+                        producer_commit_qk0, bufIdx_qk
+                    )
+                    tlx.async_dot(
+                        q0_view,
+                        k_view,
+                        qk0_view,
+                        use_acc=False,
+                        mBarriers=[producer_commit_qk0_view],
+                    )
+                    # accum_cnt_qk += 1
+
+                    consumer_q1_view = tlx.local_view(consumer_q1, bufIdx_q)
+                    # producer_qk1_view = tlx.local_view(producer_qk1, bufIdx_qk)
+                    tlx.barrier_wait(consumer_q1_view, phase_q)  # consumer wait for q1
+                    # Do we need the initial acquire here?
+                    # tlx.barrier_wait(producer_qk1_view, phase_qk)  # producer acquire for qk1
+                    # consumer release for k, producer commit for qk1
+                    q1_view = tlx.local_view(q1_buf, bufIdx_q)
+                    qk1_view = tlx.local_view(qk1_buf, bufIdx_qk)
+                    consumer_release_k_view = tlx.local_view(
+                        consumer_release_k, bufIdx_k
+                    )
+                    producer_commit_qk1_view = tlx.local_view(
+                        producer_commit_qk1, bufIdx_qk
+                    )
+                    tlx.async_dot(
+                        q1_view,
+                        k_view,
+                        qk1_view,
+                        use_acc=False,
+                        mBarriers=[consumer_release_k_view, producer_commit_qk1_view],
+                    )
+                    # accum_cnt_qk1 += 1
+
+                    consumer_v_view = tlx.local_view(consumer_v, bufIdx_k)
+                    tlx.barrier_wait(consumer_v_view, phase_k)  # consumer wait for v
+                    # need to acquire o0 to make sure epilogue is done, this is needed for each outer loop
+                    bufIdx_o_outer, phase_o_outer = _get_bufidx_phase(
+                        accum_cnt_outer, NUM_BUFFERS_O
+                    )
+                    producer_o0_view = tlx.local_view(producer_o0, bufIdx_o_outer)
+                    producer_o1_view = tlx.local_view(producer_o1, bufIdx_o_outer)
+                    tlx.barrier_wait(
+                        producer_o0_view, phase_o_outer
+                    )  # producer acquire for o0
+                    # For reuse of qk0 and p0, we can simplify the barriers
+                    #   activation partition: consumer wait for qk0, ... update p, producer commit of p0
+                    #   dot partition: producer commit of qk0, ..., consumer wait for p0 (use the same barrier as producer_qk0)
+                    bufIdx_p, phase_p = _get_bufidx_phase(accum_cnt_qk, NUM_BUFFERS_QK)
+                    consumer_p0_view = tlx.local_view(producer_qk0, bufIdx_p)
+                    tlx.barrier_wait(
+                        consumer_p0_view, phase_p
+                    )  # consumer wait for p0 due to reuse of p0 and qk0
+                    # reinterpret qk0 as p0
+                    # p0_view = _reinterpret(qk0_buf, bufIdx_p)
+                    qk_view = tlx.local_view(qk0_buf, bufIdx_p)
+                    p0_view = tlx.local_reinterpret(qk_view, tl.float16)
+
+                    bufIdx_o, phase_o = _get_bufidx_phase(accum_cnt_k, NUM_BUFFERS_O)
+                    producer_commit_o0_view = tlx.local_view(
+                        producer_commit_o0, bufIdx_o
+                    )
+                    o0_view = tlx.local_view(o0_buf, bufIdx_o)
+                    v_view = tlx.local_view(v_buf, bufIdx_k)
+                    tlx.async_dot(
+                        p0_view,
+                        v_view,
+                        o0_view,
+                        use_acc=False,
+                        mBarriers=[producer_commit_o0_view],
+                    )
+                    accum_cnt_o1 = accum_cnt_k
+
+                    lo, hi = 0, klen
+                    first = True
+                    mma_iters = (hi - lo) // BLOCK_N
+                    accum_cnt_k += 1
+                    accum_cnt_qk += 1
+                    for _ in range(mma_iters - 1):
+                        bufIdx_k, phase_k = _get_bufidx_phase(
+                            accum_cnt_k, NUM_BUFFERS_K
+                        )
+                        bufIdx_qk, phase_qk = _get_bufidx_phase(
+                            accum_cnt_qk, NUM_BUFFERS_QK
+                        )
+
+                        # q0 dot k
+                        consumer_k_view = tlx.local_view(consumer_k, bufIdx_k)
+                        tlx.barrier_wait(
+                            consumer_k_view, phase_k
+                        )  # consumer wait for k
+                        k_view = tlx.local_view(k_buf, bufIdx_k)
+                        qk0_view = tlx.local_view(qk0_buf, bufIdx_qk)
+                        producer_commit_qk0_view = tlx.local_view(
+                            producer_commit_qk0, bufIdx_qk
+                        )
+                        tlx.async_dot(
+                            q0_view,
+                            k_view,
+                            qk0_view,
+                            use_acc=False,
+                            mBarriers=[producer_commit_qk0_view],
+                        )
+
+                        # p1 dot v for previous iteration
+                        bufIdx_qk1, phase_qk1 = _get_bufidx_phase(
+                            accum_cnt_qk1, NUM_BUFFERS_QK
+                        )
+                        consumer_p1_view = tlx.local_view(producer_qk1, bufIdx_qk1)
+                        tlx.barrier_wait(
+                            producer_o1_view,
+                            phase_o_outer,  # , first FIXME
+                        )  # producer acquire for o1, only needed for first iteration
+                        tlx.barrier_wait(
+                            consumer_p1_view, phase_qk1
+                        )  # consumer wait for p1 use producer_qk1 due to reuse
+                        # done using v from previous iteration
+                        bufIdx_o1, phase_o1 = _get_bufidx_phase(
+                            accum_cnt_o1, NUM_BUFFERS_O
+                        )
+                        o1_view = tlx.local_view(o1_buf, bufIdx_o1)
+                        producer_commit_o1_view = tlx.local_view(
+                            producer_commit_o1, bufIdx_o1
+                        )
+                        bufIdx_v, phase_v = _get_bufidx_phase(
+                            accum_cnt_o1, NUM_BUFFERS_K
+                        )  # NUM_BUFFERS_K is NUM_BUFFERS_V
+                        consumer_release_v_view = tlx.local_view(
+                            consumer_release_v, bufIdx_v
+                        )
+                        # reinterpret as p1
+                        # p1_view = _reinterpret(qk1_buf, bufIdx_qk1)
+                        qk_view = tlx.local_view(qk1_buf, bufIdx_qk1)
+                        p1_view = tlx.local_reinterpret(qk_view, tl.float16)
+                        tlx.async_dot(
+                            p1_view,
+                            v_view,
+                            o1_view,
+                            use_acc=not first,
+                            mBarriers=[
+                                producer_commit_o1_view,
+                                consumer_release_v_view,
+                            ],
+                        )
+
+                        # q1 dot k, done using k for this iteration
+                        bufIdx_qk1_next, phase_qk1_next = _get_bufidx_phase(
+                            accum_cnt_qk1 + 1, NUM_BUFFERS_QK
+                        )
+                        qk1_view = tlx.local_view(qk1_buf, bufIdx_qk1_next)
+                        consumer_release_k_view = tlx.local_view(
+                            consumer_release_k, bufIdx_k
+                        )
+                        producer_commit_qk1_view = tlx.local_view(
+                            producer_commit_qk1, bufIdx_qk1_next
+                        )
+                        tlx.async_dot(
+                            q1_view,
+                            k_view,
+                            qk1_view,
+                            use_acc=False,
+                            mBarriers=[
+                                consumer_release_k_view,
+                                producer_commit_qk1_view,
+                            ],
+                        )
+
+                        # p0 dot v
+                        tlx.barrier_wait(
+                            consumer_v_view, phase_k
+                        )  # consumer wait for v
+                        # no need to acquire o0 as this is the only partition updating it
+                        # tlx.barrier_wait(producer_o0)  # producer acquire for o0
+                        consumer_p0_view = tlx.local_view(producer_qk0, bufIdx_qk)
+                        tlx.barrier_wait(
+                            consumer_p0_view, phase_qk
+                        )  # consumer wait for p0 use producer_qk0 due to reuse
+                        # reinterpret as p0
+                        # p0_view = _reinterpret(qk0_buf, bufIdx_qk)
+                        qk_view = tlx.local_view(qk0_buf, bufIdx_qk)
+                        p0_view = tlx.local_reinterpret(qk_view, tl.float16)
+
+                        v_view = tlx.local_view(v_buf, bufIdx_k)
+                        bufIdx_o, phase_o = _get_bufidx_phase(
+                            accum_cnt_k, NUM_BUFFERS_O
+                        )
+                        producer_commit_o0_view = tlx.local_view(
+                            producer_commit_o0, bufIdx_o
+                        )
+                        o0_view = tlx.local_view(o0_buf, bufIdx_o)
+                        tlx.async_dot(
+                            p0_view,
+                            v_view,
+                            o0_view,
+                            use_acc=True,
+                            mBarriers=[producer_commit_o0_view],
+                        )
+
+                        first = False
+                        accum_cnt_k += 1
+                        accum_cnt_qk += 1
+                        accum_cnt_qk1 += 1
+                        accum_cnt_o1 += 1
+
+                    # epilogue
+                    # commit to release q0, q1? FIXME
+                    release_q0_view = tlx.local_view(consumer_release_q0, bufIdx_q)
+                    # tlx.gen5_commit(release_q0_view)
+                    release_q1_view = tlx.local_view(consumer_release_q1, bufIdx_q)
+                    # tlx.gen5_commit(release_q1_view)
+                    tlx.barrier_wait(
+                        producer_o1_view,
+                        phase_o_outer,  # , first
+                    )  # producer acquire for o1 at the first iteration
+                    bufIdx_qk1, phase_qk1 = _get_bufidx_phase(
+                        accum_cnt_qk1, NUM_BUFFERS_QK
+                    )
+                    consumer_p1_view = tlx.local_view(producer_qk1, bufIdx_qk1)
+                    tlx.barrier_wait(
+                        consumer_p1_view, phase_qk1
+                    )  # consumer wait for p1 due to reuse of p1 and qk1
+                    # p1_view = _reinterpret(qk1_buf, bufIdx_qk1)
+                    qk_view = tlx.local_view(qk1_buf, bufIdx_qk1)
+                    p1_view = tlx.local_reinterpret(qk_view, tl.float16)
+
+                    accum_cnt_qk1 += 1
+                    # release p0, p1 via producer_commit_qk0, qk1 barriers
+                    # accum_cnt_qk should be equal to accum_cnt_qk1 here
+                    # bufIdx_qk, phase_qk = _get_bufidx_phase(accum_cnt_qk, NUM_BUFFERS_QK)
+                    # consumer_release_p0_view = tlx.local_view(producer_commit_qk0, bufIdx_qk)
+                    # consumer_release_p1_view = tlx.local_view(producer_commit_qk1, bufIdx_qk)
+                    bufIdx_o, phase_o = _get_bufidx_phase(accum_cnt_o1, NUM_BUFFERS_O)
+                    producer_commit_o1_view = tlx.local_view(
+                        producer_commit_o1, bufIdx_o
+                    )
+                    bufIdx_v, phase_v = _get_bufidx_phase(accum_cnt_o1, NUM_BUFFERS_K)
+                    consumer_release_v_view = tlx.local_view(
+                        consumer_release_v, bufIdx_v
+                    )
+                    o1_view = tlx.local_view(o1_buf, bufIdx_o)
+                    tlx.async_dot(
+                        p1_view,
+                        v_view,
+                        o1_view,
+                        use_acc=not first,
+                        mBarriers=[
+                            producer_commit_o1_view,
+                            consumer_release_v_view,  # , consumer_release_p0_view, consumer_release_p1_view
+                        ],
                     )
                     accum_cnt_q += 1
                     accum_cnt_outer += 1
