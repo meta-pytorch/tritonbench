@@ -197,6 +197,14 @@ class Operator(BenchmarkOperator):
     def torch_sum(self, x: torch.Tensor):
         return lambda: torch.sum(x, dim=self.reduce_dim)
 
+    @register_benchmark()
+    def torch_compile_sum(self, x: torch.Tensor):
+        @torch.compile(mode="max-autotune")
+        def _inner(x):
+            return torch.sum(x, dim=self.reduce_dim)
+        
+        return lambda: _inner(x)
+
     def get_x_val(self, example_inputs):
         if self.M is None:
             return example_inputs[0].shape[0]

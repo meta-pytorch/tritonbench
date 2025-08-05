@@ -117,6 +117,14 @@ class Operator(BenchmarkOperator):
         inner = lambda: quack_softmax(x)
         return inner
 
+    @register_benchmark()
+    def torch_compile_softmax(self, x):
+        @torch.compile(mode="max-autotune")
+        def _inner(x):
+            return torch.nn.functional.softmax(x, dim=1)
+        
+        return lambda: _inner(x)
+
     def get_input_iter(self):
         M = 4096
         shapes = [(M, 128 * i) for i in range(2, 100)]

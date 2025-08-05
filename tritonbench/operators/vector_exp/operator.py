@@ -79,6 +79,18 @@ class Operator(BenchmarkOperator):
 
         return _inner
 
+    @register_benchmark()
+    def torch_compile_exp(self, x: torch.Tensor):
+        @torch.compile(mode="max-autotune")
+        def _compiled_exp(x):
+            return torch.exp(x)
+        
+        def _inner():
+            output = _compiled_exp(x)
+            return {"output": output}
+        
+        return _inner
+
     def get_x_vals(self) -> List[int]:
         return [2**i for i in range(12, 28, 1)]
 

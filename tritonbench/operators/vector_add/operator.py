@@ -57,6 +57,14 @@ class Operator(BenchmarkOperator):
     def torch_add(self, x: torch.Tensor, y: torch.Tensor):
         return lambda: x + y
 
+    @register_benchmark()
+    def torch_compile_add(self, x: torch.Tensor, y: torch.Tensor):
+        @torch.compile(mode="max-autotune")
+        def _inner(x, y):
+            return x + y
+        
+        return lambda: _inner(x, y)
+
     def get_x_vals(self) -> List[int]:
         return [2**i for i in range(12, 28, 1)]
 
