@@ -803,35 +803,25 @@ def gdpa_kernel_tma_ws_blackwell(
                     #    q_offset,
                     #    BLOCK_M * BLOCK_D * 2,
                     # )
-                    # bufIdx, phase, empty_bars, full_bars, buffers, desc, offset_1, offset_0, num_bytes
-                    bufIdx = q_bufIdx
-                    phase = q_phase
-                    empty_bars = consumer_release_q0
-                    full_bars = consumer_q0
-                    buffers = q0_buf
-                    desc = q_desc
-                    offset_1 = begin_q + start_m * BLOCK_M
-                    offset_0 = q_offset
-                    # num_bytes = BLOCK_M * BLOCK_D * 2
                     # producer acquire
-                    empty_view = tlx.local_view(empty_bars, bufIdx)
-                    tlx.barrier_wait(empty_view, phase ^ 1)
+                    q0_empty_view = tlx.local_view(consumer_release_q0, q_bufIdx)
+                    tlx.barrier_wait(q0_empty_view, q_phase ^ 1)
                     # barrier for producer commit
-                    full_view = tlx.local_view(
-                        consumer_q0, bufIdx
+                    q0_full_view = tlx.local_view(
+                        consumer_q0, q_bufIdx
                     )  # full_bars, bufIdx)
                     tlx.barrier_expect_bytes(
-                        full_view, BLOCK_M * BLOCK_D * 2
+                        q0_full_view, BLOCK_M * BLOCK_D * 2
                     )  # num_bytes)
-                    smem_view = tlx.local_view(buffers, bufIdx)
+                    q0_smem_view = tlx.local_view(q0_buf, q_bufIdx)
                     tlx.async_descriptor_load(
-                        desc,
-                        smem_view,
+                        q_desc,
+                        q0_smem_view,
                         [
-                            (offset_1).to(tl.int32),
-                            (offset_0).to(tl.int32),
+                            (begin_q + start_m * BLOCK_M).to(tl.int32),
+                            (q_offset).to(tl.int32),
                         ],
-                        full_view,
+                        q0_full_view,
                     )
 
                     # _load_tma(
@@ -845,33 +835,23 @@ def gdpa_kernel_tma_ws_blackwell(
                     #    q_offset,
                     #    BLOCK_M * BLOCK_D * 2,
                     # )
-                    # bufIdx, phase, empty_bars, full_bars, buffers, desc, offset_1, offset_0, num_bytes
-                    bufIdx = q_bufIdx
-                    phase = q_phase
-                    empty_bars = consumer_release_q1
-                    full_bars = consumer_q1
-                    buffers = q1_buf
-                    desc = q_desc
-                    offset_1 = begin_q + start_m * BLOCK_M + BLOCK_M // 2
-                    offset_0 = q_offset
-                    # num_bytes = BLOCK_M * BLOCK_D * 2
                     # producer acquire
-                    empty_view = tlx.local_view(empty_bars, bufIdx)
-                    tlx.barrier_wait(empty_view, phase ^ 1)
+                    q1_empty_view = tlx.local_view(consumer_release_q1, q_bufIdx)
+                    tlx.barrier_wait(q1_empty_view, q_phase ^ 1)
                     # barrier for producer commit
-                    full_view = tlx.local_view(full_bars, bufIdx)
+                    q1_full_view = tlx.local_view(consumer_q1, q_bufIdx)
                     tlx.barrier_expect_bytes(
-                        full_view, BLOCK_M * BLOCK_D * 2
+                        q1_full_view, BLOCK_M * BLOCK_D * 2
                     )  # num_bytes)
-                    smem_view = tlx.local_view(buffers, bufIdx)
+                    q1_smem_view = tlx.local_view(q1_buf, q_bufIdx)
                     tlx.async_descriptor_load(
-                        desc,
-                        smem_view,
+                        q_desc,
+                        q1_smem_view,
                         [
-                            (offset_1).to(tl.int32),
-                            (offset_0).to(tl.int32),
+                            (begin_q + start_m * BLOCK_M + BLOCK_M // 2).to(tl.int32),
+                            (q_offset).to(tl.int32),
                         ],
-                        full_view,
+                        q1_full_view,
                     )
 
                     lo, hi = 0, klen
@@ -890,35 +870,24 @@ def gdpa_kernel_tma_ws_blackwell(
                         #    kv_offset,
                         #    BLOCK_N * BLOCK_D * 2,
                         # )
-                        # bufIdx, phase, empty_bars, full_bars, buffers, desc, offset_1, offset_0, num_bytes
-                        bufIdx = k_bufIdx
-                        phase = k_phase
-                        empty_bars = consumer_release_k
-                        full_bars = consumer_k
-                        buffers = k_buf
-                        desc = k_desc
-                        offset_1 = begin_k + start_n
-                        offset_0 = kv_offset
-                        num_bytes: tl.constexpr = BLOCK_N * BLOCK_D * 2
                         # producer acquire
-                        empty_view = tlx.local_view(empty_bars, bufIdx)
-                        tlx.barrier_wait(empty_view, phase ^ 1)
+                        k_empty_view = tlx.local_view(consumer_release_k, k_bufIdx)
+                        tlx.barrier_wait(k_empty_view, k_phase ^ 1)
                         # barrier for producer commit
-                        full_view = tlx.local_view(full_bars, bufIdx)
+                        k_full_view = tlx.local_view(consumer_k, k_bufIdx)
                         tlx.barrier_expect_bytes(
-                            full_view, BLOCK_N * BLOCK_D * 2
+                            k_full_view, BLOCK_N * BLOCK_D * 2
                         )  # num_bytes)
-                        smem_view = tlx.local_view(buffers, bufIdx)
+                        k_view = tlx.local_view(k_buf, k_bufIdx)
                         tlx.async_descriptor_load(
-                            desc,
-                            smem_view,
+                            k_desc,
+                            k_view,
                             [
-                                (offset_1).to(tl.int32),
-                                (offset_0).to(tl.int32),
+                                (begin_k + start_n).to(tl.int32),
+                                (kv_offset).to(tl.int32),
                             ],
-                            full_view,
+                            k_full_view,
                         )
-                        k_view = smem_view
                         k_view = tlx.local_trans(k_view)
                         # _load_tma(
                         #    k_bufIdx,
@@ -931,31 +900,21 @@ def gdpa_kernel_tma_ws_blackwell(
                         #    kv_offset,
                         #    BLOCK_N * BLOCK_D * 2,
                         # )
-                        # bufIdx, phase, empty_bars, full_bars, buffers, desc, offset_1, offset_0, num_bytes
-                        bufIdx = k_bufIdx
-                        phase = k_phase
-                        empty_bars = consumer_release_v
-                        full_bars = consumer_v
-                        buffers = v_buf
-                        desc = v_desc
-                        offset_1 = begin_k + start_n
-                        offset_0 = kv_offset
-                        num_bytes2: tl.constexpr = BLOCK_N * BLOCK_D * 2
                         # producer acquire
-                        empty_view = tlx.local_view(empty_bars, bufIdx)
-                        tlx.barrier_wait(empty_view, phase ^ 1)
+                        v_empty_view = tlx.local_view(consumer_release_v, k_bufIdx)
+                        tlx.barrier_wait(v_empty_view, k_phase ^ 1)
                         # barrier for producer commit
-                        full_view = tlx.local_view(full_bars, bufIdx)
-                        tlx.barrier_expect_bytes(full_view, num_bytes2)
-                        smem_view = tlx.local_view(buffers, bufIdx)
+                        v_full_view = tlx.local_view(consumer_v, k_bufIdx)
+                        tlx.barrier_expect_bytes(v_full_view, BLOCK_N * BLOCK_D * 2)
+                        v_smem_view = tlx.local_view(v_buf, k_bufIdx)
                         tlx.async_descriptor_load(
-                            desc,
-                            smem_view,
+                            v_desc,
+                            v_smem_view,
                             [
-                                (offset_1).to(tl.int32),
-                                (offset_0).to(tl.int32),
+                                (begin_k + start_n).to(tl.int32),
+                                (kv_offset).to(tl.int32),
                             ],
-                            full_view,
+                            v_full_view,
                         )
 
                     accum_count_q += 1
