@@ -605,7 +605,7 @@ def gdpa_kernel_tma_ws_blackwell(
                             (begin_q + start_m * BLOCK_M).to(tl.int32),
                             (out_offset).to(tl.int32),
                         ],
-                        o0,
+                        o0.to(Out.type.element_ty),
                     )
                     accum_cnt_outer += 1
 
@@ -674,7 +674,7 @@ def gdpa_kernel_tma_ws_blackwell(
                             (begin_q + start_m * BLOCK_M + BLOCK_M // 2).to(tl.int32),
                             (out_offset).to(tl.int32),
                         ],
-                        o1,
+                        o1.to(Out.type.element_ty),
                     )
                     accum_cnt_outer += 1
 
