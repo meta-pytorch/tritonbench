@@ -299,6 +299,7 @@ def _do_dots(
         p0_view = _reinterpret(qk0_buf, bufIdx_qk)
         v_view = tlx.local_view(v_buf, bufIdx_k)
         bufIdx_o, phase_o = _get_bufidx_phase(accum_cnt_k, NUM_BUFFERS_O)
+        producer_commit_o0_view = tlx.local_view(producer_commit_o0, bufIdx_o)
         o0_view = tlx.local_view(o0_buf, bufIdx_o)
         tlx.async_dot(
             p0_view, v_view, o0_view, use_acc=True, mBarriers=[producer_commit_o0_view]
@@ -540,6 +541,7 @@ def gdpa_kernel_tma_ws_blackwell(
         # activation calculation
         with tlx.async_task("default"):
             accum_cnt = 0
+            accum_cnt_outer = 0
             for _ in range(0, tiles_per_sm):
                 begin_q, end_q, begin_k, qlen, klen = _compute_qlen(
                     tile_idx,
@@ -553,6 +555,9 @@ def gdpa_kernel_tma_ws_blackwell(
                 )
                 pid = tile_idx % n_tile_num
                 start_m = pid
+                off_hz = tile_idx // n_tile_num
+                off_h = off_hz % H
+                out_offset = off_h.to(tl.int64) * stride_oh
                 if start_m * BLOCK_M < qlen:
                     lo, hi = 0, klen
                     for start_n in range(lo, hi, BLOCK_N):
@@ -568,13 +573,51 @@ def gdpa_kernel_tma_ws_blackwell(
                             activation_enum_int,
                             NUM_BUFFERS_QK,
                         )
+                        # wait for o0, o1 per iteration
+                        bufIdx = accum_cnt % NUM_BUFFERS_O
+                        phase = (accum_cnt // NUM_BUFFERS_O) & 1
+                        # consumer wait of o0: producer_commit
+                        consumer_o0_view = tlx.local_view(producer_commit_o0, bufIdx)
+                        tlx.barrier_wait(consumer_o0_view, phase)
                         accum_cnt += 1
+
+                    # epilogue here, load from tmem
+                    bufIdx_o_outer, phase_o_outer = _get_bufidx_phase(
+                        accum_cnt_outer, NUM_BUFFERS_O
+                    )
+                    o0_view = tlx.local_view(
+                        o0_buf, bufIdx_o_outer
+                    )  # FIXME: index for the last iteration
+                    o0 = tlx.local_load(o0_view, tlx.storage_kind.tmem)
+                    # release o0 here
+                    consumer_release_o0_view = tlx.local_view(
+                        producer_o0, bufIdx_o_outer
+                    )
+                    tlx.barrier_arrive(consumer_release_o0_view, 1)
+                    o0_desc = tl.make_tensor_descriptor(
+                        Out,
+                        shape=[end_q.to(tl.int32), HEAD_DIM * H],
+                        strides=[HEAD_DIM * H, 1],
+                        block_shape=[BLOCK_M // 2, BLOCK_D],
+                    )
+                    o0_desc.store(
+                        [
+                            (begin_q + start_m * BLOCK_M).to(tl.int32),
+                            (out_offset).to(tl.int32),
+                        ],
+                        o0,
+                    )
+                    accum_cnt_outer += 1
 
         with tlx.async_task(num_warps=4):
             accum_cnt = 0
+            accum_cnt_outer = 0
             for _ in range(0, tiles_per_sm):
                 pid = tile_idx % n_tile_num
                 start_m = pid
+                off_hz = tile_idx // n_tile_num
+                off_h = off_hz % H
+                out_offset = off_h.to(tl.int64) * stride_oh
                 begin_q, end_q, begin_k, qlen, klen = _compute_qlen(
                     tile_idx,
                     n_tile_num,
@@ -600,7 +643,40 @@ def gdpa_kernel_tma_ws_blackwell(
                             activation_enum_int,
                             NUM_BUFFERS_QK,
                         )
+                        # wait for o0, o1 per iteration
+                        bufIdx = accum_cnt % NUM_BUFFERS_O
+                        phase = (accum_cnt // NUM_BUFFERS_O) & 1
+                        # consumer wait of o1
+                        consumer_o1_view = tlx.local_view(producer_commit_o1, bufIdx)
+                        tlx.barrier_wait(consumer_o1_view, phase)
                         accum_cnt += 1
+                    # epilogue here, load from tmem
+                    bufIdx_o_outer, phase_o_outer = _get_bufidx_phase(
+                        accum_cnt_outer, NUM_BUFFERS_O
+                    )
+                    o0_desc = tl.make_tensor_descriptor(
+                        Out,
+                        shape=[end_q.to(tl.int32), HEAD_DIM * H],
+                        strides=[HEAD_DIM * H, 1],
+                        block_shape=[BLOCK_M // 2, BLOCK_D],
+                    )
+                    o1_view = tlx.local_view(
+                        o1_buf, bufIdx_o_outer
+                    )  # FIXME: should be 0
+                    o1 = tlx.local_load(o1_view, tlx.storage_kind.tmem)
+                    # release o1 here
+                    consumer_release_o1_view = tlx.local_view(
+                        producer_o1, bufIdx_o_outer
+                    )
+                    tlx.barrier_arrive(consumer_release_o1_view, 1)
+                    o0_desc.store(
+                        [
+                            (begin_q + start_m * BLOCK_M + BLOCK_M // 2).to(tl.int32),
+                            (out_offset).to(tl.int32),
+                        ],
+                        o1,
+                    )
+                    accum_cnt_outer += 1
 
         with tlx.async_task(num_warps=1):  # gemm
             accum_cnt_q = 0
@@ -870,84 +946,6 @@ def gdpa_kernel_tma_ws_blackwell(
                         )
 
                     accum_count_q += 1
-
-        with tlx.async_task(num_warps=1):  # epilogue
-            accum_cnt = 0
-            accum_cnt_outer = 0
-            for _ in range(0, tiles_per_sm):
-                pid = tile_idx % n_tile_num
-                start_m = pid
-                off_hz = tile_idx // n_tile_num
-                off_h = off_hz % H
-                out_offset = off_h.to(tl.int64) * stride_oh
-                begin_q, end_q, begin_k, qlen, klen = _compute_qlen(
-                    tile_idx,
-                    n_tile_num,
-                    Q_offsets,
-                    K_offsets,
-                    seq_index,
-                    SORT_BY_SEQ_LENGTH,
-                    H,
-                    N_CTX,
-                )
-
-                if start_m * BLOCK_M < qlen:
-                    lo, hi = 0, klen
-                    for start_n in range(lo, hi, BLOCK_N):
-                        # wait for o0, o1 per iteration
-                        bufIdx = accum_cnt % NUM_BUFFERS_O
-                        phase = (accum_cnt // NUM_BUFFERS_O) & 1
-                        # consumer wait of o0: producer_commit
-                        consumer_o0_view = tlx.local_view(producer_commit_o0, bufIdx)
-                        tlx.barrier_wait(consumer_o0_view, phase)
-                        # consumer wait of o1
-                        consumer_o1_view = tlx.local_view(producer_commit_o1, bufIdx)
-                        tlx.barrier_wait(consumer_o1_view, phase)
-                        accum_cnt += 1
-
-                    bufIdx_o_outer, phase_o_outer = _get_bufidx_phase(
-                        accum_cnt_outer, NUM_BUFFERS_O
-                    )
-                    o0_view = tlx.local_view(
-                        o0_buf, bufIdx_o_outer
-                    )  # FIXME: index for the last iteration
-                    o0 = tlx.local_load(o0_view, tlx.storage_kind.tmem)
-                    # release o0 here
-                    consumer_release_o0_view = tlx.local_view(
-                        producer_o0, bufIdx_o_outer
-                    )
-                    tlx.barrier_arrive(consumer_release_o0_view, 1)
-                    o0_desc = tl.make_tensor_descriptor(
-                        Out,
-                        shape=[end_q.to(tl.int32), HEAD_DIM * H],
-                        strides=[HEAD_DIM * H, 1],
-                        block_shape=[BLOCK_M // 2, BLOCK_D],
-                    )
-                    o0_desc.store(
-                        [
-                            (begin_q + start_m * BLOCK_M).to(tl.int32),
-                            (out_offset).to(tl.int32),
-                        ],
-                        o0,
-                    )
-
-                    o1_view = tlx.local_view(
-                        o1_buf, bufIdx_o_outer
-                    )  # FIXME: should be 0
-                    o1 = tlx.local_load(o1_view, tlx.storage_kind.tmem)
-                    # release o1 here
-                    consumer_release_o1_view = tlx.local_view(
-                        producer_o1, bufIdx_o_outer
-                    )
-                    tlx.barrier_arrive(consumer_release_o1_view, 1)
-                    o0_desc.store(
-                        [
-                            (begin_q + start_m * BLOCK_M + BLOCK_M // 2).to(tl.int32),
-                            (out_offset).to(tl.int32),
-                        ],
-                        o1,
-                    )
-                    accum_cnt_outer += 1
 
 
 def next_power_of_2(x):
