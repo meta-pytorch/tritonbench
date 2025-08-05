@@ -2197,6 +2197,7 @@ def generalized_dot_product_attention(
         ad_to_request_offset = create_dummy_tensor(query)
 
     activation_enum_int = activation_string_to_int(activation)
+    print("activation_enum_int", activation, activation_enum_int)
     kernel_info = capture_triton(kernel_fn)[grid](
         q,
         query_offset,

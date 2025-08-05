@@ -415,10 +415,11 @@ def _do_activation(
     tlx.barrier_wait(consumer_qk_view, phase)
     qk = tlx.local_load(qk_view, tlx.storage_kind.tmem)
     # ConsumerWait for qk, ProducerAcquire for p
-    if activation_enum_int == 3:
-        p = fast_gelu(qk)
-    else:
-        p = qk
+    # hardcode to fast_gelu
+    # if activation_enum_int == 3:
+    p = fast_gelu(qk)
+    # else:
+    #    p = qk
 
     p *= qk_scale
     p = p.to(v_dtype)
@@ -604,12 +605,24 @@ def gdpa_kernel_tma_ws_blackwell(
                         tlx.barrier_wait(consumer_qk_view, phase)
                         qk0 = tlx.local_load(qk_view, tlx.storage_kind.tmem)
                         # ConsumerWait for qk, ProducerAcquire for p
-                        if activation_enum_int == 3:
-                            p0 = fast_gelu(qk0)
-                        else:
-                            p0 = qk0
+                        # if activation_enum_int == 3:
+                        p0 = (
+                            qk0
+                            * 0.5
+                            * (
+                                1
+                                + tanh_approx_fp32(
+                                    0.7978845608 * qk0 * (1.0 + 0.044715 * qk0 * qk0)
+                                )
+                            )
+                        )  # fast_gelu(qk0)
+                        # else:
+                        #    p0 = qk0
                         p0 *= qk_scale
                         p0 = p0.to(V.dtype.element_ty)  # v_dtype)
+                        qk_view = tlx.local_view(qk0_buf, bufIdx)
+                        p0_view = tlx.local_reinterpret(qk_view, tl.float16)
+                        tlx.local_store(p0_view, p0, tlx.storage_kind.tmem)
                         # p and qk reuse tmem space, single producer commit for p via consumer_release_qk
                         consumer_release_qk_view = tlx.local_view(producer_qk0, bufIdx)
                         tlx.barrier_arrive(consumer_release_qk_view, 1)
@@ -692,12 +705,24 @@ def gdpa_kernel_tma_ws_blackwell(
                         tlx.barrier_wait(consumer_qk_view, phase)
                         qk1 = tlx.local_load(qk_view, tlx.storage_kind.tmem)
                         # ConsumerWait for qk, ProducerAcquire for p
-                        if activation_enum_int == 3:
-                            p1 = fast_gelu(qk1)
-                        else:
-                            p1 = qk1
+                        # if activation_enum_int == 3:
+                        p1 = (
+                            qk1
+                            * 0.5
+                            * (
+                                1
+                                + tanh_approx_fp32(
+                                    0.7978845608 * qk1 * (1.0 + 0.044715 * qk1 * qk1)
+                                )
+                            )
+                        )  # fast_gelu(qk1)
+                        # else:
+                        #    p1 = qk1
                         p1 *= qk_scale
                         p1 = p1.to(V.dtype.element_ty)  # v_dtype)
+                        qk_view = tlx.local_view(qk1_buf, bufIdx)
+                        p1_view = tlx.local_reinterpret(qk_view, tl.float16)
+                        tlx.local_store(p1_view, p1, tlx.storage_kind.tmem)
                         # p and qk reuse tmem space, single producer commit for p via consumer_release_qk
                         consumer_release_qk_view = tlx.local_view(producer_qk1, bufIdx)
                         tlx.barrier_arrive(consumer_release_qk_view, 1)
@@ -1233,6 +1258,7 @@ def gdpa_kernel_tma_ws_blackwell(
                             ],
                             v_full_view,
                         )
+                        accum_count_k += 1
 
                     accum_count_q += 1
 
@@ -1355,6 +1381,7 @@ def gdpa_forward_tlx(
     vstrides = v.stride()
 
     activation_enum_int = activation_string_to_int(activation)
+    print("activation_enum_int", activation, activation_enum_int)
 
     gdpa_kernel_tma_ws_blackwell[grid_tma_persistent](
         q,
