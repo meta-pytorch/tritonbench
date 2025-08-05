@@ -69,7 +69,7 @@ class Operator(BenchmarkOperator):
 
     @register_benchmark()
     def inductor_cross_entropy_loss(self, input, target) -> Callable:
-        compiled = torch.compile(self.baseline_model, dynamic=False)
+        compiled = torch.compile(self.baseline_model, dynamic=False, mode="max-autotune-no-cudagraphs")
         return lambda: compiled(input, target)
 
     @register_x_val(label="(B, T, V)")

@@ -43,7 +43,7 @@ class Operator(BenchmarkOperator):
             functorch_config.donated_buffer = False
         import torch
 
-        @torch.compile
+        @torch.compile(mode="max-autotune-no-cudagraphs")
         def inner(*args):
             return F.layer_norm(*args)
 

@@ -53,7 +53,7 @@ class Operator(BenchmarkOperator):
     def inductor_embedding(self, V, D, input, shared_weight) -> Callable:
         self.baseline_op = Embedding(V, D).to(self.device).to(self.dtype)
         self.baseline_op.weight.data.copy_(shared_weight)
-        compiled = torch.compile(self.baseline_op)
+        compiled = torch.compile(self.baseline_op, mode="max-autotune-no-cudagraphs")
         return lambda: compiled(input)
 
     @register_x_val(label="(B, T, D, V)")

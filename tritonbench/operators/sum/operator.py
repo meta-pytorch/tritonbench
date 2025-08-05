@@ -199,7 +199,7 @@ class Operator(BenchmarkOperator):
 
     @register_benchmark()
     def torch_compile_sum(self, x: torch.Tensor):
-        @torch.compile(mode="max-autotune")
+        @torch.compile(mode="max-autotune-no-cudagraphs")
         def _inner(x):
             return torch.sum(x, dim=self.reduce_dim)
         

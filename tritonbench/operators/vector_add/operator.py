@@ -59,7 +59,7 @@ class Operator(BenchmarkOperator):
 
     @register_benchmark()
     def torch_compile_add(self, x: torch.Tensor, y: torch.Tensor):
-        @torch.compile(mode="max-autotune")
+        @torch.compile(mode="max-autotune-no-cudagraphs")
         def _inner(x, y):
             return x + y
         

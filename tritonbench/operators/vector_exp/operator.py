@@ -81,7 +81,7 @@ class Operator(BenchmarkOperator):
 
     @register_benchmark()
     def torch_compile_exp(self, x: torch.Tensor):
-        @torch.compile(mode="max-autotune")
+        @torch.compile(mode="max-autotune-no-cudagraphs")
         def _compiled_exp(x):
             return torch.exp(x)
         

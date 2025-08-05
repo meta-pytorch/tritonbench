@@ -88,7 +88,7 @@ class Operator(BenchmarkOperator):
             self.llama_rms_op = LlamaRMSNorm(hidden_size=H, eps=self.eps).to(
                 self.device
             )
-        compiled = torch.compile(self.llama_rms_op)
+        compiled = torch.compile(self.llama_rms_op, mode="max-autotune-no-cudagraphs")
         return lambda: compiled(input)
 
     @register_benchmark(enabled=is_hip() and HAS_AITER)

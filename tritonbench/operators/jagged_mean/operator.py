@@ -182,7 +182,7 @@ class Operator(BenchmarkOperator):
                 x, dim=x._ragged_idx, keepdim=True
             )  # pyre-ignore: Undefined attribute [16]: `torch._tensor.Tensor` has no attribute `_ragged_idx`.
 
-        torch_compile_func = torch.compile(_inner)
+        torch_compile_func = torch.compile(_inner, mode="max-autotune-no-cudagraphs")
         return lambda: torch_compile_func(x)
 
     def get_x_val(self, example_inputs):

@@ -119,7 +119,7 @@ class Operator(BenchmarkOperator):
 
     @register_benchmark()
     def torch_compile_softmax(self, x):
-        @torch.compile(mode="max-autotune")
+        @torch.compile(mode="max-autotune-no-cudagraphs")
         def _inner(x):
             return torch.nn.functional.softmax(x, dim=1)
         
