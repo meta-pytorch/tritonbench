@@ -677,7 +677,6 @@ def gdpa_kernel_tma_ws_blackwell(
                 start_m = pid
                 q_offset = off_h.to(tl.int64) * stride_qh
                 kv_offset = off_h_kv.to(tl.int64) * stride_kh
-                out_offset = off_h.to(tl.int64) * stride_oh
 
                 begin_q, end_q, begin_k, qlen, klen = _compute_qlen(
                     tile_idx,
@@ -704,55 +703,170 @@ def gdpa_kernel_tma_ws_blackwell(
                     q_bufIdx = accum_count_q % NUM_BUFFERS_Q
                     q_phase = (accum_count_q // NUM_BUFFERS_Q) & 1
                     # producer acquire: consumer_release_q0
-                    _load_tma(
-                        q_bufIdx,
-                        q_phase,
-                        consumer_release_q0,
-                        consumer_q0,
-                        q0_buf,
-                        q_desc,
-                        begin_q + start_m * BLOCK_M,
-                        q_offset,
-                        BLOCK_M * BLOCK_D * 2,
+                    # _load_tma(
+                    #    q_bufIdx,
+                    #    q_phase,
+                    #    consumer_release_q0,
+                    #    consumer_q0,
+                    #    q0_buf,
+                    #    q_desc,
+                    #    begin_q + start_m * BLOCK_M,
+                    #    q_offset,
+                    #    BLOCK_M * BLOCK_D * 2,
+                    # )
+                    # bufIdx, phase, empty_bars, full_bars, buffers, desc, offset_1, offset_0, num_bytes
+                    bufIdx = q_bufIdx
+                    phase = q_phase
+                    empty_bars = consumer_release_q0
+                    full_bars = consumer_q0
+                    buffers = q0_buf
+                    desc = q_desc
+                    offset_1 = begin_q + start_m * BLOCK_M
+                    offset_0 = q_offset
+                    # num_bytes = BLOCK_M * BLOCK_D * 2
+                    # producer acquire
+                    empty_view = tlx.local_view(empty_bars, bufIdx)
+                    tlx.barrier_wait(empty_view, phase ^ 1)
+                    # barrier for producer commit
+                    full_view = tlx.local_view(
+                        consumer_q0, bufIdx
+                    )  # full_bars, bufIdx)
+                    tlx.barrier_expect_bytes(
+                        full_view, BLOCK_M * BLOCK_D * 2
+                    )  # num_bytes)
+                    smem_view = tlx.local_view(buffers, bufIdx)
+                    tlx.async_descriptor_load(
+                        desc,
+                        smem_view,
+                        [
+                            (offset_1).to(tl.int32),
+                            (offset_0).to(tl.int32),
+                        ],
+                        full_view,
                     )
-                    _load_tma(
-                        q_bufIdx,
-                        q_phase,
-                        consumer_release_q1,
-                        consumer_q1,
-                        q1_buf,
-                        q_desc,
-                        begin_q + start_m * BLOCK_M + BLOCK_M // 2,
-                        q_offset,
-                        BLOCK_M * BLOCK_D * 2,
+
+                    # _load_tma(
+                    #    q_bufIdx,
+                    #    q_phase,
+                    #    consumer_release_q1,
+                    #    consumer_q1,
+                    #    q1_buf,
+                    #    q_desc,
+                    #    begin_q + start_m * BLOCK_M + BLOCK_M // 2,
+                    #    q_offset,
+                    #    BLOCK_M * BLOCK_D * 2,
+                    # )
+                    # bufIdx, phase, empty_bars, full_bars, buffers, desc, offset_1, offset_0, num_bytes
+                    bufIdx = q_bufIdx
+                    phase = q_phase
+                    empty_bars = consumer_release_q1
+                    full_bars = consumer_q1
+                    buffers = q1_buf
+                    desc = q_desc
+                    offset_1 = begin_q + start_m * BLOCK_M + BLOCK_M // 2
+                    offset_0 = q_offset
+                    # num_bytes = BLOCK_M * BLOCK_D * 2
+                    # producer acquire
+                    empty_view = tlx.local_view(empty_bars, bufIdx)
+                    tlx.barrier_wait(empty_view, phase ^ 1)
+                    # barrier for producer commit
+                    full_view = tlx.local_view(full_bars, bufIdx)
+                    tlx.barrier_expect_bytes(
+                        full_view, BLOCK_M * BLOCK_D * 2
+                    )  # num_bytes)
+                    smem_view = tlx.local_view(buffers, bufIdx)
+                    tlx.async_descriptor_load(
+                        desc,
+                        smem_view,
+                        [
+                            (offset_1).to(tl.int32),
+                            (offset_0).to(tl.int32),
+                        ],
+                        full_view,
                     )
+
                     lo, hi = 0, klen
                     for start_n in range(lo, hi, BLOCK_N):
                         start_n = tl.multiple_of(start_n, BLOCK_N)
                         k_bufIdx = accum_count_k % NUM_BUFFERS_K
                         k_phase = (accum_count_k // NUM_BUFFERS_K) & 1
-                        k_view = _load_tma(
-                            k_bufIdx,
-                            k_phase,
-                            consumer_release_k,
-                            consumer_k,
-                            k_buf,
-                            k_desc,
-                            begin_k + start_n,
-                            kv_offset,
-                            BLOCK_N * BLOCK_D * 2,
+                        # k_view = _load_tma(
+                        #    k_bufIdx,
+                        #    k_phase,
+                        #    consumer_release_k,
+                        #    consumer_k,
+                        #    k_buf,
+                        #    k_desc,
+                        #    begin_k + start_n,
+                        #    kv_offset,
+                        #    BLOCK_N * BLOCK_D * 2,
+                        # )
+                        # bufIdx, phase, empty_bars, full_bars, buffers, desc, offset_1, offset_0, num_bytes
+                        bufIdx = k_bufIdx
+                        phase = k_phase
+                        empty_bars = consumer_release_k
+                        full_bars = consumer_k
+                        buffers = k_buf
+                        desc = k_desc
+                        offset_1 = begin_k + start_n
+                        offset_0 = kv_offset
+                        num_bytes: tl.constexpr = BLOCK_N * BLOCK_D * 2
+                        # producer acquire
+                        empty_view = tlx.local_view(empty_bars, bufIdx)
+                        tlx.barrier_wait(empty_view, phase ^ 1)
+                        # barrier for producer commit
+                        full_view = tlx.local_view(full_bars, bufIdx)
+                        tlx.barrier_expect_bytes(
+                            full_view, BLOCK_N * BLOCK_D * 2
+                        )  # num_bytes)
+                        smem_view = tlx.local_view(buffers, bufIdx)
+                        tlx.async_descriptor_load(
+                            desc,
+                            smem_view,
+                            [
+                                (offset_1).to(tl.int32),
+                                (offset_0).to(tl.int32),
+                            ],
+                            full_view,
                         )
+                        k_view = smem_view
                         k_view = tlx.local_trans(k_view)
-                        _load_tma(
-                            k_bufIdx,
-                            k_phase,
-                            consumer_release_v,
-                            consumer_v,
-                            v_buf,
-                            v_desc,
-                            begin_k + start_n,
-                            kv_offset,
-                            BLOCK_N * BLOCK_D * 2,
+                        # _load_tma(
+                        #    k_bufIdx,
+                        #    k_phase,
+                        #    consumer_release_v,
+                        #    consumer_v,
+                        #    v_buf,
+                        #    v_desc,
+                        #    begin_k + start_n,
+                        #    kv_offset,
+                        #    BLOCK_N * BLOCK_D * 2,
+                        # )
+                        # bufIdx, phase, empty_bars, full_bars, buffers, desc, offset_1, offset_0, num_bytes
+                        bufIdx = k_bufIdx
+                        phase = k_phase
+                        empty_bars = consumer_release_v
+                        full_bars = consumer_v
+                        buffers = v_buf
+                        desc = v_desc
+                        offset_1 = begin_k + start_n
+                        offset_0 = kv_offset
+                        num_bytes2: tl.constexpr = BLOCK_N * BLOCK_D * 2
+                        # producer acquire
+                        empty_view = tlx.local_view(empty_bars, bufIdx)
+                        tlx.barrier_wait(empty_view, phase ^ 1)
+                        # barrier for producer commit
+                        full_view = tlx.local_view(full_bars, bufIdx)
+                        tlx.barrier_expect_bytes(full_view, num_bytes2)
+                        smem_view = tlx.local_view(buffers, bufIdx)
+                        tlx.async_descriptor_load(
+                            desc,
+                            smem_view,
+                            [
+                                (offset_1).to(tl.int32),
+                                (offset_0).to(tl.int32),
+                            ],
+                            full_view,
                         )
 
                     accum_count_q += 1
@@ -763,6 +877,9 @@ def gdpa_kernel_tma_ws_blackwell(
             for _ in range(0, tiles_per_sm):
                 pid = tile_idx % n_tile_num
                 start_m = pid
+                off_hz = tile_idx // n_tile_num
+                off_h = off_hz % H
+                out_offset = off_h.to(tl.int64) * stride_oh
                 begin_q, end_q, begin_k, qlen, klen = _compute_qlen(
                     tile_idx,
                     n_tile_num,
