@@ -34,10 +34,23 @@ def get_cuda_autotune_config():
     ]
 
 
+## Iterative tuning with intra-kernel profiler
+## 1. identify critical resource
+## 2. assuming it is gemm, make sure there is no bubble in gemm partition
+
+## Potential issues
+## -- bubbles in gemm partition due to _compute_qlen
+## ---- if that is the case via intra-kernel profiler, try pre-compute _compute_qlen
+## -- load imbalance
+## ---- use dynamic scheduler
+## ---- grab the next tile one iteration ahead (i.e SWP of the outer loop)
+## -- if descriptor setup is an issue, try SWP the setup for inner loop (i.e desc_k,v)
+
+
 ## Overall warpspec configuration
-## 4 partitions:
+## default + 3 partitions:
 ##   default is activation0 with 4 warps, partition0 is activatation1 with 4 warps
-##   partition1 is gemm, partition 2 is load, partition 3 is epilogue/store
+##   partition1 is gemm, partition 2 is load
 @triton.jit
 def _compute_qlen(
     tile_idx,
@@ -605,7 +618,7 @@ def gdpa_kernel_tma_ws_blackwell(
                             (begin_q + start_m * BLOCK_M).to(tl.int32),
                             (out_offset).to(tl.int32),
                         ],
-                        o0,
+                        o0.to(Out.type.element_ty),
                     )
                     accum_cnt_outer += 1
 
@@ -674,7 +687,7 @@ def gdpa_kernel_tma_ws_blackwell(
                             (begin_q + start_m * BLOCK_M + BLOCK_M // 2).to(tl.int32),
                             (out_offset).to(tl.int32),
                         ],
-                        o1,
+                        o1.to(Out.type.element_ty),
                     )
                     accum_cnt_outer += 1
 
