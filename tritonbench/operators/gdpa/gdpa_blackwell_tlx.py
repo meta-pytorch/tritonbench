@@ -178,6 +178,8 @@ def _do_dots(
     tlx.barrier_wait(consumer_q0_view, phase_q)  # consumer wait for q0
     tlx.barrier_wait(consumer_k_view, phase_k)  # consumer wait for k
     # Do we need the initial acquire here?
+    # dot partition has producer commit for qk0, activation partition consumer wait for qk0
+    # activation partition producer commit for p0, dot partition has consumer wait for p0
     # tlx.barrier_wait(producer_qk0_view, phase_qk)  # producer acquire for qk0
     # producer commit for qk0
     q0_view = tlx.local_view(q0_buf, bufIdx_q)
@@ -192,7 +194,6 @@ def _do_dots(
     consumer_q1_view = tlx.local_view(consumer_q1, bufIdx_q)
     # producer_qk1_view = tlx.local_view(producer_qk1, bufIdx_qk)
     tlx.barrier_wait(consumer_q1_view, phase_q)  # consumer wait for q1
-    # Do we need the initial acquire here?
     # tlx.barrier_wait(producer_qk1_view, phase_qk)  # producer acquire for qk1
     # consumer release for k, producer commit for qk1
     q1_view = tlx.local_view(q1_buf, bufIdx_q)
@@ -214,7 +215,7 @@ def _do_dots(
     bufIdx_o_outer, phase_o_outer = _get_bufidx_phase(accum_cnt_outer, NUM_BUFFERS_O)
     producer_o0_view = tlx.local_view(producer_o0, bufIdx_o_outer)
     producer_o1_view = tlx.local_view(producer_o1, bufIdx_o_outer)
-    tlx.barrier_wait(producer_o0_view, phase_o_outer)  # producer acquire for o0
+    tlx.barrier_wait(producer_o0_view, phase_o_outer ^ 1)  # producer acquire for o0
     # For reuse of qk0 and p0, we can simplify the barriers
     #   activation partition: consumer wait for qk0, ... update p, producer commit of p0
     #   dot partition: producer commit of qk0, ..., consumer wait for p0 (use the same barrier as producer_qk0)
@@ -264,7 +265,7 @@ def _do_dots(
         bufIdx_qk1, phase_qk1 = _get_bufidx_phase(accum_cnt_qk1, NUM_BUFFERS_QK)
         consumer_p1_view = tlx.local_view(producer_qk1, bufIdx_qk1)
         tlx.barrier_wait(
-            producer_o1_view, phase_o_outer, first
+            producer_o1_view, phase_o_outer ^ 1, first
         )  # producer acquire for o1, only needed for first iteration
         tlx.barrier_wait(
             consumer_p1_view, phase_qk1
@@ -338,7 +339,7 @@ def _do_dots(
     release_q1_view = tlx.local_view(consumer_release_q1, bufIdx_q)
     tlx.tcgen05_commit(release_q1_view)
     tlx.barrier_wait(
-        producer_o1_view, phase_o_outer, first
+        producer_o1_view, phase_o_outer ^ 1, first
     )  # producer acquire for o1 at the first iteration
     bufIdx_qk1, phase_qk1 = _get_bufidx_phase(accum_cnt_qk1, NUM_BUFFERS_QK)
     consumer_p1_view = tlx.local_view(producer_qk1, bufIdx_qk1)
@@ -830,6 +831,8 @@ def gdpa_kernel_tma_ws_blackwell(
                     tlx.barrier_wait(consumer_q0_view, phase_q)  # consumer wait for q0
                     tlx.barrier_wait(consumer_k_view, phase_k)  # consumer wait for k
                     # Do we need the initial acquire here?
+                    # dot partition has producer commit for qk0, activation partition consumer wait for qk0
+                    # activation partition producer commit for p0, dot partition has consumer wait for p0
                     # tlx.barrier_wait(producer_qk0_view, phase_qk)  # producer acquire for qk0
                     # producer commit for qk0
                     q0_view = tlx.local_view(q0_buf, bufIdx_q)
@@ -850,7 +853,6 @@ def gdpa_kernel_tma_ws_blackwell(
                     consumer_q1_view = tlx.local_view(consumer_q1, bufIdx_q)
                     # producer_qk1_view = tlx.local_view(producer_qk1, bufIdx_qk)
                     tlx.barrier_wait(consumer_q1_view, phase_q)  # consumer wait for q1
-                    # Do we need the initial acquire here?
                     # tlx.barrier_wait(producer_qk1_view, phase_qk)  # producer acquire for qk1
                     # consumer release for k, producer commit for qk1
                     q1_view = tlx.local_view(q1_buf, bufIdx_q)
@@ -879,7 +881,7 @@ def gdpa_kernel_tma_ws_blackwell(
                     producer_o0_view = tlx.local_view(producer_o0, bufIdx_o_outer)
                     producer_o1_view = tlx.local_view(producer_o1, bufIdx_o_outer)
                     tlx.barrier_wait(
-                        producer_o0_view, phase_o_outer
+                        producer_o0_view, phase_o_outer ^ 1
                     )  # producer acquire for o0
                     # For reuse of qk0 and p0, we can simplify the barriers
                     #   activation partition: consumer wait for qk0, ... update p, producer commit of p0
@@ -946,7 +948,7 @@ def gdpa_kernel_tma_ws_blackwell(
                         )
                         consumer_p1_view = tlx.local_view(producer_qk1, bufIdx_qk1)
                         tlx.barrier_wait(
-                            producer_o1_view, phase_o_outer, first
+                            producer_o1_view, phase_o_outer ^ 1, first
                         )  # producer acquire for o1, only needed for first iteration
                         tlx.barrier_wait(
                             consumer_p1_view, phase_qk1
@@ -1046,7 +1048,7 @@ def gdpa_kernel_tma_ws_blackwell(
                     release_q1_view = tlx.local_view(consumer_release_q1, bufIdx_q)
                     tlx.tcgen05_commit(release_q1_view)
                     tlx.barrier_wait(
-                        producer_o1_view, phase_o_outer, first
+                        producer_o1_view, phase_o_outer ^ 1, first
                     )  # producer acquire for o1 at the first iteration
                     bufIdx_qk1, phase_qk1 = _get_bufidx_phase(
                         accum_cnt_qk1, NUM_BUFFERS_QK
