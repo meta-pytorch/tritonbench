@@ -333,11 +333,11 @@ def _do_dots(
         accum_cnt_o1 += 1
 
     # epilogue
-    # commit to release q0, q1? FIXME
+    # commit to release q0, q1
     release_q0_view = tlx.local_view(consumer_release_q0, bufIdx_q)
-    # tlx.gen5_commit(release_q0_view)
+    tlx.tcgen05_commit(release_q0_view)
     release_q1_view = tlx.local_view(consumer_release_q1, bufIdx_q)
-    # tlx.gen5_commit(release_q1_view)
+    tlx.tcgen05_commit(release_q1_view)
     tlx.barrier_wait(
         producer_o1_view,
         phase_o_outer,  # , first
@@ -1043,11 +1043,11 @@ def gdpa_kernel_tma_ws_blackwell(
                         accum_cnt_o1 += 1
 
                     # epilogue
-                    # commit to release q0, q1? FIXME
+                    # commit to release q0, q1
                     release_q0_view = tlx.local_view(consumer_release_q0, bufIdx_q)
-                    # tlx.gen5_commit(release_q0_view)
+                    tlx.tcgen05_commit(release_q0_view)
                     release_q1_view = tlx.local_view(consumer_release_q1, bufIdx_q)
-                    # tlx.gen5_commit(release_q1_view)
+                    tlx.tcgen05_commit(release_q1_view)
                     tlx.barrier_wait(
                         producer_o1_view,
                         phase_o_outer,  # , first
