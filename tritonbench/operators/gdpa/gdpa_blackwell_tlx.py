@@ -306,6 +306,7 @@ def _do_dots(
         )
 
         # p0 dot v
+        consumer_v_view = tlx.local_view(consumer_v, bufIdx_k)
         tlx.barrier_wait(consumer_v_view, phase_k)  # consumer wait for v
         # no need to acquire o0 as this is the only partition updating it
         # tlx.barrier_wait(producer_o0)  # producer acquire for o0
@@ -1005,6 +1006,7 @@ def gdpa_kernel_tma_ws_blackwell(
                         )
 
                         # p0 dot v
+                        consumer_v_view = tlx.local_view(consumer_v, bufIdx_k)
                         tlx.barrier_wait(
                             consumer_v_view, phase_k
                         )  # consumer wait for v
