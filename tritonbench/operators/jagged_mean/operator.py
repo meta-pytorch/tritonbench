@@ -120,6 +120,12 @@ class Operator(BenchmarkOperator):
         )  # in 3D tensor (B, *, M), takes the mean of B 2D tensors (*, M)
 
     @register_benchmark()
+    def torch_compile_jagged_mean_unbind_torch_mean(
+        self, x: torch.Tensor, B: int, M: int, seqlen: int, sparsity: float
+    ):
+        return torch.compile(self.torch_jagged_mean_unbind_torch_mean(x, B, M, seqlen, sparsity), mode="max-autotune-no-cudagraphs")
+
+    @register_benchmark()
     def torch_jagged_mean_torch_nanmean(
         self, x: torch.Tensor, B: int, M: int, seqlen: int, sparsity: float
     ):
@@ -138,6 +144,12 @@ class Operator(BenchmarkOperator):
         )
 
     @register_benchmark()
+    def torch_compile_jagged_mean_torch_nanmean(
+        self, x: torch.Tensor, B: int, M: int, seqlen: int, sparsity: float
+    ):
+        return torch.compile(self.torch_jagged_mean_torch_nanmean(x, B, M, seqlen, sparsity), mode="max-autotune-no-cudagraphs")
+
+    @register_benchmark()
     def torch_jagged_mean_torch_sum(
         self, x: torch.Tensor, B: int, M: int, seqlen: int, sparsity: float
     ):
@@ -154,6 +166,12 @@ class Operator(BenchmarkOperator):
             )
             / x.offsets().diff().unsqueeze(1)
         )
+
+    @register_benchmark()
+    def torch_compile_jagged_mean_torch_sum(
+        self, x: torch.Tensor, B: int, M: int, seqlen: int, sparsity: float
+    ):
+        return torch.compile(self.torch_jagged_mean_torch_sum(x, B, M, seqlen, sparsity), mode="max-autotune-no-cudagraphs")
 
     @register_benchmark()
     def triton_jagged_mean_simple_fused(
