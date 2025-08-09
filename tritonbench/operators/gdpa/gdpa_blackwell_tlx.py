@@ -25,7 +25,7 @@ def get_cuda_autotune_config():
             num_warps=4,
             num_stages=1,
         )
-        for BM in [128]
+        for BM in [128]  # or 256
         for BN in [128]
         for bq in [1]
         for bk in [2]
@@ -1366,6 +1366,12 @@ def gdpa_forward_tlx(
     NUM_SMS = (
         get_num_sms() or 1000000
     ) * 8  # if num sms is None, use a large number so that it is a no-op
+
+    # TMA descriptors require a global memory allocation
+    def alloc_fn(size: int, alignment: int, _):
+        return torch.empty(size, device="cuda", dtype=torch.int8)
+
+    triton.set_allocator(alloc_fn)
 
     def grid_tma_persistent(META):
         return (
