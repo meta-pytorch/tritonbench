@@ -2,11 +2,101 @@
 
 import argparse
 import shlex
-from typing import Dict, List, Tuple
+from typing import Dict, List, Tuple, Optional, Any, Union
+from dataclasses import dataclass
 
 from .parser import get_parser
 
 from .triton_op import BenchmarkOperatorResult, REGISTERED_X_VALS
+
+
+@dataclass
+class MetricComparison:
+    """Data class to store metric comparison results."""
+    val_a: float
+    val_b: float
+    improvement_pct: float
+    x_val: Any
+    backend: str
+    metric: str
+
+
+def _extract_metric_value(metric_obj: Any) -> Optional[float]:
+    """Extract and normalize metric value from metric objects.
+    
+    Only handles:
+    - Objects with p50 attribute (percentile-based metrics)
+    - Direct numeric values (int/float)
+    
+    Skips all other types (tuples, complex objects, etc.)
+    """
+    if metric_obj is None:
+        return None
+    
+    # Handle objects with p50 attribute (percentile-based metrics)
+    if hasattr(metric_obj, "p50"):
+        return float(metric_obj.p50)
+    
+    # Handle direct numeric values only
+    if isinstance(metric_obj, (int, float)):
+        return float(metric_obj)
+    
+    # Skip all other types (tuples, complex objects, etc.)
+    return None
+
+
+def _calculate_improvement(val_a: float, val_b: float) -> float:
+    """Calculate percentage improvement from val_a to val_b."""
+    if val_a == 0:
+        return 0.0
+    return ((val_b - val_a) / val_a) * 100
+
+
+def _get_comparable_data_points(
+    result_a: BenchmarkOperatorResult,
+    result_b: BenchmarkOperatorResult,
+    common_x_vals: List,
+    common_backends: List[str],
+    metric: str,
+) -> List[MetricComparison]:
+    """Get all comparable data points for a specific metric."""
+    # Create result dictionaries for easier lookup
+    result_dict_a = {x_val: metrics_dict for x_val, metrics_dict in result_a.result}
+    result_dict_b = {x_val: metrics_dict for x_val, metrics_dict in result_b.result}
+    
+    comparisons = []
+    
+    for backend in common_backends:
+        for x_val in common_x_vals:
+            if backend in result_dict_a[x_val] and backend in result_dict_b[x_val]:
+                metrics_a = result_dict_a[x_val][backend]
+                metrics_b = result_dict_b[x_val][backend]
+                
+                # Try to get the metric from direct attribute first
+                raw_val_a = getattr(metrics_a, metric, None)
+                raw_val_b = getattr(metrics_b, metric, None)
+                
+                # If not found, check in extra_metrics
+                if raw_val_a is None and hasattr(metrics_a, 'extra_metrics') and metrics_a.extra_metrics:
+                    raw_val_a = metrics_a.extra_metrics.get(metric, None)
+                if raw_val_b is None and hasattr(metrics_b, 'extra_metrics') and metrics_b.extra_metrics:
+                    raw_val_b = metrics_b.extra_metrics.get(metric, None)
+                
+                val_a = _extract_metric_value(raw_val_a)
+                val_b = _extract_metric_value(raw_val_b)
+                
+                if val_a is not None and val_b is not None:
+                    improvement_pct = _calculate_improvement(val_a, val_b)
+                    comparisons.append(MetricComparison(
+                        val_a=val_a,
+                        val_b=val_b,
+                        improvement_pct=improvement_pct,
+                        x_val=x_val,
+                        backend=backend,
+                        metric=metric
+                    ))
+    
+    return comparisons
 
 
 def parse_ab_config(config_str: str) -> List[str]:
@@ -163,48 +253,37 @@ def _analyze_config_differences(
     return differences
 
 
-def _calculate_performance_summary(
+def _get_all_comparable_data_points(
     result_a: BenchmarkOperatorResult,
     result_b: BenchmarkOperatorResult,
     common_x_vals: List,
     common_backends: List[str],
-) -> Dict[str, Dict[str, float]]:
-    """Calculate performance summary statistics."""
-    summary = {}
+) -> Dict[str, List[MetricComparison]]:
+    """Get all comparable data points for all metrics at once."""
+    all_comparisons = {}
+    
+    for metric in result_a.metrics:
+        all_comparisons[metric] = _get_comparable_data_points(
+            result_a, result_b, common_x_vals, common_backends, metric
+        )
+    
+    return all_comparisons
 
-    # Create result dictionaries for easier lookup
-    result_dict_a = {x_val: metrics_dict for x_val, metrics_dict in result_a.result}
-    result_dict_b = {x_val: metrics_dict for x_val, metrics_dict in result_b.result}
+
+def _calculate_performance_summary(
+    all_comparisons: Dict[str, List[MetricComparison]],
+    common_backends: List[str],
+) -> Dict[str, Dict[str, float]]:
+    """Calculate performance summary statistics from pre-computed comparisons."""
+    summary = {}
 
     for backend in common_backends:
         backend_summary = {}
 
-        for metric in result_a.metrics:
-            improvements = []
-
-            for x_val in common_x_vals:
-                if backend in result_dict_a[x_val] and backend in result_dict_b[x_val]:
-                    metrics_a = result_dict_a[x_val][backend]
-                    metrics_b = result_dict_b[x_val][backend]
-
-                    val_a = getattr(metrics_a, metric, None)
-                    val_b = getattr(metrics_b, metric, None)
-
-                    if val_a is not None and val_b is not None:
-                        # Handle different metric types
-                        if hasattr(val_a, "p50"):
-                            val_a_num = val_a.p50
-                        else:
-                            val_a_num = val_a
-
-                        if hasattr(val_b, "p50"):
-                            val_b_num = val_b.p50
-                        else:
-                            val_b_num = val_b
-
-                        if val_a_num != 0:
-                            improvement = ((val_b_num - val_a_num) / val_a_num) * 100
-                            improvements.append(improvement)
+        for metric, comparisons in all_comparisons.items():
+            # Filter for current backend
+            backend_comparisons = [c for c in comparisons if c.backend == backend]
+            improvements = [c.improvement_pct for c in backend_comparisons]
 
             if improvements:
                 backend_summary[metric] = {
@@ -260,6 +339,14 @@ def compare_ab_results(
         return
 
     # ============================================================================
+    # PRE-COMPUTE: Get all comparable data points once
+    # ============================================================================
+    all_comparisons = _get_all_comparable_data_points(
+        result_a, result_b, common_x_vals, common_backends
+    )
+    
+
+    # ============================================================================
     # SECTION 1: Configuration Analysis
     # ============================================================================
     print("\n" + "=" * 70)
@@ -290,9 +377,7 @@ def compare_ab_results(
     print("Performance Summary")
     print("-" * 70)
 
-    summary = _calculate_performance_summary(
-        result_a, result_b, common_x_vals, common_backends
-    )
+    summary = _calculate_performance_summary(all_comparisons, common_backends)
 
     for backend in common_backends:
         print(f"\n{backend}:")
@@ -320,8 +405,10 @@ def compare_ab_results(
 
     x_val_name = REGISTERED_X_VALS.get(result_a.op_name, "x_val")
 
-    # Show all metrics for detailed comparison
+    # Show only metrics that have comparable data
     for metric in result_a.metrics:
+        if metric not in all_comparisons or len(all_comparisons[metric]) == 0:
+            continue  # Skip metrics with no comparable data
         print(f"\nMetric: {metric}")
         print("Backend".ljust(15), end="")
         print(x_val_name.ljust(20), end="")
@@ -330,49 +417,36 @@ def compare_ab_results(
         print("Difference".ljust(12))
         print("-" * 71)
 
+        # Use pre-computed comparisons
+        comparisons = all_comparisons.get(metric, [])
+
+        # Group by backend for display
+        backend_comparisons = {}
+        for comp in comparisons:
+            if comp.backend not in backend_comparisons:
+                backend_comparisons[comp.backend] = []
+            backend_comparisons[comp.backend].append(comp)
+
         for backend in common_backends:
+            if backend not in backend_comparisons:
+                continue
+                
             first_row = True
-            for x_val in common_x_vals:
-                if (
-                    backend not in result_dict_a[x_val]
-                    or backend not in result_dict_b[x_val]
-                ):
-                    continue
+            for comp in backend_comparisons[backend]:
+                # Format values
+                if isinstance(comp.val_a, float):
+                    val_a_str = f"{comp.val_a:.3f}"
+                    val_b_str = f"{comp.val_b:.3f}"
+                else:
+                    val_a_str = str(comp.val_a)
+                    val_b_str = str(comp.val_b)
 
-                metrics_a = result_dict_a[x_val][backend]
-                metrics_b = result_dict_b[x_val][backend]
-
-                val_a = getattr(metrics_a, metric, None)
-                val_b = getattr(metrics_b, metric, None)
-
-                if val_a is not None and val_b is not None:
-                    # Handle different data types
-                    if hasattr(val_a, "p50"):
-                        val_a_num = val_a.p50
-                        val_b_num = val_b.p50
-                    else:
-                        val_a_num = val_a
-                        val_b_num = val_b
-
-                    if val_a_num != 0:
-                        diff_pct = ((val_b_num - val_a_num) / val_a_num) * 100
-                    else:
-                        diff_pct = 0
-
-                    # Format values
-                    if isinstance(val_a_num, float):
-                        val_a_str = f"{val_a_num:.3f}"
-                        val_b_str = f"{val_b_num:.3f}"
-                    else:
-                        val_a_str = str(val_a_num)
-                        val_b_str = str(val_b_num)
-
-                    # Print row
-                    backend_name = backend if first_row else ""
-                    print(
-                        f"{backend_name:<15}{str(x_val):<20}{val_a_str:<12}{val_b_str:<12}{diff_pct:+5.1f}%"
-                    )
-                    first_row = False
+                # Print row
+                backend_name = backend if first_row else ""
+                print(
+                    f"{backend_name:<15}{str(comp.x_val):<20}{val_a_str:<12}{val_b_str:<12}{comp.improvement_pct:+5.1f}%"
+                )
+                first_row = False
 
             if not first_row:  # Only print separator if we printed data
                 print()
