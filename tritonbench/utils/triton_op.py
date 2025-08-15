@@ -1145,14 +1145,34 @@ class BenchmarkOperator(metaclass=PostInitProcessor):
         baseline_output = baseline_fn()
         try:
             if self.mode == Mode.FWD:
-                torch.testing.assert_close(output, baseline_output)
+                torch.testing.assert_close(
+                    output,
+                    baseline_output,
+                    rtol=self.tb_args.rtol,
+                    atol=self.tb_args.atol,
+                )
             elif self.mode == Mode.BWD:
-                torch.testing.assert_close(output.grad, baseline_output.grad)
+                torch.testing.assert_close(
+                    output.grad,
+                    baseline_output.grad,
+                    rtol=self.tb_args.rtol,
+                    atol=self.tb_args.atol,
+                )
             else:
                 fwd_output, loss = output
                 baseline_fwd_output, baseline_loss = baseline_output
-                torch.testing.assert_close(fwd_output, baseline_fwd_output)
-                torch.testing.assert_close(loss.grad, baseline_loss.grad)
+                torch.testing.assert_close(
+                    fwd_output,
+                    baseline_fwd_output,
+                    rtol=self.tb_args.rtol,
+                    atol=self.tb_args.atol,
+                )
+                torch.testing.assert_close(
+                    loss.grad,
+                    baseline_loss.grad,
+                    rtol=self.tb_args.rtol,
+                    atol=self.tb_args.atol,
+                )
             return True
         except Exception:
             # either the output tensor or the loss grad tensor does not match

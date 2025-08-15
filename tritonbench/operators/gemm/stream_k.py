@@ -390,6 +390,7 @@ def streamk_amd_matmul(a, b, bias=None):
     # print(a @ b)
     return c
 
+
 def _matmul_launch_metadata(grid, kernel, args):
     ret = {}
     M, N, K = args["M"], args["N"], args["K"]
@@ -406,7 +407,13 @@ def _matmul_launch_metadata(grid, kernel, args):
 def matmul_get_configs(pre_hook=None):
     return [
         triton.Config(
-            {"BLOCK_M": BM, "BLOCK_N": BN, "BLOCK_K": BK, "SK_BLOCK_K": skBK, "GROUP_M": 8},
+            {
+                "BLOCK_M": BM,
+                "BLOCK_N": BN,
+                "BLOCK_K": BK,
+                "SK_BLOCK_K": skBK,
+                "GROUP_M": 8,
+            },
             num_stages=s,
             num_warps=w,
             pre_hook=pre_hook,
@@ -414,10 +421,11 @@ def matmul_get_configs(pre_hook=None):
         for BM in [128, 256]  #
         for BN in [128, 256]  #
         for BK in [32, 64, 128]  #
-        for skBK in [16, 32, 64, 128] #
+        for skBK in [16, 32, 64, 128]  #
         for s in ([2, 3, 4])  #
         for w in [4, 8]  #
     ]
+
 
 def matmul_tma_set_block_size_hook(nargs):
     BLOCK_M = nargs["BLOCK_M"]
@@ -430,6 +438,7 @@ def matmul_tma_set_block_size_hook(nargs):
     SK_BLOCK_K = nargs["SK_BLOCK_K"]
     nargs["a_desc_sk"].block_shape = [BLOCK_M, SK_BLOCK_K]
     nargs["b_desc_sk"].block_shape = [BLOCK_N, SK_BLOCK_K]
+
 
 @triton.autotune(
     configs=matmul_get_configs(pre_hook=matmul_tma_set_block_size_hook),
@@ -494,7 +503,6 @@ def streamk_cuda_gemm(
         total_ddp_tiles = num_pid - NUM_SMS
         streamk_sms = NUM_SMS
 
-
     # ----------------------------------------------------------------------------
     # DDP phase
     # ----------------------------------------------------------------------------
@@ -534,12 +542,12 @@ def streamk_cuda_gemm(
 
         # `evenly` distribute work units across SMs, with rem tiles assigned contiguously to the first rem programs
         base = total_work_units // streamk_sms
-        rem  = total_work_units % streamk_sms
+        rem = total_work_units % streamk_sms
         work = tl.where(worker_id < rem, base + 1, base)
         start = tl.where(
             worker_id < rem,
             worker_id * (base + 1),
-            rem * (base + 1) + (worker_id - rem) * base
+            rem * (base + 1) + (worker_id - rem) * base,
         )
         end = start + work - 1
 
@@ -567,7 +575,9 @@ def streamk_cuda_gemm(
 
             # compute the start and end K index on this tile for this work unit
             curr_st_k = tl.where(curr_tile == st_tile_streamk, st_k_streamk, 0)
-            curr_en_k = tl.where(curr_tile == en_tile_streamk, en_k_streamk, work_units_per_tile - 1)
+            curr_en_k = tl.where(
+                curr_tile == en_tile_streamk, en_k_streamk, work_units_per_tile - 1
+            )
 
             accumulator = tl.zeros((BLOCK_M, BLOCK_N), dtype=tl.float32)
 
@@ -589,6 +599,7 @@ def streamk_cuda_gemm(
             else:
                 # NOTE: known correctness issue with atomic_add
                 c_desc.atomic_add([offs_am, offs_bn], c)
+
 
 def streamk_cuda_matmul(a, b):
     assert a.dtype == b.dtype, "Incompatible dtypes"
@@ -624,7 +635,6 @@ def streamk_cuda_matmul(a, b):
             streamk_sms = num_sms
         return (total_ddp_tiles + streamk_sms,)
 
-
     streamk_cuda_gemm[grid](
         a_desc,
         b_desc,
@@ -636,6 +646,6 @@ def streamk_cuda_matmul(a, b):
         K,  #
         FP8_OUTPUT=dtype == torch.float8_e4m3fn,  #
         ENABLE_BUFFER_OPS_ASSUMES=True,  #
-        NUM_SMS=num_sms #
+        NUM_SMS=num_sms  #
     )
     return c

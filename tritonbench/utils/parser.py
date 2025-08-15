@@ -246,6 +246,18 @@ def get_parser(args=None):
         default=None,
         help="Name of group for benchmarking.",
     )
+    parser.add_argument(
+        "--rtol",
+        type=float,
+        default=None,
+        help="Relative tolerance for accuracy metric.",
+    )
+    parser.add_argument(
+        "--atol",
+        type=float,
+        default=None,
+        help="Absolute tolerance for accuracy metric.",
+    )
 
     # A/B Testing parameters
     parser.add_argument(
