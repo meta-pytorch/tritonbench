@@ -22,7 +22,7 @@ RUN echo ". /workspace/setup_instance.sh\n" >> ${HOME}/.bashrc
 
 # Checkout TritonBench and submodules
 RUN git clone --recurse-submodules -b "${TRITONBENCH_BRANCH}" --single-branch \
-    https://github.com/pytorch-labs/tritonbench /workspace/tritonbench
+    https://github.com/meta-pytorch/tritonbench /workspace/tritonbench
 
 # Setup conda env
 RUN cd /workspace/tritonbench && \

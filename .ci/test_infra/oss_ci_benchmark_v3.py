@@ -34,7 +34,7 @@ def parse_dependencies(envs: Dict[str, str]) -> Dict[str, Dict[str, Any]]:
     dependencies = {
         "pytorch": "pytorch/pytorch",
         "triton": "triton-lang/triton",
-        "tritonbench": "pytorch-labs/tritonbench",
+        "tritonbench": "meta-pytorch/tritonbench",
     }
     out = {}
     for dep in dependencies:

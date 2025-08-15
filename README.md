@@ -12,7 +12,7 @@ The benchmark suite should be self-contained of its dependencies. To install, fo
 Step 1: clone the repository and checkout all submodules
 
 ```
-$ git clone https://github.com/pytorch-labs/tritonbench.git
+$ git clone https://github.com/meta-pytorch/tritonbench.git
 $ git submodule update --init --recursive
 ```
 

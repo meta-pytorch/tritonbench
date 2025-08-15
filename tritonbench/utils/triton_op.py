@@ -683,7 +683,7 @@ class BenchmarkOperator(metaclass=PostInitProcessor):
     example_inputs: Any = None
     use_cuda_graphs: bool = False
     is_compute_bound = True
-    # reset dynamo to avoid errors like https://github.com/pytorch-labs/tritonbench/issues/90
+    # reset dynamo to avoid errors like https://github.com/meta-pytorch/tritonbench/issues/90
     reset_dynamo = False
 
     """

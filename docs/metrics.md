@@ -29,6 +29,6 @@ Additionally, users can define customized metrics or override  in `operator.py` 
 
 Here are some examples:
 
-- [tflops](https://github.com/pytorch-labs/tritonbench/blob/70264720fbfbb13020f63d4f8ddf9389abd54841/tritonbench/operators/grouped_gemm/operator.py#L47)
-- [occupacy](https://github.com/pytorch-labs/tritonbench/blob/70264720fbfbb13020f63d4f8ddf9389abd54841/tritonbench/operators/jagged_sum/operator.py#L251)
-- [gbps](https://github.com/pytorch-labs/tritonbench/blob/70264720fbfbb13020f63d4f8ddf9389abd54841/tritonbench/operators/softmax/operator.py#L125)
+- [tflops](https://github.com/meta-pytorch/tritonbench/blob/70264720fbfbb13020f63d4f8ddf9389abd54841/tritonbench/operators/grouped_gemm/operator.py#L47)
+- [occupacy](https://github.com/meta-pytorch/tritonbench/blob/70264720fbfbb13020f63d4f8ddf9389abd54841/tritonbench/operators/jagged_sum/operator.py#L251)
+- [gbps](https://github.com/meta-pytorch/tritonbench/blob/70264720fbfbb13020f63d4f8ddf9389abd54841/tritonbench/operators/softmax/operator.py#L125)

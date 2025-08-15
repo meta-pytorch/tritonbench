@@ -108,7 +108,7 @@ def install_tritonparse():
         "pip",
         "install",
         "-e",
-        "git+https://github.com/pytorch-labs/tritonparse.git#egg=tritonparse",
+        "git+https://github.com/meta-pytorch/tritonparse.git#egg=tritonparse",
         "--no-deps",
     ]
     subprocess.check_call(cmd)

@@ -1,7 +1,7 @@
 """
 This module provides utility functions for integrating with TritonParse.
 TritonParse is a tool for tracing, visualizing, and analyzing Triton kernels.
-For more details, see: https://github.com/pytorch-labs/tritonparse
+For more details, see: https://github.com/meta-pytorch/tritonparse
 """
 
 import importlib.util
@@ -12,7 +12,7 @@ def tritonparse_init(tritonparse_log_path):
 
     This function sets up the logging hook to capture Triton compilation
     and launch events. For more details, see:
-    https://github.com/pytorch-labs/tritonparse
+    https://github.com/meta-pytorch/tritonparse
 
     Args:
         tritonparse_log_path (str or None): The path to the directory where
@@ -44,7 +44,7 @@ def tritonparse_parse(tritonparse_log_path):
 
     This function processes the raw logs generated during the run and
     creates unified, structured trace files. For more details, see:
-    https://github.com/pytorch-labs/tritonparse
+    https://github.com/meta-pytorch/tritonparse
 
     Args:
         tritonparse_log_path (str or None): The path to the directory containing

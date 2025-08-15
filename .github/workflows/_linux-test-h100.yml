@@ -10,7 +10,7 @@ on:
 
 jobs:
   linux-test-h100:
-    if: github.repository_owner == 'pytorch-labs'
+    if: github.repository_owner == 'meta-pytorch'
     runs-on: [gcp-h100-runner]
     timeout-minutes: 240
     environment: docker-s3-upload
