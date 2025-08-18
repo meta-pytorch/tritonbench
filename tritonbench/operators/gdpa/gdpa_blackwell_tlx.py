@@ -584,10 +584,10 @@ def gdpa_kernel_tma_ws_blackwell(
                 out_offset = off_h.to(tl.int64) * stride_oh
                 if start_m * BLOCK_M < qlen:
                     lo, hi = 0, klen
-                    tl.device_print("default", hi)
+                    # tl.device_print("default", hi)
                     for start_n in range(lo, hi, BLOCK_N):
                         start_n = tl.multiple_of(start_n, BLOCK_N)
-                        tl.device_print("default start_n", start_n)
+                        # tl.device_print("default start_n", start_n)
                         ## communication channel for qk0, p0
                         # _do_activation(
                         #    qk0_buf,
@@ -604,8 +604,8 @@ def gdpa_kernel_tma_ws_blackwell(
                         phase = (accum_cnt // NUM_BUFFERS_QK) & 1
                         qk_view = tlx.local_view(qk0_buf, bufIdx)
                         consumer_qk_view = tlx.local_view(producer_commit_qk0, bufIdx)
-                        tl.device_print("producer_commit_qk0", accum_cnt)
-                        tl.device_print("producer_commit_qk0_phase", phase)
+                        # tl.device_print("producer_commit_qk0", accum_cnt)
+                        # tl.device_print("producer_commit_qk0_phase", phase)
                         tlx.barrier_wait(consumer_qk_view, phase)
                         qk0 = tlx.local_load(qk_view)  # , tlx.storage_kind.tmem)
                         # ConsumerWait for qk, ProducerAcquire for p
@@ -636,8 +636,8 @@ def gdpa_kernel_tma_ws_blackwell(
                         phase = (accum_cnt // NUM_BUFFERS_O) & 1
                         # consumer wait of o0: producer_commit
                         consumer_o0_view = tlx.local_view(producer_commit_o0, bufIdx)
-                        tl.device_print("producer_commit_o0", accum_cnt)
-                        tl.device_print("producer_commit_o0_phase", phase)
+                        # tl.device_print("producer_commit_o0", accum_cnt)
+                        # tl.device_print("producer_commit_o0_phase", phase)
                         tlx.barrier_wait(consumer_o0_view, phase)
                         accum_cnt += 1
 
@@ -653,7 +653,7 @@ def gdpa_kernel_tma_ws_blackwell(
                     consumer_release_o0_view = tlx.local_view(
                         producer_o0, bufIdx_o_outer
                     )
-                    tl.device_print("arrive producer_o0", accum_cnt_outer)
+                    # tl.device_print("arrive producer_o0", accum_cnt_outer)
                     tlx.barrier_arrive(consumer_release_o0_view, 1)
                     o0_desc = tl.make_tensor_descriptor(
                         Out,
@@ -838,11 +838,11 @@ def gdpa_kernel_tma_ws_blackwell(
                     consumer_q0_view = tlx.local_view(consumer_q0, bufIdx_q)
                     consumer_k_view = tlx.local_view(consumer_k, bufIdx_k)
                     # producer_qk0_view = tlx.local_view(producer_qk0, bufIdx_qk)
-                    tl.device_print("consumer_q0_prologue", accum_cnt_q)
-                    tl.device_print("consumer_q0_phase", phase_q)
+                    # tl.device_print("consumer_q0_prologue", accum_cnt_q)
+                    # tl.device_print("consumer_q0_phase", phase_q)
                     tlx.barrier_wait(consumer_q0_view, phase_q)  # consumer wait for q0
-                    tl.device_print("consumer_k", accum_cnt_k)
-                    tl.device_print("consumer_k_phase", phase_k)
+                    # tl.device_print("consumer_k", accum_cnt_k)
+                    # tl.device_print("consumer_k_phase", phase_k)
                     tlx.barrier_wait(consumer_k_view, phase_k)  # consumer wait for k
                     # Do we need the initial acquire here?
                     # dot partition has producer commit for qk0, activation partition consumer wait for qk0
@@ -866,8 +866,8 @@ def gdpa_kernel_tma_ws_blackwell(
 
                     consumer_q1_view = tlx.local_view(consumer_q1, bufIdx_q)
                     # producer_qk1_view = tlx.local_view(producer_qk1, bufIdx_qk)
-                    tl.device_print("consumer_q1", accum_cnt_q)
-                    tl.device_print("consumer_q1_phase", phase_q)
+                    # tl.device_print("consumer_q1", accum_cnt_q)
+                    # tl.device_print("consumer_q1_phase", phase_q)
                     tlx.barrier_wait(consumer_q1_view, phase_q)  # consumer wait for q1
                     # tlx.barrier_wait(producer_qk1_view, phase_qk)  # producer acquire for qk1
                     # consumer release for k, producer commit for qk1
@@ -889,8 +889,8 @@ def gdpa_kernel_tma_ws_blackwell(
                     # accum_cnt_qk1 += 1
 
                     consumer_v_view = tlx.local_view(consumer_v, bufIdx_k)
-                    tl.device_print("consumer_v", accum_cnt_k)
-                    tl.device_print("consumer_v_phase", phase_k)
+                    # tl.device_print("consumer_v", accum_cnt_k)
+                    # tl.device_print("consumer_v_phase", phase_k)
                     tlx.barrier_wait(consumer_v_view, phase_k)  # consumer wait for v
                     # need to acquire o0 to make sure epilogue is done, this is needed for each outer loop
                     bufIdx_o_outer, phase_o_outer = _get_bufidx_phase(
@@ -898,8 +898,8 @@ def gdpa_kernel_tma_ws_blackwell(
                     )
                     producer_o0_view = tlx.local_view(producer_o0, bufIdx_o_outer)
                     producer_o1_view = tlx.local_view(producer_o1, bufIdx_o_outer)
-                    tl.device_print("producer_o0", accum_cnt_outer)
-                    tl.device_print("producer_o0_phase", phase_o_outer)
+                    # tl.device_print("producer_o0", accum_cnt_outer)
+                    # tl.device_print("producer_o0_phase", phase_o_outer)
                     tlx.barrier_wait(
                         producer_o0_view, phase_o_outer ^ 1
                     )  # producer acquire for o0
@@ -908,8 +908,8 @@ def gdpa_kernel_tma_ws_blackwell(
                     #   dot partition: producer commit of qk0, ..., consumer wait for p0 (use the same barrier as producer_qk0)
                     bufIdx_p, phase_p = _get_bufidx_phase(accum_cnt_qk, NUM_BUFFERS_QK)
                     consumer_p0_view = tlx.local_view(producer_qk0, bufIdx_p)
-                    tl.device_print("producer_qk0", accum_cnt_qk)
-                    tl.device_print("producer_qk0_phase", phase_p)
+                    # tl.device_print("producer_qk0", accum_cnt_qk)
+                    # tl.device_print("producer_qk0_phase", phase_p)
                     tlx.barrier_wait(
                         consumer_p0_view, phase_p
                     )  # consumer wait for p0 due to reuse of p0 and qk0
@@ -938,11 +938,11 @@ def gdpa_kernel_tma_ws_blackwell(
                     mma_iters = (hi - lo) // BLOCK_N
                     accum_cnt_k += 1
                     accum_cnt_qk += 1
-                    tl.device_print("gemm for ", hi)
-                    tl.device_print("gemm mma_iters ", mma_iters)
+                    # tl.device_print("gemm for ", hi)
+                    # tl.device_print("gemm mma_iters ", mma_iters)
                     for it in range(BLOCK_N, hi, BLOCK_N):
                         # for it in range(mma_iters - 1):
-                        tl.device_print("gemm iter ", it)
+                        # tl.device_print("gemm iter ", it)
                         bufIdx_k, phase_k = _get_bufidx_phase(
                             accum_cnt_k, NUM_BUFFERS_K
                         )
@@ -952,8 +952,8 @@ def gdpa_kernel_tma_ws_blackwell(
 
                         # q0 dot k
                         consumer_k_view = tlx.local_view(consumer_k, bufIdx_k)
-                        tl.device_print("consumer_k", accum_cnt_k)
-                        tl.device_print("consumer_k_phase", phase_k)
+                        # tl.device_print("consumer_k", accum_cnt_k)
+                        # tl.device_print("consumer_k_phase", phase_k)
                         tlx.barrier_wait(
                             consumer_k_view, phase_k
                         )  # consumer wait for k
@@ -975,13 +975,13 @@ def gdpa_kernel_tma_ws_blackwell(
                             accum_cnt_qk1, NUM_BUFFERS_QK
                         )
                         consumer_p1_view = tlx.local_view(producer_qk1, bufIdx_qk1)
-                        tl.device_print("producer_o1", accum_cnt_outer)
-                        tl.device_print("producer_o1_phase", phase_o_outer)
+                        # tl.device_print("producer_o1", accum_cnt_outer)
+                        # tl.device_print("producer_o1_phase", phase_o_outer)
                         tlx.barrier_wait(
                             producer_o1_view, phase_o_outer ^ 1, first
                         )  # producer acquire for o1, only needed for first iteration
-                        tl.device_print("producer_qk1", accum_cnt_qk1)
-                        tl.device_print("producer_qk1_phase", phase_qk1)
+                        # tl.device_print("producer_qk1", accum_cnt_qk1)
+                        # tl.device_print("producer_qk1_phase", phase_qk1)
                         tlx.barrier_wait(
                             consumer_p1_view, phase_qk1
                         )  # consumer wait for p1 use producer_qk1 due to reuse
@@ -1038,16 +1038,16 @@ def gdpa_kernel_tma_ws_blackwell(
 
                         # p0 dot v
                         consumer_v_view = tlx.local_view(consumer_v, bufIdx_k)
-                        tl.device_print("consumer_v", accum_cnt_k)
-                        tl.device_print("consumer_v_phase", phase_k)
+                        # tl.device_print("consumer_v", accum_cnt_k)
+                        # tl.device_print("consumer_v_phase", phase_k)
                         tlx.barrier_wait(
                             consumer_v_view, phase_k
                         )  # consumer wait for v
                         # no need to acquire o0 as this is the only partition updating it
                         # tlx.barrier_wait(producer_o0)  # producer acquire for o0
                         consumer_p0_view = tlx.local_view(producer_qk0, bufIdx_qk)
-                        tl.device_print("producer_qk0", accum_cnt_qk)
-                        tl.device_print("producer_qk0_phase", phase_qk)
+                        # tl.device_print("producer_qk0", accum_cnt_qk)
+                        # tl.device_print("producer_qk0_phase", phase_qk)
                         tlx.barrier_wait(
                             consumer_p0_view, phase_qk
                         )  # consumer wait for p0 use producer_qk0 due to reuse
@@ -1084,8 +1084,8 @@ def gdpa_kernel_tma_ws_blackwell(
                     tlx.tcgen05_commit(release_q0_view)
                     release_q1_view = tlx.local_view(consumer_release_q1, bufIdx_q)
                     tlx.tcgen05_commit(release_q1_view)
-                    tl.device_print("producer_o1_epilogue", accum_cnt_outer)
-                    tl.device_print("producer_o1_phase", phase_o_outer)
+                    # tl.device_print("producer_o1_epilogue", accum_cnt_outer)
+                    # tl.device_print("producer_o1_phase", phase_o_outer)
                     tlx.barrier_wait(
                         producer_o1_view, phase_o_outer ^ 1, first
                     )  # producer acquire for o1 at the first iteration
@@ -1093,8 +1093,8 @@ def gdpa_kernel_tma_ws_blackwell(
                         accum_cnt_qk1, NUM_BUFFERS_QK
                     )
                     consumer_p1_view = tlx.local_view(producer_qk1, bufIdx_qk1)
-                    tl.device_print("producer_qk1_epilogue", accum_cnt_qk1)
-                    tl.device_print("producer_qk1_phase", phase_qk1)
+                    # tl.device_print("producer_qk1_epilogue", accum_cnt_qk1)
+                    # tl.device_print("producer_qk1_phase", phase_qk1)
                     tlx.barrier_wait(
                         consumer_p1_view, phase_qk1
                     )  # consumer wait for p1 due to reuse of p1 and qk1
@@ -1416,7 +1416,7 @@ def gdpa_forward_tlx(
 
     def grid_tma_persistent(META):
         return (
-            1,  # min(NUM_SMS, triton.cdiv(max_seq_len_q, META["BLOCK_M"]) * BATCH * nheads),
+            min(NUM_SMS, triton.cdiv(max_seq_len_q, META["BLOCK_M"]) * BATCH * nheads),
             1,
             1,
         )
@@ -1428,7 +1428,7 @@ def gdpa_forward_tlx(
     vstrides = v.stride()
 
     activation_enum_int = activation_string_to_int(activation)
-    print("activation_enum_int", activation, activation_enum_int)
+    # print("activation_enum_int", activation, activation_enum_int)
 
     gdpa_kernel_tma_ws_blackwell[grid_tma_persistent](
         q,
