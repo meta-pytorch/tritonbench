@@ -1,4 +1,5 @@
 import argparse
+import csv
 import logging
 
 from typing import Any, Callable, List, Optional
@@ -41,7 +42,26 @@ def parse_args(args):
     parser.add_argument("--m", type=int)
     parser.add_argument("--k", type=int)
     parser.add_argument("--n", type=int)
+    parser.add_argument("--filepath", type=str, default=None)
     return parser.parse_args(args)
+
+
+def read_fp8_shapes(filepath):
+    fp8_shapes = []
+    try:
+        with open(filepath, "r", newline="") as csvfile:
+            filtered_lines = (
+                line
+                for line in csvfile
+                if line.strip() and not line.lstrip().startswith("#")
+            )
+            reader = csv.reader(filtered_lines)
+            for row in reader:
+                fp8_shapes.append(tuple(map(int, row)))
+    except Exception as e:
+        logger.error(f"Failed to read fp8 shapes from {filepath}: {e}")
+        raise e
+    return fp8_shapes
 
 
 class Operator(BenchmarkOperator):
@@ -70,6 +90,10 @@ class Operator(BenchmarkOperator):
                 yield args(m, n, k)
         elif self.extra_args.m:
             yield args(self.extra_args.m, self.extra_args.n, self.extra_args.k)
+        elif self.extra_args.filepath:
+            fp8_shapes = read_fp8_shapes(self.extra_args.filepath)
+            for m, n, k in fp8_shapes:
+                yield args(m, n, k)
         else:
             for i in range(10, 15):
                 for j in range(0, 4):
@@ -114,8 +138,8 @@ class Operator(BenchmarkOperator):
                 scale_b = torch.ones((1, N), dtype=torch.float32, device=b.device)
                 out_dtype = torch.bfloat16
             else:
-                scale_a = torch.tensor(1.0, device=a.device)
-                scale_b = torch.tensor(1.0, device=a.device)
+                scale_a = torch.tensor(1.0, dtype=torch.float32, device=a.device)
+                scale_b = torch.tensor(1.0, dtype=torch.float32, device=b.device)
                 out_dtype = torch.float16
             f = lambda a, b: torch._scaled_mm(
                 a, b, scale_a, scale_b, use_fast_accum=True, out_dtype=out_dtype
