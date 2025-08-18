@@ -186,6 +186,12 @@ def get_parser(args=None):
         "--cudagraph", action="store_true", help="Benchmark with CUDA graph."
     )
     parser.add_argument(
+        "--latency-measure-mode",
+        default="triton_do_bench",
+        choices=["triton_do_bench", "inductor_benchmarker"],
+        help="Method to measure latency: triton_do_bench (default) or inductor_benchmarker.",
+    )
+    parser.add_argument(
         "--isolate",
         action="store_true",
         help="Run each operator in a separate child process. By default, it will always continue on failure.",
