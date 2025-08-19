@@ -12,7 +12,7 @@ from .run import Latency
 CACHE_CLEAR_KERNEL = "void at::native::vectorized_elementwise_kernel<4, at::native::FillFunctor<int>, std::array<char*, 1ul> >(int, at::native::FillFunctor<int>, std::array<char*, 1ul>)"
 
 
-def _kineto_events_to_latency(prof):
+def _kineto_events_to_latency(prof, n_repeat):
     prof_averages = prof.key_averages(group_by_input_shape=False)
     cuda_event_names = [
         event.key
@@ -33,22 +33,16 @@ def _kineto_events_to_latency(prof):
             kernel_duration_name_map[event.name()] = []
         kernel_duration_name_map[event.name()].append(event.duration_ns() / 1e6)
 
-    kernel_hits = [len(kernel_duration_name_map[k]) for k in kernel_duration_name_map]
-    assert all(
-        x == kernel_hits[0] for x in kernel_hits
-    ), "Error: Not all kernels run the same time."
+    op_time = 0.0
+    for name in kernel_duration_name_map:
+        op_time += sum(kernel_duration_name_map[name])
 
-    op_latencies = []
-    for x in range(kernel_hits[0]):
-        op_time = 0.0
-        for name in kernel_duration_name_map:
-            op_time += kernel_duration_name_map[name][x]
-        op_latencies.append(op_time)
+    op_time = op_time / n_repeat
 
     print(
         prof.key_averages(group_by_input_shape=False).table(sort_by="cuda_time_total")
     )
-    return Latency(times=op_latencies)
+    return op_time
 
 
 def _do_bench_cuda_time_cudagraph(
@@ -59,7 +53,7 @@ def _do_bench_cuda_time_cudagraph(
     n_repeat: int,
     grad_to_none: bool,
     bypass_fail: bool = False,
-) -> Latency:
+) -> float:
     with torch.cuda.stream(torch.cuda.Stream()):
         g = torch.cuda.CUDAGraph()
         with torch.cuda.graph(g):
@@ -87,7 +81,7 @@ def _do_bench_cuda_time_cudagraph(
                 prof.step()
             synchronize_with_timing()
 
-    return _kineto_events_to_latency(prof)
+    return _kineto_events_to_latency(prof, n_repeat)
 
 
 def do_bench_cuda_time(
@@ -97,7 +91,7 @@ def do_bench_cuda_time(
     grad_to_none: bool,
     use_cuda_graphs: bool = False,
     bypass_fail: bool = False,
-) -> Latency:
+) -> float:
     """
     Return the aggregated CUDA time of a benchmarked operator backend.
     """
@@ -156,4 +150,4 @@ def do_bench_cuda_time(
             prof.step()
         synchronize_with_timing()
 
-    return _kineto_events_to_latency(prof)
+    return _kineto_events_to_latency(prof, n_repeat)
