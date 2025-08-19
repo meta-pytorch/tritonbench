@@ -65,7 +65,14 @@ class Operator(BenchmarkOperator):
             )
             return (a, b)
 
-        if self.extra_args.llama:
+        if hasattr(self, 'external_shapes') and self.external_shapes:  # Check for external shapes loaded from input-loader
+            for shape in self.external_shapes:
+                if len(shape) == 3:
+                    m, n, k = shape
+                    yield args(m, n, k)
+                else:
+                    logger.warning(f"Skipping invalid shape: {shape}, expected [M, N, K]")
+        elif self.extra_args.llama:
             for m, n, k, _bias in llama_shapes():
                 yield args(m, n, k)
         elif self.extra_args.m:
@@ -115,7 +122,7 @@ class Operator(BenchmarkOperator):
                 out_dtype = torch.bfloat16
             else:
                 scale_a = torch.tensor(1.0, device=a.device)
-                scale_b = torch.tensor(1.0, device=a.device)
+                scale_b = torch.tensor(1.0, device=b.device)
                 out_dtype = torch.float16
             f = lambda a, b: torch._scaled_mm(
                 a, b, scale_a, scale_b, use_fast_accum=True, out_dtype=out_dtype
