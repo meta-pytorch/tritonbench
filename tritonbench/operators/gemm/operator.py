@@ -16,6 +16,16 @@ from tritonbench.operators.gemm.warp_spec_persistent_matmul import (
     blackwell_matmul_tma,
     blackwell_matmul_tma_persistent,
 )
+from tritonbench.utils.triton_utils import has_tlx
+
+if has_tlx():
+    from tritonbench.operators.gemm.tlx_matmul import tlx_matmul as _tlx_matmul
+else:
+
+    def _tlx_matmul(*args, **kwargs):
+        raise RuntimeError("TLX not available in this Triton version")
+
+
 from tritonbench.utils.data_utils import get_production_shapes
 from tritonbench.utils.env_utils import (
     get_nvidia_gpu_model,
@@ -444,6 +454,13 @@ class Operator(BenchmarkOperator):
                 return lambda: blackwell_matmul_descriptor_persistent(
                     a, b, warp_specialize=False
                 )
+
+        @register_benchmark(enabled=False)
+        def tlx_matmul(self, a, b, bias) -> Callable:
+            if bias is not None:
+                return lambda: _tlx_matmul(a, b) + bias
+            else:
+                return lambda: _tlx_matmul(a, b)
 
     @register_x_val(label="(M, N, K)")
     def get_x_val(self, example_inputs) -> Tuple[int, int, int]:

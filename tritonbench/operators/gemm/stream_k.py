@@ -646,6 +646,6 @@ def streamk_cuda_matmul(a, b):
         K,  #
         FP8_OUTPUT=dtype == torch.float8_e4m3fn,  #
         ENABLE_BUFFER_OPS_ASSUMES=True,  #
-        NUM_SMS=num_sms  #
+        NUM_SMS=num_sms,  #
     )
     return c

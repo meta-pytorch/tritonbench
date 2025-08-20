@@ -1,6 +1,8 @@
 # utils to identify triton versions
 
 import triton.language as tl
+import functools
+import importlib.util
 
 
 class AsyncTaskContext:
@@ -34,3 +36,15 @@ def has_new_tma():
     import triton.language as tl
 
     return hasattr(triton, "set_allocator") and hasattr(tl, "make_tensor_descriptor")
+
+
+@functools.lru_cache
+def has_tlx():
+    """
+    Returns whether TLX is supported.
+    """
+    # TODO: Replace with the variant in compat once that's
+    # available in OSS.
+    tlx_module = "triton.language.extra.tlx"
+    spec = importlib.util.find_spec(tlx_module)
+    return spec is not None
