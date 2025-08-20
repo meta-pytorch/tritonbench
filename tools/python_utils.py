@@ -8,12 +8,12 @@ from typing import Dict, List, Optional
 DEFAULT_PYTHON_VERSION = "3.12"
 
 PYTHON_VERSION_MAP = {
-   "3.11": {
+    "3.11": {
         "pytorch_url": "cp311",
-   },
-   "3.12": {
+    },
+    "3.12": {
         "pytorch_url": "cp312",
-   },
+    },
 }
 REPO_DIR = Path(__file__).parent.parent
 

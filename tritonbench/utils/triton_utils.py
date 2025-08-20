@@ -1,8 +1,9 @@
 # utils to identify triton versions
 
-import triton.language as tl
 import functools
 import importlib.util
+
+import triton.language as tl
 
 
 class AsyncTaskContext:

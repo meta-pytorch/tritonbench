@@ -15,6 +15,7 @@ from tritonbench.operator_loader import get_op_loader_bench_cls_by_name, is_load
 
 from tritonbench.operators import load_opbench_by_name
 from tritonbench.operators_collection import list_operators_by_collection
+from tritonbench.utils.ab_test import compare_ab_results, run_ab_test
 from tritonbench.utils.env_utils import is_fbcode
 from tritonbench.utils.gpu_utils import gpu_lockdown
 from tritonbench.utils.list_operator_details import list_operator_details
@@ -23,7 +24,6 @@ from tritonbench.utils.run_utils import run_config, run_in_task
 
 from tritonbench.utils.triton_op import BenchmarkOperatorResult
 from tritonbench.utils.tritonparse_utils import tritonparse_init, tritonparse_parse
-from tritonbench.utils.ab_test import run_ab_test, compare_ab_results
 
 try:
     if is_fbcode():
@@ -32,8 +32,6 @@ try:
         usage_report_logger = lambda *args, **kwargs: None
 except ImportError:
     usage_report_logger = lambda *args, **kwargs: None
-
-
 
 
 def _run(args: argparse.Namespace, extra_args: List[str]) -> BenchmarkOperatorResult:
@@ -132,23 +130,26 @@ def run(args: List[str] = []):
     # Check if A/B testing mode is enabled
     if args.side_a is not None and args.side_b is not None:
         # A/B testing mode - only support single operator
-        assert len(ops) == 1, "A/B testing validation should have caught multiple operators"
+        assert (
+            len(ops) == 1
+        ), "A/B testing validation should have caught multiple operators"
         op = ops[0]
         args.op = op
-        
+
         print("[A/B Testing Mode Enabled]")
         print(f"Operator: {op}")
         print()
-        
+
         with gpu_lockdown(args.gpu_lockdown):
             try:
                 result_a, result_b = run_ab_test(args, extra_args, _run)
-                
+
                 from tritonbench.utils.ab_test import parse_ab_config
+
                 config_a_args = parse_ab_config(args.side_a)
                 config_b_args = parse_ab_config(args.side_b)
                 compare_ab_results(result_a, result_b, config_a_args, config_b_args)
-                
+
             except Exception as e:
                 print(f"A/B test failed: {e}")
                 if not args.bypass_fail:
@@ -166,7 +167,7 @@ def run(args: List[str] = []):
                     run_in_task(op)
                 else:
                     _run(args, extra_args)
-                    
+
     tritonparse_parse(args.tritonparse)
 
 

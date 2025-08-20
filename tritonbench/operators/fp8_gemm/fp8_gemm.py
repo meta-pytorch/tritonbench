@@ -65,13 +65,17 @@ class Operator(BenchmarkOperator):
             )
             return (a, b)
 
-        if hasattr(self, 'external_shapes') and self.external_shapes:  # Check for external shapes loaded from input-loader
+        if (
+            hasattr(self, "external_shapes") and self.external_shapes
+        ):  # Check for external shapes loaded from input-loader
             for shape in self.external_shapes:
                 if len(shape) == 3:
                     m, n, k = shape
                     yield args(m, n, k)
                 else:
-                    logger.warning(f"Skipping invalid shape: {shape}, expected [M, N, K]")
+                    logger.warning(
+                        f"Skipping invalid shape: {shape}, expected [M, N, K]"
+                    )
         elif self.extra_args.llama:
             for m, n, k, _bias in llama_shapes():
                 yield args(m, n, k)
