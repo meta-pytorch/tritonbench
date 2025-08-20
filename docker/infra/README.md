@@ -6,6 +6,9 @@ The Infra is a Kubernetes cluster built on top of Google Cloud Platform.
 ## Step 1: Create the cluster and install the ARC Controller
 
 ```
+# login ghcr.io so that remote can pull the image
+docker login ghcr.io
+
 # Get credentials for the cluster so that kubectl could use it
 gcloud container clusters get-credentials --location us-central1 tritonbench-h100-cluster
 
