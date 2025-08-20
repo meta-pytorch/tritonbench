@@ -223,7 +223,7 @@ template:
     containers:
     - name: runner
       # image: ghcr.io/actions/actions-runner:latest
-      image: ghcr.io/pytorch-labs/tritonbench:latest
+      image: ghcr.io/meta-pytorch/tritonbench:latest
       command: ["sh", "-c", "sudo cp -r /usr/bin/nvidia/* /usr/bin; sudo cp -r /usr/lib/x86_64-linux-gnu/nvidia/* /usr/lib/x86_64-linux-gnu; bash /home/runner/run.sh"]
       securityContext:
         privileged: true
