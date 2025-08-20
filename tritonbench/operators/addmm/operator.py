@@ -11,7 +11,12 @@ try:
 except ModuleNotFoundError:
     from .hstu import triton_addmm
 
-from tritonbench.operators.gemm.stream_k import streamk_matmul
+try:
+    from tritonbench.operators.gemm.stream_k import streamk_matmul
+except ImportError:
+    streamk_matmul = None
+
+from tritonbench.operators.gemm import stream_k
 from tritonbench.utils.triton_op import (
     BenchmarkOperator,
     BenchmarkOperatorMetrics,
@@ -94,7 +99,7 @@ class Operator(BenchmarkOperator):
     def triton_addmm(self, a, mat1, mat2) -> Callable:
         return lambda: triton_addmm(a, mat1, mat2)
 
-    @register_benchmark()
+    @register_benchmark(enabled=bool(streamk_matmul))
     def streamk_addmm(self, a, mat1, mat2) -> Callable:
         return lambda: streamk_matmul(mat1, mat2, bias=a)
 
