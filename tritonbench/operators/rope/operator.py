@@ -93,7 +93,7 @@ class Operator(BenchmarkOperator):
         )
         return lambda: compiled_func(q, k, cos, sin, pos_ids)
 
-    @register_x_val(label="(H, T)")
+    @register_x_val(label="(B, S)")
     def get_x_val(self, example_inputs) -> Tuple[int, int]:
         return (example_inputs[0], example_inputs[1])
 
