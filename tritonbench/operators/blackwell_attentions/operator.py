@@ -6,6 +6,7 @@
 
 
 import argparse
+import math
 import os
 from contextlib import nullcontext
 
@@ -110,6 +111,9 @@ def parse_op_args(args: List[str]):
         "--pt2-sdpa", action="store_true", help="Compile SDPA with PT2."
     )
     parser.add_argument(
+        "--sm-scale", type=Optional[float], default=None, help="softmax scale"
+    )
+    parser.add_argument(
         "--input-types",
         type=str,
         default=CUSTOMIZED_SHAPES,
@@ -138,7 +142,7 @@ class Operator(BenchmarkOperator):
         self.native_sdpa = args.native_sdpa
         self.pt2_sdpa = args.pt2_sdpa
         self.input_types = args.input_types
-        self.sm_scale = 1.3
+        self.sm_scale = args.sm_scale if args.sm_scale else 1.0 / math.sqrt(self.D_HEAD)
 
     @register_benchmark()
     def aten(
