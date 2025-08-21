@@ -684,7 +684,7 @@ class BenchmarkOperator(metaclass=PostInitProcessor):
     use_cuda_graphs: bool = False
     is_compute_bound = True
     # reset dynamo to avoid errors like https://github.com/meta-pytorch/tritonbench/issues/90
-    reset_dynamo = False
+    reset_dynamo = True
 
     """
     A base class for adding operators to torch benchmark.
