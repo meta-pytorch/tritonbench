@@ -1,6 +1,6 @@
 """
 Compute a bf16 (activation) x int4 (weight) gemm.
-Inspired by [gpt-fast](https://github.com/pytorch-labs/gpt-fast)
+Inspired by [gpt-fast](https://github.com/meta-pytorch/gpt-fast)
 ATen kernels from tinygemm
 Triton implementation by @jlebar: https://gist.github.com/jlebar/3435b2c00deea53258887ce37231e5e2
 """
