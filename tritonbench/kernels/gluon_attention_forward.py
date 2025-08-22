@@ -24,7 +24,7 @@ from triton.language.core import _aggregate as aggregate
 # ===-----------------------------------------------------------------------===#
 
 
-@tl.constexpr_function
+@gluon.constexpr_function
 def get_tmem_32x32b_reg_layout(instr_shape, shape, num_warps):
     assert len(shape) == 2, "expected a 2D tensor"
     assert num_warps in [4, 8], "expected 4 or 8 warps"
@@ -60,7 +60,7 @@ def get_tmem_32x32b_reg_layout(instr_shape, shape, num_warps):
     )
 
 
-@tl.constexpr_function
+@gluon.constexpr_function
 def get_mma_instr_shape(shape, element_ty):
     m = 128 if shape[0] >= 128 else 64
     n = 256 if shape[1] >= 256 else shape[1]
@@ -68,7 +68,7 @@ def get_mma_instr_shape(shape, element_ty):
     return (m, n, k)
 
 
-@tl.constexpr_function
+@gluon.constexpr_function
 def get_nvmma_layout(shape, element_ty, order=[1, 0], fp4_padded=False):
     packing_factor = 2 if fp4_padded else 1
 
@@ -100,7 +100,7 @@ def get_nvmma_layout(shape, element_ty, order=[1, 0], fp4_padded=False):
     )
 
 
-@tl.constexpr_function
+@gluon.constexpr_function
 def get_mma_reg_layout(shape, num_warps, dtype=gl.float32):
     instr_shape = get_mma_instr_shape(shape, dtype)
     return get_tmem_32x32b_reg_layout(instr_shape, shape, num_warps)
@@ -111,7 +111,7 @@ def get_mma_reg_layout(shape, num_warps, dtype=gl.float32):
 # ===-----------------------------------------------------------------------===#
 
 
-@tl.constexpr_function
+@gluon.constexpr_function
 def get_load_size_bytes(desc):
     size = desc.dtype.primitive_bitwidth // 8
     for dim in desc.block_type.shape:
@@ -385,7 +385,7 @@ class MMAContext:
     def release(self):
         self.channel.release()
 
-    @tl.constexpr_function
+    @gluon.constexpr_function
     def get_reg_layout(self, num_warps):
         return get_tmem_32x32b_reg_layout(self.instr_shape, self.shape, num_warps)
 
