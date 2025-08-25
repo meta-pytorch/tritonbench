@@ -289,7 +289,7 @@ def gdpa_kernel_tma_ws_blackwell(
 
     with tlx.async_tasks():
         # activation calculation
-        with tlx.async_task("default"):
+        with tlx.async_task("default", registers=192):
             accum_cnt = 0
             accum_cnt_outer = 0
             for _ in range(0, tiles_per_sm):
@@ -387,7 +387,7 @@ def gdpa_kernel_tma_ws_blackwell(
                     accum_cnt_outer += 1
                 tile_idx += num_progs
 
-        with tlx.async_task(num_warps=4):
+        with tlx.async_task(num_warps=4, registers=192):
             accum_cnt = 0
             accum_cnt_outer = 0
             for _ in range(0, tiles_per_sm):
@@ -477,7 +477,7 @@ def gdpa_kernel_tma_ws_blackwell(
                     accum_cnt_outer += 1
                 tile_idx += num_progs
 
-        with tlx.async_task(num_warps=1):  # gemm
+        with tlx.async_task(num_warps=1, registers=24):  # gemm
             accum_cnt_q = 0
             accum_cnt_kv = 0
             accum_cnt_o = 0
@@ -832,7 +832,7 @@ def gdpa_kernel_tma_ws_blackwell(
                     # to wait for the completion
                 tile_idx += num_progs
 
-        with tlx.async_task(num_warps=1):  # load
+        with tlx.async_task(num_warps=1, registers=24):  # load
             accum_count_q = 0
             accum_cnt_kv = 0
             for _ in range(0, tiles_per_sm):
