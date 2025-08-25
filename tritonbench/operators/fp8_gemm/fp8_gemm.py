@@ -90,8 +90,13 @@ class Operator(BenchmarkOperator):
             )  # For row-wise scaling, kernel requires a float32 scale tensor
 
         def args(m, n, k):
-            a = torch.randn(m, k, device=self.device).to(torch.float16)
-            b = torch.randn(k, n, device=self.device).to(torch.float16).T.contiguous().T
+            a = torch.randn(m, k, device=self.device).to(self._get_dtype())
+            b = (
+                torch.randn(k, n, device=self.device)
+                .to(self._get_dtype())
+                .T.contiguous()
+                .T
+            )
 
             if self.extra_args.scaling_rowwise:
                 scale_a = _get_scale_per_row(a)
@@ -155,12 +160,7 @@ class Operator(BenchmarkOperator):
             autotune_fallback_to_aten=False,
         ):
             f = lambda a, b: torch._scaled_mm(
-                a,
-                b,
-                scale_a,
-                scale_b,
-                use_fast_accum=True,
-                out_dtype=self._get_dtype(),
+                a, b, scale_a, scale_b, use_fast_accum=True, out_dtype=self._get_dtype()
             )
             compiled = torch.compile(f, dynamic=False)
             compiled(a, b)
