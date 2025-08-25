@@ -905,6 +905,27 @@ def gdpa_kernel_tma_ws_blackwell(
                         q0_full_view,
                     )
 
+                    k_bufIdx, k_phase = _get_bufidx_phase(accum_cnt_kv, NUM_BUFFERS_KV)
+                    # producer acquire
+                    k_empty_view = tlx.local_view(consumer_release_kv, k_bufIdx)
+                    tlx.barrier_wait(k_empty_view, k_phase)  # ^ 1)
+                    # barrier for producer commit
+                    k_full_view = tlx.local_view(consumer_kv, k_bufIdx)
+                    tlx.barrier_expect_bytes(
+                        k_full_view, BLOCK_N * BLOCK_D * 2
+                    )  # num_bytes)
+                    k_view = tlx.local_view(kv_buf, k_bufIdx)
+                    start_n = 0
+                    tlx.async_descriptor_load(
+                        k_desc,
+                        k_view,
+                        [
+                            (begin_k + start_n).to(tl.int32),
+                            (kv_offset).to(tl.int32),
+                        ],
+                        k_full_view,
+                    )
+
                     # producer acquire
                     q1_empty_view = tlx.local_view(consumer_release_q1, q_bufIdx)
                     tlx.barrier_wait(q1_empty_view, q_phase ^ 1)
@@ -924,8 +945,28 @@ def gdpa_kernel_tma_ws_blackwell(
                         q1_full_view,
                     )
 
+                    v_bufIdx, v_phase = _get_bufidx_phase(
+                        accum_cnt_kv + 1, NUM_BUFFERS_KV
+                    )
+                    v_empty_view = tlx.local_view(consumer_release_kv, v_bufIdx)
+                    tlx.barrier_wait(v_empty_view, v_phase)  # ^ 1)
+                    # barrier for producer commit
+                    v_full_view = tlx.local_view(consumer_kv, v_bufIdx)
+                    tlx.barrier_expect_bytes(v_full_view, BLOCK_N * BLOCK_D * 2)
+                    v_smem_view = tlx.local_view(kv_buf, v_bufIdx)
+                    tlx.async_descriptor_load(
+                        v_desc,
+                        v_smem_view,
+                        [
+                            (begin_k + start_n).to(tl.int32),
+                            (kv_offset).to(tl.int32),
+                        ],
+                        v_full_view,
+                    )
+                    accum_cnt_kv += 2
+
                     lo, hi = 0, klen
-                    for start_n in range(lo, hi, BLOCK_N):
+                    for start_n in range(BLOCK_N, hi, BLOCK_N):
                         start_n = tl.multiple_of(start_n, BLOCK_N)
                         k_bufIdx, k_phase = _get_bufidx_phase(
                             accum_cnt_kv, NUM_BUFFERS_KV
@@ -1087,6 +1128,8 @@ def gdpa_forward_tlx(
     NUM_SMS = (
         get_num_sms() or 1000000
     ) * 8  # if num sms is None, use a large number so that it is a no-op
+    print("NUM_SMS", NUM_SMS)
+    print(triton.cdiv(max_seq_len_q, 256) * BATCH * nheads)
 
     # TMA descriptors require a global memory allocation
     def alloc_fn(size: int, alignment: int, _):
