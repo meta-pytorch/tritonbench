@@ -50,12 +50,16 @@ def customized_inputs(shape, num_inputs, dtype, device) -> Generator:
         SEQ_LEN_KV = SEQ_LEN if SEQ_LEN_KV is None else SEQ_LEN_KV
         if num_inputs is None:
             yield _generated_qkv_inputs(
-                (BATCH, H, N_HEADS_KV, SEQ_LEN, SEQ_LEN_KV, D_HEAD), dtype=dtype, device=device
+                (BATCH, H, N_HEADS_KV, SEQ_LEN, SEQ_LEN_KV, D_HEAD),
+                dtype=dtype,
+                device=device,
             )
         else:
             for _i in range(num_inputs):
                 yield _generated_qkv_inputs(
-                    (BATCH, H, N_HEADS_KV, SEQ_LEN, SEQ_LEN, D_HEAD), dtype=dtype, device=device
+                    (BATCH, H, N_HEADS_KV, SEQ_LEN, SEQ_LEN, D_HEAD),
+                    dtype=dtype,
+                    device=device,
                 )
                 SEQ_LEN *= 2
         return
