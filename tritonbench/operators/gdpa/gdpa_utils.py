@@ -5,8 +5,6 @@ import math
 from functools import lru_cache
 from typing import Any, List, Optional
 
-import fbgemm_gpu
-
 import torch
 import triton  # @manual=//triton:triton
 

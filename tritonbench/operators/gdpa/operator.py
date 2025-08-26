@@ -84,28 +84,6 @@ def get_attn_config(config_name, dtype=torch.bfloat16):
     return default_config
 
 
-def get_cutlass_config(dtype=torch.bfloat16):
-    default_config = {
-        "B": 1152,
-        "max_M": 1000,
-        "D": 512,
-        "H": 4,
-        "dense_q_len": 192,
-        "sparsity": 1.0,
-        "dense_q": False,
-        "dff": None,
-        "bias": False,
-        "dtype": dtype,
-        "fused_kv": False,
-        "window_size": None,
-        "broadcast_q": False,
-        "activation": "fast_gelu",
-    }
-    # per event pffn, pma, self_attn share the same setting
-
-    return default_config
-
-
 all_configs = [
     "_".join([event_size, attn_type])
     for event_size in ["long_event", "short_event"]
@@ -175,7 +153,7 @@ class Operator(BenchmarkOperator):
     ):
         super().__init__(tb_args, extra_args=extra_args)
         args = parse_args(self.extra_args)
-        self.config_names = ["default"]  # args.config.split(",")
+        self.config_names = args.config.split(",")
         self.sparsity = args.sparsity
         self.batch = args.batch
         self.max_seq_len = args.max_seq_len
@@ -323,8 +301,7 @@ class Operator(BenchmarkOperator):
 
     def get_input_iter(self) -> Generator:
         for config_name in self.config_names:
-            config = get_cutlass_config(self.dtype)
-            # config = get_attn_config(config_name, self.dtype)
+            config = get_attn_config(config_name, self.dtype)
             B = self.batch
             max_M = self.max_seq_len
             D = self.dim
@@ -432,23 +409,6 @@ class Operator(BenchmarkOperator):
         ms = metrics.latency
         memory_bandwidth_gb_per_sec = memory_size_gb / (ms * 1e-3)
         return memory_bandwidth_gb_per_sec
-
-    @register_metric()
-    def flops(
-        self, fn_name: str, example_inputs: Any, metrics: BenchmarkOperatorMetrics
-    ) -> float:
-        B = self.batch
-        max_M = self.max_seq_len
-        D = self.dim
-        H = self.head
-        config = get_cutlass_config(self.dtype)
-        sparsity = config["sparsity"]
-
-        print("D/dim", D)  # D/self.dim, assume H * dim in script is D
-        total_flops = 4 * B * max_M * sparsity * D * D  # H * self.dim
-        # ms = metrics.latency
-        # print(f"TFLOP/s: {total_flops / 1e9 / ms :.2f}")
-        return total_flops
 
     @register_metric()
     def activation_mb(
