@@ -6,9 +6,25 @@ import torch
 import triton
 import triton.language as tl
 import triton.language.extra.tlx as tlx
+from triton.tools.tensor_descriptor import TensorDescriptor
 
 from .gdpa_utils import get_num_sms
 from .math import activation_string_to_int
+
+
+def _host_descriptor_pre_hook(nargs):
+    BLOCK_M = nargs["BLOCK_M"]
+    BLOCK_N = nargs["BLOCK_N"]
+    BLOCK_D = nargs["BLOCK_D"]
+    if not isinstance(nargs["Q"], TensorDescriptor):
+        # early return for on-device TMA
+        return
+    NUM_MMA_GROUPS = 2
+    BLOCK_M_SPLIT = BLOCK_M // NUM_MMA_GROUPS
+    nargs["Q"].block_shape = [BLOCK_M_SPLIT, BLOCK_D]
+    nargs["V"].block_shape = [BLOCK_N, BLOCK_D]
+    nargs["K"].block_shape = [BLOCK_N, BLOCK_D]
+    nargs["Out"].block_shape = [BLOCK_M_SPLIT, BLOCK_D]
 
 
 def get_cuda_autotune_config():
@@ -24,6 +40,7 @@ def get_cuda_autotune_config():
             },
             num_warps=4,
             num_stages=1,
+            pre_hook=_host_descriptor_pre_hook,
         )
         for BM in [256]  # 128 or 256
         for BN in [128]
@@ -198,6 +215,7 @@ def gdpa_kernel_tma_ws_blackwell(
     BROADCAST_Q: tl.constexpr,
     IS_DENSE_KV: tl.constexpr,
     activation_enum_int: tl.constexpr,
+    USE_ON_DEVICE_TMA: tl.constexpr,
     NUM_BUFFERS_Q: tl.constexpr,
     NUM_BUFFERS_KV: tl.constexpr,
     NUM_BUFFERS_QK: tl.constexpr,
@@ -214,21 +232,27 @@ def gdpa_kernel_tma_ws_blackwell(
         tiles_per_sm += 1
 
     tile_idx = prog_id
+    if not USE_ON_DEVICE_TMA:
+        q_desc = Q
+        k_desc = K
+        v_desc = V
+        o_desc = Out
 
     # start with on-device TMA where descriptors for k, v are set up outside of the persistent
     # loop and descriptor for q is set up inside the persistent loop.
-    k_desc = tl.make_tensor_descriptor(
-        K,
-        shape=[N_CTX_KV * Z, HEAD_DIM * H // G],
-        strides=[HEAD_DIM * H // G, 1],
-        block_shape=[BLOCK_N, BLOCK_D],
-    )
-    v_desc = tl.make_tensor_descriptor(
-        V,
-        shape=[N_CTX_KV * Z, HEAD_DIM * H // G],
-        strides=[HEAD_DIM * H // G, 1],
-        block_shape=[BLOCK_N, BLOCK_D],
-    )
+    if USE_ON_DEVICE_TMA:
+        k_desc = tl.make_tensor_descriptor(
+            K,
+            shape=[N_CTX_KV * Z, HEAD_DIM * H // G],
+            strides=[HEAD_DIM * H // G, 1],
+            block_shape=[BLOCK_N, BLOCK_D],
+        )
+        v_desc = tl.make_tensor_descriptor(
+            V,
+            shape=[N_CTX_KV * Z, HEAD_DIM * H // G],
+            strides=[HEAD_DIM * H // G, 1],
+            block_shape=[BLOCK_N, BLOCK_D],
+        )
 
     # allocate buffers for q0, q1
     q0_buf = tlx.local_alloc((BLOCK_M // 2, BLOCK_D), tl.float16, 1)
@@ -326,20 +350,12 @@ def gdpa_kernel_tma_ws_blackwell(
                         qk0 = tlx.local_load(qk_view)  # , tlx.storage_kind.tmem)
                         # ConsumerWait for qk, ProducerAcquire for p
                         # if activation_enum_int == 3:
-                        p0 = (
-                            qk0
-                            * 0.5
-                            * (
-                                1
-                                + tanh_approx_fp32(
-                                    0.7978845608 * qk0 * (1.0 + 0.044715 * qk0 * qk0)
-                                )
-                            )
-                        )  # fast_gelu(qk0)
-                        # else:
-                        #    p0 = qk0
+                        p0 = fast_gelu(qk0)
                         p0 *= qk_scale
-                        p0 = p0.to(V.dtype.element_ty)  # v_dtype)
+                        if USE_ON_DEVICE_TMA:
+                            p0 = p0.to(V.dtype.element_ty)  # v_dtype)
+                        else:
+                            p0 = p0.to(tlx.dtype_of(v_desc))
                         qk_view = tlx.local_view(qk0_buf, bufIdx)
                         p0_view = tlx.local_reinterpret(qk_view, tl.float16)
                         tlx.local_store(p0_view, p0)  # , tlx.storage_kind.tmem)
@@ -371,18 +387,23 @@ def gdpa_kernel_tma_ws_blackwell(
                     )
                     # tl.device_print("default producer_o0", accum_cnt_outer)
                     tlx.barrier_arrive(consumer_release_o0_view, 1)
-                    o0_desc = tl.make_tensor_descriptor(
-                        Out,
-                        shape=[end_q.to(tl.int32), HEAD_DIM * H],
-                        strides=[HEAD_DIM * H, 1],
-                        block_shape=[BLOCK_M // 2, BLOCK_D],
-                    )
-                    o0_desc.store(
+                    if USE_ON_DEVICE_TMA:
+                        o_desc = tl.make_tensor_descriptor(
+                            Out,
+                            shape=[end_q.to(tl.int32), HEAD_DIM * H],
+                            strides=[HEAD_DIM * H, 1],
+                            block_shape=[BLOCK_M // 2, BLOCK_D],
+                        )
+                    if USE_ON_DEVICE_TMA:
+                        o0 = o0.to(Out.type.element_ty)
+                    else:
+                        o0 = o0.to(tlx.dtype_of(o_desc))
+                    o_desc.store(
                         [
                             (begin_q + start_m * BLOCK_M).to(tl.int32),
                             (out_offset).to(tl.int32),
                         ],
-                        o0.to(Out.type.element_ty),
+                        o0,
                     )
                     accum_cnt_outer += 1
                 tile_idx += num_progs
@@ -420,20 +441,12 @@ def gdpa_kernel_tma_ws_blackwell(
                         qk1 = tlx.local_load(qk_view)  # , tlx.storage_kind.tmem)
                         # ConsumerWait for qk, ProducerAcquire for p
                         # if activation_enum_int == 3:
-                        p1 = (
-                            qk1
-                            * 0.5
-                            * (
-                                1
-                                + tanh_approx_fp32(
-                                    0.7978845608 * qk1 * (1.0 + 0.044715 * qk1 * qk1)
-                                )
-                            )
-                        )  # fast_gelu(qk1)
-                        # else:
-                        #    p1 = qk1
+                        p1 = fast_gelu(qk1)
                         p1 *= qk_scale
-                        p1 = p1.to(V.dtype.element_ty)  # v_dtype)
+                        if USE_ON_DEVICE_TMA:
+                            p1 = p1.to(V.dtype.element_ty)  # v_dtype)
+                        else:
+                            p1 = p1.to(tlx.dtype_of(v_desc))
                         qk_view = tlx.local_view(qk1_buf, bufIdx)
                         p1_view = tlx.local_reinterpret(qk_view, tl.float16)
                         tlx.local_store(p1_view, p1)  # , tlx.storage_kind.tmem)
@@ -452,12 +465,13 @@ def gdpa_kernel_tma_ws_blackwell(
                     bufIdx_o_outer, phase_o_outer = _get_bufidx_phase(
                         accum_cnt_outer, NUM_BUFFERS_O
                     )
-                    o0_desc = tl.make_tensor_descriptor(
-                        Out,
-                        shape=[end_q.to(tl.int32), HEAD_DIM * H],
-                        strides=[HEAD_DIM * H, 1],
-                        block_shape=[BLOCK_M // 2, BLOCK_D],
-                    )
+                    if USE_ON_DEVICE_TMA:
+                        o_desc = tl.make_tensor_descriptor(
+                            Out,
+                            shape=[end_q.to(tl.int32), HEAD_DIM * H],
+                            strides=[HEAD_DIM * H, 1],
+                            block_shape=[BLOCK_M // 2, BLOCK_D],
+                        )
                     o1_view = tlx.local_view(
                         o1_buf, bufIdx_o_outer
                     )  # FIXME: should be 0
@@ -467,12 +481,16 @@ def gdpa_kernel_tma_ws_blackwell(
                         producer_o1, bufIdx_o_outer
                     )
                     tlx.barrier_arrive(consumer_release_o1_view, 1)
-                    o0_desc.store(
+                    if USE_ON_DEVICE_TMA:
+                        o1 = o1.to(Out.type.element_ty)
+                    else:
+                        o1 = o1.to(tlx.dtype_of(o_desc))
+                    o_desc.store(
                         [
                             (begin_q + start_m * BLOCK_M + BLOCK_M // 2).to(tl.int32),
                             (out_offset).to(tl.int32),
                         ],
-                        o1.to(Out.type.element_ty),
+                        o1,
                     )
                     accum_cnt_outer += 1
                 tile_idx += num_progs
@@ -581,6 +599,7 @@ def gdpa_kernel_tma_ws_blackwell(
                     producer_o1_view = tlx.local_view(producer_o1, bufIdx_o_outer)
                     # tl.device_print("gemm producer_o0", accum_cnt_outer)
                     # tl.device_print("gemm producer_o0_phase", phase_o_outer)
+                    # DEBUG_PERF
                     tlx.barrier_wait(
                         producer_o0_view, phase_o_outer ^ 1
                     )  # producer acquire for o0
@@ -591,6 +610,7 @@ def gdpa_kernel_tma_ws_blackwell(
                     consumer_p0_view = tlx.local_view(producer_qk0, bufIdx_p)
                     # tl.device_print("gemm producer_qk0", accum_cnt_qk)
                     # tl.device_print("gemm producer_qk0_phase", phase_p)
+                    # DEBUG_PERF_P
                     tlx.barrier_wait(
                         consumer_p0_view, phase_p
                     )  # consumer wait for p0 due to reuse of p0 and qk0
@@ -660,11 +680,13 @@ def gdpa_kernel_tma_ws_blackwell(
                         consumer_p1_view = tlx.local_view(producer_qk1, bufIdx_qk1)
                         # tl.device_print("gemm producer_o1", accum_cnt_outer)
                         # tl.device_print("gemm producer_o1_phase", phase_o_outer)
+                        # DEBUG_PERF
                         tlx.barrier_wait(
                             producer_o1_view, phase_o_outer ^ 1, first
                         )  # producer acquire for o1, only needed for first iteration
                         # tl.device_print("gemm producer_qk1", accum_cnt_qk1)
                         # tl.device_print("gemm producer_qk1_phase", phase_qk1)
+                        # DEBUG_PERF_P
                         tlx.barrier_wait(
                             consumer_p1_view, phase_qk1
                         )  # consumer wait for p1 use producer_qk1 due to reuse
@@ -741,6 +763,7 @@ def gdpa_kernel_tma_ws_blackwell(
                         consumer_p0_view = tlx.local_view(producer_qk0, bufIdx_qk)
                         # tl.device_print("gemm producer_qk0", accum_cnt_qk)
                         # tl.device_print("gemm producer_qk0_phase", phase_qk)
+                        # DEBUG_PERF_P
                         tlx.barrier_wait(
                             consumer_p0_view, phase_qk
                         )  # consumer wait for p0 use producer_qk0 due to reuse
@@ -780,6 +803,7 @@ def gdpa_kernel_tma_ws_blackwell(
                     tlx.tcgen05_commit(release_q1_view)
                     # tl.device_print("gemm producer_o1_epilogue", accum_cnt_outer)
                     # tl.device_print("gemm producer_o1_phase", phase_o_outer)
+                    # DEBUG_PERF
                     tlx.barrier_wait(
                         producer_o1_view, phase_o_outer ^ 1, first
                     )  # producer acquire for o1 at the first iteration
@@ -789,6 +813,7 @@ def gdpa_kernel_tma_ws_blackwell(
                     consumer_p1_view = tlx.local_view(producer_qk1, bufIdx_qk1)
                     # tl.device_print("gemm producer_qk1_epilogue", accum_cnt_qk1)
                     # tl.device_print("gemm producer_qk1_phase", phase_qk1)
+                    # DEBUG_PERF_P
                     tlx.barrier_wait(
                         consumer_p1_view, phase_qk1
                     )  # consumer wait for p1 due to reuse of p1 and qk1
@@ -862,12 +887,13 @@ def gdpa_kernel_tma_ws_blackwell(
                 if start_m * BLOCK_M < qlen:
                     # begin_o = tl.load(Out_offsets + off_z) # confirm if tma store should use begin_q
 
-                    q_desc = tl.make_tensor_descriptor(
-                        Q,
-                        shape=[end_q.to(tl.int32), HEAD_DIM * H],
-                        strides=[HEAD_DIM * H, 1],
-                        block_shape=[BLOCK_M // 2, BLOCK_D],
-                    )
+                    if USE_ON_DEVICE_TMA:
+                        q_desc = tl.make_tensor_descriptor(
+                            Q,
+                            shape=[end_q.to(tl.int32), HEAD_DIM * H],
+                            strides=[HEAD_DIM * H, 1],
+                            block_shape=[BLOCK_M // 2, BLOCK_D],
+                        )
 
                     # calculate bufIdx and phase from accum_count_q
                     q_bufIdx = accum_count_q % NUM_BUFFERS_Q
@@ -1131,6 +1157,40 @@ def gdpa_forward_tlx(
     print("NUM_SMS", NUM_SMS)
     print(triton.cdiv(max_seq_len_q, 256) * BATCH * nheads)
 
+    q = expect_contiguous(query)
+    k = expect_contiguous(key)
+    v = expect_contiguous(value)
+    kstrides = k.stride()
+    vstrides = v.stride()
+
+    dummy_block = [1, 1]
+    N_CTX_KV = max_seq_len_kv
+    HEAD_DIM = HEAD_DIM_K
+    Z = BATCH
+    H = nheads
+    y_dim = N_CTX_KV * Z
+    x_dim = HEAD_DIM * H // G
+    USE_ON_DEVICE_TMA = True
+    if not USE_ON_DEVICE_TMA:
+        desc_q = TensorDescriptor(
+            q,
+            shape=[y_dim, HEAD_DIM * H],
+            strides=[HEAD_DIM * H, 1],
+            block_shape=dummy_block,
+        )
+        desc_v = TensorDescriptor(
+            v, shape=[y_dim, x_dim], strides=[x_dim, 1], block_shape=dummy_block
+        )
+        desc_k = TensorDescriptor(
+            k, shape=[y_dim, x_dim], strides=[x_dim, 1], block_shape=dummy_block
+        )
+        desc_o = TensorDescriptor(
+            o,
+            shape=[y_dim, HEAD_DIM * H],
+            strides=[HEAD_DIM * H, 1],
+            block_shape=dummy_block,
+        )
+
     # TMA descriptors require a global memory allocation
     def alloc_fn(size: int, alignment: int, _):
         return torch.empty(size, device="cuda", dtype=torch.int8)
@@ -1144,22 +1204,19 @@ def gdpa_forward_tlx(
             1,
         )
 
-    q = expect_contiguous(query)
-    k = expect_contiguous(key)
-    v = expect_contiguous(value)
-    kstrides = k.stride()
-    vstrides = v.stride()
-
     activation_enum_int = activation_string_to_int(activation)
+    print(q.shape, k.shape, v.shape)
     # print("activation_enum_int", activation, activation_enum_int)
+    # print(query_offset)
+    # print(key_offset)
 
     gdpa_kernel_tma_ws_blackwell[grid_tma_persistent](
-        q,
+        q if USE_ON_DEVICE_TMA else desc_q,
         query_offset,
-        k,
+        k if USE_ON_DEVICE_TMA else desc_k,
         key_offset,
-        v,
-        o,  #
+        v if USE_ON_DEVICE_TMA else desc_v,
+        o if USE_ON_DEVICE_TMA else desc_o,
         output_offset,
         ad_to_request_offset,
         seq_index,
@@ -1194,6 +1251,7 @@ def gdpa_forward_tlx(
         BROADCAST_Q=broadcast_q,
         IS_DENSE_KV=is_dense_kv,
         activation_enum_int=activation_enum_int,
+        USE_ON_DEVICE_TMA=USE_ON_DEVICE_TMA,
         **extra_kern_args,
     )
     return o
