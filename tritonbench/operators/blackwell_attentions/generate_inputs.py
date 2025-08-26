@@ -14,7 +14,7 @@ def _generated_qkv_inputs(
 ) -> Tuple[torch.Tensor, torch.Tensor, torch.Tensor]:
     requires_grad = True
 
-    BATCH, H, N_CTX, N_CTX_KV, D_HEAD = shape
+    BATCH, H, N_HEADS_KV, N_CTX, N_CTX_KV, D_HEAD = shape
 
     q = torch.randn(
         (BATCH, H, N_CTX, D_HEAD),
@@ -23,13 +23,13 @@ def _generated_qkv_inputs(
         requires_grad=requires_grad,
     )
     k = torch.randn(
-        (BATCH, H, N_CTX_KV, D_HEAD),
+        (BATCH, N_HEADS_KV, N_CTX_KV, D_HEAD),
         dtype=dtype,
         device=device,
         requires_grad=requires_grad,
     )
     v = torch.randn(
-        (BATCH, H, N_CTX_KV, D_HEAD),
+        (BATCH, N_HEADS_KV, N_CTX_KV, D_HEAD),
         dtype=dtype,
         device=device,
         requires_grad=requires_grad,
@@ -42,7 +42,7 @@ def _generated_qkv_inputs(
 
 
 def customized_inputs(shape, num_inputs, dtype, device) -> Generator:
-    BATCH, H, SEQ_LEN, SEQ_LEN_KV, D_HEAD = shape
+    BATCH, H, N_HEADS_KV, SEQ_LEN, SEQ_LEN_KV, D_HEAD = shape
 
     SEQ_LEN_LOG2 = 7
 
@@ -50,19 +50,19 @@ def customized_inputs(shape, num_inputs, dtype, device) -> Generator:
         SEQ_LEN_KV = SEQ_LEN if SEQ_LEN_KV is None else SEQ_LEN_KV
         if num_inputs is None:
             yield _generated_qkv_inputs(
-                (BATCH, H, SEQ_LEN, SEQ_LEN_KV, D_HEAD), dtype=dtype, device=device
+                (BATCH, H, N_HEADS_KV, SEQ_LEN, SEQ_LEN_KV, D_HEAD), dtype=dtype, device=device
             )
         else:
             for _i in range(num_inputs):
                 yield _generated_qkv_inputs(
-                    (BATCH, H, SEQ_LEN, SEQ_LEN, D_HEAD), dtype=dtype, device=device
+                    (BATCH, H, N_HEADS_KV, SEQ_LEN, SEQ_LEN, D_HEAD), dtype=dtype, device=device
                 )
                 SEQ_LEN *= 2
         return
     for i in range(SEQ_LEN_LOG2, 15):
         SEQ_LEN = 2**i
         yield _generated_qkv_inputs(
-            (BATCH, H, SEQ_LEN, SEQ_LEN, D_HEAD), dtype=dtype, device=device
+            (BATCH, H, H, SEQ_LEN, SEQ_LEN, D_HEAD), dtype=dtype, device=device
         )
 
 

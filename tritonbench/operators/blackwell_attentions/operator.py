@@ -47,7 +47,7 @@ except (ImportError, IOError, AttributeError):
 
 # [Optional] CuTe
 try:
-    import flash_attn.cute.interface as facute
+    from flash_attn.cute.interface import flash_attn_func as facute_flash_attn_func
 
     HAS_FLASH_CUTE = True
 except (ImportError, IOError, AttributeError):
@@ -98,6 +98,7 @@ def parse_op_args(args: List[str]):
         "--seq-len-kv", type=int, default=None, help="Sequence length kv"
     )
     parser.add_argument("--n-heads", type=int, default=48, help="Number of heads")
+    parser.add_argument("--n-heads-kv", type=int, default=None, help="Number of heads kv")
     parser.add_argument("--d-head", type=int, default=64, help="specify head dimension")
     parser.add_argument(
         "--causal",
@@ -136,6 +137,7 @@ class Operator(BenchmarkOperator):
         self.SEQ_LEN_KV = (
             args.seq_len_kv if args.seq_len_kv is not None else args.seq_len
         )
+        self.N_HEAD_KV = args.n_heads_kv if args.n_heads_kv is not None else args.n_heads
         self.H = args.n_heads
         self.D_HEAD = args.d_head
         self.causal = args.causal
@@ -288,7 +290,7 @@ class Operator(BenchmarkOperator):
         q = q.transpose(1, 2).contiguous()
         k = k.transpose(1, 2).contiguous()
         v = v.transpose(1, 2).contiguous()
-        return lambda: facute.flash_attn_func(q, k, v, self.sm_scale, self.causal)
+        return lambda: facute_flash_attn_func(q, k, v, softmax_scale=self.sm_scale, causal=self.causal)
 
     @register_benchmark()
     def flex_attention(self, q, k, v):
@@ -372,7 +374,7 @@ class Operator(BenchmarkOperator):
     def get_input_iter(self) -> Generator:
         if self.input_types == "CUSTOMIZED_SHAPES":
             return customized_inputs(
-                shape=(self.BATCH, self.H, self.SEQ_LEN, self.SEQ_LEN_KV, self.D_HEAD),
+                shape=(self.BATCH, self.H, self.N_HEAD_KV, self.SEQ_LEN, self.SEQ_LEN_KV, self.D_HEAD),
                 num_inputs=self.tb_args.num_inputs,
                 dtype=self.dtype,
                 device=self.device,
@@ -386,9 +388,9 @@ class Operator(BenchmarkOperator):
         else:
             raise AssertionError(f"Unknown input type {self.input_types}")
 
-    @register_x_val(label="(Batch, Heads, SeqLen, SeqLen_KV, Dhead)")
+    @register_x_val(label="(Batch, Heads, Heads_KV, SeqLen, SeqLen_KV, Dhead)")
     def get_x_val(self, example_inputs) -> float:
         q, k, v = example_inputs
         B, H, S, D = q.shape
-        _, _, S_KV, _ = k.shape
-        return (B, H, S, S_KV, D)
+        _, H_KV, S_KV, _ = k.shape
+        return (B, H, H_KV, S, S_KV, D)
