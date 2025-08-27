@@ -142,6 +142,11 @@ def parse_args(args: List[str]) -> argparse.Namespace:
     parser.add_argument("--llama", action="store_true", default=False)
     parser.add_argument("--buffer-ops", action="store_true", default=False)
     parser.add_argument("--layout", type=str, default="tn")
+    parser.add_argument(
+        "--verbose-autotune",
+        action="store_true",
+        help="Being verbose with autotuning results",
+    )
     args = parser.parse_args(args)
     return args
 
@@ -171,6 +176,11 @@ class Operator(BenchmarkOperator):
         super().__init__(tb_args, extra_args)
         gemm_args = parse_args(self.extra_args)
         self.layout = gemm_args.layout
+        self.inductor_autotune_num_choices_displayed = (
+            0
+            if gemm_args.verbose_autotune
+            else inductor_config.autotune_num_choices_displayed
+        )
         if gemm_args.input:
             self.shapes = read_shapes_from_csv(gemm_args.input)
         elif gemm_args.splitk:
@@ -295,6 +305,7 @@ class Operator(BenchmarkOperator):
             max_autotune=True,
             max_autotune_gemm_backends="TRITON",
             autotune_fallback_to_aten=False,
+            autotune_num_choices_displayed=self.inductor_autotune_num_choices_displayed,
         ):
             if bias is not None:
                 f = lambda a, b: a.matmul(b) + bias
@@ -311,6 +322,7 @@ class Operator(BenchmarkOperator):
         with inductor_config.patch(
             max_autotune=True,
             max_autotune_gemm_backends="ATEN,TRITON",
+            autotune_num_choices_displayed=self.inductor_autotune_num_choices_displayed,
         ):
             if bias is not None:
                 f = lambda a, b: a.matmul(b) + bias
@@ -323,8 +335,8 @@ class Operator(BenchmarkOperator):
 
     @register_benchmark(enabled=not is_cuda())
     def streamk_matmul(self, a, b, bias) -> Callable:
-        return (
-            lambda: streamk_amd_matmul(a, b, bias) if bias else streamk_amd_matmul(a, b)
+        return lambda: (
+            streamk_amd_matmul(a, b, bias) if bias else streamk_amd_matmul(a, b)
         )
 
     @register_benchmark(enabled=is_cuda())
@@ -337,10 +349,8 @@ class Operator(BenchmarkOperator):
             print(
                 f"StreamK matmul on {a.shape} x {b.shape} result does not match baseline matmul result. Max abs(streamk/baseline - 1):  {torch.max(torch.abs(streamk / baseline - 1))}"
             )
-        return (
-            lambda: streamk_cuda_matmul(a, b) + bias
-            if bias
-            else streamk_cuda_matmul(a, b)
+        return lambda: (
+            streamk_cuda_matmul(a, b) + bias if bias else streamk_cuda_matmul(a, b)
         )
 
     @register_benchmark(enabled=is_cuda())
