@@ -254,12 +254,17 @@ def gdpa_kernel_tma_ws_blackwell(
             block_shape=[BLOCK_N, BLOCK_D],
         )
 
+    if USE_ON_DEVICE_TMA:
+        dtype = V.dtype.element_ty  # v_dtype)
+    else:
+        dtype = tlx.dtype_of(v_desc)
+
     # allocate buffers for q0, q1
-    q0_buf = tlx.local_alloc((BLOCK_M // 2, BLOCK_D), tl.float16, 1)
-    q1_buf = tlx.local_alloc((BLOCK_M // 2, BLOCK_D), tl.float16, 1)
+    q0_buf = tlx.local_alloc((BLOCK_M // 2, BLOCK_D), dtype, 1)
+    q1_buf = tlx.local_alloc((BLOCK_M // 2, BLOCK_D), dtype, 1)
 
     # allocate buffers for k, v
-    kv_buf = tlx.local_alloc((BLOCK_N, BLOCK_D), tl.float16, NUM_BUFFERS_KV)  # k
+    kv_buf = tlx.local_alloc((BLOCK_N, BLOCK_D), dtype, NUM_BUFFERS_KV)  # k
 
     # allocate tmem for outputs of 4 dots (after partitioning)
     # qk0 = q0 dot k, qk1 = q1 dot k, acc0 = p0 dot v, acc1 = p1 dot v
@@ -357,7 +362,7 @@ def gdpa_kernel_tma_ws_blackwell(
                         else:
                             p0 = p0.to(tlx.dtype_of(v_desc))
                         qk_view = tlx.local_view(qk0_buf, bufIdx)
-                        p0_view = tlx.local_reinterpret(qk_view, tl.float16)
+                        p0_view = tlx.local_reinterpret(qk_view, dtype)
                         tlx.local_store(p0_view, p0)  # , tlx.storage_kind.tmem)
                         # p and qk reuse tmem space, single producer commit for p via consumer_release_qk
                         consumer_release_qk_view = tlx.local_view(producer_qk0, bufIdx)
@@ -448,7 +453,7 @@ def gdpa_kernel_tma_ws_blackwell(
                         else:
                             p1 = p1.to(tlx.dtype_of(v_desc))
                         qk_view = tlx.local_view(qk1_buf, bufIdx)
-                        p1_view = tlx.local_reinterpret(qk_view, tl.float16)
+                        p1_view = tlx.local_reinterpret(qk_view, dtype)
                         tlx.local_store(p1_view, p1)  # , tlx.storage_kind.tmem)
                         # p and qk reuse tmem space, single producer commit for p via consumer_release_qk
                         consumer_release_qk_view = tlx.local_view(producer_qk1, bufIdx)
@@ -617,7 +622,7 @@ def gdpa_kernel_tma_ws_blackwell(
                     # reinterpret qk0 as p0
                     # p0_view = _reinterpret(qk0_buf, bufIdx_p)
                     qk_view = tlx.local_view(qk0_buf, bufIdx_p)
-                    p0_view = tlx.local_reinterpret(qk_view, tl.float16)
+                    p0_view = tlx.local_reinterpret(qk_view, dtype)
 
                     bufIdx_o, phase_o = _get_bufidx_phase(accum_cnt_o, NUM_BUFFERS_O)
                     producer_commit_o0_view = tlx.local_view(
@@ -709,7 +714,7 @@ def gdpa_kernel_tma_ws_blackwell(
                         # reinterpret as p1
                         # p1_view = _reinterpret(qk1_buf, bufIdx_qk1)
                         qk_view = tlx.local_view(qk1_buf, bufIdx_qk1)
-                        p1_view = tlx.local_reinterpret(qk_view, tl.float16)
+                        p1_view = tlx.local_reinterpret(qk_view, dtype)
                         tlx.async_dot(  # p1 . v from previous iteration
                             p1_view,
                             v_view,
@@ -770,7 +775,7 @@ def gdpa_kernel_tma_ws_blackwell(
                         # reinterpret as p0
                         # p0_view = _reinterpret(qk0_buf, bufIdx_qk)
                         qk_view = tlx.local_view(qk0_buf, bufIdx_qk)
-                        p0_view = tlx.local_reinterpret(qk_view, tl.float16)
+                        p0_view = tlx.local_reinterpret(qk_view, dtype)
 
                         v_view = tlx.local_view(kv_buf, bufIdx_v)
                         bufIdx_o, phase_o = _get_bufidx_phase(
@@ -819,7 +824,7 @@ def gdpa_kernel_tma_ws_blackwell(
                     )  # consumer wait for p1 due to reuse of p1 and qk1
                     # p1_view = _reinterpret(qk1_buf, bufIdx_qk1)
                     qk_view = tlx.local_view(qk1_buf, bufIdx_qk1)
-                    p1_view = tlx.local_reinterpret(qk_view, tl.float16)
+                    p1_view = tlx.local_reinterpret(qk_view, dtype)
 
                     accum_cnt_qk1 += 1
                     # release p0, p1 via producer_commit_qk0, qk1 barriers
