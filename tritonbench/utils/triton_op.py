@@ -79,7 +79,7 @@ class BenchmarkOperatorBackend:
 
 
 DEFAULT_WARMUP = 25
-DEFAULT_RUN_ITERS = 100
+DEFAULT_REP = 100
 DEFAULT_QUANTILES = [0.5, 0.1, 0.9]
 REGISTERED_BENCHMARKS: Dict[str, OrderedDict[str, BenchmarkOperatorBackend]] = {}
 REGISTERED_METRICS: defaultdict[str, List[str]] = defaultdict(list)
@@ -127,7 +127,7 @@ class TimerContext:
             self.elapsed_ms = (end_time - self._start_time) * 1e3
 
 
-def do_bench_walltime(fn, warmup=25, rep=100):
+def do_bench_walltime(fn, warmup=25, rep=DEFAULT_REP):
     fn()
     torch.cuda.synchronize()
 
@@ -808,7 +808,7 @@ class BenchmarkOperator(metaclass=PostInitProcessor):
             return fwd_no_grad_fn
 
     def run(
-        self, warmup=DEFAULT_WARMUP, rep=DEFAULT_RUN_ITERS, quantiles=DEFAULT_QUANTILES
+        self, warmup=DEFAULT_WARMUP, rep=DEFAULT_REP, quantiles=DEFAULT_QUANTILES
     ) -> None:
         """Benchmarking the operator and returning its metrics."""
         metrics = []
@@ -1183,7 +1183,7 @@ class BenchmarkOperator(metaclass=PostInitProcessor):
         input_id: int,
         fn_name: str,
         warmup=DEFAULT_WARMUP,
-        rep=DEFAULT_RUN_ITERS,
+        rep=DEFAULT_REP,
         quantiles=DEFAULT_QUANTILES,
         baseline: bool = False,
     ) -> BenchmarkOperatorMetrics:
