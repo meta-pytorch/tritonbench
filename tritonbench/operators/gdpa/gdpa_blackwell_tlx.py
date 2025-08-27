@@ -105,13 +105,6 @@ def _get_bufidx_phase(accum_cnt, NUM_BUFFERS):
 
 
 @triton.jit
-def _reinterpret(qk_buf, bufIdx_qk):
-    qk_view = tlx.local_view(qk_buf, bufIdx_qk)
-    p_view = tlx.local_reinterpret(qk_view, tl.float16)
-    return p_view
-
-
-@triton.jit
 def _load_tma(
     bufIdx, phase, empty_bars, full_bars, buffers, desc, offset_1, offset_0, num_bytes
 ):
@@ -146,6 +139,69 @@ def _load_tma(
 #   qk0, qk1: producers
 #   p0, p1: sharing tmem spaces, and barriers with qk0, qk1 (consumers)
 #   o0, o1
+
+
+@triton.jit
+def _add_f32x2(a, b):
+    return tl.inline_asm_elementwise(
+        """
+        {
+            .reg .b64 ra, rb, rc;
+            mov.b64 ra, { $2, $3 };
+            mov.b64 rb, { $4, $5 };
+            add.f32x2 rc, ra, rb;
+            mov.b64 { $0, $1 }, rc;
+        }
+        """,
+        "=r,=r,r,r,r,r",
+        [a, b],
+        dtype=tl.float32,
+        is_pure=True,
+        pack=2,
+    )
+
+
+@triton.jit
+def _mul_f32x2(a, b):
+    return tl.inline_asm_elementwise(
+        """
+        {
+            .reg .b64 ra, rb, rc;
+            mov.b64 ra, { $2, $3 };
+            mov.b64 rb, { $4, $5 };
+            mul.f32x2 rc, ra, rb;
+            mov.b64 { $0, $1 }, rc;
+        }
+        """,
+        "=r,=r,r,r,r,r",
+        [a, b],
+        dtype=tl.float32,
+        is_pure=True,
+        pack=2,
+    )
+
+
+@triton.jit
+def _fma_f32x2(a, b, c):
+    return tl.inline_asm_elementwise(
+        """
+        {
+            .reg .b64 ra, rb, rc, rd;
+            mov.b64 ra, { $2, $3 };
+            mov.b64 rb, { $4, $5 };
+            mov.b64 rc, { $6, $7 };
+            fma.rn.f32x2 rd, ra, rb, rc;
+            mov.b64 { $0, $1 }, rd;
+        }
+        """,
+        "=r,=r,r,r,r,r,r,r",
+        [a, b, c],
+        dtype=tl.float32,
+        is_pure=True,
+        pack=2,
+    )
+
+
 @triton.jit
 def tanh_approx_fp32(x):
     output = tl.inline_asm_elementwise(
@@ -161,10 +217,42 @@ def tanh_approx_fp32(x):
     return output
 
 
+@triton.jit
+def subtiled_activation(qk_view, qk_scale, dtype, HEAD_DIM):
+    # qk_view: BLOCK_M // 2, HEAD_DIM
+    qk_view_1st = tlx.subslice(qk_view, 0, HEAD_DIM // 2)
+    qk0 = tlx.local_load(qk_view_1st)  # , tlx.storage_kind.tmem)
+    # ConsumerWait for qk, ProducerAcquire for p
+    p0 = fast_gelu(qk0)
+    # p0 *= qk_scale
+    p0 = p0.to(dtype)
+    p0_view = tlx.local_reinterpret(qk_view_1st, dtype)
+    tlx.local_store(p0_view, p0)  # , tlx.storage_kind.tmem)
+
+    qk_view_2nd = tlx.subslice(qk_view, HEAD_DIM // 2, HEAD_DIM // 2)
+    qk0 = tlx.local_load(qk_view_2nd)  # , tlx.storage_kind.tmem)
+    # ConsumerWait for qk, ProducerAcquire for p
+    p0 = fast_gelu(qk0)
+    # p0 *= qk_scale
+    p0 = p0.to(dtype)
+    p0_view = tlx.local_reinterpret(qk_view_2nd, dtype)
+    tlx.local_store(p0_view, p0)
+
+
 # typical configuration is 3/fast_gelu
 @triton.jit
 def fast_gelu(x):
-    return x * 0.5 * (1 + tanh_approx_fp32(0.7978845608 * x * (1.0 + 0.044715 * x * x)))
+    # following D80750725
+    # was * scaling
+    # return x * 0.5 * (1 + tanh_approx_fp32(0.7978845608 * x * (1.0 + 0.044715 * x * x)))
+    c1 = 0.0356774081
+    c0 = 0.7978845608
+    square = _mul_f32x2(x, x)
+    inner = _fma_f32x2(c1, square, c0)
+    inner = _mul_f32x2(inner, x)
+    out = _fma_f32x2(x, tanh_approx_fp32(inner), x)
+    return out  # x * tanh((c1 * x * x + c0)*x) + x
+    # return tanh_approx_fp32(x)
 
 
 @triton.autotune(
@@ -352,18 +440,29 @@ def gdpa_kernel_tma_ws_blackwell(
                         # tl.device_print("default producer_commit_qk0", accum_cnt)
                         # tl.device_print("default producer_commit_qk0_phase", phase)
                         tlx.barrier_wait(consumer_qk_view, phase)
-                        qk0 = tlx.local_load(qk_view)  # , tlx.storage_kind.tmem)
+
+                        # subtiled_activation(qk_view, qk_scale, dtype, HEAD_DIM)
+                        # qk_view: BLOCK_M // 2, HEAD_DIM
+                        qk_view_1st = tlx.subslice(qk_view, 0, HEAD_DIM // 2)
+                        qk0 = tlx.local_load(qk_view_1st)  # , tlx.storage_kind.tmem)
                         # ConsumerWait for qk, ProducerAcquire for p
-                        # if activation_enum_int == 3:
                         p0 = fast_gelu(qk0)
-                        p0 *= qk_scale
-                        if USE_ON_DEVICE_TMA:
-                            p0 = p0.to(V.dtype.element_ty)  # v_dtype)
-                        else:
-                            p0 = p0.to(tlx.dtype_of(v_desc))
-                        qk_view = tlx.local_view(qk0_buf, bufIdx)
-                        p0_view = tlx.local_reinterpret(qk_view, dtype)
+                        # p0 *= qk_scale
+                        p0 = p0.to(dtype)
+                        p0_view = tlx.local_reinterpret(qk_view_1st, dtype)
                         tlx.local_store(p0_view, p0)  # , tlx.storage_kind.tmem)
+
+                        qk_view_2nd = tlx.subslice(
+                            qk_view, HEAD_DIM // 2, HEAD_DIM // 2
+                        )
+                        qk0 = tlx.local_load(qk_view_2nd)  # , tlx.storage_kind.tmem)
+                        # ConsumerWait for qk, ProducerAcquire for p
+                        p0 = fast_gelu(qk0)
+                        # p0 *= qk_scale
+                        p0 = p0.to(dtype)
+                        p0_view = tlx.local_reinterpret(qk_view_2nd, dtype)
+                        tlx.local_store(p0_view, p0)
+
                         # p and qk reuse tmem space, single producer commit for p via consumer_release_qk
                         consumer_release_qk_view = tlx.local_view(producer_qk0, bufIdx)
                         tlx.barrier_arrive(consumer_release_qk_view, 1)
@@ -443,18 +542,29 @@ def gdpa_kernel_tma_ws_blackwell(
                         qk_view = tlx.local_view(qk1_buf, bufIdx)
                         consumer_qk_view = tlx.local_view(producer_commit_qk1, bufIdx)
                         tlx.barrier_wait(consumer_qk_view, phase)
-                        qk1 = tlx.local_load(qk_view)  # , tlx.storage_kind.tmem)
+
+                        # subtiled_activation(qk_view, qk_scale, dtype, HEAD_DIM)
+                        # qk_view: BLOCK_M // 2, HEAD_DIM
+                        qk_view_1st = tlx.subslice(qk_view, 0, HEAD_DIM // 2)
+                        qk0 = tlx.local_load(qk_view_1st)  # , tlx.storage_kind.tmem)
                         # ConsumerWait for qk, ProducerAcquire for p
-                        # if activation_enum_int == 3:
-                        p1 = fast_gelu(qk1)
-                        p1 *= qk_scale
-                        if USE_ON_DEVICE_TMA:
-                            p1 = p1.to(V.dtype.element_ty)  # v_dtype)
-                        else:
-                            p1 = p1.to(tlx.dtype_of(v_desc))
-                        qk_view = tlx.local_view(qk1_buf, bufIdx)
-                        p1_view = tlx.local_reinterpret(qk_view, dtype)
-                        tlx.local_store(p1_view, p1)  # , tlx.storage_kind.tmem)
+                        p0 = fast_gelu(qk0)
+                        # p0 *= qk_scale
+                        p0 = p0.to(dtype)
+                        p0_view = tlx.local_reinterpret(qk_view_1st, dtype)
+                        tlx.local_store(p0_view, p0)  # , tlx.storage_kind.tmem)
+
+                        qk_view_2nd = tlx.subslice(
+                            qk_view, HEAD_DIM // 2, HEAD_DIM // 2
+                        )
+                        qk0 = tlx.local_load(qk_view_2nd)  # , tlx.storage_kind.tmem)
+                        # ConsumerWait for qk, ProducerAcquire for p
+                        p0 = fast_gelu(qk0)
+                        # p0 *= qk_scale
+                        p0 = p0.to(dtype)
+                        p0_view = tlx.local_reinterpret(qk_view_2nd, dtype)
+                        tlx.local_store(p0_view, p0)
+
                         # p and qk reuse tmem space, single producer commit for p via consumer_release_qk
                         consumer_release_qk_view = tlx.local_view(producer_qk1, bufIdx)
                         tlx.barrier_arrive(consumer_release_qk_view, 1)
@@ -620,7 +730,6 @@ def gdpa_kernel_tma_ws_blackwell(
                         consumer_p0_view, phase_p
                     )  # consumer wait for p0 due to reuse of p0 and qk0
                     # reinterpret qk0 as p0
-                    # p0_view = _reinterpret(qk0_buf, bufIdx_p)
                     qk_view = tlx.local_view(qk0_buf, bufIdx_p)
                     p0_view = tlx.local_reinterpret(qk_view, dtype)
 
@@ -712,7 +821,6 @@ def gdpa_kernel_tma_ws_blackwell(
                             consumer_release_kv, bufIdx_v
                         )
                         # reinterpret as p1
-                        # p1_view = _reinterpret(qk1_buf, bufIdx_qk1)
                         qk_view = tlx.local_view(qk1_buf, bufIdx_qk1)
                         p1_view = tlx.local_reinterpret(qk_view, dtype)
                         tlx.async_dot(  # p1 . v from previous iteration
@@ -773,7 +881,6 @@ def gdpa_kernel_tma_ws_blackwell(
                             consumer_p0_view, phase_qk
                         )  # consumer wait for p0 use producer_qk0 due to reuse
                         # reinterpret as p0
-                        # p0_view = _reinterpret(qk0_buf, bufIdx_qk)
                         qk_view = tlx.local_view(qk0_buf, bufIdx_qk)
                         p0_view = tlx.local_reinterpret(qk_view, dtype)
 
@@ -822,7 +929,6 @@ def gdpa_kernel_tma_ws_blackwell(
                     tlx.barrier_wait(
                         consumer_p1_view, phase_qk1
                     )  # consumer wait for p1 due to reuse of p1 and qk1
-                    # p1_view = _reinterpret(qk1_buf, bufIdx_qk1)
                     qk_view = tlx.local_view(qk1_buf, bufIdx_qk1)
                     p1_view = tlx.local_reinterpret(qk_view, dtype)
 
