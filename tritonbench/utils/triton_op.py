@@ -81,6 +81,7 @@ class BenchmarkOperatorBackend:
 DEFAULT_WARMUP = 25
 DEFAULT_REP = 100
 DEFAULT_QUANTILES = [0.5, 0.1, 0.9]
+DEFAULT_SLEEP = 0.0
 REGISTERED_BENCHMARKS: Dict[str, OrderedDict[str, BenchmarkOperatorBackend]] = {}
 REGISTERED_METRICS: defaultdict[str, List[str]] = defaultdict(list)
 OVERRIDDEN_METRICS: defaultdict[str, List[str]] = defaultdict(list)
@@ -808,7 +809,11 @@ class BenchmarkOperator(metaclass=PostInitProcessor):
             return fwd_no_grad_fn
 
     def run(
-        self, warmup=DEFAULT_WARMUP, rep=DEFAULT_REP, quantiles=DEFAULT_QUANTILES
+        self,
+        warmup=DEFAULT_WARMUP,
+        rep=DEFAULT_REP,
+        quantiles=DEFAULT_QUANTILES,
+        sleep=DEFAULT_SLEEP,
     ) -> None:
         """Benchmarking the operator and returning its metrics."""
         metrics = []
@@ -910,6 +915,9 @@ class BenchmarkOperator(metaclass=PostInitProcessor):
                     )
                     if baseline:
                         self.baseline_metrics = acc[bm_name]
+                    if sleep:
+                        logging.debug(f"Sleeping for {sleep} seconds before next run")
+                        time.sleep(sleep)
                     return acc
 
                 y_vals: Dict[str, BenchmarkOperatorMetrics] = functools.reduce(

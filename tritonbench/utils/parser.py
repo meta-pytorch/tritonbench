@@ -61,6 +61,12 @@ def get_parser(args=None):
         help="The rep time for each benchmark run.",
     )
     parser.add_argument(
+        "--sleep",
+        type=float,
+        default=0.0,
+        help="The amount of time (in seconds) to sleep between benchmark runs.",
+    )
+    parser.add_argument(
         "--csv",
         action="store_true",
         help="Print result as csv.",

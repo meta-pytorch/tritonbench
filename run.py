@@ -44,7 +44,7 @@ def _run(args: argparse.Namespace, extra_args: List[str]) -> BenchmarkOperatorRe
         extra_args=extra_args,
     )
     try:
-        opbench.run(args.warmup, args.iter)
+        opbench.run(args.warmup, args.rep, sleep=args.sleep)
     finally:
         metrics = opbench.output
         if not args.skip_print:
