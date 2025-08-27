@@ -95,13 +95,25 @@ def run_config(config_file: str):
         benchmark_config = config[benchmark_name]
         op_name = benchmark_config["op"]
         op_args = benchmark_config["args"].split(" ")
-        run_in_task(op=op_name, op_args=op_args, benchmark_name=benchmark_name)
+        env_string = benchmark_config.get("envs", None)
+        extra_envs = {}
+        if env_string:
+            for env_part in env_string.split(" "):
+                key, val = env_part.split("=")
+                extra_envs[key] = val
+        run_in_task(
+            op=op_name,
+            op_args=op_args,
+            benchmark_name=benchmark_name,
+            extra_envs=extra_envs,
+        )
 
 
 def run_in_task(
     op: Optional[str],
     op_args: Optional[List[str]] = None,
     benchmark_name: Optional[str] = None,
+    extra_envs: Optional[Dict[str, str]] = None,
 ) -> None:
     op_task_cmd = [] if is_fbcode() else [sys.executable]
     if not op_args:
@@ -131,8 +143,14 @@ def run_in_task(
             f"[tritonbench] Running {benchmark_name}: " + " ".join(op_task_cmd),
             flush=True,
         )
+        subprocess_env = os.environ.copy()
+        subprocess_env.update(extra_envs or {})
         subprocess.check_call(
-            op_task_cmd, stdout=sys.stdout, stderr=sys.stderr, cwd=REPO_PATH
+            op_task_cmd,
+            stdout=sys.stdout,
+            stderr=sys.stderr,
+            cwd=REPO_PATH,
+            env=subprocess_env,
         )
     except subprocess.CalledProcessError:
         # By default, we will continue on the failed operators
