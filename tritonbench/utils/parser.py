@@ -1,7 +1,7 @@
 import argparse
 
 from tritonbench.utils.env_utils import AVAILABLE_PRECISIONS, is_fbcode
-from tritonbench.utils.triton_op import DEFAULT_RUN_ITERS, DEFAULT_WARMUP
+from tritonbench.utils.triton_op import DEFAULT_REP, DEFAULT_WARMUP
 
 
 def get_parser(args=None):
@@ -57,7 +57,7 @@ def get_parser(args=None):
     parser.add_argument(
         "--rep",
         type=int,
-        default=DEFAULT_RUN_ITERS,
+        default=DEFAULT_REP,
         help="The rep time for each benchmark run.",
     )
     parser.add_argument(
