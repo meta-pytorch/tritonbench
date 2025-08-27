@@ -177,7 +177,7 @@ class Operator(BenchmarkOperator):
         gemm_args = parse_args(self.extra_args)
         self.layout = gemm_args.layout
         self.inductor_autotune_num_choices_displayed = (
-            0
+            None
             if gemm_args.verbose_autotune
             else inductor_config.autotune_num_choices_displayed
         )
