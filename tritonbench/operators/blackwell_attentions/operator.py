@@ -19,6 +19,10 @@ from torch.nn.functional import scaled_dot_product_attention as sdpa
 
 from tritonbench.kernels.attention_utils import SUPPORT_GLUON
 
+from tritonbench.kernels.blackwell_triton_fused_attention import (
+    attention_opt as blackwell_triton_tutorial_FA2_opt,
+)
+
 from tritonbench.kernels.triton_fused_attention import (
     attention_opt as triton_tutorial_FA2_opt,
 )
@@ -326,6 +330,17 @@ class Operator(BenchmarkOperator):
     ) -> Callable:
         return lambda: triton_tutorial_FA2_opt(
             q, k, v, self.causal, self.sm_scale, "tma_ws_persistent_blackwell"
+        )
+
+    @register_benchmark(enabled=False)
+    def triton_tutorial_flash_v2_blackwell(
+        self,
+        q: torch.Tensor,
+        k: torch.Tensor,
+        v: torch.Tensor,
+    ) -> Callable:
+        return lambda: blackwell_triton_tutorial_FA2_opt(
+            q, k, v, self.causal, self.sm_scale, "ws"
         )
 
     # Only works with triton main, forward only.
