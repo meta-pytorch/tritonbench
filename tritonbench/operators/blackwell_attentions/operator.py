@@ -19,9 +19,15 @@ from torch.nn.functional import scaled_dot_product_attention as sdpa
 
 from tritonbench.kernels.attention_utils import SUPPORT_GLUON
 
-from tritonbench.kernels.blackwell_triton_fused_attention import (
-    attention_opt as blackwell_triton_tutorial_FA2_opt,
-)
+try:
+    from tritonbench.kernels.blackwell_triton_fused_attention import (
+        attention_opt as blackwell_triton_tutorial_FA2_opt,
+    )
+
+    HAS_BLACKWELL_AUTOWS = True
+except (ImportError, IOError, AttributeError):
+    # Needs compiler that supports autoWS
+    HAS_BLACKWELL_AUTOWS = False
 
 from tritonbench.kernels.triton_fused_attention import (
     attention_opt as triton_tutorial_FA2_opt,
