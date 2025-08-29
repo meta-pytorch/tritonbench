@@ -1,3 +1,3 @@
 fp8_gemm_rowwise_fwd:
     op: fp8_gemm_rowwise
-    args: --op fp8_gemm_rowwise --only _triton --no_fp8_fast_accum --use_tma --use_persistent --metrics tflops --num-inputs 1 --input-id 7
+    args: --op fp8_gemm_rowwise --only _triton --no_fp8_fast_accum --use_persistent --no_use_tma --metrics tflops --num-inputs 1 --input-id 7
