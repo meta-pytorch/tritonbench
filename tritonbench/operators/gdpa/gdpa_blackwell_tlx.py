@@ -34,9 +34,12 @@ def get_cuda_autotune_config():
                 "BLOCK_M": BM,
                 "BLOCK_N": BN,
                 "NUM_BUFFERS_Q": bq,
-                "NUM_BUFFERS_KV": bk,
+                "NUM_BUFFERS_KV": bkv,
                 "NUM_BUFFERS_QK": bqk,
                 "NUM_BUFFERS_O": bo,
+                "SUBTILING": SUBTILE,
+                "PINGPONG": pp,
+                "ACT_REGS": ar,
             },
             num_warps=4,
             num_stages=1,
@@ -45,9 +48,12 @@ def get_cuda_autotune_config():
         for BM in [256]  # 128 or 256
         for BN in [128]
         for bq in [1]
-        for bk in [3]
+        for bkv in [3]
         for bqk in [1]  # in tmem
         for bo in [1]  # in tmem
+        for SUBTILE in [True] # doesn't support False
+        for pp in [True, False]
+        for ar in [192, 232]
     ]
 
 
@@ -285,6 +291,9 @@ def gdpa_kernel_tma_ws_blackwell(
     NUM_BUFFERS_KV: tl.constexpr,
     NUM_BUFFERS_QK: tl.constexpr,
     NUM_BUFFERS_O: tl.constexpr,
+    SUBTILING: tl.constexpr,
+    PINGPONG: tl.constexpr,
+    ACT_REGS: tl.constexpr,
 ):
     n_tile_num = tl.cdiv(N_CTX, BLOCK_M)
     prog_id = tl.program_id(0)
@@ -375,7 +384,7 @@ def gdpa_kernel_tma_ws_blackwell(
 
     with tlx.async_tasks():
         # activation calculation
-        with tlx.async_task("default", registers=232):
+        with tlx.async_task("default", registers=ACT_REGS):
             accum_cnt = 0
             accum_cnt_outer = 0
             for _ in range(0, tiles_per_sm):
@@ -424,7 +433,8 @@ def gdpa_kernel_tma_ws_blackwell(
                         inner = _fma_f32x2(c1, square, c0)
                         inner1 = _mul_f32x2(inner, qk1)
 
-                        tlx.named_barrier_wait(9, 128)
+                        if PINGPONG:
+                            tlx.named_barrier_wait(9, 128)
                         # p0 = fast_gelu(qk0)
                         p0 = _fma_f32x2(qk0, tanh_approx_fp32(inner0), qk0)
                         p0 = p0.to(dtype)
@@ -440,7 +450,8 @@ def gdpa_kernel_tma_ws_blackwell(
                         # p and qk reuse tmem space, single producer commit for p via consumer_release_qk
                         consumer_release_qk_view = tlx.local_view(producer_qk0, bufIdx)
                         tlx.barrier_arrive(consumer_release_qk_view, 1)
-                        tlx.named_barrier_arrive(10, 128)
+                        if PINGPONG:
+                            tlx.named_barrier_arrive(10, 128)
 
                         # wait for o0, o1 per iteration
                         bufIdx = accum_cnt % NUM_BUFFERS_O
@@ -487,10 +498,11 @@ def gdpa_kernel_tma_ws_blackwell(
                     accum_cnt_outer += 1
                 tile_idx += num_progs
 
-        with tlx.async_task(num_warps=4, registers=232):
+        with tlx.async_task(num_warps=4, registers=ACT_REGS):
             accum_cnt = 0
             accum_cnt_outer = 0
-            tlx.named_barrier_arrive(9, 128)
+            if PINGPONG:
+                tlx.named_barrier_arrive(9, 128)
             for _ in range(0, tiles_per_sm):
                 pid = tile_idx % n_tile_num
                 start_m = pid
@@ -534,7 +546,8 @@ def gdpa_kernel_tma_ws_blackwell(
                         inner = _fma_f32x2(c1, square, c0)
                         inner1 = _mul_f32x2(inner, qk1)
 
-                        tlx.named_barrier_wait(10, 128)
+                        if PINGPONG:
+                            tlx.named_barrier_wait(10, 128)
                         # p0 = fast_gelu(qk0)
                         p0 = _fma_f32x2(qk0, tanh_approx_fp32(inner0), qk0)
                         p0 = p0.to(dtype)
@@ -550,7 +563,8 @@ def gdpa_kernel_tma_ws_blackwell(
                         # p and qk reuse tmem space, single producer commit for p via consumer_release_qk
                         consumer_release_qk_view = tlx.local_view(producer_qk1, bufIdx)
                         tlx.barrier_arrive(consumer_release_qk_view, 1)
-                        tlx.named_barrier_arrive(9, 128)
+                        if PINGPONG:
+                            tlx.named_barrier_arrive(9, 128)
 
                         # wait for o0, o1 per iteration
                         bufIdx = accum_cnt % NUM_BUFFERS_O
@@ -1241,6 +1255,7 @@ def gdpa_forward_tlx(
 
     stage = 1  # When supporting causal, change to 3
     extra_kern_args = {}
+    # extra_kern_args["maxnreg"] = 168
     nheads = query.shape[1]
     G = query.shape[1] // key.shape[1]
     assert query.shape[1] % key.shape[1] == 0
