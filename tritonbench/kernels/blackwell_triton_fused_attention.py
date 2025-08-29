@@ -402,7 +402,7 @@ class _attention_opt(torch.autograd.Function):
         ctx.grid = grid
         warp_specialize = baseVariant == "ws"
         if is_blackwell() and warp_specialize:
-            if HEAD_DIM_K == 128 and q.dtype == torch.float16:
+            if HEAD_DIM_K == 128 and (q.dtype == torch.float16 or q.dtype == torch.bfloat16):
                 extra_kern_args["maxnreg"] = 168
             else:
                 extra_kern_args["maxnreg"] = 80
