@@ -23,6 +23,9 @@ try:
     from tritonbench.kernels.blackwell_triton_fused_attention import (
         attention_opt as blackwell_triton_tutorial_FA2_opt,
     )
+    from tritonbench.kernels.blackwell_triton_fused_attention_dp import (
+        attention_opt as blackwell_triton_tutorial_FA2_dp,
+    )
 
     HAS_BLACKWELL_AUTOWS = True
 except (ImportError, IOError, AttributeError):
@@ -426,6 +429,17 @@ class Operator(BenchmarkOperator):
         v: torch.Tensor,
     ) -> Callable:
         return lambda: blackwell_triton_tutorial_FA2_opt(
+            q, k, v, self.causal, self.sm_scale, "ws"
+        )
+
+    @register_benchmark(enabled=False)
+    def triton_tutorial_flash_dp_blackwell(
+        self,
+        q: torch.Tensor,
+        k: torch.Tensor,
+        v: torch.Tensor,
+    ) -> Callable:
+        return lambda: blackwell_triton_tutorial_FA2_dp(
             q, k, v, self.causal, self.sm_scale, "ws"
         )
 
