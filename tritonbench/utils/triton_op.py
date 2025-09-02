@@ -36,7 +36,12 @@ from tritonbench.components.do_bench import (
 )
 from tritonbench.components.export import export_data
 
-from tritonbench.utils.constants import (DEFAULT_WARMUP,DEFAULT_REP,DEFAULT_QUANTILES,DEFAULT_SLEEP)
+from tritonbench.utils.constants import (
+    DEFAULT_QUANTILES,
+    DEFAULT_REP,
+    DEFAULT_SLEEP,
+    DEFAULT_WARMUP,
+)
 from tritonbench.utils.env_utils import (
     apply_precision,
     is_fbcode,
@@ -79,6 +84,7 @@ class BenchmarkOperatorBackend:
     # need to be tested in ci
     # ci = False implies enabled = False
     ci: bool = True
+
 
 REGISTERED_BENCHMARKS: Dict[str, OrderedDict[str, BenchmarkOperatorBackend]] = {}
 REGISTERED_METRICS: defaultdict[str, List[str]] = defaultdict(list)
@@ -588,7 +594,6 @@ def register_benchmark(
     label: Optional[str] = None,
 ):
     def decorator(function):
-        
         op_name = (
             operator_name
             if operator_name
@@ -666,6 +671,7 @@ def _translate_mode(tb_args):
     if _has_and_true("fwd_no_grad"):
         tb_args.mode = "fwd_no_grad"
 
+
 def override_args(args_to_override):
     parser = get_parser()
     tb_args, extra_args = parser.parse_known_args(args_to_override)
@@ -703,7 +709,9 @@ class BenchmarkOperator(metaclass=PostInitProcessor):
         if extra_args and not tb_args:
             tb_args, extra_args = override_args(extra_args)
         elif not tb_args:
-            raise ValueError('no args selected. Either pass in argparse namespace or give list override')
+            raise ValueError(
+                "no args selected. Either pass in argparse namespace or give list override"
+            )
 
         if tb_args.benchmark_name:
             self.name = tb_args.benchmark_name
@@ -819,20 +827,28 @@ class BenchmarkOperator(metaclass=PostInitProcessor):
 
             setattr(fwd_no_grad_fn, "_name", bm_func_name)
             return fwd_no_grad_fn
-    
+
     def set_input_iter(self, input_iter: Callable):
         def input_decorator(input_iter):
             def input_callable(self):
                 return input_iter()
+
             return input_callable
+
         self.get_input_iter = input_decorator(input_iter)
-        self.get_input_iter = input_decorator(input_iter).__get__(self, BenchmarkOperator)
+        self.get_input_iter = input_decorator(input_iter).__get__(
+            self, BenchmarkOperator
+        )
         self.input_iter = input_iter
         self._available_num_inputs = sum(1 for _ in self.get_input_iter())
         self._num_inputs = self._available_num_inputs - self._input_id
-    
+
     def add_benchmark(self, bm_func_name: str, bm_callable: Callable):
-        decorator_kwargs = {"operator_name":self.name,"func_name":bm_func_name,"enabled":True}
+        decorator_kwargs = {
+            "operator_name": self.name,
+            "func_name": bm_func_name,
+            "enabled": True,
+        }
         decorated_func = register_benchmark(**decorator_kwargs)(bm_callable)
         bound_method = types.MethodType(decorated_func, self)
         setattr(self, bm_func_name or bm_callable.__name__, bound_method)
@@ -989,9 +1005,7 @@ class BenchmarkOperator(metaclass=PostInitProcessor):
 
     def get_input_iter(self) -> Generator:
         """Return the dynamic input iterator for the model."""
-        logger.warning(
-            "Each operator must implement its own input iterator."
-        )
+        logger.warning("Each operator must implement its own input iterator.")
         return []
 
     def get_grad_to_none(self, args):

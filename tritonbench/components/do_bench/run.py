@@ -133,7 +133,7 @@ def _do_bench_inductor(fn, warmup, rep, grad_to_none=None):
         warmup: Target warmup time in milliseconds (matches triton.testing.do_bench)
         rep: Target total measurement time in milliseconds (matches triton.testing.do_bench)
         grad_to_none: Tensors whose gradients should be cleared before each measurement
-    
+
     Returns:
         List of measured times in milliseconds.
     """

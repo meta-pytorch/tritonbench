@@ -1,7 +1,8 @@
 import argparse
 
-from tritonbench.utils.env_utils import AVAILABLE_PRECISIONS, is_fbcode
 from tritonbench.utils.constants import DEFAULT_REP, DEFAULT_WARMUP
+
+from tritonbench.utils.env_utils import AVAILABLE_PRECISIONS, is_fbcode
 
 
 def get_parser(args=None):
