@@ -1,0 +1,7 @@
+bf16_flash_attention_fwd_shape1:
+  op:
+    blackwell_attentions
+  args:
+    --op blackwell_attentions --seq-len 8192 --batch 8 --n-heads 16 --d-head 128 --rep 3000 --sleep 1.0 --metrics tflops --simple-output --only gluon_blackwell_tutorial_persistent_fwd
+  envs:
+    WITH_GLUON=1
