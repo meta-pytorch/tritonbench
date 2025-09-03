@@ -1,4 +1,4 @@
-bf16_flash_attention_fwd_shape2:
+bf16_flash_attention_fwd_shape3:
   op:
     blackwell_attentions
   args:
