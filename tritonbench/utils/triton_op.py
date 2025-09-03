@@ -29,11 +29,7 @@ import tabulate
 import torch
 import triton
 
-from tritonbench.components.do_bench import (
-    do_bench_cuda_time,
-    do_bench_wrapper,
-    Latency,
-)
+from tritonbench.components.do_bench import do_bench_wrapper, Latency
 from tritonbench.components.export import export_data
 
 from tritonbench.utils.constants import (
@@ -261,8 +257,6 @@ class BenchmarkOperatorMetrics:
     nsys_gpu_speedup: Optional[float] = None
     # hashed source code for the kernel
     kernel_source_hash: Optional[str] = None
-    # cuda time
-    cuda_time: Optional[float] = None
 
 
 BUILTIN_METRICS = {x.name for x in fields(BenchmarkOperatorMetrics)} - {"extra_metrics"}
@@ -1269,15 +1263,6 @@ class BenchmarkOperator(metaclass=PostInitProcessor):
             fn = self._get_bm_func(fn_name)
             if baseline:
                 self.baseline_fn = fn
-            if "cuda_time" in self.required_metrics:
-                metrics.cuda_time = do_bench_cuda_time(
-                    fn,
-                    warmup,
-                    rep,
-                    grad_to_none=self.get_grad_to_none(self.example_inputs),
-                    use_cuda_graphs=self.use_cuda_graphs,
-                    bypass_fail=self.tb_args.bypass_fail,
-                )
             if {"latency", "tflops", "gbps", "speedup", "compile_time"} & set(
                 self.required_metrics
             ):
