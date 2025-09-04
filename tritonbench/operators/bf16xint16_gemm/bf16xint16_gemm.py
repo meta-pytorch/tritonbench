@@ -106,6 +106,18 @@ class Operator(BenchmarkOperator):
         return lambda: bf16xbf16_matmul(x_bf16, w_bf16)
 
     @register_benchmark()
+    def eager_bf16xbf16(self, x, w):
+        x_bf16 = x.to(torch.bfloat16) if self.transpose else x
+        w_bf16 = w if self.transpose else w.to(torch.bfloat16)
+        return lambda: torch.matmul(x_bf16, w_bf16)
+
+    @register_benchmark()
+    def torch_compile_bf16xbf16(self, x, w):
+        return torch.compile(
+            self.eager_bf16xbf16(x, w), mode="max-autotune-no-cudagraphs"
+        )
+
+    @register_benchmark()
     def bf16xint16(self, x, w):
         x = x.reshape(-1, x.size(-1))
         return lambda: bf16xint16_matmul(x, w, transpose=self.transpose)

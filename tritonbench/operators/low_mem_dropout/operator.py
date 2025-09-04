@@ -37,23 +37,32 @@ class Operator(BenchmarkOperator):
         n_elements = x.numel()
         grid = lambda meta: (triton.cdiv(n_elements, meta["BLOCK_SIZE"]),)
 
-        x_keep = (torch.rand(size=(n_elements,)) > p).to(torch.int32).cuda()
+        torch.manual_seed(123)  # Set seed for reproducibility
+        x_keep = (torch.rand_like(x) > p).to(torch.int32)
 
         def _inner():
-            return _triton_dropout[grid](
-                x, x_keep, output, n_elements, p, BLOCK_SIZE=1024
-            )
+            _triton_dropout[grid](x, x_keep, output, n_elements, p, BLOCK_SIZE=1024)
+            return output
 
         return _inner
 
     @register_benchmark(baseline=True)
-    def torch_dropout(self, p, x):
+    def eager_dropout(self, p, x):
+        torch.manual_seed(123)
+        mask = torch.rand_like(x) > p
+
         def _inner():
-            m = torch.nn.Dropout(p=p)
-            output = m(x)
+            # Use manual dropout implementation for deterministic comparison
+            output = x * mask.to(x.dtype) / (1 - p)
             return output
 
         return _inner
+
+    @register_benchmark()
+    def torch_compile_dropout(self, p, x):
+        return torch.compile(
+            self.eager_dropout(p, x), mode="max-autotune-no-cudagraphs"
+        )
 
     @register_benchmark()
     def seeded_dropout(self, p, x):

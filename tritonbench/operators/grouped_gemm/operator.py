@@ -17,7 +17,7 @@ class Operator(BenchmarkOperator):
     DEFAULT_METRICS = ["latency", "speedup", "accuracy"]
 
     @register_benchmark(baseline=True)
-    def torch(self, group_A, group_B):
+    def eager(self, group_A, group_B):
         def _inner():
             out = []
             for a, b in zip(group_A, group_B):
@@ -25,6 +25,12 @@ class Operator(BenchmarkOperator):
             return out
 
         return _inner
+
+    @register_benchmark()
+    def torch_compile(self, group_A, group_B):
+        return torch.compile(
+            self.eager(group_A, group_B), mode="max-autotune-no-cudagraphs"
+        )
 
     @register_benchmark()
     def triton(self, group_A, group_B):

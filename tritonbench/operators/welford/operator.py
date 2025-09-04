@@ -49,9 +49,22 @@ class Operator(BenchmarkOperator):
     def test_welford(self, p1, p2, p3) -> Callable:
         return lambda: triton_welford(p1, p2, p3)
 
-    @register_benchmark(baseline=True)
+    @register_benchmark()
     def test_no_welford(self, p1, p2, p3) -> Callable:
         return lambda: triton_no_welford(p1, p2, p3)
+
+    @register_benchmark(baseline=True)
+    def eager_layer_norm(self, p1, p2, p3) -> Callable:
+        # p1 is weight, p2 is bias, p3 is input
+        return lambda: torch.nn.functional.layer_norm(
+            p3, normalized_shape=(p3.shape[-1],), weight=p1, bias=p2, eps=1e-05
+        )
+
+    @register_benchmark()
+    def torch_compile_layer_norm(self, p1, p2, p3) -> Callable:
+        return torch.compile(
+            self.eager_layer_norm(p1, p2, p3), mode="max-autotune-no-cudagraphs"
+        )
 
     def get_x_val(self, example_inputs) -> float:
         p1, p2, p3 = example_inputs
@@ -70,4 +83,8 @@ class Operator(BenchmarkOperator):
         output = fn()
         baseline_output = baseline_fn()
         tol = 1e-2
+        # The triton_welford functions return a tuple (output, input, mean, rsqrt)
+        # while eager_layer_norm returns just the output tensor
+        if isinstance(output, tuple):
+            output = output[0]  # Extract just the output tensor from the tuple
         return same(output, baseline_output, tol=tol, exact_dtype=True)
