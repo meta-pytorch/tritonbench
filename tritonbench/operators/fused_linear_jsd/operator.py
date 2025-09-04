@@ -163,8 +163,8 @@ class Operator(BenchmarkOperator):
         return lambda: self.liger_op(student_input, teacher_input)
 
     @register_benchmark()
-    def inductor_lm_head_jsd(self, student_input, teacher_input) -> Callable:
-        compiled = torch.compile(self.baseline_op)
+    def torch_compile_lm_head_jsd(self, student_input, teacher_input) -> Callable:
+        compiled = torch.compile(self.baseline_op, mode="max-autotune-no-cudagraphs")
         return lambda: compiled(student_input, teacher_input)
 
     @register_x_val(label="(B*T, H)")

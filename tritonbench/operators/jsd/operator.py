@@ -85,8 +85,8 @@ class Operator(BenchmarkOperator):
         return lambda: self.liger_op(_input, target)
 
     @register_benchmark()
-    def inductor_jsd(self, _input, target) -> Callable:
-        compiled = torch.compile(self.baseline_op)
+    def torch_compile_jsd(self, _input, target) -> Callable:
+        compiled = torch.compile(self.baseline_op, mode="max-autotune-no-cudagraphs")
         return lambda: compiled(_input, target)
 
     @register_x_val(label="(B, T, V)")

@@ -59,7 +59,7 @@ class Operator(BenchmarkOperator):
         return lambda: self.liger_model(input)
 
     @register_benchmark()
-    def inductor_geglu(self, input) -> Callable:
+    def torch_compile_geglu(self, input) -> Callable:
         # TODO: remove this once we have a better way to handle backward benchmarking
         # We need to run backward multiple times for proper benchmarking
         # so donated buffer have to be disabled
@@ -68,7 +68,7 @@ class Operator(BenchmarkOperator):
 
             functorch_config.donated_buffer = False
 
-        compiled = torch.compile(self.baseline_model)
+        compiled = torch.compile(self.baseline_model, mode="max-autotune-no-cudagraphs")
         return lambda: compiled(input)
 
     @register_x_val(label="(B, T, H)")

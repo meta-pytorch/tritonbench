@@ -107,7 +107,7 @@ class Operator(BenchmarkOperator):
         return lambda: self.quack_rms_op(input)
 
     @register_benchmark()
-    def inductor_rms(self, H, input) -> Callable:
+    def torch_compile_rms(self, H, input) -> Callable:
         if self.llama_rms_op is None:
             self.llama_rms_op = LlamaRMSNorm(hidden_size=H, eps=self.eps).to(
                 self.device

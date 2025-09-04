@@ -68,7 +68,7 @@ class Operator(BenchmarkOperator):
         return lambda: self.liger_model(input, target)
 
     @register_benchmark()
-    def inductor_cross_entropy_loss(self, input, target) -> Callable:
+    def torch_compile_cross_entropy_loss(self, input, target) -> Callable:
         compiled = torch.compile(
             self.baseline_model, dynamic=False, mode="max-autotune-no-cudagraphs"
         )

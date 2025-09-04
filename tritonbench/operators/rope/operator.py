@@ -92,12 +92,17 @@ class Operator(BenchmarkOperator):
         return lambda: liger_rotary_pos_emb(q, k, cos, sin, pos_ids)
 
     @register_benchmark()
-    def inductor_rotary_pos_emb_full_op(self, hidden_size, seq_length) -> Callable:
+    def torch_compile_rotary_pos_emb_full_op(self, hidden_size, seq_length) -> Callable:
         q, k, cos, sin, pos_ids = self.prepare_input(hidden_size, seq_length)
         head_dim = hidden_size // self.num_q_heads
-        compiled = torch.compile(LlamaRotaryEmbedding(head_dim, device=self.device))
+        compiled = torch.compile(
+            LlamaRotaryEmbedding(head_dim, device=self.device),
+            mode="max-autotune-no-cudagraphs",
+        )
         cos, sin = compiled(k, pos_ids)
-        compiled_func = torch.compile(apply_rotary_pos_emb)
+        compiled_func = torch.compile(
+            apply_rotary_pos_emb, mode="max-autotune-no-cudagraphs"
+        )
         return lambda: compiled_func(q, k, cos, sin, pos_ids)
 
     @register_x_val(label="(H, T)")

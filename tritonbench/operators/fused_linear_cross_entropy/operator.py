@@ -99,8 +99,10 @@ class Operator(BenchmarkOperator):
         return lambda: self.liger_model(input, weight, target)
 
     @register_benchmark()
-    def inductor_fused_linear_cross_entropy(self, input, weight, target) -> Callable:
-        compiled = torch.compile(self.baseline_model)
+    def torch_compile_fused_linear_cross_entropy(
+        self, input, weight, target
+    ) -> Callable:
+        compiled = torch.compile(self.baseline_model, mode="max-autotune-no-cudagraphs")
         return lambda: compiled(input, weight, target)
 
     @register_x_val(label="(B*T, H)")
