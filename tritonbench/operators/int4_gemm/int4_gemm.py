@@ -61,31 +61,29 @@ class Operator(BenchmarkOperator):
 
     @register_benchmark(baseline=True)
     def tinygemm(self, x, w):
-        # Match triton kernel behavior - implement the same int4 unpacking logic
         x = x.reshape(-1, x.size(-1))
         w_int4_packed = pack_2xint4(w).T.contiguous().T
-
-        # Manually unpack int4 values to match triton kernel behavior
-        # This mimics what the triton kernel does:
-        # b_lo = (b << 4) >> 4  (sign extend lower 4 bits)
-        # b_hi = b >> 4         (upper 4 bits)
         K, N = w.shape
 
-        # Unpack the int4 values
-        w_int8 = w_int4_packed.to(torch.int8)
+        # Return a lambda that does the unpacking and matmul together (matches triton impl behavior)
+        def compute_unpack_and_matmul():
+            # Unpack the int4 values
+            w_int8 = w_int4_packed.to(torch.int8)
 
-        # Extract low and high 4-bit values with sign extension for low bits
-        w_lo = ((w_int8 << 4) >> 4).to(torch.bfloat16)  # Sign extend lower 4-bit
-        w_hi = (w_int8 >> 4).to(torch.bfloat16)  # Upper 4-bit
+            # Extract low and high 4-bit values with sign extension for low bits
+            w_lo = ((w_int8 << 4) >> 4).to(torch.bfloat16)  # Sign extend lower 4-bit
+            w_hi = (w_int8 >> 4).to(torch.bfloat16)  # Upper 4-bit
 
-        # Interleave them back to get full K dimension
-        w_unpacked = torch.stack([w_lo, w_hi], dim=1).reshape(K, N)
+            # Interleave them back to get full K dimension
+            w_unpacked = torch.stack([w_lo, w_hi], dim=1).reshape(K, N)
 
-        # Perform regular matrix multiplication
-        return lambda: torch.matmul(x, w_unpacked)
+            # Perform regular matrix multiplication
+            return torch.matmul(x, w_unpacked)
+
+        return compute_unpack_and_matmul
 
     @register_benchmark()
-    def torch_compile(self, x, w):
+    def torch_compile_tinygemm(self, x, w):
         return torch.compile(self.tinygemm(x, w), mode="max-autotune-no-cudagraphs")
 
     @register_benchmark()
