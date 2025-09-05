@@ -174,10 +174,9 @@ class OperatorInputsLoader:
 
         for operator in obj:
             op_inps = Counter()
-            while i < len(obj[operator]):
-                line = lines[i]
-                cnt = int(line[len("cnt: ") : line.find(",")])
-                inps = line[line.find(",") + 2 :].strip("'")
+            for inputs in obj[operator]:
+                cnt = inputs["count"]
+                inps = inputs["inputs"]
                 op_inps[inps] += cnt
             self.operator_db[operator] = op_inps
             if "embedding" in str(operator):

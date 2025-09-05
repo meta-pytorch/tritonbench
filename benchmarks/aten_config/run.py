@@ -24,7 +24,7 @@ def reverse_dict(data):
     for key, value in data.items():
         suite, model = key
         for op in value:
-            reversed_data[op] = f"{suite}/{model}"
+            reversed_data[op] = f"{suite}/{model}.json"
     return reversed_data
 
 
