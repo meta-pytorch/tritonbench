@@ -2,6 +2,7 @@ from itertools import accumulate
 from typing import Any, Generator, List, Tuple
 
 import torch
+from torch._inductor import config as inductor_config
 
 from tritonbench.utils.triton_op import (
     BenchmarkOperator,
@@ -39,10 +40,17 @@ class Operator(BenchmarkOperator):
         return _inner
 
     @register_benchmark()
-    def torch_compile(self, group_A, group_B):
-        return torch.compile(
-            self.naive(group_A, group_B), mode="max-autotune-no-cudagraphs"
-        )
+    def pt2_triton_grouped_mm(self, group_A, group_B):
+        torch._dynamo.reset()
+
+        with inductor_config.patch(
+            max_autotune=True,
+            max_autotune_gemm_backends="TRITON",
+            autotune_fallback_to_aten=False,
+        ):
+            A_packed, B_shared, offs = self.list_input_to_jagged(group_A, group_B)
+            compiled = torch.compile(torch._grouped_mm, dynamic=False)
+            return lambda: compiled(A_packed, B_shared, offs=offs, bias=None)
 
     @register_benchmark()
     def triton(self, group_A, group_B):
