@@ -295,7 +295,7 @@ class Operator(BenchmarkOperator):
                 )
                 yield (input_tensor,)
 
-    def _get_accuracy(self, fn: Callable, baseline_fn: Callable) -> bool:
+    def accuracy(self, fn: Callable, baseline_fn: Callable) -> bool:
         output = fn()
         baseline_output = baseline_fn()
         return torch.allclose(
