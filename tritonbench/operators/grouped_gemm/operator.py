@@ -54,8 +54,21 @@ class Operator(BenchmarkOperator):
 
     @register_benchmark()
     def triton(self, group_A, group_B):
+        (d_a_ptrs, d_b_ptrs, d_c_ptrs, d_g_sizes, d_g_lds, group_C) = (
+            self.list_input_to_triton_input(group_A, group_B)
+        )
+
         def _inner():
-            outs = triton_group_gemm_fn(group_A, group_B)
+            outs = triton_group_gemm_fn(
+                d_a_ptrs,
+                d_b_ptrs,
+                d_c_ptrs,
+                d_g_sizes,
+                d_g_lds,
+                group_C,
+                len(group_A),
+                group_A[0].dtype,
+            )
             return torch.cat(outs, dim=0)
 
         return _inner
@@ -105,6 +118,50 @@ class Operator(BenchmarkOperator):
         )
 
         return A_packed, B_batched, offs
+
+    def list_input_to_triton_input(
+        self,
+        group_A: List[torch.Tensor],
+        group_B: List[torch.Tensor],
+    ) -> Tuple[
+        torch.Tensor,
+        torch.Tensor,
+        torch.Tensor,
+        torch.Tensor,
+        torch.Tensor,
+        torch.Tensor,
+    ]:
+        group_size = len(group_A)
+        device = group_A[0].device
+
+        A_addrs = []
+        B_addrs = []
+        C_addrs = []
+        g_sizes = []
+        g_lds = []
+        group_C = []
+        for i in range(group_size):
+            A = group_A[i]
+            B = group_B[i]
+            assert A.shape[1] == B.shape[0]
+            M, K = A.shape
+            K, N = B.shape
+            C = torch.zeros((M, N), device=device, dtype=A.dtype)
+            group_C.append(C)
+            A_addrs.append(A.data_ptr())
+            B_addrs.append(B.data_ptr())
+            C_addrs.append(C.data_ptr())
+            g_sizes += [M, N, K]
+            g_lds += [A.stride(0), B.stride(0), C.stride(0)]
+
+        # note these are device tensors
+        d_a_ptrs = torch.tensor(A_addrs, device=device)
+        d_b_ptrs = torch.tensor(B_addrs, device=device)
+        d_c_ptrs = torch.tensor(C_addrs, device=device)
+        d_g_sizes = torch.tensor(g_sizes, dtype=torch.int32, device=device)
+        d_g_lds = torch.tensor(g_lds, dtype=torch.int32, device=device)
+
+        return (d_a_ptrs, d_b_ptrs, d_c_ptrs, d_g_sizes, d_g_lds, group_C)
 
     @register_metric()
     def flops(

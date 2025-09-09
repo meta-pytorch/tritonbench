@@ -5,6 +5,8 @@ This group gemm kernel launches a fixed number of CTA to compute a group
 of gemms. The scheduling is static and we do it on device.
 """
 
+import itertools
+
 # Copyright (c) 2023 NVIDIA Corporation & Affiliates. All rights reserved.
 #
 # Permission is hereby granted, free of charge, to any person obtaining
@@ -31,40 +33,40 @@ import triton
 import triton.language as tl
 
 
+def is_cuda():
+    return triton.runtime.driver.active.get_current_target().backend == "cuda"
+
+
+def num_sms():
+    if is_cuda():
+        return torch.cuda.get_device_properties("cuda").multi_processor_count
+    return 148
+
+
+def torch_dtype_to_triton_dtype(dtype):
+    if dtype == torch.float16:
+        return tl.float16
+    elif dtype == torch.float32:
+        return tl.float32
+    elif dtype == torch.float8_e4m3fn:
+        return tl.float8e4nv
+    elif dtype == torch.bfloat16:
+        return tl.bfloat16
+    else:
+        raise ValueError(f"Unsupported dtype: {dtype}")
+
+
 @triton.autotune(
     configs=[
         triton.Config(
             {
-                "BLOCK_SIZE_M": 128,
-                "BLOCK_SIZE_N": 128,
-                "BLOCK_SIZE_K": 32,
-                "NUM_SM": 84,
+                "BLOCK_SIZE_M": BLOCK_M,
+                "BLOCK_SIZE_N": BLOCK_N,
+                "BLOCK_SIZE_K": BLOCK_K,
+                "NUM_SMS": num_sms(),
             }
-        ),
-        triton.Config(
-            {
-                "BLOCK_SIZE_M": 128,
-                "BLOCK_SIZE_N": 128,
-                "BLOCK_SIZE_K": 32,
-                "NUM_SM": 128,
-            }
-        ),
-        triton.Config(
-            {
-                "BLOCK_SIZE_M": 64,
-                "BLOCK_SIZE_N": 64,
-                "BLOCK_SIZE_K": 32,
-                "NUM_SM": 84,
-            }
-        ),
-        triton.Config(
-            {
-                "BLOCK_SIZE_M": 64,
-                "BLOCK_SIZE_N": 64,
-                "BLOCK_SIZE_K": 32,
-                "NUM_SM": 128,
-            }
-        ),
+        )
+        for BLOCK_M, BLOCK_N, BLOCK_K in itertools.product([128, 256], repeat=3)
     ],
     key=["group_size"],
 )
@@ -82,8 +84,9 @@ def grouped_matmul_kernel(
     g_lds,
     # number of gemms
     group_size,
+    DTYPE: tl.constexpr,
     # number of virtual SM
-    NUM_SM: tl.constexpr,
+    NUM_SMS: tl.constexpr,
     # tile sizes
     BLOCK_SIZE_M: tl.constexpr,
     BLOCK_SIZE_N: tl.constexpr,
@@ -106,9 +109,9 @@ def grouped_matmul_kernel(
             lda = tl.load(g_lds + g * 3)
             ldb = tl.load(g_lds + g * 3 + 1)
             ldc = tl.load(g_lds + g * 3 + 2)
-            a_ptr = tl.load(group_a_ptrs + g).to(tl.pointer_type(tl.float16))
-            b_ptr = tl.load(group_b_ptrs + g).to(tl.pointer_type(tl.float16))
-            c_ptr = tl.load(group_c_ptrs + g).to(tl.pointer_type(tl.float16))
+            a_ptr = tl.load(group_a_ptrs + g).to(tl.pointer_type(DTYPE))
+            b_ptr = tl.load(group_b_ptrs + g).to(tl.pointer_type(DTYPE))
+            c_ptr = tl.load(group_c_ptrs + g).to(tl.pointer_type(DTYPE))
             # figure out tile coordinates
             tile_idx_in_gemm = tile_idx - last_problem_end
             tile_m_idx = tile_idx_in_gemm // num_n_tiles
@@ -131,7 +134,7 @@ def grouped_matmul_kernel(
                 accumulator += tl.dot(a, b)
                 a_ptrs += BLOCK_SIZE_K
                 b_ptrs += BLOCK_SIZE_K * ldb
-            c = accumulator.to(tl.float16)
+            c = accumulator.to(DTYPE)
 
             offs_cm = tile_m_idx * BLOCK_SIZE_M + tl.arange(0, BLOCK_SIZE_M)
             offs_cn = tile_n_idx * BLOCK_SIZE_N + tl.arange(0, BLOCK_SIZE_N)
@@ -141,45 +144,16 @@ def grouped_matmul_kernel(
             tl.store(c_ptrs, c)
 
             # go to the next tile by advancing NUM_SM
-            tile_idx += NUM_SM
+            tile_idx += NUM_SMS
 
         # get ready to go to the next gemm problem
         last_problem_end = last_problem_end + num_tiles
 
 
-def triton_group_gemm_fn(group_A, group_B):
-    assert len(group_A) == len(group_B)
-    group_size = len(group_A)
-    device = group_A[0].device
-
-    A_addrs = []
-    B_addrs = []
-    C_addrs = []
-    g_sizes = []
-    g_lds = []
-    group_C = []
-    for i in range(group_size):
-        A = group_A[i]
-        B = group_B[i]
-        assert A.shape[1] == B.shape[0]
-        M, K = A.shape
-        K, N = B.shape
-        C = torch.empty((M, N), device=device, dtype=A.dtype)
-        group_C.append(C)
-        A_addrs.append(A.data_ptr())
-        B_addrs.append(B.data_ptr())
-        C_addrs.append(C.data_ptr())
-        g_sizes += [M, N, K]
-        g_lds += [A.stride(0), B.stride(0), C.stride(0)]
-
-    # note these are device tensors
-    d_a_ptrs = torch.tensor(A_addrs, device=device)
-    d_b_ptrs = torch.tensor(B_addrs, device=device)
-    d_c_ptrs = torch.tensor(C_addrs, device=device)
-    d_g_sizes = torch.tensor(g_sizes, dtype=torch.int32, device=device)
-    d_g_lds = torch.tensor(g_lds, dtype=torch.int32, device=device)
-    # we use a fixed number of CTA, and it's auto-tunable
-    grid = lambda META: (META["NUM_SM"],)
+def triton_group_gemm_fn(
+    d_a_ptrs, d_b_ptrs, d_c_ptrs, d_g_sizes, d_g_lds, group_C, group_size, dtype
+):
+    grid = lambda META: (META["NUM_SMS"],)
     grouped_matmul_kernel[grid](
         d_a_ptrs,
         d_b_ptrs,
@@ -187,6 +161,7 @@ def triton_group_gemm_fn(group_A, group_B):
         d_g_sizes,
         d_g_lds,
         group_size,
+        torch_dtype_to_triton_dtype(dtype),
     )
 
     return group_C
