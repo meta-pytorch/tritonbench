@@ -3,6 +3,7 @@ from typing import Any, Generator, List, Tuple
 
 import torch
 from torch._inductor import config as inductor_config
+from tritonbench.utils.env_utils import get_nvidia_gpu_model, is_cuda
 
 from tritonbench.utils.triton_op import (
     BenchmarkOperator,
@@ -11,7 +12,22 @@ from tritonbench.utils.triton_op import (
     register_metric,
 )
 
+# Try to import Cutlass and CuteDSL
+try:
+    import cutlass
+    import cutlass.utils as utils
+
+    from .cutedsl import compile_cutedsl_grouped_gemm
+
+    # Set HAS_CUTEDSL to True if import succeeds
+    HAS_CUTEDSL = True
+except (ImportError, AttributeError):
+    HAS_CUTEDSL = False
+
+
 from .kernels import triton_group_gemm_fn
+
+IS_B200 = is_cuda() and get_nvidia_gpu_model() == "NVIDIA B200"
 
 
 # TODO(nikhilap): Add a separate 3D grouped_gemm operator to alleviate the restriction that all B tensors must be the same.
@@ -56,6 +72,57 @@ class Operator(BenchmarkOperator):
     def triton(self, group_A, group_B):
         def _inner():
             outs = triton_group_gemm_fn(group_A, group_B)
+            return torch.cat(outs, dim=0)
+
+        return _inner
+
+    @register_benchmark(enabled=HAS_CUTEDSL and IS_B200)
+    def cutedsl_grouped_mm(self, group_A, group_B):
+        (
+            compiled_grouped_gemm,
+            initial_cute_tensors_abc,
+            tensor_of_dim_size_mnkl,
+            tensor_of_strides_abc,
+            tensor_of_ptrs_abc,
+            tensor_of_tensormap,
+            current_stream,
+            torch_tensors_abc,
+        ) = compile_cutedsl_grouped_gemm(
+            group_A,
+            group_B,
+            ab_dtype=cutlass.Float16
+            if self.dtype == torch.float16
+            else cutlass.BFloat16,
+            c_dtype=cutlass.Float16
+            if self.dtype == torch.float16
+            else cutlass.BFloat16,
+            acc_dtype=cutlass.Float32,
+            a_major="m",
+            b_major="n",
+            c_major="m",
+            mma_tiler_mn=(128, 128),
+            cluster_shape_mn=(1, 1),
+            use_2cta_instrs=False,
+            tensormap_update_mode=utils.TensorMapUpdateMode.SMEM,
+            tolerance=0.5,
+            warmup_iterations=0,
+            iterations=1,
+            skip_ref_check=True,
+        )
+
+        def _inner():
+            compiled_grouped_gemm(
+                initial_cute_tensors_abc[0],
+                initial_cute_tensors_abc[1],
+                initial_cute_tensors_abc[2],
+                tensor_of_dim_size_mnkl,
+                tensor_of_strides_abc,
+                tensor_of_ptrs_abc,
+                tensor_of_tensormap,
+                current_stream,
+            )
+
+            outs = [C.squeeze(-1) for (_, _, C) in torch_tensors_abc]
             return torch.cat(outs, dim=0)
 
         return _inner
