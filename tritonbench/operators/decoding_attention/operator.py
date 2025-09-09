@@ -72,6 +72,15 @@ except (ImportError, IOError, AttributeError):
     HAS_AITER = False
 
 
+# [Optional] flash_fwd cute-DSL backend
+HAS_FLASH_CUTE = True
+try:
+    from flash_attn.cute.interface import flash_attn_func as flash_attn_cute_func
+except (ImportError, IOError, AttributeError):
+    HAS_FLASH_CUTE = False
+    flash_attn_cute_func = None  # Define it as None to avoid NameError
+
+
 def parse_op_args(args: List[str]):
     parser = argparse.ArgumentParser()
     parser.add_argument("--batch", type=int, help="Batch size")
@@ -557,6 +566,23 @@ class Operator(BenchmarkOperator):
             kv_cache_quant_num_groups=kv_cache_quant_num_groups,
             use_tensor_cores=True,
             cache_logical_dtype_int=1,  # FP8 = 1
+        )
+
+    @register_benchmark(enabled=HAS_FLASH_CUTE)
+    def flash_cute_dsl(
+        self,
+        q: torch.Tensor,
+        k_cache: torch.Tensor,
+        v_cache: torch.Tensor,
+        cache_seqlens: torch.Tensor,
+    ) -> Callable:
+        """Flash Attention implementation using cute-DSL backend."""
+        # For GQA, cute-DSL handles the head expansion internally
+        # We pass the original KV tensors without manual expansion
+        q_heads = q.shape[2]
+        kv_heads = k_cache.shape[2]
+        return lambda: flash_attn_cute_func(
+            q, k_cache, v_cache, causal=CAUSAL, pack_gqa=(q_heads != kv_heads)
         )
 
     @register_benchmark(enabled=HAS_AITER)
