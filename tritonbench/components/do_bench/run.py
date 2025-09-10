@@ -201,7 +201,7 @@ def _do_bench_profiler(
 
     # Calculate number of iterations based on target rep time
     if estimate_ms == 0:
-        n_repeat = 1000  # Default if function is very fast
+        n_repeat = 100  # Default if function is very fast
     else:
         n_repeat = max(1, int(rep / estimate_ms))
 
@@ -221,7 +221,7 @@ def _do_bench_profiler(
                 run_iteration()
         torch.cuda.synchronize()
 
-    n_profiler_runs = 10
+    n_profiler_runs = 5
 
     # Benchmark phase - collect kernel times for each iteration
     all_kernel_times = []
