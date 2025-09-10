@@ -189,7 +189,7 @@ def _do_bench_profiler(
     torch.cuda.synchronize()
 
     # warmup `fn` (and catches any failures in the process)
-    for _ in range(warmup):
+    for _ in range(3):
         fn()
     torch.cuda.synchronize()
 
