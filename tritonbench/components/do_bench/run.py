@@ -206,12 +206,10 @@ def _do_bench_profiler(
         n_repeat = max(1, int(rep / estimate_ms))
 
     # Helper function to execute one iteration
-    def run_iteration(should_clear_cache: bool):
+    def run_iteration():
         if grad_to_none is not None:
             for x in grad_to_none:
                 x.grad = None
-        if should_clear_cache:
-            cache.zero_()
         fn()
 
     if use_cudagraph:
@@ -219,7 +217,7 @@ def _do_bench_profiler(
         g = torch.cuda.CUDAGraph()
         with torch.cuda.graph(g):
             for _ in range(n_repeat):
-                run_iteration(should_clear_cache=False)
+                run_iteration()
         torch.cuda.synchronize()
 
     n_profiler_runs = 10
@@ -244,7 +242,7 @@ def _do_bench_profiler(
             else:
                 # Execute multiple iterations for regular mode
                 for _ in range(n_repeat):
-                    run_iteration(should_clear_cache=True)
+                    run_iteration()
             torch.cuda.synchronize()
 
         # Collect all kernel execution intervals
