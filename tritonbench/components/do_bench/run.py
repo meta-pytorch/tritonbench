@@ -199,6 +199,12 @@ def _do_bench_profiler(
     # First, estimate the runtime to calculate iterations
     estimate_ms = benchmarker.benchmark_gpu(fn, estimation_iters=5, benchmark_iters=10)
 
+    # Calculate number of iterations based on target rep time
+    if estimate_ms == 0:
+        n_repeat = 1000  # Default if function is very fast
+    else:
+        n_repeat = max(1, int(rep / estimate_ms))
+
     # Helper function to execute one iteration
     def run_iteration():
         if grad_to_none is not None:
@@ -206,12 +212,6 @@ def _do_bench_profiler(
                 x.grad = None
         cache.zero_()
         fn()
-
-    # Calculate number of iterations based on target rep time
-    if estimate_ms == 0:
-        n_repeat = 1000  # Default if function is very fast
-    else:
-        n_repeat = max(1, int(rep / estimate_ms))
 
     if use_cudagraph:
         # Create CUDA graph
