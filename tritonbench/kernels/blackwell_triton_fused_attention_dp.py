@@ -175,11 +175,6 @@ def _maybe_make_tensor_desc(desc_or_ptr, shape, strides, block_shape):
         return tl.make_tensor_descriptor(desc_or_ptr, shape, strides, block_shape)
 
 
-@triton.autotune(
-    configs=list(filter(keep, configs)),
-    key=["N_CTX", "HEAD_DIM", "FP8_OUTPUT", "warp_specialize"],
-    prune_configs_by={"early_config_prune": prune_invalid_configs},
-)
 @triton.jit
 def _attn_fwd_tma_dp(sm_scale, M,  #
                      Z, H, desc_q, desc_k, desc_v, desc_o, N_CTX,  #
@@ -244,6 +239,42 @@ def _attn_fwd_tma_dp(sm_scale, M,  #
     m_ptrs1 = M + off_hz * N_CTX + offs_m1
     tl.store(m_ptrs1, m_i1)
     desc_o.store([qo_offset_y+BLOCK_M//2, 0], acc1.to(dtype))
+
+
+@triton.autotune(
+    configs=list(filter(keep, configs)),
+    key=["N_CTX", "HEAD_DIM", "FP8_OUTPUT", "warp_specialize"],
+    prune_configs_by={"early_config_prune": prune_invalid_configs},
+)
+@triton.jit
+def _attn_fwd_persist(sm_scale, M,  #
+              Z, H, desc_q, desc_k, desc_v, desc_o, N_CTX,  #
+              HEAD_DIM: tl.constexpr,  #
+              BLOCK_M: tl.constexpr,  #
+              BLOCK_N: tl.constexpr,  #
+              FP8_OUTPUT: tl.constexpr,  #
+              STAGE: tl.constexpr,  #
+              warp_specialize: tl.constexpr,  #
+              OUTER_LOOP: tl.constexpr,
+              dtype: tl.constexpr,
+              ):
+    n_tile_num = tl.cdiv(N_CTX, BLOCK_M)
+    prog_id = tl.program_id(0)
+    num_progs = tl.num_programs(0)
+    total_tiles = n_tile_num * Z * H
+
+    tiles_per_sm = total_tiles // num_progs
+    if prog_id < total_tiles % num_progs:
+        tiles_per_sm += 1
+
+    tile_idx = prog_id
+    # inner loop warpspec vs. outer loop warpspec
+    for _ in tl.range(0, tiles_per_sm, warp_specialize=warp_specialize and OUTER_LOOP):
+        pid = tile_idx % n_tile_num
+        off_hz = tile_idx // n_tile_num
+        _attn_fwd_tma_dp(sm_scale, M, Z, H, desc_q, desc_k, desc_v, desc_o, N_CTX,
+                         HEAD_DIM, BLOCK_M, BLOCK_N, FP8_OUTPUT, STAGE, warp_specialize and not OUTER_LOOP, dtype)
+        tile_idx += num_progs
 
 
 def torch_dtype_to_triton(dtype):
@@ -316,6 +347,7 @@ class _attention_opt(torch.autograd.Function):
             return torch.empty(size, dtype=torch.int8, device="cuda")
 
         triton.set_allocator(alloc_fn)
+        NUM_SMS = torch.cuda.get_device_properties("cuda").multi_processor_count
 
         def grid(META):
             return (
@@ -323,6 +355,8 @@ class _attention_opt(torch.autograd.Function):
                 q.shape[0] * q.shape[1],
                 1,
             )
+        def grid_persist(META):
+            return (min(NUM_SMS, triton.cdiv(q.shape[2], META["BLOCK_M"]) * q.shape[0] * q.shape[1]), 1, 1)
 
         ctx.grid = grid
         warp_specialize = baseVariant == "ws"
@@ -333,7 +367,7 @@ class _attention_opt(torch.autograd.Function):
                 extra_kern_args["maxnreg"] = 168
             else:
                 extra_kern_args["maxnreg"] = 80
-        _attn_fwd_tma_dp[grid](
+        _attn_fwd_persist[grid_persist](
             sm_scale,
             M,  #
             q.shape[0],
@@ -347,6 +381,7 @@ class _attention_opt(torch.autograd.Function):
             FP8_OUTPUT=q.dtype == torch.float8_e5m2,  #
             STAGE=stage,  #
             warp_specialize=warp_specialize,
+            OUTER_LOOP=True,
             dtype=torch_dtype_to_triton(q.dtype),
             **extra_kern_args,
         )
