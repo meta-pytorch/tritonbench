@@ -298,9 +298,7 @@ def _do_bench_profiler(
             )
 
         # Convert to milliseconds and normalize by iterations
-        total_kernel_time_ms = (
-            total_kernel_time_us / 1000.0
-        ) / n_repeat
+        total_kernel_time_ms = (total_kernel_time_us / 1000.0) / n_repeat
         all_kernel_times.append(total_kernel_time_ms)
 
     times = torch.tensor(all_kernel_times, dtype=torch.float)
