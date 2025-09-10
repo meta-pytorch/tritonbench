@@ -17,6 +17,8 @@ from tritonbench.utils.triton_op import (
     register_x_val,
 )
 
+from .aoti_fp8_triton_mm import aoti_fp8_triton_mm
+
 
 def parse_args(args: List[str]) -> argparse.Namespace:
     parser = argparse.ArgumentParser(
@@ -196,6 +198,17 @@ class Operator(BenchmarkOperator):
             tma_persistent=self.use_tma,
             no_use_persistent=self.no_use_persistent,
             use_warp_specialization=self.warp_specialization,
+        )
+
+    @register_benchmark(enabled=HAS_TRITON)
+    def _aoti_fp8_triton_mm(self, xq, wq, x_scale, w_scale, bias) -> Callable:
+        return lambda: aoti_fp8_triton_mm(
+            xq,
+            x_scale,
+            wq,
+            w_scale,
+            bias=bias,
+            fp8_fast_accum=self.fp8_fast_accum,
         )
 
     @register_benchmark(
