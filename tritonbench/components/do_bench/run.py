@@ -249,6 +249,21 @@ def _do_bench_profiler(
         # Collect all kernel execution intervals
         kernel_intervals = []
 
+        # check the number of cache clear kernels.
+        # we rely on hard-coded aten op name for excluding cache clear kernels.
+        # this check ensures that pytorch does not dispatch to another kernel.
+        num_cache_clear_kernels = len(
+            [
+                evt
+                for evt in prof.events()
+                if evt.device_type == torch.autograd.DeviceType.CUDA
+                and evt.name == CACHE_CLEAR_KERNEL
+            ]
+        )
+        assert (
+            num_cache_clear_kernels == n_repeat
+        ), f"Expected {n_repeat} cache clear kernels but found {num_cache_clear_kernels}"
+
         # Get raw function events and collect time intervals
         for evt in prof.events():
             # Check for CUDA kernel events, excluding cache clear kernel
