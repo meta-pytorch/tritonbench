@@ -185,17 +185,16 @@ def _do_bench_profiler(
     Returns:
         List of measured kernel times in milliseconds (if return_mode="all") or single value.
     """
+    # we don't want any outside errors propagating into benchmarking
+    torch.cuda.synchronize()
+
+    # warmup `fn` (and catches any failures in the process)
+    for _ in range(3):
+        fn()
+    torch.cuda.synchronize()
+
     # Get cache for L2 cache clearing
     cache = triton.runtime.driver.active.get_empty_cache_for_benchmark()
-
-    # First, estimate the runtime to calculate iterations
-    estimate_ms = benchmarker.benchmark_gpu(fn, estimation_iters=5, benchmark_iters=10)
-
-    # Calculate number of iterations based on target rep time
-    if estimate_ms == 0:
-        n_repeat = 1000  # Default if function is very fast
-    else:
-        n_repeat = max(1, int(rep / estimate_ms))
 
     # Helper function to execute one iteration
     def run_iteration():
@@ -205,13 +204,14 @@ def _do_bench_profiler(
         cache.zero_()
         fn()
 
-    # Warmup
-    n_warmup = max(1, int(warmup / estimate_ms)) if estimate_ms > 0 else 25
+    # First, estimate the runtime to calculate iterations
+    estimate_ms = benchmarker.benchmark_gpu(fn, estimation_iters=5, benchmark_iters=10)
 
-    torch.cuda.synchronize()
-    for _ in range(n_warmup):
-        run_iteration()
-    torch.cuda.synchronize()
+    # Calculate number of iterations based on target rep time
+    if estimate_ms == 0:
+        n_repeat = 1000  # Default if function is very fast
+    else:
+        n_repeat = max(1, int(rep / estimate_ms))
 
     if use_cudagraph:
         # Create CUDA graph
