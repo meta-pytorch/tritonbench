@@ -1,7 +1,6 @@
 import copy
 import itertools
 
-import pytest
 import torch
 import triton
 
