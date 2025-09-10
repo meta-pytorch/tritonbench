@@ -193,7 +193,7 @@ def _do_bench_profiler(
 
     # Calculate number of iterations based on target rep time
     if estimate_ms == 0:
-        n_repeat = 100  # Default if function is very fast
+        n_repeat = 1000  # Default if function is very fast
     else:
         n_repeat = max(1, int(rep / estimate_ms))
 
@@ -205,6 +205,14 @@ def _do_bench_profiler(
         cache.zero_()
         fn()
 
+    # Warmup
+    n_warmup = max(1, int(warmup / estimate_ms)) if estimate_ms > 0 else 25
+
+    torch.cuda.synchronize()
+    for _ in range(n_warmup):
+        run_iteration()
+    torch.cuda.synchronize()
+
     if use_cudagraph:
         # Create CUDA graph
         g = torch.cuda.CUDAGraph()
@@ -212,17 +220,8 @@ def _do_bench_profiler(
             for _ in range(n_repeat):
                 run_iteration()
         torch.cuda.synchronize()
-    else:
-        # Regular mode warmup
-        n_warmup = max(1, int(warmup / estimate_ms)) if estimate_ms > 0 else 25
 
-        torch.cuda.synchronize()
-        for _ in range(n_warmup):
-            run_iteration()
-        torch.cuda.synchronize()
-
-    n_profiler_runs = 5
-    iterations_per_profiler_run = n_repeat
+    n_profiler_runs = 10
 
     # Benchmark phase - collect kernel times for each iteration
     all_kernel_times = []
@@ -243,7 +242,7 @@ def _do_bench_profiler(
                 g.replay()
             else:
                 # Execute multiple iterations for regular mode
-                for _ in range(iterations_per_profiler_run):
+                for _ in range(n_repeat):
                     run_iteration()
             torch.cuda.synchronize()
 
@@ -301,7 +300,7 @@ def _do_bench_profiler(
         # Convert to milliseconds and normalize by iterations
         total_kernel_time_ms = (
             total_kernel_time_us / 1000.0
-        ) / iterations_per_profiler_run
+        ) / n_repeat
         all_kernel_times.append(total_kernel_time_ms)
 
     times = torch.tensor(all_kernel_times, dtype=torch.float)
