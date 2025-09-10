@@ -210,6 +210,7 @@ def _do_bench_profiler(
         if grad_to_none is not None:
             for x in grad_to_none:
                 x.grad = None
+        cache.zero_()
         fn()
 
     if use_cudagraph:
