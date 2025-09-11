@@ -82,9 +82,37 @@ class Operator(BenchmarkOperator):
         return lambda: LigerLayerNormFunction.apply(x, weight, bias, eps)
 
     def get_bwd_fn(self, fwd_fn: Callable) -> Callable:
+        from torch.utils._pytree import tree_map
+
+        # Run forward once to get output
         y = fwd_fn()
         dy = 0.1 * torch.randn_like(y)
-        return lambda: y.backward(dy, retain_graph=True)
+
+        # Extract tensors that require gradients from example_inputs
+        grad_tensors = []
+
+        def extract_if_requires_grad(x):
+            if isinstance(x, torch.Tensor) and x.requires_grad:
+                grad_tensors.append(x)
+            return x
+
+        # Use tree_map to find all grad tensors in example_inputs
+        # example_inputs is set by the benchmark framework and contains the current input
+        tree_map(extract_if_requires_grad, self.example_inputs)
+
+        def bwd_fn():
+            # Clear existing gradients
+            for t in grad_tensors:
+                if t.grad is not None:
+                    t.grad = None
+
+            # Run backward
+            y.backward(dy, retain_graph=True)
+
+            # Return the tensors (not gradients) for accuracy checking
+            return grad_tensors
+
+        return bwd_fn
 
     def get_grad_to_none(self, args) -> List[torch.Tensor]:
         x = args[0]

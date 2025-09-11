@@ -28,6 +28,7 @@ import psutil
 import tabulate
 import torch
 import triton
+from torch.utils._pytree import tree_flatten, tree_map
 
 from tritonbench.components.do_bench import do_bench_wrapper, Latency
 from tritonbench.components.export import export_data
@@ -817,7 +818,15 @@ class BenchmarkOperator(metaclass=PostInitProcessor):
                 not backend.fwd_only
             ), f"Backend {bm_func_name} does not support backward pass."
             bwd_fn = self.get_bwd_fn(fwd_fn)
-            fwd_bwd_fn = lambda: (fwd_fn(), bwd_fn())
+
+            # FWD_BWD returns (forward_output, grad_tensors_after_backward)
+            def fwd_bwd_fn():
+                fwd_output = fwd_fn()
+                grad_tensors = (
+                    bwd_fn()
+                )  # This runs backward and returns tensors with grads
+                return (fwd_output, grad_tensors)
+
             setattr(fwd_bwd_fn, "_name", bm_func_name)
             return fwd_bwd_fn
         elif self.mode == Mode.FWD_NO_GRAD:
@@ -1194,11 +1203,66 @@ class BenchmarkOperator(metaclass=PostInitProcessor):
     def logging_group(self) -> Optional[str]:
         return self.tb_args.logging_group
 
+    def _check_gradients(self, grad_tensors, baseline_grad_tensors, mode=""):
+        """Helper to check gradients between two sets of tensors.
+
+        Args:
+            grad_tensors: List of tensors with gradients from implementation
+            baseline_grad_tensors: List of tensors with gradients from baseline
+            mode: Mode name for error messages (e.g. "BWD" or "FWD_BWD")
+
+        Returns:
+            True if gradients match, False otherwise
+        """
+        prefix = f"{mode}: " if mode else ""
+
+        # Ensure we have tensors to check
+        assert len(grad_tensors) > 0, (
+            f"{prefix}No tensors with requires_grad=True found. "
+            "Check that input tensors have requires_grad set."
+        )
+
+        # Ensure same number of grad tensors
+        assert len(grad_tensors) == len(baseline_grad_tensors), (
+            f"{prefix}Mismatch in number of grad tensors: {len(grad_tensors)} vs "
+            f"{len(baseline_grad_tensors)}"
+        )
+
+        # Compare each tensor's gradient
+        has_gradient = False
+        for i, (t, bt) in enumerate(zip(grad_tensors, baseline_grad_tensors)):
+            # Check gradient existence
+            if (t.grad is None) != (bt.grad is None):
+                print(
+                    f"{prefix}Gradient existence mismatch for tensor {i}: "
+                    f"impl has grad={t.grad is not None}, "
+                    f"baseline has grad={bt.grad is not None}"
+                )
+                return False
+
+            if t.grad is not None:
+                has_gradient = True
+                torch.testing.assert_close(
+                    t.grad,
+                    bt.grad,
+                    rtol=self.tb_args.rtol,
+                    atol=self.tb_args.atol,
+                    msg=f"{prefix}Gradient mismatch for tensor {i} with shape {t.shape}",
+                )
+
+        # Ensure at least one tensor has a gradient
+        assert has_gradient, (
+            f"{prefix}No gradients were computed. All tensors have grad=None. "
+            "Check that backward was called and tensors require gradients."
+        )
+
+        return True
+
     def accuracy(self, fn: Callable, baseline_fn: Callable) -> bool:
-        output = fn()
-        baseline_output = baseline_fn()
         try:
             if self.mode == Mode.FWD:
+                output = fn()
+                baseline_output = baseline_fn()
                 torch.testing.assert_close(
                     output,
                     baseline_output,
@@ -1206,30 +1270,55 @@ class BenchmarkOperator(metaclass=PostInitProcessor):
                     atol=self.tb_args.atol,
                 )
             elif self.mode == Mode.BWD:
+                # Get tensors with gradients from both implementations
+                grad_tensors = fn()
+                baseline_grad_tensors = baseline_fn()
+                # Use helper to check gradients
+                if not self._check_gradients(
+                    grad_tensors, baseline_grad_tensors, "BWD"
+                ):
+                    return False
+            elif self.mode == Mode.FWD_BWD:
+                # FWD_BWD should return (forward_output, grad_tensors) tuple
+                output = fn()
+                baseline_output = baseline_fn()
+
+                # Unpack the results - expecting (fwd_output, grad_tensors)
+                if isinstance(output, tuple) and len(output) == 2:
+                    fwd_output, grad_tensors = output
+                    baseline_fwd_output, baseline_grad_tensors = baseline_output
+
+                    # Check forward outputs match
+                    torch.testing.assert_close(
+                        fwd_output,
+                        baseline_fwd_output,
+                        rtol=self.tb_args.rtol,
+                        atol=self.tb_args.atol,
+                    )
+
+                    # Check backward gradients using helper
+                    if not self._check_gradients(
+                        grad_tensors, baseline_grad_tensors, "FWD_BWD"
+                    ):
+                        return False
+                else:
+                    # FWD_BWD mode requires specific return format
+                    raise AssertionError(
+                        f"FWD_BWD mode expects functions to return (forward_output, grad_tensors) tuple, "
+                        f"but got {type(output)}. Operators must properly implement get_bwd_fn() for FWD_BWD mode."
+                    )
+            else:  # FWD_NO_GRAD
+                output = fn()
+                baseline_output = baseline_fn()
                 torch.testing.assert_close(
-                    output.grad,
-                    baseline_output.grad,
-                    rtol=self.tb_args.rtol,
-                    atol=self.tb_args.atol,
-                )
-            else:
-                fwd_output, loss = output
-                baseline_fwd_output, baseline_loss = baseline_output
-                torch.testing.assert_close(
-                    fwd_output,
-                    baseline_fwd_output,
-                    rtol=self.tb_args.rtol,
-                    atol=self.tb_args.atol,
-                )
-                torch.testing.assert_close(
-                    loss.grad,
-                    baseline_loss.grad,
+                    output,
+                    baseline_output,
                     rtol=self.tb_args.rtol,
                     atol=self.tb_args.atol,
                 )
             return True
         except Exception:
-            # either the output tensor or the loss grad tensor does not match
+            # either the output tensor or the grad tensor does not match
             return False
 
     def _do_bench(
