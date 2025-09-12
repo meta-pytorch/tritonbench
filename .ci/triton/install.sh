@@ -101,16 +101,16 @@ install_triton "${TRITON_INSTALL_DIR}"
 # export Triton repo related envs
 # these envs will be used in nightly runs and other benchmarks
 cd "${TRITON_INSTALL_DIR}"
-TRITONBENCH_TRITON_COMMIT=$(git rev-parse --verify HEAD)
+TRITONBENCH_TRITON_COMMIT_HASH=$(git rev-parse --verify HEAD)
 TRITONBENCH_TRITON_REPO=$(git config --get remote.origin.url | sed -E 's|.*github.com[:/](.+)\.git|\1|')
 
 # If the current conda env matches the env we just created
 # then export all Triton related envs to shell env
 cat <<EOF > /workspace/setup_instance.sh
-if [ \${CONDA_DEFAULT_ENV} == ${CONDA_ENV} ] ; then
-    export TRITONBENCH_TRITON_COMMIT_HASH=${TRITONBENCH_TRITON_COMMIT}
-    export TRITONBENCH_TRITON_REPO=${TRITONBENCH_TRITON_REPO}
-    export TRITONBENCH_TRITON_COMMIT=${COMMIT}
-    export TRITONBENCH_TRITON_INSTALL_DIR=${TRITON_INSTALL_DIR}
+if [ \${CONDA_DEFAULT_ENV} == \"${CONDA_ENV}\" ] ; then
+    export TRITONBENCH_TRITON_COMMIT_HASH=\"${TRITONBENCH_TRITON_COMMIT_HASH}\"
+    export TRITONBENCH_TRITON_REPO=\"${TRITONBENCH_TRITON_REPO}\"
+    export TRITONBENCH_TRITON_COMMIT=\"${COMMIT}\"
+    export TRITONBENCH_TRITON_INSTALL_DIR=\"${TRITON_INSTALL_DIR}\"
 fi
 EOF

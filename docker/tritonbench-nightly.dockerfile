@@ -109,7 +109,7 @@ RUN sudo apt-get purge -y libnvidia-compute-550
 
 # Build triton-main conda env
 RUN cd /workspace/tritonbench && \
-    bash .ci/triton/install.sh --conda-env ${CONDA_ENV_TRITON_MAIN} \
+    bash .ci/triton/install.sh --conda-env "${CONDA_ENV_TRITON_MAIN}" \
         --repo triton-lang/triton --commit main --side single \
         --install-dir /workspace/triton-main
 
