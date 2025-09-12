@@ -113,5 +113,8 @@ RUN cd /workspace/tritonbench && \
         --repo triton-lang/triton --commit main --side single \
         --install-dir /workspace/triton-main
 
+# Output setup script for inspection
+RUN cat "${SETUP_SCRIPT}"
+
 # Set run command
 CMD ["bash", "/workspace/tritonbench/docker/entrypoint.sh"]
