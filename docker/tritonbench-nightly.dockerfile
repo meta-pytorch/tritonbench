@@ -107,9 +107,11 @@ RUN cd /workspace/tritonbench && \
 # Remove NVIDIA driver library - they are supposed to be mapped at runtime
 RUN sudo apt-get purge -y libnvidia-compute-550
 
-# Clone the pytorch env as triton-main env, then compile triton main from source
+# Build triton-main conda env
 RUN cd /workspace/tritonbench && \
-    BASE_CONDA_ENV=${CONDA_ENV} CONDA_ENV=${CONDA_ENV_TRITON_MAIN} bash .ci/tritonbench/install-triton-main.sh
+    bash .ci/triton/install.sh --conda-env ${CONDA_ENV_TRITON_MAIN} \
+        --repo triton-lang/triton --commit main --side single \
+        --install-dir /workspace/triton-main
 
 # Set run command
 CMD ["bash", "/workspace/tritonbench/docker/entrypoint.sh"]

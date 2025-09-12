@@ -70,7 +70,7 @@ jobs:
           aws-region: us-east-1
       - name: Compile Triton (Side A)
         run: |
-          bash ./.ci/triton/compile.sh --repo ${{ inputs.side_a_triton }} --commit ${{ inputs.side_a_commit }} --side a
+          bash ./.ci/triton/install.sh --repo ${{ inputs.side_a_triton }} --commit ${{ inputs.side_a_commit }} --side a
       - name: Benchmark Triton (Side A)
         run: |
           bash ./.ci/tritonbench/run-benchmark.sh ${{ inputs.benchmark_name }} --conda-env triton-side-a
@@ -79,7 +79,7 @@ jobs:
           rm -rf .benchmarks || true
       - name: Compile Triton (Side B)
         run: |
-          bash ./.ci/triton/compile.sh --repo ${{ inputs.side_b_triton }} --commit ${{ inputs.side_b_commit }} --side b
+          bash ./.ci/triton/install.sh --repo ${{ inputs.side_b_triton }} --commit ${{ inputs.side_b_commit }} --side b
       - name: Benchmark Triton (Side B)
         run: |
           bash ./.ci/tritonbench/run-benchmark.sh ${{ inputs.benchmark_name }} --conda-env triton-side-b
