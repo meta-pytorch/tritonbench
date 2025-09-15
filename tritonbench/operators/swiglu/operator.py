@@ -77,7 +77,7 @@ class Operator(BenchmarkOperator):
 
             functorch_config.donated_buffer = False
 
-        compiled = torch.compile(self.baseline_op, mode="default")
+        compiled = torch.compile(self.baseline_op, mode="max-autotune-no-cudagraphs")
         return lambda: compiled(input)
 
     @register_x_val(label="(B, T, H)")
