@@ -31,15 +31,24 @@ class Operator(BenchmarkOperator):
         self.dtype = torch.bfloat16
         self.intermediate_size = 11008
         self.hidden_act = "silu"
-        llama_config = LlamaConfig(
+        self.llama_config = LlamaConfig(
             hidden_size=self.hidden_size,
             intermediate_size=self.intermediate_size,
             hidden_act=self.hidden_act,
         )
-        self.baseline_op = LlamaMLP(config=llama_config).to(self.device).to(self.dtype)
-        self.liger_op = (
-            LigerSwiGLUMLP(config=llama_config).to(self.device).to(self.dtype)
-        )
+        self.baseline_op = LlamaMLP(self.llama_config).to(self.device).to(self.dtype)
+        self.liger_op = LigerSwiGLUMLP(self.llama_config).to(self.device).to(self.dtype)
+        # Copy weights from baseline to liger model for fair accuracy comparison
+        with torch.no_grad():
+            self.liger_op.gate_proj.weight.data.copy_(
+                self.baseline_op.gate_proj.weight.data
+            )
+            self.liger_op.up_proj.weight.data.copy_(
+                self.baseline_op.up_proj.weight.data
+            )
+            self.liger_op.down_proj.weight.data.copy_(
+                self.baseline_op.down_proj.weight.data
+            )
 
     def get_input_iter(self) -> Generator:
         for seq_len in [2**i for i in range(10, 14)]:
@@ -68,7 +77,7 @@ class Operator(BenchmarkOperator):
 
             functorch_config.donated_buffer = False
 
-        compiled = torch.compile(self.baseline_op, mode="max-autotune-no-cudagraphs")
+        compiled = torch.compile(self.baseline_op, mode="default")
         return lambda: compiled(input)
 
     @register_x_val(label="(B, T, H)")
