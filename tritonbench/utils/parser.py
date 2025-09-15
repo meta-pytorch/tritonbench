@@ -175,6 +175,12 @@ def get_parser(args=None):
         help="Dump Triton IR to specific directory.",
     )
     parser.add_argument(
+        "--power-chart",
+        type=str,
+        default=None,
+        help="Dump GPU power chart to specific directory.",
+    )
+    parser.add_argument(
         "--gpu-lockdown",
         action="store_true",
         help="Lock down GPU frequency and clocks to avoid throttling.",
