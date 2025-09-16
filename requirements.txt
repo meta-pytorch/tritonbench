@@ -2,4 +2,5 @@ packaging
 nvidia-ml-py
 psutil
 tabulate
+matplotlib
 transformers==4.46.1
