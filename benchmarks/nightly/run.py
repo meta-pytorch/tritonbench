@@ -84,15 +84,15 @@ def run():
         run_in_task(op=op_name, op_args=op_args, benchmark_name=op_bench)
         # write pass or fail to result json
         # todo: check every input shape has passed
+        output_file_name = Path(output_file).stem
         if not os.path.exists(output_file) or os.path.getsize(output_file) == 0:
-            output_file_name = Path(output_file).stem
-            logger.warning(f"[nightly] Failed to run {output_file_name}.", flush=True)
+            logger.warning(f"[nightly] Failed to run {output_file_name}.")
             with open(output_file, "w") as f:
                 json.dump({f"tritonbench_{output_file_name}-pass": 0}, f)
         else:
             with open(output_file, "r") as f:
                 obj = json.load(f)
-            obj["tritonbench_{output_file_name}-pass"] = 1
+            obj[f"tritonbench_{output_file_name}-pass"] = 1
             with open(output_file, "w") as f:
                 json.dump(obj, f, indent=4)
         output_files.append(output_file)
