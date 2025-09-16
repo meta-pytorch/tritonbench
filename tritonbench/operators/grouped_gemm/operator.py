@@ -1,3 +1,4 @@
+import logging
 from itertools import accumulate
 from typing import Any, Generator, List, Tuple
 
@@ -12,6 +13,8 @@ from tritonbench.utils.triton_op import (
     register_metric,
 )
 
+logger = logging.getLogger(__name__)
+
 # Try to import Cutlass and CuteDSL
 try:
     import cutlass
@@ -22,12 +25,28 @@ try:
     # Set HAS_CUTEDSL to True if import succeeds
     HAS_CUTEDSL = True
 except (ImportError, AttributeError):
+    logger.warning("Failed to import CuteDSL and/or Cutlass")
     HAS_CUTEDSL = False
 
 
 from .kernels import triton_group_gemm_fn
 
 IS_B200 = is_cuda() and get_nvidia_gpu_model() == "NVIDIA B200"
+
+
+def get_default_shapes():
+    group_size = 4
+    x_vals = [2**i for i in range(7, 11)]  # 128, 256, 512, 1024
+
+    shapes = []
+    for N in x_vals:
+        M = K = N
+        N_out = N
+        A_shapes = [(M, K)] * group_size
+        B_shape = (K, N_out)
+        shapes.append((A_shapes, B_shape))
+
+    return shapes
 
 
 # TODO(nikhilap): Add a separate 3D grouped_gemm operator to alleviate the restriction that all B tensors must be the same.
@@ -141,28 +160,35 @@ class Operator(BenchmarkOperator):
         return _inner
 
     def get_input_iter(self) -> Generator:
-        # NOTE:
-        # The 2D+offs variant of torch._grouped_mm only supports a *single shared B* across groups.
-        # That’s why group_B here just repeats the same B_shared reference.
-        # If you need truly different B_i per group, you cannot use the 2D+offs API —
-        # instead, you must switch to the 3D variant (both A and B 3D) where offs is not required.
-        self.group_size = 4
-        x_vals = [2**i for i in range(7, 11)]  # 128, 256, 512, 1024
+        """
+        If external shapes are provided, generate inputs for those shapes.
+        If not, fall back to the default sweep:
+            group_size = 4
+            x_vals = [128, 256, 512, 1024]
+        NOTE:
+        The 2D+offs variant of torch._grouped_mm only supports a *single shared B* across groups.
+        That’s why group_B here just repeats the same B_shared reference.
+        If you need truly different B_i per group, you cannot use the 2D+offs API —
+        instead, you must switch to the 3D variant (both A and B 3D) where offs is not required.
+        """
+        if hasattr(self, "external_shapes") and self.external_shapes:
+            self.shapes = self.external_shapes
+        else:
+            self.shapes = get_default_shapes()
 
-        for N in x_vals:
-            G = self.group_size
-            M = K = N
-            N_out = N
+        # Generate tensors from shapes
+        for A_shapes, B_shape in self.shapes:
+            G = len(A_shapes)
 
             B_shared = torch.rand(
-                (K, N_out), device=self.device, dtype=self.dtype
+                B_shape, device=self.device, dtype=self.dtype
             ).contiguous()
 
             group_A = [
-                torch.rand((M, K), device=self.device, dtype=self.dtype).contiguous()
-                for _ in range(G)
+                torch.rand(A_shape, device=self.device, dtype=self.dtype).contiguous()
+                for A_shape in A_shapes
             ]
-            group_B = [B_shared] * G  # same weight per group in list-form
+            group_B = [B_shared] * G
 
             yield (group_A, group_B)
 
