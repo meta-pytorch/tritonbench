@@ -77,7 +77,10 @@ def _run(args: argparse.Namespace, extra_args: List[str]) -> BenchmarkOperatorRe
         # Log benchmark output to scuba even if not in fbcode
         if args.log_scuba and not is_fbcode():
             from tritonbench.utils.scuba_utils import log_benchmark
-            log_benchmark(benchmark_data=None, run_timestamp=run_timestamp, opbench=opbench)
+
+            log_benchmark(
+                benchmark_data=None, run_timestamp=run_timestamp, opbench=opbench
+            )
 
         if args.plot:
             try:

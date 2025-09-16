@@ -9,8 +9,8 @@ import json
 import logging
 import os
 import sys
-from pathlib import Path
 from os.path import abspath, exists
+from pathlib import Path
 from typing import Any, Dict
 
 import yaml
@@ -36,6 +36,7 @@ def setup_tritonbench_cwd():
         os.chdir(tritonbench_dir)
         sys.path.append(tritonbench_dir)
     return original_dir
+
 
 def get_operator_benchmarks() -> Dict[str, Any]:
     def _load_benchmarks(config_path: str) -> Dict[str, Any]:
@@ -83,10 +84,7 @@ def run():
         run_in_task(op=op_name, op_args=op_args, benchmark_name=op_bench)
         # write pass or fail to result json
         # todo: check every input shape has passed
-        if (
-            not os.path.exists(output_file)
-            or os.path.getsize(output_file) == 0
-        ):
+        if not os.path.exists(output_file) or os.path.getsize(output_file) == 0:
             output_file_name = Path(output_file).stem
             logger.warning(f"[nightly] Failed to run {output_file_name}.", flush=True)
             with open(output_file, "w") as f:
@@ -99,8 +97,10 @@ def run():
                 json.dump(obj, f, indent=4)
         output_files.append(output_file)
     # Reduce all operator CSV outputs to a single output json
-    benchmark_data = [ json.load(open(f, "r")) for f in output_files ]
-    aggregated_obj = decorate_benchmark_data(args.name, run_timestamp, args.ci, benchmark_data)
+    benchmark_data = [json.load(open(f, "r")) for f in output_files]
+    aggregated_obj = decorate_benchmark_data(
+        args.name, run_timestamp, args.ci, benchmark_data
+    )
     result_json_file = os.path.join(output_dir, "result.json")
     with open(result_json_file, "w") as fp:
         json.dump(aggregated_obj, fp, indent=4)

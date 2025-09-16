@@ -1,17 +1,19 @@
 """
 Log benchmark results to scuba table (Requires Scuba token stored in TRITONBENCH_SCRIBE_GRAPHQL_ACCESS_TOKEN)
 """
-import os
-from collections import defaultdict
+
 import json
-import requests
+import os
 import time
+from collections import defaultdict
+
+from typing import Any, Dict, List, Optional
+
+import requests
 
 from tritonbench.utils.gpu_utils import get_nvidia_gpu_states, has_nvidia_smi
 from tritonbench.utils.path_utils import REPO_PATH
 from tritonbench.utils.run_utils import get_github_env, get_run_env
-
-from typing import List, Dict, Any, Optional
 
 CATEGORY_NAME = "perfpipe_pytorch_user_benchmarks"
 
@@ -127,8 +129,9 @@ class ScribeUploader:
         self._upload(messages)
 
 
-
-def decorate_benchmark_data(name, run_timestamp, ci: bool, benchmark_data: List[Dict[str, Any]]):
+def decorate_benchmark_data(
+    name, run_timestamp, ci: bool, benchmark_data: List[Dict[str, Any]]
+):
     """aggregate benchmark_data into a single object"""
 
     repo_locs = {
@@ -153,17 +156,24 @@ def decorate_benchmark_data(name, run_timestamp, ci: bool, benchmark_data: List[
         aggregated_obj["github"] = get_github_env()
     else:
         aggregated_obj["env"]["unix_user"] = os.environ.get("USER", "unknown")
-    
+
     for data in benchmark_data:
         aggregated_obj["metrics"].update(data)
 
     return aggregated_obj
 
-def log_benchmark(benchmark_data, run_timestamp: Optional[str]=None, opbench: Optional[Any]=None):
+
+def log_benchmark(
+    benchmark_data, run_timestamp: Optional[str] = None, opbench: Optional[Any] = None
+):
     if opbench:
-        assert benchmark_data is None, "Only one of opbench or benchmark_data can be specified"
+        assert (
+            benchmark_data is None
+        ), "Only one of opbench or benchmark_data can be specified"
         benchmark_data = decorate_benchmark_data(
-            name=opbench.logging_group if opbench.logging_group else opbench.benchmark_name,
+            name=opbench.logging_group
+            if opbench.logging_group
+            else opbench.benchmark_name,
             run_timestamp=run_timestamp,
             ci=False,
             benchmark_data=[opbench.output.userbenchmark_dict],

@@ -25,6 +25,7 @@ def setup_tritonbench_cwd():
         sys.path.append(tritonbench_dir)
     return original_dir
 
+
 setup_tritonbench_cwd()
 from tritonbench.utils.scuba_utils import log_benchmark
 
