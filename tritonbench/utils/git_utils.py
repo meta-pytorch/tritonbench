@@ -1,7 +1,6 @@
 import os
 import subprocess
 from datetime import datetime
-from typing import Optional
 
 
 def get_branch(repo: str, commit: str) -> str:
@@ -29,7 +28,7 @@ def get_commit_time(repo: str, commit: str) -> str:
     commit: hash of a commit
     If a commit does not exist, return "unknown"
     """
-    if "repo" == "unknown":
+    if repo == "unknown":
         return "unknown"
     assert os.path.exists(repo), f"{repo} path does not exist."
     git_date_cmd = ["git", "show", "--no-patch", "--format=%ci", commit]
