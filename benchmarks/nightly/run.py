@@ -1,5 +1,6 @@
 """
 Tritonbench nightly run, dashboard: https://hud.pytorch.org/tritonbench/commit_view
+Run all operators in nightly/autogen.yaml.
 Requires the operator to support the speedup metric.
 """
 
@@ -37,7 +38,7 @@ def setup_tritonbench_cwd():
     return original_dir
 
 
-def reduce(run_timestamp, output_dir, output_files, args):
+def reduce(name, run_timestamp, output_files, args):
     """aggregate all op benchmark csvs into json file"""
     from tritonbench.utils.gpu_utils import get_nvidia_gpu_states, has_nvidia_smi
     from tritonbench.utils.path_utils import REPO_PATH
@@ -46,11 +47,11 @@ def reduce(run_timestamp, output_dir, output_files, args):
     repo_locs = {
         "tritonbench": REPO_PATH,
     }
-    if args.ci and "TRITONBENCH_TRITON_REPO_PATH" in os.environ:
-        repo_locs["triton"] = os.environ.get("TRITONBENCH_TRITON_REPO_PATH", None)
-        repo_locs["pytorch"] = os.environ.get("TRITONBENCH_PYTORCH_REPO_PATH", None)
+    if args.ci and "TRITONBENCH_TRITON_REPO" in os.environ:
+        repo_locs["triton"] = os.environ.get("TRITONBENCH_TRITON_REPO", "unknown")
+        repo_locs["pytorch"] = os.environ.get("TRITONBENCH_PYTORCH_REPO_PATH", "unknown")
     aggregated_obj = {
-        "name": "nightly",
+        "name": name,
         "env": get_run_env(run_timestamp, repo_locs),
         "metrics": {},
     }
@@ -82,10 +83,7 @@ def reduce(run_timestamp, output_dir, output_files, args):
         ) as fp:
             result_obj = json.load(fp)
             aggregated_obj["metrics"].update(result_obj)
-    result_json_path = os.path.join(output_dir, "result.json")
-    with open(result_json_path, "w") as fp:
-        json.dump(aggregated_obj, fp, indent=4)
-    return result_json_path
+    return aggregated_obj
 
 
 def get_operator_benchmarks() -> Dict[str, Any]:
@@ -111,8 +109,12 @@ def get_operator_benchmarks() -> Dict[str, Any]:
 
 def run():
     parser = argparse.ArgumentParser()
+    parser.add_argument("--name", default="nightly", help="Benchmark name.")
     parser.add_argument(
         "--ci", action="store_true", help="Running in GitHub Actions CI mode."
+    )
+    parser.add_argument(
+        "--log-scuba", action="store_true", help="Upload results to Scuba."
     )
     args = parser.parse_args()
     setup_tritonbench_cwd()
@@ -129,8 +131,16 @@ def run():
         run_in_task(op=op_name, op_args=op_args, benchmark_name=op_bench)
         output_files.append(output_file)
     # Reduce all operator CSV outputs to a single output json
-    result_json_file = reduce(run_timestamp, output_dir, output_files, args)
+    aggregated_obj = reduce(args.name, run_timestamp, output_files, args)
+    result_json_file = os.path.join(output_dir, "result.json")
+    with open(result_json_file, "w") as fp:
+        json.dump(aggregated_obj, fp, indent=4)
     logger.info(f"[nightly] logging result json file to {result_json_file}.")
+    if args.log_scuba:
+        from tritonbench.utils.scuba_utils import log_benchmark
+
+        log_benchmark(aggregated_obj)
+        logger.info(f"[nightly] logging results to scuba.")
 
 
 if __name__ == "__main__":

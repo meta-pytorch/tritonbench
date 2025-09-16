@@ -57,7 +57,7 @@ def get_run_env(
     run_env["pytorch_commit"] = torch.version.git_version
     # we assume Tritonbench CI will properly set Triton commit hash in env
     run_env["triton_commit"] = os.environ.get(
-        "TRITONBENCH_TRITON_MAIN_COMMIT", "unknown"
+        "TRITONBENCH_TRITON_COMMIT_HASH", "unknown"
     )
     run_env["tritonbench_commit"] = get_current_hash(REPO_PATH)
     for repo in ["triton", "pytorch", "tritonbench"]:
