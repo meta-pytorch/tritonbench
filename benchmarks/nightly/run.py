@@ -10,7 +10,6 @@ import logging
 import os
 import sys
 from os.path import abspath, exists
-from pathlib import Path
 from typing import Any, Dict
 
 import yaml
@@ -36,55 +35,6 @@ def setup_tritonbench_cwd():
         os.chdir(tritonbench_dir)
         sys.path.append(tritonbench_dir)
     return original_dir
-
-
-def reduce(name, run_timestamp, output_files, args):
-    """aggregate all op benchmark csvs into json file"""
-    from tritonbench.utils.gpu_utils import get_nvidia_gpu_states, has_nvidia_smi
-    from tritonbench.utils.path_utils import REPO_PATH
-    from tritonbench.utils.run_utils import get_github_env, get_run_env
-
-    repo_locs = {
-        "tritonbench": REPO_PATH,
-    }
-    if args.ci and "TRITONBENCH_TRITON_REPO" in os.environ:
-        repo_locs["triton"] = os.environ.get("TRITONBENCH_TRITON_REPO", "unknown")
-        repo_locs["pytorch"] = os.environ.get("TRITONBENCH_PYTORCH_REPO_PATH", "unknown")
-    aggregated_obj = {
-        "name": name,
-        "env": get_run_env(run_timestamp, repo_locs),
-        "metrics": {},
-    }
-    if has_nvidia_smi():
-        aggregated_obj.update(
-            {
-                "nvidia_gpu_states": get_nvidia_gpu_states(),
-            }
-        )
-
-    # Collecting GitHub environment variables when running in CI environment
-    if args.ci:
-        aggregated_obj["github"] = get_github_env()
-
-    for result_json_file in output_files:
-        logger.info(f"Loading output file: {result_json_file}.")
-        result_json_filename = Path(result_json_file).stem
-        if (
-            not os.path.exists(result_json_file)
-            or os.path.getsize(result_json_file) == 0
-        ):
-            aggregated_obj["metrics"][f"tritonbench_{result_json_filename}-pass"] = 0
-            continue
-        # TODO: check if all inputs pass
-        aggregated_obj["metrics"][f"tritonbench_{result_json_filename}-pass"] = 1
-        with open(
-            result_json_file,
-            "r",
-        ) as fp:
-            result_obj = json.load(fp)
-            aggregated_obj["metrics"].update(result_obj)
-    return aggregated_obj
-
 
 def get_operator_benchmarks() -> Dict[str, Any]:
     def _load_benchmarks(config_path: str) -> Dict[str, Any]:
@@ -119,6 +69,7 @@ def run():
     args = parser.parse_args()
     setup_tritonbench_cwd()
     from tritonbench.utils.run_utils import run_in_task, setup_output_dir
+    from tritonbench.utils.scuba_utils import decorate_benchmark_data, log_benchmark
 
     run_timestamp, output_dir = setup_output_dir("nightly")
     # Run each operator
@@ -131,14 +82,13 @@ def run():
         run_in_task(op=op_name, op_args=op_args, benchmark_name=op_bench)
         output_files.append(output_file)
     # Reduce all operator CSV outputs to a single output json
-    aggregated_obj = reduce(args.name, run_timestamp, output_files, args)
+    benchmark_data = [ json.load(open(f, "r")) for f in output_files ]
+    aggregated_obj = decorate_benchmark_data(args.name, run_timestamp, args.ci, benchmark_data)
     result_json_file = os.path.join(output_dir, "result.json")
     with open(result_json_file, "w") as fp:
         json.dump(aggregated_obj, fp, indent=4)
     logger.info(f"[nightly] logging result json file to {result_json_file}.")
     if args.log_scuba:
-        from tritonbench.utils.scuba_utils import log_benchmark
-
         log_benchmark(aggregated_obj)
         logger.info(f"[nightly] logging results to scuba.")
 

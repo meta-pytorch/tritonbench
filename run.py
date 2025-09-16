@@ -72,6 +72,10 @@ def _run(args: argparse.Namespace, extra_args: List[str]) -> BenchmarkOperatorRe
             if "triton_type" in args:
                 kwargs["triton_type"] = args.triton_type
             log_benchmark(**kwargs)
+        # Log benchmark output to scuba even if not in fbcode
+        if args.log_scuba and not is_fbcode():
+            from tritonbench.utils.scuba_utils import log_benchmark
+            log_benchmark(benchmark_data=None, opbench=opbench)
 
         if args.plot:
             try:
