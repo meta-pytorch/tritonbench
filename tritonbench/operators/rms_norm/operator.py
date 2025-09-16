@@ -96,7 +96,7 @@ class Operator(BenchmarkOperator):
         self.llama_rms_op = LlamaRMSNorm(hidden_size=H, eps=self.eps).to(self.device)
         return lambda: self.llama_rms_op(input)
 
-    @register_benchmark()
+    @register_benchmark(enabled=LigerRMSNorm is not None)
     def liger_rms(self, H, input) -> Callable:
         self.liger_rms_op = LigerRMSNorm(hidden_size=H, eps=self.eps).to(self.device)
         return lambda: self.liger_rms_op(input)
@@ -119,13 +119,40 @@ class Operator(BenchmarkOperator):
     def aiter(self, H, input) -> Callable:
         self.aiter_rms_op = AITerRMSNorm(hidden_size=H, eps=self.eps).to(self.device)
         return lambda: self.aiter_rms_op(input)
-
     @register_x_val(label="(M, H)")
     def get_x_val(self, example_inputs) -> Tuple[int, int]:
         H = example_inputs[0]
         return (self.M, H)
 
     def get_bwd_fn(self, fwd_fn: Callable) -> Callable:
+        from torch.utils._pytree import tree_map
+
+        # Run forward once to get output
         y = fwd_fn()
-        do = torch.randn_like(y)
-        return lambda: y.backward(do, retain_graph=True)
+        dy = 0.1 * torch.randn_like(y)
+
+        # Extract tensors that require gradients from example_inputs
+        grad_tensors = []
+
+        def extract_if_requires_grad(x):
+            if isinstance(x, torch.Tensor) and x.requires_grad:
+                grad_tensors.append(x)
+            return x
+
+        # Use tree_map to find all grad tensors in example_inputs
+        # example_inputs is set by the benchmark framework and contains the current input
+        tree_map(extract_if_requires_grad, self.example_inputs)
+
+        def bwd_fn():
+            # Clear existing gradients
+            for t in grad_tensors:
+                if t.grad is not None:
+                    t.grad = None
+
+            # Run backward
+            y.backward(dy, retain_graph=True)
+
+            # Return the tensors (not gradients) for accuracy checking
+            return grad_tensors
+
+        return bwd_fn
