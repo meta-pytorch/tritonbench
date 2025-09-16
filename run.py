@@ -7,9 +7,10 @@ Note: make sure to `python install.py` first or otherwise make sure the benchmar
 
 import argparse
 import os
-import shlex
 import sys
-from typing import List, Tuple
+import time
+from datetime import datetime
+from typing import List
 
 from tritonbench.operator_loader import get_op_loader_bench_cls_by_name, is_loader_op
 
@@ -35,6 +36,7 @@ except ImportError:
 
 
 def _run(args: argparse.Namespace, extra_args: List[str]) -> BenchmarkOperatorResult:
+    run_timestamp = datetime.fromtimestamp(time.time()).strftime("%Y%m%d%H%M%S")
     if is_loader_op(args.op):
         Opbench = get_op_loader_bench_cls_by_name(args.op)
     else:
@@ -75,7 +77,7 @@ def _run(args: argparse.Namespace, extra_args: List[str]) -> BenchmarkOperatorRe
         # Log benchmark output to scuba even if not in fbcode
         if args.log_scuba and not is_fbcode():
             from tritonbench.utils.scuba_utils import log_benchmark
-            log_benchmark(benchmark_data=None, opbench=opbench)
+            log_benchmark(benchmark_data=None, run_timestamp=run_timestamp, opbench=opbench)
 
         if args.plot:
             try:
