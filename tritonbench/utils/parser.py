@@ -288,9 +288,9 @@ def get_parser(args=None):
         help="Configuration B for A/B testing. Specify operator-specific arguments as a string. "
         "Example: '--side-b \"--dynamic\"'",
     )
+    parser.add_argument("--log-scuba", action="store_true", help="Log to scuba.")
 
     if is_fbcode():
-        parser.add_argument("--log-scuba", action="store_true", help="Log to scuba.")
         parser.add_argument(
             "--production-shapes",
             action="store_true",

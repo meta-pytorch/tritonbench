@@ -11,6 +11,8 @@ def get_branch(repo: str, commit: str) -> str:
     If a commit does not belong to any branch, return "unknown"
     If a commit belongs to many branches, return the very first branch.
     """
+    if repo == "unknown":
+        return "unknown"
     assert os.path.exists(repo), f"{repo} path does not exist."
     cmd = ["git", "branch", "-a", "--contains", commit, "--no-color"]
     branch_names = subprocess.check_output(cmd, cwd=repo).decode().strip().splitlines()
@@ -27,6 +29,8 @@ def get_commit_time(repo: str, commit: str) -> str:
     commit: hash of a commit
     If a commit does not exist, return "unknown"
     """
+    if "repo" == "unknown":
+        return "unknown"
     assert os.path.exists(repo), f"{repo} path does not exist."
     git_date_cmd = ["git", "show", "--no-patch", "--format=%ci", commit]
     git_date = subprocess.check_output(git_date_cmd, cwd=repo).decode().strip()
@@ -40,6 +44,8 @@ def get_commit_time(repo: str, commit: str) -> str:
 def get_current_hash(repo: str) -> str:
     """Get the HEAD hash of a git repo.
     repo: local git repo path"""
+    if repo == "unknown":
+        return "unknown"
     cmd = ["git", "rev-parse", "--verify", "HEAD"]
     output = subprocess.check_output(cmd, cwd=repo).decode().strip()
     return output
