@@ -28,8 +28,6 @@ fp8_fused_quant_gemm_rowwise:
 gemm:
   # internal only kernels
   - hstu_triton_matmul
-  # pt2 cutlass kernel
-  - pt2_cutlass_matmul
 # jagged tests are slow, so disable them in OSS
 jagged_layer_norm:
 jagged_mean:
