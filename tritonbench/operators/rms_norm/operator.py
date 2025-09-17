@@ -119,6 +119,7 @@ class Operator(BenchmarkOperator):
     def aiter(self, H, input) -> Callable:
         self.aiter_rms_op = AITerRMSNorm(hidden_size=H, eps=self.eps).to(self.device)
         return lambda: self.aiter_rms_op(input)
+
     @register_x_val(label="(M, H)")
     def get_x_val(self, example_inputs) -> Tuple[int, int]:
         H = example_inputs[0]
