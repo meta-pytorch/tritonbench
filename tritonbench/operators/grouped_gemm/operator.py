@@ -62,6 +62,16 @@ class Operator(BenchmarkOperator):
 
         return _inner
 
+    # Version of the ATen benchmark that doesn't time input preprocessing
+    @register_benchmark()
+    def preprocessed_aten_grouped_mm(self, group_A, group_B):
+        A_packed, B_shared, offs = self.list_input_to_jagged(group_A, group_B)
+
+        def _inner():
+            return torch._grouped_mm(A_packed, B_shared, offs=offs, bias=None)
+
+        return _inner
+
     @register_benchmark()
     def naive(self, group_A, group_B):
         b_shared = group_B[0]
@@ -93,6 +103,23 @@ class Operator(BenchmarkOperator):
 
         return _inner
 
+    # Version of the Inductor Triton benchmark that doesn't time input preprocessing
+    @register_benchmark()
+    def preprocessed_pt2_triton_grouped_mm(self, group_A, group_B):
+        def _inner():
+            torch._dynamo.reset()
+
+            with inductor_config.patch(
+                max_autotune=True,
+                max_autotune_gemm_backends="TRITON",
+                autotune_fallback_to_aten=False,
+            ):
+                A_packed, B_shared, offs = self.list_input_to_jagged(group_A, group_B)
+                compiled = torch.compile(torch._grouped_mm, dynamic=False)
+                return compiled(A_packed, B_shared, offs=offs, bias=None)
+
+        return _inner
+
     @register_benchmark()
     def triton(self, group_A, group_B):
         def _inner():
@@ -109,6 +136,62 @@ class Operator(BenchmarkOperator):
                 len(group_A),
                 group_A[0].dtype,
             )
+            return torch.cat(outs, dim=0)
+
+        return _inner
+
+    # NOTE(nikhilap): These CuteDSL kernels are highly experimental, and certain design decisions may affect the accuracy of their measurements.
+    # In the kernel below, it was decided to NOT include the time it takes to convert from Torch to Cute tensors and construct the tensors of
+    # dims, strides, etc. that the kernel needs. Additionally, we are not including the compile time. This was done so we can measure raw kernel
+    # performance. The Inductor implementation has not yet been fleshed out, but should hopefully hide some of the preprocessing steps we have chosen
+    # to omit here.
+    @register_benchmark(enabled=HAS_CUTEDSL and IS_B200)
+    def precompiled_cutedsl_grouped_mm(self, group_A, group_B):
+        (
+            compiled_grouped_gemm,
+            initial_cute_tensors_abc,
+            tensor_of_dim_size_mnkl,
+            tensor_of_strides_abc,
+            tensor_of_ptrs_abc,
+            tensor_of_tensormap,
+            current_stream,
+            torch_tensors_abc,
+        ) = compile_cutedsl_grouped_gemm(
+            group_A,
+            group_B,
+            ab_dtype=cutlass.Float16
+            if self.dtype == torch.float16
+            else cutlass.BFloat16,
+            c_dtype=cutlass.Float16
+            if self.dtype == torch.float16
+            else cutlass.BFloat16,
+            acc_dtype=cutlass.Float32,
+            a_major="m",
+            b_major="n",
+            c_major="m",
+            mma_tiler_mn=(128, 128),
+            cluster_shape_mn=(1, 1),
+            use_2cta_instrs=False,
+            tensormap_update_mode=utils.TensorMapUpdateMode.SMEM,
+            tolerance=0.5,
+            warmup_iterations=0,
+            iterations=1,
+            skip_ref_check=True,
+        )
+
+        def _inner():
+            compiled_grouped_gemm(
+                initial_cute_tensors_abc[0],
+                initial_cute_tensors_abc[1],
+                initial_cute_tensors_abc[2],
+                tensor_of_dim_size_mnkl,
+                tensor_of_strides_abc,
+                tensor_of_ptrs_abc,
+                tensor_of_tensormap,
+                current_stream,
+            )
+
+            outs = [C.squeeze(-1) for (_, _, C) in torch_tensors_abc]
             return torch.cat(outs, dim=0)
 
         return _inner
