@@ -59,39 +59,65 @@ class Operator(BenchmarkOperator):
         _, n = w.size()
         return (B, m, n, k)
 
+    def _matmul_from_packed(self, x_2d, w_int4_packed, K, N):
+        w_int8 = w_int4_packed.to(torch.int8)
+
+        # Extract low and high 4-bit values with sign extension for low bits
+        w_lo = ((w_int8 << 4) >> 4).to(torch.bfloat16)  # Sign extend lower 4-bit
+        w_hi = (w_int8 >> 4).to(torch.bfloat16)  # Upper 4-bit
+
+        # Interleave them back to get full K dimension
+        w_unpacked = torch.stack([w_lo, w_hi], dim=1).reshape(K, N)
+
+        # Perform regular matrix multiplication
+        return torch.matmul(x_2d, w_unpacked)
+
     @register_benchmark(baseline=True)
-    def tinygemm(self, x, w):
-        x = x.reshape(-1, x.size(-1))
-        w_int4_packed = pack_2xint4(w).T.contiguous().T
-        K, N = w.shape
-
-        # Return a lambda that does the unpacking and matmul together (matches triton impl behavior)
+    def eager_int4_gemm(self, x, w):
         def compute_unpack_and_matmul():
-            # Unpack the int4 values
-            w_int8 = w_int4_packed.to(torch.int8)
-
-            # Extract low and high 4-bit values with sign extension for low bits
-            w_lo = ((w_int8 << 4) >> 4).to(torch.bfloat16)  # Sign extend lower 4-bit
-            w_hi = (w_int8 >> 4).to(torch.bfloat16)  # Upper 4-bit
-
-            # Interleave them back to get full K dimension
-            w_unpacked = torch.stack([w_lo, w_hi], dim=1).reshape(K, N)
-
-            # Perform regular matrix multiplication
-            return torch.matmul(x, w_unpacked)
+            x_2d = x.reshape(-1, x.size(-1))
+            K, N = w.shape
+            w_int4_packed = pack_2xint4(w).T.contiguous().T
+            return self._matmul_from_packed(x_2d, w_int4_packed, K, N)
 
         return compute_unpack_and_matmul
 
     @register_benchmark()
-    def torch_compile_tinygemm(self, x, w):
-        return torch.compile(self.tinygemm(x, w), mode="max-autotune-no-cudagraphs")
+    def torch_compile_int4_gemm(self, x, w):
+        return torch.compile(
+            self.eager_int4_gemm(x, w), mode="max-autotune-no-cudagraphs"
+        )
 
     @register_benchmark()
-    def triton(self, x, w):
-        x = x.reshape(-1, x.size(-1))
-        w_int4 = pack_2xint4(w).T.contiguous().T
-        print(w_int4.dtype)
-        return lambda: matmul(x, w_int4)
+    def triton_int4_gemm(self, x, w):
+        def run_kernel():
+            x_2d = x.reshape(-1, x.size(-1))
+            w_int4_packed = pack_2xint4(w).T.contiguous().T
+
+            return matmul(x_2d, w_int4_packed)
+
+        return run_kernel
+
+    @register_benchmark()
+    def preprocessed_eager_int4_gemm(self, x, w):
+        x_2d = x.reshape(-1, x.size(-1))
+        K, N = w.shape
+        w_int4_packed = pack_2xint4(w).T.contiguous().T
+
+        return lambda: self._matmul_from_packed(x_2d, w_int4_packed, K, N)
+
+    @register_benchmark()
+    def preprocessed_torch_compile_int4_gemm(self, x, w):
+        return torch.compile(
+            self.preprocessed_eager_int4_gemm(x, w), mode="max-autotune-no-cudagraphs"
+        )
+
+    @register_benchmark()
+    def preprocessed_triton_int4_gemm(self, x, w):
+        x_2d = x.reshape(-1, x.size(-1))
+        w_int4_packed = pack_2xint4(w).T.contiguous().T
+
+        return lambda: matmul(x_2d, w_int4_packed)
 
     @register_metric()
     def gbps(self, fn, example_inputs: Any, metrics: BenchmarkOperatorMetrics) -> float:
@@ -118,6 +144,23 @@ class Operator(BenchmarkOperator):
         flops = 2 * m * n * k
         return flops
 
+    def accuracy(self, fn, baseline_fn):
+        output = fn()
+        baseline_output = baseline_fn()
+        rtol = self.tb_args.rtol if self.tb_args.rtol is not None else 1e-2
+        atol = self.tb_args.atol if self.tb_args.atol is not None else 8.0
+
+        try:
+            torch.testing.assert_close(
+                output,
+                baseline_output,
+                rtol=rtol,
+                atol=atol,
+            )
+            return True
+        except AssertionError:
+            return False
+
     def plot(self):
         @triton.testing.perf_report(
             triton.testing.Benchmark(
@@ -130,12 +173,12 @@ class Operator(BenchmarkOperator):
                 x_vals=self.output.x_vals,  # different possible values for `x_name`
                 line_arg="provider",  # argument name whose value corresponds to a different line in the plot
                 line_vals=[
-                    "tinygemm",
-                    "triton",
+                    "eager_int4_gemm",
+                    "triton_int4_gemm",
                 ],  # possible values for `line_arg``
                 line_names=[
-                    "tinygemm",
-                    "triton",
+                    "eager_int4_gemm",
+                    "triton_int4_gemm",
                 ],  # label name for the lines
                 styles=[("blue", "-"), ("green", "-")],
                 ylabel="tflops",  # label name for the y-axis
