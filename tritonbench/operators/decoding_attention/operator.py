@@ -9,7 +9,6 @@ import os
 from typing import Callable, Optional, Tuple
 
 import torch
-from gen_ai.llm_inference.fb.llm.quantization.kv_quantize import quantize_kv_fp8
 
 from tritonbench.utils.path_utils import add_ld_library_path
 
@@ -51,10 +50,17 @@ try:
 except (ImportError, IOError, AttributeError):
     HAS_XFORMERS = False
 
+try:
+    from gen_ai.llm_inference.fb.llm.quantization.kv_quantize import quantize_kv_fp8
 
-torch.ops.load_library(
-    "//deeplearning/fbgemm/fbgemm_gpu/experimental:gen_ai_attention_ops"
-)
+    torch.ops.load_library(
+        "//deeplearning/fbgemm/fbgemm_gpu/experimental:gen_ai_attention_ops"
+    )
+
+    HAS_FB_IMPORT = True
+except ImportError:
+    HAS_FB_IMPORT = False
+
 
 from tritonbench.utils.triton_op import (
     BenchmarkOperator,
@@ -161,7 +167,7 @@ def _pack_xformer_input(
     torch.Tensor,
     torch.Tensor,
     torch.Tensor,
-    fmha.attn_bias.BlockDiagonalCausalWithOffsetPaddedKeysMask,
+    "fmha.attn_bias.BlockDiagonalCausalWithOffsetPaddedKeysMask",
 ]:
     batch, seq_len_q, head_q, head_d = q.shape
     _, max_len_kv, head_kv, _ = k.shape
