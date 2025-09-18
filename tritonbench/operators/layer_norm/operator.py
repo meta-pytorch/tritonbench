@@ -41,6 +41,12 @@ except ModuleNotFoundError:
     LigerLayerNormFunction = None
     HAS_LIGER_KERNEL = False
 
+try:
+    from quack.quack_layernorm import layernorm as quack_layernorm
+    HAS_QUACK_KERNEL = True
+except ModuleNotFoundError:
+    HAS_QUACK_KERNEL = False
+
 
 class Operator(BenchmarkOperator):
     def __init__(
@@ -81,11 +87,17 @@ class Operator(BenchmarkOperator):
         (x, w_shape, weight, bias, eps) = args
         return lambda: LigerLayerNormFunction.apply(x, weight, bias, eps)
 
+    @register_benchmark(enabled=HAS_QUACK_KERNEL)
+    def quack_layer_norm(self, *args) -> Callable:
+        (x, w_shape, weight, bias, eps) = args
+        return lambda: quack_layernorm(x, weight, eps, bias)
+
     def get_bwd_fn(self, fwd_fn: Callable) -> Callable:
         from torch.utils._pytree import tree_map
 
         # Run forward once to get output
-        y = fwd_fn()
+        output = fwd_fn()
+        y = output[0] if isinstance(output, tuple) else output
         dy = 0.1 * torch.randn_like(y)
 
         # Extract tensors that require gradients from example_inputs
