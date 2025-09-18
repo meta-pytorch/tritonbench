@@ -107,6 +107,10 @@ def run_config(config_file: str, args: List[str]):
         op_name = benchmark_config["op"]
         op_args = benchmark_config["args"].split(" ") + args
         env_string = benchmark_config.get("envs", None)
+        disabled = benchmark_config.get("disabled", False)
+        if disabled:
+            logger.info(f"Skipping disabled benchmark {benchmark_name}.")
+            continue
         extra_envs = {}
         if env_string:
             for env_part in env_string.split(" "):
