@@ -20,12 +20,12 @@ try:
     import cutlass
     import cutlass.utils as utils
 
-    from .cutedsl import compile_cutedsl_grouped_gemm
+    from .cutedsl.kernels import compile_cutedsl_grouped_gemm, grouped_gemm_sm100_tuned
 
     # Set HAS_CUTEDSL to True if import succeeds
     HAS_CUTEDSL = True
-except (ImportError, AttributeError):
-    logger.warning("Failed to import CuteDSL and/or Cutlass")
+except (ImportError, AttributeError) as e:
+    logger.warning(f"Failed to import CuteDSL and/or Cutlass: {e}")
     HAS_CUTEDSL = False
 
 
@@ -243,6 +243,54 @@ class Operator(BenchmarkOperator):
             )
 
             outs = [C.squeeze(-1) for (_, _, C) in torch_tensors_abc]
+            return torch.cat(outs, dim=0)
+
+        return _inner
+
+    # Autotunes the CuteDSL kernel then returns the version compiled with the best configs. Similar to the Triton benchmarks,
+    # autotuning time is not included in benchmark measurements.
+    # NOTE(nikhilap): Right now we use the shape as an autotune key much like Triton. It is unclear whether that is the right approach for CuteDSL,
+    # given how Quack keys instead on dynamic scheduling.
+    @register_benchmark(enabled=HAS_CUTEDSL and IS_B200)
+    def precompiled_cutedsl_grouped_mm_tuned(self, group_A, group_B):
+        # --- Trigger autotune outside of timing ---
+        shape_sig = tuple(
+            (A.shape[0], B.shape[1], A.shape[1]) for A, B in zip(group_A, group_B)
+        )
+        grouped_gemm_sm100_tuned(
+            group_A,
+            group_B,
+            ab_dtype=cutlass.Float16
+            if self.dtype == torch.float16
+            else cutlass.BFloat16,
+            c_dtype=cutlass.Float16
+            if self.dtype == torch.float16
+            else cutlass.BFloat16,
+            acc_dtype=cutlass.Float32,
+            a_major="m",
+            b_major="n",
+            c_major="m",
+            skip_ref_check=True,
+            shape_sig=shape_sig,
+        )
+        torch.cuda.synchronize()
+
+        # --- Return timed closure ---
+        def _inner():
+            outs = grouped_gemm_sm100_tuned(
+                group_A,
+                group_B,
+                ab_dtype=cutlass.Float16
+                if self.dtype == torch.float16
+                else cutlass.BFloat16,
+                c_dtype=cutlass.Float16
+                if self.dtype == torch.float16
+                else cutlass.BFloat16,
+                acc_dtype=cutlass.Float32,
+                skip_ref_check=True,
+                shape_sig=shape_sig,
+            )
+            outs = [C.squeeze(-1) for (_, _, C) in outs]
             return torch.cat(outs, dim=0)
 
         return _inner

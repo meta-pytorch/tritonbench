@@ -28,7 +28,7 @@
 
 import functools
 from inspect import isclass
-from typing import List, Type, Union
+from typing import List, Optional, Tuple, Type, Union
 
 import cuda.bindings.driver as cuda
 
@@ -40,6 +40,14 @@ import cutlass.utils.blackwell_helpers as sm100_utils
 
 import torch
 from cutlass.cute.nvgpu import cpasync, tcgen05
+
+from .autotuner import (
+    autotune,
+    AutotuneConfig,
+    GemmConfig,
+    get_exhaustive_groupgemm_configs,
+)
+
 
 """
 A grouped GEMM example for the NVIDIA Blackwell SM100 architecture using CUTE DSL
@@ -2217,4 +2225,163 @@ def compile_cutedsl_grouped_gemm(
         tensor_of_tensormap,
         current_stream,
         torch_tensors_abc,
+    )
+
+
+def grouped_gemm_sm100(
+    group_A_2d: List[torch.Tensor],  # each (M, K), CUDA
+    group_B_2d: List[torch.Tensor],  # each (K, N), CUDA
+    ab_dtype: cutlass.dtype,
+    c_dtype: cutlass.dtype,
+    acc_dtype: cutlass.dtype,
+    *,
+    config: GemmConfig,
+    a_major: str = "m",
+    b_major: str = "n",
+    c_major: str = "m",
+    tensormap_update_mode: utils.TensorMapUpdateMode = utils.TensorMapUpdateMode.SMEM,
+    tolerance: float = 1e-2,
+    skip_ref_check: bool = True,
+    # autotune key passthrough; we won’t use it other than letting your @autotune hash on it
+    shape_sig: Optional[Tuple[Tuple[int, int, int], ...]] = None,
+):
+    assert len(group_A_2d) == len(group_B_2d) and len(group_A_2d) > 0
+    num_groups = len(group_A_2d)
+    if shape_sig is None:
+        # (M, N, K) per group, order stable for caching
+        shape_sig = tuple(
+            (A.shape[0], B.shape[1], A.shape[1]) for A, B in zip(group_A_2d, group_B_2d)
+        )
+
+    # Build a compact, hashable compile key. We include shape_sig because total_num_clusters is baked at compile time.
+    compile_key = (
+        # types & layout
+        ab_dtype,
+        c_dtype,
+        acc_dtype,
+        a_major,
+        b_major,
+        c_major,
+        # tiling
+        config.tile_m,
+        config.tile_n,
+        config.cluster_m,
+        config.cluster_n,
+        config.use_2_cta,
+        # mode
+        tensormap_update_mode,
+        # arity & shapes (must match because group_count and total_num_clusters are constexpr in your compile)
+        num_groups,
+        shape_sig,
+    )
+
+    cache = grouped_gemm_sm100.compile_cache
+    if compile_key not in cache:
+        # First time for this combo → compile once using your existing builder.
+        (
+            compiled,
+            initial_cute_tensors_abc,
+            _dims,
+            _strides,
+            _ptrs,
+            tensor_of_tensormap,
+            _stream,
+            torch_tensors_abc,
+        ) = compile_cutedsl_grouped_gemm(
+            group_A_2d,
+            group_B_2d,
+            ab_dtype=ab_dtype,
+            c_dtype=c_dtype,
+            acc_dtype=acc_dtype,
+            a_major=a_major,
+            b_major=b_major,
+            c_major=c_major,
+            mma_tiler_mn=(config.tile_m, config.tile_n),
+            cluster_shape_mn=(config.cluster_m, config.cluster_n),
+            use_2cta_instrs=config.use_2_cta,
+            tensormap_update_mode=tensormap_update_mode,
+            tolerance=tolerance,
+            skip_ref_check=skip_ref_check,
+        )
+        cache[compile_key] = (
+            compiled,
+            initial_cute_tensors_abc,
+            _dims,
+            _strides,
+            _ptrs,
+            tensor_of_tensormap,
+            _stream,
+            torch_tensors_abc,
+        )
+
+    (
+        compiled,
+        initial_cute_tensors_abc,
+        _dims,
+        _strides,
+        _ptrs,
+        tensor_of_tensormap,
+        _stream,
+        torch_tensors_abc,
+    ) = cache[compile_key]
+    A0, B0, C0 = (
+        initial_cute_tensors_abc  # type/layout carriers baked into the compiled signature
+    )
+
+    # NOTE(nikhilap): In real life, we won't have the actual kernel tensor inputs cached,
+    # we'd need to suffer the overhead of their conversion from torch to cute and the calculation
+    # of the strides, dims, etc. However, for the sake of Tritonbench, we are choosing to cache
+    # these so we can measure raw kernel performance.
+
+    # Launch with the compiled callable. All constexpr items (group_count, total_num_clusters, max_active_clusters)
+    # are already baked into `compiled` for this shape_sig/config, so we only pass the dynamic buffers + stream.
+    stream = cutlass_torch.default_stream()
+    compiled(
+        A0,
+        B0,
+        C0,
+        _dims,
+        _strides,
+        _ptrs,
+        tensor_of_tensormap,
+        stream,
+    )
+
+    return torch_tensors_abc
+
+
+# attach the cache to the function, same pattern as Quack gemm_sm90
+grouped_gemm_sm100.compile_cache = {}
+
+
+@autotune(
+    configs=[AutotuneConfig(config=c) for c in get_exhaustive_groupgemm_configs()],
+    key=["shape_sig"],  # we key on the (M,N,K) tuples so each shape-set tunes once
+)
+def grouped_gemm_sm100_tuned(
+    group_A_2d: List[torch.Tensor],
+    group_B_2d: List[torch.Tensor],
+    ab_dtype: cutlass.dtype,
+    c_dtype: cutlass.dtype,
+    acc_dtype: cutlass.dtype,
+    *,
+    config: Optional[GemmConfig] = None,
+    shape_sig: Optional[Tuple[Tuple[int, int, int], ...]] = None,
+    **kwargs,
+):
+    if config is None:
+        config = GemmConfig()  # defaults
+    if shape_sig is None:
+        shape_sig = tuple(
+            (A.shape[0], B.shape[1], A.shape[1]) for A, B in zip(group_A_2d, group_B_2d)
+        )
+    return grouped_gemm_sm100(
+        group_A_2d,
+        group_B_2d,
+        ab_dtype,
+        c_dtype,
+        acc_dtype,
+        config=config,
+        shape_sig=shape_sig,
+        **kwargs,
     )
