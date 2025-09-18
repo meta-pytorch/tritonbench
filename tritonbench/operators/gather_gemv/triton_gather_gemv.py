@@ -126,4 +126,4 @@ def triton_gemv_0(arg0_1, arg1_1, arg2_1):
 
         grid = lambda META: (triton.cdiv(2 * S, META["XBLOCK"]),)
         triton_red_fused_mv_0[grid](arg1_1, arg0_1, arg2_1, buf1, xnumel, rnumel)
-    return (reinterpret_tensor(buf1, (2, S), (S, 1), 0),)
+    return reinterpret_tensor(buf1, (2, S), (S, 1), 0)

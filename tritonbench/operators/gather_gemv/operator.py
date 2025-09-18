@@ -42,7 +42,7 @@ class Operator(BenchmarkOperator):
     def test_0(self, p1, p2, p3) -> Callable:
         return lambda: triton_test_0(p1, p2, p3)
 
-    @register_benchmark(baseline=True)
+    @register_benchmark()
     def test_eager(self, w, idx, x):
         return lambda: w[idx].to(x.dtype) @ x
 
