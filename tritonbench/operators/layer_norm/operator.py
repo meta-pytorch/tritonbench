@@ -43,6 +43,7 @@ except ModuleNotFoundError:
 
 try:
     from quack.quack_layernorm import layernorm as quack_layernorm
+
     HAS_QUACK_KERNEL = True
 except ModuleNotFoundError:
     HAS_QUACK_KERNEL = False
