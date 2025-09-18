@@ -98,14 +98,14 @@ def get_github_env() -> Dict[str, str]:
     return out
 
 
-def run_config(config_file: str):
+def run_config(config_file: str, args: List[str]):
     assert Path(config_file).exists(), f"Config file {config_file} must exist."
     with open(config_file, "r") as fp:
         config = yaml.safe_load(fp)
     for benchmark_name in config:
         benchmark_config = config[benchmark_name]
         op_name = benchmark_config["op"]
-        op_args = benchmark_config["args"].split(" ")
+        op_args = benchmark_config["args"].split(" ") + args
         env_string = benchmark_config.get("envs", None)
         extra_envs = {}
         if env_string:
