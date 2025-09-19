@@ -30,6 +30,7 @@ jobs:
       - name: Install Tritonbench
         run: |
           # speedup install and skip compile by reusing the docker .so files
+          . "${SETUP_SCRIPT}"
           mkdir -p /workspace/tritonbench/.data
           ln -s /workspace/tritonbench/.data .
           pip install -r requirements.txt
