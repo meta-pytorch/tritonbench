@@ -32,6 +32,7 @@ jobs:
           # speedup install and skip compile by reusing the docker .so files
           mkdir -p /workspace/tritonbench/.data
           ln -s /workspace/tritonbench/.data .
+          pip install -r requirements.txt
       - name: Test Tritonbench operators on H100 GPU
         run: |
           bash ./.ci/tritonbench/test-gpu.sh
