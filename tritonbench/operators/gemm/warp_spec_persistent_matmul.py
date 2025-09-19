@@ -9,7 +9,13 @@ from typing import Optional
 import torch
 import triton
 import triton.language as tl
-from triton.tools.tensor_descriptor import TensorDescriptor
+
+# Conditional import for TensorDescriptor - only available in newer Triton versions
+try:
+    from triton.tools.tensor_descriptor import TensorDescriptor
+except ModuleNotFoundError:
+    TensorDescriptor = None
+
 
 # TODO: Add proton support
 
