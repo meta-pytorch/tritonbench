@@ -26,6 +26,9 @@ fp8_attention:
 # fp8_fused_quant_gemm_rowwise requires fb-only kernels
 fp8_fused_quant_gemm_rowwise:
 gemm:
+  # torch._inductor.exc.InductorError: LoweringException
+  # NoValidChoicesError: No choices to select. 
+  - pt2_cutlass_matmul
   # internal only kernels
   - hstu_triton_matmul
 # jagged tests are slow, so disable them in OSS

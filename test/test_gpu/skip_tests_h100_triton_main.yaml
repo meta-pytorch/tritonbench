@@ -30,6 +30,7 @@ gemm:
   - hstu_triton_matmul
   # No need to test cutlass on triton main
   - pt2_cutlass_matmul
+int4_gemm:
 # jagged tests are slow, so disable them in OSS
 jagged_layer_norm:
 jagged_mean:
