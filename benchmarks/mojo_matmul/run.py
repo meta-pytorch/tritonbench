@@ -1,0 +1,120 @@
+import argparse
+import json
+import logging
+import os
+import sys
+
+from os.path import abspath, exists
+from typing import Dict, List
+
+
+def setup_tritonbench_cwd():
+    original_dir = abspath(os.getcwd())
+
+    for tritonbench_dir in (
+        ".",
+        "../../../tritonbench",
+    ):
+        if exists(tritonbench_dir):
+            break
+
+    if exists(tritonbench_dir):
+        tritonbench_dir = abspath(tritonbench_dir)
+        os.chdir(tritonbench_dir)
+        sys.path.append(tritonbench_dir)
+    return original_dir
+
+setup_tritonbench_cwd()
+
+import torch
+import max.graph as mg
+
+from max import engine
+from max.graph import TensorValue, ops, DType, DeviceRef, TensorType, Graph
+from max.graph.type import Shape, ShapeLike
+from max.driver import CPU, Tensor, Accelerator
+
+
+def matmul_graph(
+    name: str,
+    shapes: tuple[ShapeLike, ShapeLike],
+    dtype: DType = DType.float32,
+) -> Graph:
+    """Creates a graph op containing a matmul."""
+
+    def tensor_type(dims: ShapeLike) -> TensorType:
+        return TensorType(dtype, Shape(dims), device=DeviceRef.CPU())
+
+    return Graph(
+        name,
+        lambda a, b: ops.matmul(a, b),
+        (tensor_type(shapes[0]), tensor_type(shapes[1])),
+    )
+
+
+
+def promote_mojo_tensor_to_fp32(mojo_tensor, dtype, device):
+    input_type = TensorType(dtype=dtype, shape=mojo_tensor.shape, device=device)
+    with mg.Graph("mojo_to_fp32", input_types=(input_type, )) as g:
+        (inp, ) = g.inputs
+        out = ops.cast(inp, dtype=DType.float32)
+        g.output(out)
+    session = engine.InferenceSession(devices=[CPU()])
+    model = session.load(g)
+    output = model.execute(mojo_tensor)
+    return output
+
+def demote_numpy_to_mojo_tensor_bf16(numpy_array, dtype):
+    with mg.Graph("mojo_to_bf16") as g:
+        inp = ops.constant(numpy_array, dtype=DType.float32, device=DeviceRef.GPU())
+        out = ops.cast(inp, dtype=DType.bfloat16)
+        g.output(out)
+    session = engine.InferenceSession(devices=[GPU()])
+    model = session.load(g)
+    output = model.execute()
+    return output[0]
+
+MOJO_DTYPE_MAPPING = {
+    "bf16": DType.bfloat16,
+    "fp32": DType.float32,
+    "fp16": DType.float16,
+}
+MOJO_DEVICE_MAPPING = {
+    "cuda": DeviceRef.GPU,
+    "cpu": DeviceRef.CPU,
+}
+
+def mojo_matmul(precision, device, a, b):
+    mojo_dtype = MOJO_DTYPE_MAPPING[precision]
+    mojo_device = MOJO_DEVICE_MAPPING[device]
+    a_numpy = a.cpu().float().numpy()
+    b_numpy = b.cpu().float().numpy()
+    a_mojo_cuda = Tensor.from_numpy(a_numpy, device=mojo_device)
+    b_mojo_cuda = Tensor.from_numpy(a_numpy, device=mojo_device)
+    a_mojo_bf16 = demote_numpy_to_mojo_tensor_bf16(a_numpy, mojo_dtype)
+    b_mojo_bf16 = demote_numpy_to_mojo_tensor_bf16(b_numpy, mojo_dtype)
+    input_types = (
+        TensorType(dtype=mojo_dtype, shape=a_numpy.shape, device=mojo_device()),
+        TensorType(dtype=mojo_dtype, shape=a_numpy.shape, device=mojo_device()),
+    )
+    with mg.Graph("mojo_matmul", input_types=input_types) as g:
+        a_val, b_val = g.inputs
+        c_val = ops.matmul(a_val, b_val)
+        g.output(c_val)
+    session = engine.InferenceSession(devices=[Accelerator()])
+    model = session.load(g)
+    outputs = model.execute(a_mojo_bf16, b_mojo_bf16)
+    return outputs
+
+if __name__ == "__main__":
+    precision = "bf16"
+    a = torch.randn([1024, 1024], dtype=torch.bfloat16).cuda()
+    b = torch.randn([1024, 1024], dtype=torch.bfloat16).cuda()
+    mojo_matmul("bf16", "cuda", a, b)
+    # gemm_opbench = load_opbench_by_name("gemm")
+    # register_benchmark(mojo_matmul)
+    # gemm_opbench.run()
+    # promoting the output to fp32 for numerics check
+    # convert back to pytorch
+    y_torch = torch.from_numpy(promote_mojo_tensor_to_fp32(outputs[0], dtype=DType.bfloat16, device=DeviceRef.CPU())[0].to_numpy())
+    print("success!")
