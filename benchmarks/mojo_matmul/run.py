@@ -34,6 +34,8 @@ from max.graph import TensorValue, ops, DeviceRef, TensorType, Graph
 from max.graph.type import Shape, ShapeLike, DType
 
 from tritonbench.operators import load_opbench_by_name
+from tritonbench.utils.triton_op import register_benchmark
+from tritonbench.utils.parser import get_parser
 
 def promote_mojo_tensor_to_fp32(mojo_tensor, dtype):
     input_type = TensorType(dtype=dtype, shape=mojo_tensor.shape, device=DeviceRef.GPU())
@@ -98,10 +100,14 @@ if __name__ == "__main__":
     a = torch.randn([1024, 1024], dtype=torch.bfloat16).cuda()
     b = torch.randn([1024, 1024], dtype=torch.bfloat16).cuda()
     outputs = mojo_matmul("bf16", "cuda", a, b)
-    gemm_opbench = load_opbench_by_name("gemm")
-    # register_benchmark(mojo_matmul)
-    # gemm_opbench.run()
-    # promoting the output to fp32 for numerics check
-    # convert back to pytorch
-    y_torch = torch.from_numpy(promote_mojo_tensor_to_fp32(outputs[0], dtype=DType.bfloat16)[0].to_numpy())
+    args = ["--op", "gemm", "--only", "aten_matmul,mojo_matmul", "--num-inputs", "1"]
+    gemm_opbench_cls = load_opbench_by_name("gemm")
+    parser = get_parser(args)
+    tb_args, extra_args = parser.parse_known_args(args)
+    gemm_opbench = gemm_opbench_cls(tb_args, extra_args)
+    decorator = register_benchmark(operator_name="gemm", func_name="mojo_matmul")
+    decorator(mojo_matmul)
+    gemm_opbench.run()
+    # TODO: promote the output to fp32 for numerics check
+    # y_torch = torch.from_numpy(promote_mojo_tensor_to_fp32(outputs[0], dtype=DType.bfloat16)[0].to_numpy())
     print("success!")
