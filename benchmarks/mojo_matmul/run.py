@@ -1,3 +1,9 @@
+"""
+Benchmark mojo_matmul with modular nightly.
+To install modular nightly:
+pip install --pre modular --index-url https://dl.modular.com/public/nightly/python/simple/
+"""
+
 import argparse
 import json
 import logging
