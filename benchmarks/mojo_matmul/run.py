@@ -37,6 +37,8 @@ from tritonbench.operators import load_opbench_by_name
 from tritonbench.utils.triton_op import register_benchmark
 from tritonbench.utils.parser import get_parser
 
+from typing import Callable
+
 def promote_mojo_tensor_to_fp32(mojo_tensor, dtype):
     input_type = TensorType(dtype=dtype, shape=mojo_tensor.shape, device=DeviceRef.GPU())
     with mg.Graph("mojo_to_fp32", input_types=(input_type, )) as g:
@@ -48,10 +50,10 @@ def promote_mojo_tensor_to_fp32(mojo_tensor, dtype):
     output = model.execute(mojo_tensor)
     return output
 
-def demote_numpy_to_mojo_tensor_bf16(numpy_array, dtype):
-    with mg.Graph("mojo_to_bf16") as g:
+def demote_numpy_to_mojo_tensor_dtype(numpy_array, dtype):
+    with mg.Graph("mojo_to_dtype") as g:
         inp = ops.constant(numpy_array, dtype=DType.float32, device=DeviceRef.GPU())
-        out = ops.cast(inp, dtype=DType.bfloat16)
+        out = ops.cast(inp, dtype=dtype)
         g.output(out)
     session = engine.InferenceSession(devices=[driver.Accelerator()])
     model = session.load(g)
@@ -72,7 +74,9 @@ MOJO_DRIVER_DEVICE_MAPPING = {
     "cpu": driver.CPU,
 }
 
-def mojo_matmul(precision, device, a, b):
+def mojo_matmul(operator, a, b, bias) -> Callable:
+    precision = operator.precision
+    device = operator.device
     mojo_dtype = MOJO_DTYPE_MAPPING[precision]
     mojo_device = MOJO_DEVICE_MAPPING[device]
     mojo_driver_device = MOJO_DRIVER_DEVICE_MAPPING[device]
@@ -80,8 +84,8 @@ def mojo_matmul(precision, device, a, b):
     b_numpy = b.cpu().float().numpy()
     a_mojo_cuda = driver.Tensor.from_numpy(a_numpy).to(mojo_driver_device())
     b_mojo_cuda = driver.Tensor.from_numpy(b_numpy).to(mojo_driver_device())
-    a_mojo_bf16 = demote_numpy_to_mojo_tensor_bf16(a_numpy, mojo_dtype)
-    b_mojo_bf16 = demote_numpy_to_mojo_tensor_bf16(b_numpy, mojo_dtype)
+    a_mojo_bf16 = demote_numpy_to_mojo_tensor_dtype(a_numpy, mojo_dtype)
+    b_mojo_bf16 = demote_numpy_to_mojo_tensor_dtype(b_numpy, mojo_dtype)
     input_types = (
         TensorType(dtype=mojo_dtype, shape=a_numpy.shape, device=mojo_device()),
         TensorType(dtype=mojo_dtype, shape=a_numpy.shape, device=mojo_device()),
@@ -93,21 +97,18 @@ def mojo_matmul(precision, device, a, b):
     session = engine.InferenceSession(devices=[driver.Accelerator()])
     model = session.load(g)
     outputs = model.execute(a_mojo_bf16, b_mojo_bf16)
-    return outputs
+    output_func = lambda: model.execute(a_mojo_bf16, b_mojo_bf16)
+    return output_func
 
 if __name__ == "__main__":
-    precision = "bf16"
-    a = torch.randn([1024, 1024], dtype=torch.bfloat16).cuda()
-    b = torch.randn([1024, 1024], dtype=torch.bfloat16).cuda()
-    outputs = mojo_matmul("bf16", "cuda", a, b)
     args = ["--op", "gemm", "--only", "aten_matmul,mojo_matmul", "--num-inputs", "1"]
     gemm_opbench_cls = load_opbench_by_name("gemm")
     parser = get_parser(args)
     tb_args, extra_args = parser.parse_known_args(args)
     gemm_opbench = gemm_opbench_cls(tb_args, extra_args)
-    decorator = register_benchmark(operator_name="gemm", func_name="mojo_matmul")
-    decorator(mojo_matmul)
+    gemm_opbench.add_benchmark(bm_func_name="mojo_matmul", bm_callable=mojo_matmul)
     gemm_opbench.run()
+    metrics = gemm_opbench.output
+    print(metrics)
     # TODO: promote the output to fp32 for numerics check
     # y_torch = torch.from_numpy(promote_mojo_tensor_to_fp32(outputs[0], dtype=DType.bfloat16)[0].to_numpy())
-    print("success!")
