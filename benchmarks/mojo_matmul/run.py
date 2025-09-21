@@ -81,7 +81,7 @@ def mojo_matmul(operator, a, b, bias) -> Callable:
     mojo_device = MOJO_DEVICE_MAPPING[device]
     mojo_driver_device = MOJO_DRIVER_DEVICE_MAPPING[device]
     a_numpy = a.cpu().float().numpy()
-    b_numpy = b.cpu().float().numpy()
+    b_numpy = b.T.cpu().float().numpy()
     a_mojo_cuda = driver.Tensor.from_numpy(a_numpy).to(mojo_driver_device())
     b_mojo_cuda = driver.Tensor.from_numpy(b_numpy).to(mojo_driver_device())
     a_mojo_bf16 = demote_numpy_to_mojo_tensor_dtype(a_numpy, mojo_dtype)
@@ -92,7 +92,7 @@ def mojo_matmul(operator, a, b, bias) -> Callable:
     )
     with mg.Graph("mojo_matmul", input_types=input_types) as g:
         a_val, b_val = g.inputs
-        c_val = ops.matmul(a_val, b_val)
+        c_val = ops.matmul(a_val, b_val.T)
         g.output(c_val)
     session = engine.InferenceSession(devices=[driver.Accelerator()])
     model = session.load(g)
