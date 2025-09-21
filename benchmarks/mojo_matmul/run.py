@@ -88,7 +88,7 @@ def mojo_matmul(operator, a, b, bias) -> Callable:
     b_mojo_bf16 = demote_numpy_to_mojo_tensor_dtype(b_numpy, mojo_dtype)
     input_types = (
         TensorType(dtype=mojo_dtype, shape=a_numpy.shape, device=mojo_device()),
-        TensorType(dtype=mojo_dtype, shape=a_numpy.shape, device=mojo_device()),
+        TensorType(dtype=mojo_dtype, shape=b_numpy.shape, device=mojo_device()),
     )
     with mg.Graph("mojo_matmul", input_types=input_types) as g:
         a_val, b_val = g.inputs
@@ -101,7 +101,7 @@ def mojo_matmul(operator, a, b, bias) -> Callable:
     return output_func
 
 if __name__ == "__main__":
-    args = ["--op", "gemm", "--only", "aten_matmul,mojo_matmul", "--num-inputs", "1"]
+    args = ["--op", "gemm", "--only", "aten_matmul,mojo_matmul", "--precision", "bf16", "--m", "512", "--n", "8192", "--k", "5376"]
     gemm_opbench_cls = load_opbench_by_name("gemm")
     parser = get_parser(args)
     tb_args, extra_args = parser.parse_known_args(args)
