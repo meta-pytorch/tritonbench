@@ -101,7 +101,7 @@ def mojo_matmul(operator, a, b, bias) -> Callable:
     return output_func
 
 if __name__ == "__main__":
-    args = ["--op", "gemm", "--only", "aten_matmul,mojo_matmul", "--precision", "bf16", "--m", "512", "--n", "8192", "--k", "5376"]
+    args = ["--op", "gemm", "--only", "aten_matmul,mojo_matmul", "--precision", "bf16", "--m", "512", "--n", "8192", "--k", "5376"] + sys.argv[1:]
     gemm_opbench_cls = load_opbench_by_name("gemm")
     parser = get_parser(args)
     tb_args, extra_args = parser.parse_known_args(args)
