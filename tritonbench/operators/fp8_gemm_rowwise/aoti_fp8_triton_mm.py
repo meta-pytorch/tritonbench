@@ -113,6 +113,11 @@ FP16_MAX_POS: float = torch.finfo(torch.float16).max
             num_stages=5,
             num_warps=8,
         ),
+        Config(
+            {"BLOCK_M": 128, "BLOCK_N": 128, "BLOCK_K": 128},
+            num_stages=4,
+            num_warps=8,
+        ),
     ],
     key=["M", "N", "K"],
 )
