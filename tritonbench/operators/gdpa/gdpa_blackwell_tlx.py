@@ -607,7 +607,9 @@ def gdpa_kernel_tma_ws_blackwell(
                             if NAME_BARRIER:
                                 tlx.named_barrier_wait(10, 128)
                             else:
-                                tlx.barrier_wait(producer_commit_pp[0], phase)  # consumer_wait
+                                tlx.barrier_wait(
+                                    producer_commit_pp[0], phase
+                                )  # consumer_wait
                         # p0 = fast_gelu(qk0)
                         if ENABLE_PROTON and idx == PROTON_TILE:
                             pl.enter_scope("tanh")
@@ -672,7 +674,9 @@ def gdpa_kernel_tma_ws_blackwell(
                     if MERGE_EPI:
                         o_desc.store(
                             [
-                                (begin_q + start_m * BLOCK_M + BLOCK_M // 2).to(tl.int32),
+                                (begin_q + start_m * BLOCK_M + BLOCK_M // 2).to(
+                                    tl.int32
+                                ),
                                 (out_offset).to(tl.int32),
                             ],
                             o1,
