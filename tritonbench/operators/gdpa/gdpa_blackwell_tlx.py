@@ -295,6 +295,7 @@ def gdpa_kernel_tma_ws_blackwell(
     SUBTILING: tl.constexpr,
     PINGPONG: tl.constexpr,
     ACT_REGS: tl.constexpr,
+    MERGE_EPI: tl.constexpr,
     ENABLE_PROTON: tl.constexpr,
     PROTON_TILE: tl.constexpr,
 ):
@@ -342,6 +343,8 @@ def gdpa_kernel_tma_ws_blackwell(
 
     # allocate buffers for k, v
     kv_buf = tlx.local_alloc((BLOCK_N, BLOCK_D), dtype, NUM_BUFFERS_KV)  # k
+    o0_smem = tlx.local_alloc((BLOCK_M // 2, HEAD_DIM), dtype, 1)
+    o1_smem = tlx.local_alloc((BLOCK_M // 2, HEAD_DIM), dtype, 1)
 
     # allocate tmem for outputs of 4 dots (after partitioning)
     # qk0 = q0 dot k, qk1 = q1 dot k, acc0 = p0 dot v, acc1 = p1 dot v
@@ -504,7 +507,7 @@ def gdpa_kernel_tma_ws_blackwell(
                     )
                     # tl.device_print("default producer_o0", accum_cnt_outer)
                     tlx.barrier_arrive(consumer_release_o0_view, 1)
-                    if USE_ON_DEVICE_TMA:
+                    if USE_ON_DEVICE_TMA and MERGE_EPI:
                         o_desc = tl.make_tensor_descriptor(
                             Out,
                             shape=[end_q.to(tl.int32), HEAD_DIM * H],
@@ -515,13 +518,16 @@ def gdpa_kernel_tma_ws_blackwell(
                         o0 = o0.to(Out.type.element_ty)
                     else:
                         o0 = o0.to(tlx.dtype_of(o_desc))
-                    o_desc.store(
-                        [
-                            (begin_q + start_m * BLOCK_M).to(tl.int32),
-                            (out_offset).to(tl.int32),
-                        ],
-                        o0,
-                    )
+                    if MERGE_EPI:
+                        o_desc.store(
+                            [
+                                (begin_q + start_m * BLOCK_M).to(tl.int32),
+                                (out_offset).to(tl.int32),
+                            ],
+                            o0,
+                        )
+                    else:
+                        tlx.local_store(o0_smem[0], o0)
                     accum_cnt_outer += 1
                     if ENABLE_PROTON and idx == PROTON_TILE:
                         pl.exit_scope("elementwise_0_epi")
@@ -629,7 +635,7 @@ def gdpa_kernel_tma_ws_blackwell(
                     bufIdx_o_outer, phase_o_outer = _get_bufidx_phase(
                         accum_cnt_outer, NUM_BUFFERS_O
                     )
-                    if USE_ON_DEVICE_TMA:
+                    if USE_ON_DEVICE_TMA and MERGE_EPI:
                         o_desc = tl.make_tensor_descriptor(
                             Out,
                             shape=[end_q.to(tl.int32), HEAD_DIM * H],
@@ -647,13 +653,16 @@ def gdpa_kernel_tma_ws_blackwell(
                         o1 = o1.to(Out.type.element_ty)
                     else:
                         o1 = o1.to(tlx.dtype_of(o_desc))
-                    o_desc.store(
-                        [
-                            (begin_q + start_m * BLOCK_M + BLOCK_M // 2).to(tl.int32),
-                            (out_offset).to(tl.int32),
-                        ],
-                        o1,
-                    )
+                    if MERGE_EPI:
+                        o_desc.store(
+                            [
+                                (begin_q + start_m * BLOCK_M + BLOCK_M // 2).to(tl.int32),
+                                (out_offset).to(tl.int32),
+                            ],
+                            o1,
+                        )
+                    else:
+                        tlx.local_store(o1_smem[0], o1)
                     accum_cnt_outer += 1
                     if ENABLE_PROTON and idx == PROTON_TILE:
                         pl.exit_scope("elementwise_1_epi")
@@ -1228,6 +1237,55 @@ def gdpa_kernel_tma_ws_blackwell(
                     # outside of inner for
                     accum_count_q += 1
                 tile_idx += num_progs
+        with tlx.async_task(num_warps=1, registers=24):  # epilogue
+            # Can we guard this with not MERGE_EPI?
+            accum_cnt_outer = 0
+            for idx in range(0, tiles_per_sm):
+                pid = tile_idx % n_tile_num
+                start_m = pid
+                off_hz = tile_idx // n_tile_num
+                off_h = off_hz % H
+                out_offset = off_h.to(tl.int64) * stride_oh
+
+                begin_q, end_q, begin_k, qlen, klen = _compute_qlen(
+                    tile_idx,
+                    n_tile_num,
+                    Q_offsets,
+                    K_offsets,
+                    seq_index,
+                    SORT_BY_SEQ_LENGTH,
+                    H,
+                    N_CTX,
+                )
+
+                if start_m * BLOCK_M < qlen:
+                    out_offset = off_h.to(tl.int64) * stride_oh
+                    if USE_ON_DEVICE_TMA:
+                        o_desc = tl.make_tensor_descriptor(
+                            Out,
+                            shape=[end_q.to(tl.int32), HEAD_DIM * H],
+                            strides=[HEAD_DIM * H, 1],
+                            block_shape=[BLOCK_M // 2, BLOCK_D],
+                        )
+                    # wait for o0
+                    tlx.async_descriptor_store(
+                        o_desc,
+                        o0_smem[0],
+                        [
+                            (begin_q + start_m * BLOCK_M).to(tl.int32),
+                            (out_offset).to(tl.int32),
+                        ],
+                    )
+                    tlx.async_descriptor_store(
+                        o_desc,
+                        o1_smem[0],
+                        [
+                            (begin_q + start_m * BLOCK_M + BLOCK_M // 2).to(tl.int32),
+                            (out_offset).to(tl.int32),
+                        ],
+                    )
+                    accum_cnt_outer += 1
+                tile_idx += num_progs
 
 
 def next_power_of_2(x):
@@ -1434,6 +1492,7 @@ def gdpa_forward_tlx(
         IS_DENSE_KV=is_dense_kv,
         activation_enum_int=activation_enum_int,
         USE_ON_DEVICE_TMA=USE_ON_DEVICE_TMA,
+        MERGE_EPI=False,
         ENABLE_PROTON=enable_proton,
         PROTON_TILE=10,
         **extra_kern_args,
