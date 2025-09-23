@@ -5,6 +5,7 @@ Note: make sure to `python install.py` first or otherwise make sure the benchmar
       has been installed. This script intentionally does not automate or enforce setup steps.
 """
 
+import torch
 import argparse
 import os
 import sys
@@ -33,7 +34,6 @@ try:
         usage_report_logger = lambda *args, **kwargs: None
 except ImportError:
     usage_report_logger = lambda *args, **kwargs: None
-
 
 def _run(args: argparse.Namespace, extra_args: List[str]) -> BenchmarkOperatorResult:
     run_timestamp = datetime.fromtimestamp(time.time()).strftime("%Y%m%d%H%M%S")
@@ -120,6 +120,17 @@ def run(args: List[str] = []):
     args, extra_args = parser.parse_known_args(args)
 
     tritonparse_init(args.tritonparse)
+
+    if args.device == "mtia":
+        import mtia.host_runtime.torch_mtia.dynamic_library  # noqa
+        from mtia.host_runtime.torch_mtia import dynamo_backends  # noqa
+        from triton_mtia.python.mtia.eager import mtia_triton_launcher
+
+        # Initialize MTIA's streaming runtime.
+        torch.mtia.init()
+        mtia_triton_launcher.init()
+
+
     if args.op:
         ops = args.op.split(",")
     else:
