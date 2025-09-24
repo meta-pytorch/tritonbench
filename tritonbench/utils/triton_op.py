@@ -1214,7 +1214,7 @@ class BenchmarkOperator(metaclass=PostInitProcessor):
 
         Args:
             tensors: List/tuple of tensors (each should have `.grad` possibly populated)
-            mode: Optional mode information for richer error messages
+            mode: Optional mode information for better error messages
 
         Returns:
             List of cloned gradients (or None when no gradient was produced).
@@ -1248,12 +1248,12 @@ class BenchmarkOperator(metaclass=PostInitProcessor):
 
         return grads
 
-    def _check_gradients(self, gradients, baseline_gradients, mode=""):
+    def _check_gradients(self, grads, baseline_grads, mode=""):
         """Helper to check gradients between two sets of tensors.
 
         Args:
-            gradients: List of gradient tensors (or None) from implementation
-            baseline_gradients: List of gradient tensors (or None) from baseline
+            grads: List of gradient tensors (or None) from implementation
+            baseline_grads: List of gradient tensors (or None) from baseline
             mode: Mode name for error messages (e.g. "BWD" or "FWD_BWD")
 
         Returns:
@@ -1262,20 +1262,20 @@ class BenchmarkOperator(metaclass=PostInitProcessor):
         prefix = f"{mode}: " if mode else ""
 
         # Ensure we have tensors to check
-        assert len(gradients) > 0, (
+        assert len(grads) > 0, (
             f"{prefix}No tensors with requires_grad=True found. "
             "Check that input tensors have requires_grad set."
         )
 
         # Ensure same number of grad tensors
-        assert len(gradients) == len(baseline_gradients), (
-            f"{prefix}Mismatch in number of grad tensors: {len(gradients)} vs "
-            f"{len(baseline_gradients)}"
+        assert len(grads) == len(baseline_grads), (
+            f"{prefix}Mismatch in number of grad tensors: {len(grads)} vs "
+            f"{len(baseline_grads)}"
         )
 
         # Compare each tensor's gradient
         has_gradient = False
-        for i, (grad, baseline_grad) in enumerate(zip(gradients, baseline_gradients)):
+        for i, (grad, baseline_grad) in enumerate(zip(grads, baseline_grads)):
             # Check gradient existence
             if (grad is None) != (baseline_grad is None):
                 print(
@@ -1292,10 +1292,7 @@ class BenchmarkOperator(metaclass=PostInitProcessor):
                     baseline_grad,
                     rtol=self.tb_args.rtol,
                     atol=self.tb_args.atol,
-                    msg=(
-                        f"{prefix}Gradient mismatch for tensor {i} "
-                        f"with shape {grad.shape}"
-                    ),
+                    msg=f"{prefix}Gradient mismatch for tensor {i} with shape {grad.shape}",
                 )
 
         # Ensure at least one tensor has a gradient
@@ -1320,6 +1317,7 @@ class BenchmarkOperator(metaclass=PostInitProcessor):
             elif self.mode == Mode.BWD:
                 # Get tensors with gradients from both implementations
                 grad_tensors = fn()
+                # Clone gradients to maintain an isolated copy of the result for later comparison
                 impl_grads = self._clone_gradients(grad_tensors, mode="BWD")
 
                 baseline_grad_tensors = baseline_fn()
@@ -1336,6 +1334,7 @@ class BenchmarkOperator(metaclass=PostInitProcessor):
                 # Unpack the results - expecting (fwd_output, grad_tensors)
                 if isinstance(output, tuple) and len(output) == 2:
                     fwd_output, grad_tensors = output
+                    # Clone gradients to maintain an isolated copy of the result for later comparison
                     impl_grads = self._clone_gradients(grad_tensors, mode="FWD_BWD")
 
                     baseline_output = baseline_fn()

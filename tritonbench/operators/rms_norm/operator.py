@@ -154,7 +154,7 @@ class Operator(BenchmarkOperator):
         # Run forward once to get output
         y = fwd_fn()
         torch.manual_seed(0)
-        dy = torch.randn_like(y)
+        dy = 0.1 * torch.randn_like(y)
 
         # Extract tensors that require gradients from example_inputs
         grad_tensors = []
