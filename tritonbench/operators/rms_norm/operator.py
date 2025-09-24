@@ -87,44 +87,47 @@ class Operator(BenchmarkOperator):
         else:
             H_values = [2**i for i in range(10, 16)]
 
+        requires_grad = self.mode in (Mode.BWD, Mode.FWD_BWD)
+
         for H in H_values:
             x_shape = (self.M, H)
-            _input = torch.randn(x_shape, dtype=self.dtype, device=self.device)
-            if self.mode in (Mode.BWD, Mode.FWD_BWD):
-                _input.requires_grad_()
-
-            weight = torch.ones(H, dtype=self.dtype, device=self.device)
+            _input = torch.randn(
+                x_shape,
+                dtype=self.dtype,
+                device=self.device,
+                requires_grad=requires_grad,
+            )
+            weight = torch.nn.Parameter(
+                torch.ones(H, dtype=self.dtype, device=self.device),
+                requires_grad=requires_grad,
+            )
             yield H, _input, weight
 
     @register_benchmark(baseline=True)
     def llama_rms(self, H, input, weight) -> Callable:
         module = LlamaRMSNorm(hidden_size=H, eps=self.eps).to(self.device)
-        with torch.no_grad():
-            module.weight.copy_(weight.to(module.weight.dtype))
+        module.weight = weight
         self.llama_rms_op = module
         return lambda: module(input)
 
     @register_benchmark(enabled=LigerRMSNorm is not None)
     def liger_rms(self, H, input, weight) -> Callable:
         module = LigerRMSNorm(hidden_size=H, eps=self.eps).to(self.device)
-        with torch.no_grad():
-            module.weight.copy_(weight.to(module.weight.dtype))
+        module.weight = weight
         self.liger_rms_op = module
         return lambda: module(input)
 
     @register_benchmark(enabled=QuackRMSNorm)
     def quack_rms(self, H, input, weight) -> Callable:
         module = QuackRMSNorm(hidden_size=H, eps=self.eps).to(self.device)
-        with torch.no_grad():
-            module.weight.copy_(weight.to(module.weight.dtype))
+        module.weight = weight
         self.quack_rms_op = module
         return lambda: module(input)
 
     @register_benchmark()
     def torch_compile_rms(self, H, input, weight) -> Callable:
         module = LlamaRMSNorm(hidden_size=H, eps=self.eps).to(self.device)
-        with torch.no_grad():
-            module.weight.copy_(weight.to(module.weight.dtype))
+        module.weight = weight
         self.llama_rms_op = module
         compiled = torch.compile(module, mode="max-autotune-no-cudagraphs")
         return lambda: compiled(input)
@@ -132,8 +135,7 @@ class Operator(BenchmarkOperator):
     @register_benchmark(enabled=is_hip() and HAS_AITER)
     def aiter(self, H, input, weight) -> Callable:
         module = AITerRMSNorm(hidden_size=H, eps=self.eps).to(self.device)
-        with torch.no_grad():
-            module.weight.copy_(weight.to(module.weight.dtype))
+        module.weight = weight
         self.aiter_rms_op = module
         return lambda: module(input)
 
