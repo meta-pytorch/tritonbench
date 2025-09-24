@@ -1327,9 +1327,7 @@ class BenchmarkOperator(metaclass=PostInitProcessor):
                     baseline_grad_tensors, mode="BWD"
                 )
                 # Use helper to check gradients
-                if not self._check_gradients(
-                    impl_grads, baseline_grads, "BWD"
-                ):
+                if not self._check_gradients(impl_grads, baseline_grads, "BWD"):
                     return False
             elif self.mode == Mode.FWD_BWD:
                 # FWD_BWD should return (forward_output, grad_tensors) tuple
@@ -1338,9 +1336,7 @@ class BenchmarkOperator(metaclass=PostInitProcessor):
                 # Unpack the results - expecting (fwd_output, grad_tensors)
                 if isinstance(output, tuple) and len(output) == 2:
                     fwd_output, grad_tensors = output
-                    impl_grads = self._clone_gradients(
-                        grad_tensors, mode="FWD_BWD"
-                    )
+                    impl_grads = self._clone_gradients(grad_tensors, mode="FWD_BWD")
 
                     baseline_output = baseline_fn()
                     baseline_fwd_output, baseline_grad_tensors = baseline_output
@@ -1357,9 +1353,7 @@ class BenchmarkOperator(metaclass=PostInitProcessor):
                     )
 
                     # Check backward gradients using helper
-                    if not self._check_gradients(
-                        impl_grads, baseline_grads, "FWD_BWD"
-                    ):
+                    if not self._check_gradients(impl_grads, baseline_grads, "FWD_BWD"):
                         return False
                 else:
                     # FWD_BWD mode requires specific return format
