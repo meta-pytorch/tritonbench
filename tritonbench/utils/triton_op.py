@@ -1768,12 +1768,11 @@ class BenchmarkOperator(metaclass=PostInitProcessor):
         nsys_output_dir = self.get_temp_path(fn_name)
         nsys_output_dir.mkdir(parents=True, exist_ok=True)
         ext = ".nsys-rep"
+        nsys_bin = os.environ.get("NSYS_BIN", "nsys")
         nsys_output_file = nsys_output_dir.joinpath(f"nsys_rep{ext}").resolve()
         nsys_trace_cmd = [
-            "nsys",
+            nsys_bin,
             "profile",
-            "-c",
-            "cudaProfilerApi",
             "-t",
             "nvtx,osrt,cuda,cudnn,cublas",
             "-w",
@@ -1781,7 +1780,7 @@ class BenchmarkOperator(metaclass=PostInitProcessor):
             "-f",
             "true",
             "-o",
-            nsys_output_file,
+            str(nsys_output_file),
         ]
         nsys_trace_cmd.extend(op_task_args)
         try:
