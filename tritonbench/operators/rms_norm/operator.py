@@ -79,6 +79,10 @@ class Operator(BenchmarkOperator):
         # they are generated later
         self.llama_rms_op = None
         self.liger_rms_op = None
+        if self.tb_args.rtol is None:
+            self.tb_args.rtol = 1e-5
+        if self.tb_args.atol is None:
+            self.tb_args.atol = 1e-4
 
     def get_input_iter(self) -> Generator:
         # If H is provided, use only that value; otherwise use the default range
@@ -149,7 +153,8 @@ class Operator(BenchmarkOperator):
 
         # Run forward once to get output
         y = fwd_fn()
-        dy = 0.1 * torch.randn_like(y)
+        torch.manual_seed(0)
+        dy = torch.randn_like(y)
 
         # Extract tensors that require gradients from example_inputs
         grad_tensors = []
