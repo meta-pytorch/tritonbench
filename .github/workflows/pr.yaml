@@ -14,6 +14,11 @@ jobs:
     uses: ./.github/workflows/_linux-test-h100.yml
     with:
       conda_env: "triton-main"
+  mi350-triton-main-test:
+    uses: ./.github/workflows/_linux-test-mi350.yml
+    with:
+      conda_env: "triton-main"
+
 
 
 concurrency:
