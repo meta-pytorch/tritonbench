@@ -162,12 +162,21 @@ def get_parser(args=None):
     )
     parser.add_argument(
         "--input-id",
-        type=int,
-        default=0,
-        help="Specify the start input id to run. "
-        "For example, --input-id 0 runs only the first available input sample."
-        "When used together like --input-id <X> --num-inputs <Y>, start from the input id <X> "
-        "and run <Y> different inputs.",
+        type=str,
+        default="0",
+        help="Specify the input id(s) to run. Can be a single integer or comma-separated list of integers. "
+        "For example, --input-id 0 runs only the first available input sample. "
+        "--input-id 0,2,4 runs inputs at indices 0, 2, and 4. "
+        "When used together like --input-id <X> --num-inputs <Y> with a single ID, start from the input id <X> "
+        "and run <Y> different inputs. When multiple IDs are specified, --num-inputs is not supported.",
+    )
+    parser.add_argument(
+        "--input-sample-mode",
+        type=str,
+        default="first-k",
+        choices=["first-k", "equally-spaced-k"],
+        help="Input sampling mode. 'first-k' (default) uses the first k inputs starting from --input-id. "
+        "'equally-spaced-k' selects k equally spaced inputs from the entire input range, where k is specified by --num-inputs.",
     )
     parser.add_argument(
         "--test-only",

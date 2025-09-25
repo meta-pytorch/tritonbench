@@ -760,8 +760,15 @@ class BenchmarkOperator(metaclass=PostInitProcessor):
         self._only = _split_params_by_comma(self.tb_args.only)
         self._skip = _split_params_by_comma(self.tb_args.skip)
         self._only_match_mode = self.tb_args.only_match_mode
-        self._input_id = self.tb_args.input_id
+        # Parse input_id as comma-separated list - always store as a list
+        if "," in self.tb_args.input_id:
+            self._input_ids = [
+                int(id.strip()) for id in self.tb_args.input_id.split(",")
+            ]
+        else:
+            self._input_ids = [int(self.tb_args.input_id)]
         self._num_inputs = self.tb_args.num_inputs
+        self._input_sample_mode = self.tb_args.input_sample_mode
         self.prod_shapes = self.tb_args.prod_shapes
 
     # Run the post initialization
@@ -779,11 +786,89 @@ class BenchmarkOperator(metaclass=PostInitProcessor):
                 self._get_input_iter = get_input_loader(
                     self, self.name, self.tb_args.input_loader
                 )
-        self._available_num_inputs = self.count_example_inputs()
-        if self._num_inputs is None:
-            self._num_inputs = self._available_num_inputs - self._input_id
-        if self._num_inputs > self._available_num_inputs:
-            self._num_inputs = self._available_num_inputs
+        # Count total available inputs directly
+        self._available_num_inputs = sum(1 for _ in self.get_input_iter())
+
+        # Check if multiple IDs are specified explicitly
+        if len(self._input_ids) > 1:
+            # Multiple IDs mode
+            if self._num_inputs is not None:
+                raise ValueError(
+                    f"Cannot use --num-inputs with multiple input IDs. "
+                    f"When specifying multiple IDs (e.g., --input-id 0,2,4), the number of inputs "
+                    f"is determined by the number of IDs provided ({len(self._input_ids)} in this case)."
+                )
+            if self._input_sample_mode == "equally-spaced-k":
+                raise ValueError(
+                    f"Cannot use --input-sample-mode equally-spaced-k with multiple input IDs. "
+                    f"Either specify multiple IDs directly or use equally-spaced-k with --num-inputs."
+                )
+            # Validate that all IDs are within range
+            invalid_ids = [
+                id
+                for id in self._input_ids
+                if id >= self._available_num_inputs or id < 0
+            ]
+            if invalid_ids:
+                raise ValueError(
+                    f"Invalid input IDs {invalid_ids}. Available inputs: 0 to {self._available_num_inputs - 1}"
+                )
+            self._num_inputs = len(self._input_ids)
+        elif self._input_sample_mode == "equally-spaced-k":
+            # Equally-spaced-k mode - generate equally spaced IDs
+            if self._num_inputs is None:
+                raise ValueError(
+                    "--num-inputs must be specified when using --input-sample-mode equally-spaced-k"
+                )
+
+            # When using equally-spaced-k, --input-id must be 0 (the default)
+            if self._input_ids[0] != 0:
+                raise ValueError(
+                    "--input-id must be 0 or omitted when using --input-sample-mode equally-spaced-k"
+                )
+
+            # Generate equally spaced indices
+            if self._num_inputs > self._available_num_inputs:
+                print(
+                    f"Warning: Requested {self._num_inputs} inputs but only {self._available_num_inputs} available. "
+                    f"Using all available inputs.",
+                    file=sys.stderr,
+                )
+                self._num_inputs = self._available_num_inputs
+
+            if self._num_inputs == 1:
+                self._input_ids = [0]
+            else:
+                # Generate equally spaced indices
+                step = (self._available_num_inputs - 1) / (self._num_inputs - 1)
+                self._input_ids = [
+                    int(round(i * step)) for i in range(self._num_inputs)
+                ]
+
+            print(
+                f"Equally-spaced-k mode: Selected {len(self._input_ids)} equally spaced inputs (total available: {self._available_num_inputs})",
+                file=sys.stderr,
+            )
+        else:
+            # First-k mode (default) - construct sequential range based on start ID and num_inputs
+            start_id = self._input_ids[0]
+            if self._num_inputs is None:
+                self._num_inputs = self._available_num_inputs - start_id
+            if self._num_inputs > self._available_num_inputs - start_id:
+                self._num_inputs = self._available_num_inputs - start_id
+            # Expand single ID to sequential range
+            self._input_ids = list(range(start_id, start_id + self._num_inputs))
+
+            print(
+                f"First-k mode: Selected {len(self._input_ids)} sequential inputs starting from index {start_id} "
+                f"(total available: {self._available_num_inputs})",
+                file=sys.stderr,
+            )
+
+        print(
+            f"Input IDs to run: {self._input_ids}",
+            file=sys.stderr,
+        )
 
     def _get_bm_func(self, bm_func_name: str):
         fwd_fn_lambda = getattr(self, bm_func_name, None)
@@ -882,15 +967,20 @@ class BenchmarkOperator(metaclass=PostInitProcessor):
                 self._proton_session_id = proton.start()
                 proton.enter_scope(f"tritonbench_run_op_{self.name}")
                 proton.deactivate(self._proton_session_id)
-            input_id_range = range(self._input_id, self._input_id + self._num_inputs)
+            input_id_range = self._input_ids
             if tqdm is not None:
                 input_id_range = tqdm(input_id_range)
-            if self._input_id:
-                for _dryrun_input_id in range(self._input_id):
-                    self.example_inputs = self.get_example_inputs()
+
+            current_pos = 0
             for input_id in input_id_range:
+                # Skip to the correct position if there are gaps
+                while current_pos < input_id:
+                    self.example_inputs = self.get_example_inputs()
+                    current_pos += 1
+
                 self._cur_input_id = input_id
                 self.example_inputs = self.get_example_inputs()
+                current_pos += 1
                 if self.reset_dynamo:
                     torch._dynamo.reset()
                 x_val = self.get_x_val(self.example_inputs)
@@ -1164,12 +1254,6 @@ class BenchmarkOperator(metaclass=PostInitProcessor):
         self.example_inputs = input_cast(
             tensor_cond, tensor_action, self.example_inputs
         )
-
-    def count_example_inputs(self):
-        total_possible = sum(1 for _ in self.get_input_iter())
-        if self._num_inputs is not None and self._num_inputs <= total_possible:
-            return self._num_inputs
-        return total_possible
 
     def get_example_inputs(self):
         if self._input_iter is None:
