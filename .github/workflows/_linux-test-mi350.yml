@@ -30,15 +30,15 @@ jobs:
         run: |
           set -eux
           
-          GPU_FLAG="--device /dev/kfd --device /dev/dri --security-opt seccomp=unconfined "
+          GPU_FLAG="--device /dev/kfd --device /dev/dri --security-opt seccomp=unconfined --group-add video"
 
           container_name=$(docker run \
             ${GPU_FLAG:-} \
+            --env-file /etc/podinfo/gha-gpu-isolation-settings \
             -e CONDA_ENV \
             --ipc=host \
             --tty \
             --detach \
-            --security-opt seccomp=unconfined \
             --shm-size=32g \
             --cap-add=SYS_PTRACE \
             -v "${GITHUB_WORKSPACE}:/tmp/workspace" \
