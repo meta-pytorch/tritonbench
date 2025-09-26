@@ -237,7 +237,7 @@ def get_parser(args=None):
     parser.add_argument(
         "--export",
         default=None,
-        choices=["in", "out", "both"],
+        choices=["input", "output", "both"],
         help="Export input or output. Must be used together with --export-dir.",
     )
     parser.add_argument(
