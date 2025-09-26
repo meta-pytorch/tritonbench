@@ -913,6 +913,18 @@ class BenchmarkOperator(metaclass=PostInitProcessor):
                 )
                 # Handle the input data types with best effort
                 apply_precision(self, self.tb_args.precision)
+                # CUDAGraphs run kernels on a fresh stream. Make sure all input
+                # tensors produced on the default stream have finished writing
+                # before we hand them to the captured graph. Otherwise we can
+                # read partially initialized values (e.g. from torch.randint)
+                # and hit device-side asserts in the baseline kernels.
+                if (
+                    self.use_cuda_graphs
+                    and self.device
+                    and self.device.startswith("cuda")
+                    and torch.cuda.is_available()
+                ):
+                    torch.cuda.synchronize()
                 self.baseline_fn = None
                 self.baseline_metrics = None
                 self._op_flops = {}
