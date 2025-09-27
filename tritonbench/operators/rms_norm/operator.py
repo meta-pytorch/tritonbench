@@ -116,7 +116,11 @@ class Operator(BenchmarkOperator):
 
     @register_benchmark(enabled=LigerRMSNorm is not None)
     def liger_rms(self, H, input, weight) -> Callable:
-        module = LigerRMSNorm(hidden_size=H, eps=self.eps).to(self.device)
+        module = LigerRMSNorm(
+            hidden_size=H,
+            eps=self.eps,
+            in_place=False,
+        ).to(self.device)
         module.weight = weight
         self.liger_rms_op = module
         return lambda: module(input)
