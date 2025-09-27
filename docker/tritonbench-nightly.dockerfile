@@ -15,7 +15,7 @@ RUN sudo apt-get install -y git jq gcc g++ \
                             vim wget curl ninja-build cmake \
                             libgl1-mesa-glx libsndfile1-dev kmod libxml2-dev libxslt1-dev \
                             libsdl2-dev libsdl2-2.0-0 \
-                            zlib1g-dev patch
+                            zlib1g-dev patch patchelf
 
 # get switch-cuda utility
 RUN sudo wget -q https://raw.githubusercontent.com/phohenecker/switch-cuda/master/switch-cuda.sh -O /usr/bin/switch-cuda.sh
@@ -34,16 +34,12 @@ RUN cd /workspace/pytorch-ci; wget https://raw.githubusercontent.com/pytorch/pyt
     wget https://raw.githubusercontent.com/pytorch/pytorch/main/.ci/docker/ci_commit_pins/nccl-cu12.txt
 RUN sudo bash -c "set -x;export OVERRIDE_GENCODE=\"${OVERRIDE_GENCODE}\" OVERRIDE_GENCODE_CUDNN=\"${OVERRIDE_GENCODE_CUDNN}\"; cd /workspace/pytorch-ci; bash install_cuda.sh 12.8"
 
-# Install miniconda
-RUN wget -q https://repo.anaconda.com/miniconda/Miniconda3-latest-Linux-x86_64.sh -O /workspace/Miniconda3-latest-Linux-x86_64.sh
-RUN cd /workspace && \
-    chmod +x Miniconda3-latest-Linux-x86_64.sh && \
-    bash ./Miniconda3-latest-Linux-x86_64.sh -b -u -p /workspace/miniconda3
+# Checkout TritonBench and submodules
+RUN git clone --recurse-submodules -b "${TRITONBENCH_BRANCH}" --single-branch \
+    https://github.com/meta-pytorch/tritonbench /workspace/tritonbench
 
-# Test activate miniconda
-RUN . /workspace/miniconda3/etc/profile.d/conda.sh && \
-    conda activate base && \
-    conda init && conda tos accept
+# Install and setup miniconda
+RUN cd /workspace/tritonbench && bash ./.ci/conda/install.sh
 
 RUN echo "\
 . /workspace/miniconda3/etc/profile.d/conda.sh\n\
@@ -55,10 +51,6 @@ export LD_LIBRARY_PATH=\${CUDA_HOME}/lib64\${LD_LIBRARY_PATH:+:\${LD_LIBRARY_PAT
 export LIBRARY_PATH=\${CUDA_HOME}/lib64\${LIBRARY_PATHPATH:+:\${LIBRARY_PATHPATH}}\n" >> /workspace/setup_instance.sh
 
 RUN echo ". /workspace/setup_instance.sh\n" >> ${HOME}/.bashrc
-
-# Checkout TritonBench and submodules
-RUN git clone --recurse-submodules -b "${TRITONBENCH_BRANCH}" --single-branch \
-    https://github.com/meta-pytorch/tritonbench /workspace/tritonbench
 
 # Setup conda env and CUDA
 RUN cd /workspace/tritonbench && \
@@ -91,7 +83,7 @@ RUN cd /workspace/tritonbench && \
 
 # Tritonbench library build and test require libcuda.so.1
 # which is from NVIDIA driver
-RUN sudo apt update && sudo apt-get install -y libnvidia-compute-550 patchelf patch
+RUN sudo apt update && sudo apt-get install -y libnvidia-compute-550
 
 # Workaround: installing Ninja from setup.py hits "Failed to decode METADATA with UTF-8" error
 RUN . ${SETUP_SCRIPT} && pip install ninja
@@ -116,5 +108,5 @@ RUN cd /workspace/tritonbench && \
 # Output setup script for inspection
 RUN cat "${SETUP_SCRIPT}"
 
-# Set run command
+# Set entrypoint
 CMD ["bash", "/workspace/tritonbench/docker/entrypoint.sh"]

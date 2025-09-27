@@ -8,15 +8,18 @@ import importlib.util
 
 
 def tritonparse_init(tritonparse_log_path):
-    """Initializes TritonParse structured logging.
+    """
+    Initializes TritonParse structured logging.
 
     This function sets up the logging hook to capture Triton compilation
-    and launch events. For more details, see:
-    https://github.com/meta-pytorch/tritonparse
+    and launch events. The logs will be stored in a 'raw_logs' subdirectory
+    within the specified path. For more details, see:
+    https://github.com/pytorch-labs/tritonparse
 
     Args:
         tritonparse_log_path (str or None): The path to the directory where
-            TritonParse logs should be stored. If None, this function
+            TritonParse logs should be stored. Raw logs will be saved in
+            {tritonparse_log_path}/raw_logs/. If None, this function
             does nothing.
     """
     if tritonparse_log_path is not None:
@@ -30,7 +33,7 @@ def tritonparse_init(tritonparse_log_path):
             import tritonparse.structured_logging
 
             tritonparse.structured_logging.init(
-                tritonparse_log_path, enable_trace_launch=True
+                f"{tritonparse_log_path}/raw_logs", enable_trace_launch=True
             )
             print(
                 f"TritonParse structured logging initialized with log path: {tritonparse_log_path}"
@@ -40,15 +43,19 @@ def tritonparse_init(tritonparse_log_path):
 
 
 def tritonparse_parse(tritonparse_log_path):
-    """Parses the generated TritonParse logs.
+    """
+    Parses the generated TritonParse logs.
 
-    This function processes the raw logs generated during the run and
-    creates unified, structured trace files. For more details, see:
-    https://github.com/meta-pytorch/tritonparse
+    This function processes the raw logs from the 'raw_logs' subdirectory
+    and creates unified, structured trace files in the 'parsed_logs'
+    subdirectory. For more details, see:
+    https://github.com/pytorch-labs/tritonparse
 
     Args:
-        tritonparse_log_path (str or None): The path to the directory containing
-            the TritonParse logs to be parsed. If None, this function
+        tritonparse_log_path (str or None): The base path to the directory
+            containing TritonParse logs. Raw logs will be read from
+            {tritonparse_log_path}/raw_logs/ and parsed logs will be saved to
+            {tritonparse_log_path}/parsed_logs/. If None, this function
             does nothing.
     """
     if tritonparse_log_path is not None:
@@ -56,6 +63,10 @@ def tritonparse_parse(tritonparse_log_path):
         try:
             from tritonparse.utils import unified_parse
 
-            unified_parse(tritonparse_log_path)
+            unified_parse(
+                f"{tritonparse_log_path}/raw_logs",
+                f"{tritonparse_log_path}/parsed_logs",
+                overwrite=True,
+            )
         except Exception as e:
             print(f"Warning: Failed to parse tritonparse log: {e}")

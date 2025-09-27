@@ -1,0 +1,52 @@
+name: linux-test-mi350
+on:
+  workflow_call:
+    inputs:
+      conda_env:
+        required: True
+        type: string
+        description: |
+          Conda environment to activate when testing Triton
+
+jobs:
+  linux-test-mi350:
+    if: github.repository_owner == 'meta-pytorch'
+    runs-on: [amd-mi350-runner]
+    timeout-minutes: 240
+    environment: docker-s3-upload
+    env:
+      DOCKER_IMAGE: "ghcr.io/meta-pytorch/tritonbench:rocm-latest"
+      CONDA_ENV: ${{ inputs.conda_env }}
+    steps:
+      - name: Checkout Tritonbench
+        uses: actions/checkout@v3
+        with:
+          submodules: recursive
+      - name: Pull docker image
+        uses: pytorch/test-infra/.github/actions/pull-docker-image@main
+        with:
+          docker-image: ${{ env.DOCKER_IMAGE }}
+      - name: Test Tritonbench
+        run: |
+          set -eux
+          
+          GPU_FLAG="--device /dev/kfd --device /dev/dri --security-opt seccomp=unconfined "
+
+          container_name=$(docker run \
+            ${GPU_FLAG:-} \
+            -e CONDA_ENV \
+            --ipc=host \
+            --tty \
+            --detach \
+            --security-opt seccomp=unconfined \
+            --shm-size=32g \
+            --cap-add=SYS_PTRACE \
+            -v "${GITHUB_WORKSPACE}:/tmp/workspace" \
+            -w /tmp/workspace \
+            "${DOCKER_IMAGE}"
+          )
+
+          docker exec -t -w /tmp/workspace "${container_name}" bash -c "
+            set -eux
+            bash ./.ci/tritonbench/test-gpu.sh
+          "

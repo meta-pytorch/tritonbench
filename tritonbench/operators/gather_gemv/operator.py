@@ -39,11 +39,11 @@ class Operator(BenchmarkOperator):
         super().__init__(tb_args, extra_args)
 
     @register_benchmark()
-    def test_0(self, p1, p2, p3) -> Callable:
+    def triton_gather_gemv(self, p1, p2, p3) -> Callable:
         return lambda: triton_test_0(p1, p2, p3)
 
     @register_benchmark(baseline=True)
-    def test_eager(self, w, idx, x):
+    def eager_gather_gemv(self, w, idx, x):
         s = x.size(0)
 
         if s <= 8192:
@@ -61,7 +61,7 @@ class Operator(BenchmarkOperator):
         return eager_impl
 
     @register_benchmark()
-    def test_inductor(self, w, idx, x):
+    def torch_compile_gather_gemv(self, w, idx, x):
         @torch.compile(mode="max-autotune-no-cudagraphs")
         def gather_gemv(w, idx, x):
             return w[idx].to(x.dtype) @ x

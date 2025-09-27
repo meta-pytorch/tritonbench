@@ -3,10 +3,10 @@ import os
 import subprocess
 
 # defines the default ROCM version to compile against
-DEFAULT_ROCM_VERSION = "6.2"
+DEFAULT_ROCM_VERSION = "6.4"
 ROCM_VERSION_MAP = {
-    "6.2": {
-        "pytorch_url": "rocm6.2",
+    "6.4": {
+        "pytorch_url": "rocm6.4",
     },
 }
 
@@ -25,9 +25,9 @@ def install_torch_deps():
     cmd = ["conda", "install", "-y"] + torch_deps
     subprocess.check_call(cmd)
     # conda forge deps
-    # ubuntu 22.04 comes with libstdcxx6 12.3.0
+    # ubuntu 24.04 comes with libstdcxx6 14.3.0
     # we need to install the same library version in conda
-    conda_deps = ["libstdcxx-ng=12.3.0"]
+    conda_deps = ["libstdcxx-ng=14.3.0"]
     cmd = ["conda", "install", "-y", "-c", "conda-forge"] + conda_deps
     subprocess.check_call(cmd)
 

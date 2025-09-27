@@ -12,7 +12,7 @@ from tritonbench.utils.triton_op import (
 )
 
 try:
-    from liger_kernel.transformers.cross_entropy import LigerCrossEntropyLoss
+    from .liger_cross_entropy import LigerCrossEntropyLoss
 except ModuleNotFoundError:
     LigerCrossEntropyLoss = None
 

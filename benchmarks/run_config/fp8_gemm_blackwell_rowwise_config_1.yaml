@@ -1,0 +1,4 @@
+fp8_gemm_blackwell_rowwise_config_1:
+    op: fp8_gemm
+    args: --op fp8_gemm --only blackwell_pt2_fp8_gemm --metrics tflops --m 1024 --n 256 --k 9216 --scaling_rowwise --simple-output
+    envs: TORCHINDUCTOR_AUTOTUNE_IN_SUBPROC=1 TRITON_ALWAYS_COMPILE=1 TORCHINDUCTOR_FORCE_DISABLE_CACHES=1 ENABLE_PERSISTENT_TMA_MATMUL=1 TORCHINDUCTOR_MAX_AUTOTUNE_GEMM=1

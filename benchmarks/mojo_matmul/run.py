@@ -30,31 +30,36 @@ def setup_tritonbench_cwd():
         sys.path.append(tritonbench_dir)
     return original_dir
 
+
 setup_tritonbench_cwd()
-
-import torch
-import max.graph as mg
-
-from max import engine, driver
-from max.graph import TensorValue, ops, DeviceRef, TensorType, Graph
-from max.graph.type import Shape, ShapeLike, DType
-
-from tritonbench.operators import load_opbench_by_name
-from tritonbench.utils.triton_op import register_benchmark
-from tritonbench.utils.parser import get_parser
 
 from typing import Callable
 
+import max.graph as mg
+import torch
+
+from max import driver, engine
+from max.graph import DeviceRef, Graph, ops, TensorType, TensorValue
+from max.graph.type import DType, Shape, ShapeLike
+
+from tritonbench.operators import load_opbench_by_name
+from tritonbench.utils.parser import get_parser
+from tritonbench.utils.triton_op import register_benchmark
+
+
 def promote_mojo_tensor_to_fp32(mojo_tensor, dtype):
-    input_type = TensorType(dtype=dtype, shape=mojo_tensor.shape, device=DeviceRef.GPU())
-    with mg.Graph("mojo_to_fp32", input_types=(input_type, )) as g:
-        (inp, ) = g.inputs
+    input_type = TensorType(
+        dtype=dtype, shape=mojo_tensor.shape, device=DeviceRef.GPU()
+    )
+    with mg.Graph("mojo_to_fp32", input_types=(input_type,)) as g:
+        (inp,) = g.inputs
         out = ops.cast(inp, dtype=DType.float32)
         g.output(out)
     session = engine.InferenceSession(devices=[driver.Accelerator()])
     model = session.load(g)
     output = model.execute(mojo_tensor)
     return output
+
 
 def demote_numpy_to_mojo_tensor_dtype(numpy_array, dtype):
     with mg.Graph("mojo_to_dtype") as g:
@@ -65,6 +70,7 @@ def demote_numpy_to_mojo_tensor_dtype(numpy_array, dtype):
     model = session.load(g)
     output = model.execute()
     return output[0]
+
 
 MOJO_DTYPE_MAPPING = {
     "bf16": DType.bfloat16,
@@ -79,6 +85,7 @@ MOJO_DRIVER_DEVICE_MAPPING = {
     "cuda": driver.Accelerator,
     "cpu": driver.CPU,
 }
+
 
 def mojo_matmul(operator, a, b, bias) -> Callable:
     precision = operator.precision
@@ -106,8 +113,22 @@ def mojo_matmul(operator, a, b, bias) -> Callable:
     output_func = lambda: model.execute(a_mojo_bf16, b_mojo_bf16)
     return output_func
 
+
 if __name__ == "__main__":
-    args = ["--op", "gemm", "--only", "aten_matmul,mojo_matmul", "--precision", "bf16", "--m", "512", "--n", "8192", "--k", "5376"] + sys.argv[1:]
+    args = [
+        "--op",
+        "gemm",
+        "--only",
+        "aten_matmul,mojo_matmul",
+        "--precision",
+        "bf16",
+        "--m",
+        "512",
+        "--n",
+        "8192",
+        "--k",
+        "5376",
+    ] + sys.argv[1:]
     gemm_opbench_cls = load_opbench_by_name("gemm")
     parser = get_parser(args)
     tb_args, extra_args = parser.parse_known_args(args)

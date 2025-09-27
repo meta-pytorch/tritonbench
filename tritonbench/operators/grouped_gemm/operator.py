@@ -88,7 +88,7 @@ class Operator(BenchmarkOperator):
         return _inner
 
     @register_benchmark()
-    def pt2_triton_grouped_mm(self, group_A, group_B):
+    def torch_compile_grouped_gemm(self, group_A, group_B):
         def _inner():
             torch._dynamo.reset()
 
@@ -121,7 +121,7 @@ class Operator(BenchmarkOperator):
         return _inner
 
     @register_benchmark()
-    def triton(self, group_A, group_B):
+    def triton_grouped_gemm(self, group_A, group_B):
         def _inner():
             (d_a_ptrs, d_b_ptrs, d_c_ptrs, d_g_sizes, d_g_lds, group_C) = (
                 self.list_input_to_triton_input(group_A, group_B)

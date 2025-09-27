@@ -46,7 +46,7 @@ class Operator(BenchmarkOperator):
         self.shapes = BUILDIN_SHAPES
 
     @register_benchmark()
-    def test_welford(self, p1, p2, p3) -> Callable:
+    def triton_welford(self, p1, p2, p3) -> Callable:
         return lambda: triton_welford(p1, p2, p3)
 
     @register_benchmark()

@@ -41,14 +41,14 @@ jobs:
           docker build . --build-arg TRITONBENCH_BRANCH="${branch_name}" --build-arg FORCE_DATE="${NIGHTLY_DATE}" \
               -f tritonbench-rocm-nightly.dockerfile -t ghcr.io/meta-pytorch/tritonbench:rocm-latest
           # Extract pytorch version from the docker
-          PYTORCH_VERSION=$(docker run -e SETUP_SCRIPT="${SETUP_SCRIPT}" ghcr.io/meta-pytorch/tritonbench:rocm-latest bash -c '. "${SETUP_SCRIPT}"; python -c "import torch; print(torch.__version__)"')
+          PYTORCH_VERSION=$(docker run -e SETUP_SCRIPT ghcr.io/meta-pytorch/tritonbench:rocm-latest bash -c '. "${SETUP_SCRIPT}"; python -c "import torch; print(torch.__version__)"')
           export DOCKER_TAG=$(awk '{match($0, /dev[0-9]+/, arr); print arr[0]}' <<< "${PYTORCH_VERSION}")
           docker tag ghcr.io/meta-pytorch/tritonbench:rocm-latest ghcr.io/meta-pytorch/tritonbench:rocm-${DOCKER_TAG}
       - name: Push docker to remote
         if: github.event_name != 'pull_request'
         run: |
           # Extract pytorch version from the docker
-          PYTORCH_VERSION=$(docker run -e SETUP_SCRIPT="${SETUP_SCRIPT}" ghcr.io/meta-pytorch/tritonbench:rocm-latest bash -c '. "${SETUP_SCRIPT}"; python -c "import torch; print(torch.__version__)"')
+          PYTORCH_VERSION=$(docker run -e SETUP_SCRIPT ghcr.io/meta-pytorch/tritonbench:rocm-latest bash -c '. "${SETUP_SCRIPT}"; python -c "import torch; print(torch.__version__)"')
           export DOCKER_TAG=$(awk '{match($0, /dev[0-9]+/, arr); print arr[0]}' <<< "${PYTORCH_VERSION}")
           docker push ghcr.io/meta-pytorch/tritonbench:rocm-${DOCKER_TAG}
           docker push ghcr.io/meta-pytorch/tritonbench:rocm-latest

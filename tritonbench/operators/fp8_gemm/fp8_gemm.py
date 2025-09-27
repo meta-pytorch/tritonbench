@@ -100,16 +100,11 @@ class Operator(BenchmarkOperator):
 
         def args(m, n, k):
             a = torch.randn(m, k, device=self.device).to(self._get_dtype())
-            b = (
-                torch.randn(k, n, device=self.device)
-                .to(self._get_dtype())
-                .T.contiguous()
-                .T
-            )
+            b = torch.randn(n, k, device=self.device).to(self._get_dtype())
 
             if self.extra_args.scaling_rowwise:
                 scale_a = _get_scale_per_row(a)
-                scale_b = _get_scale_per_row(b, transpose=True)
+                scale_b = _get_scale_per_row(b)
             else:
                 scale_a = _get_scale_per_tensor(
                     a, custom_scale=self.extra_args.per_tensor_scale_a
@@ -157,7 +152,12 @@ class Operator(BenchmarkOperator):
     @register_benchmark(baseline=True)
     def torch_fp8_gemm(self, a, b, scale_a, scale_b):
         return lambda: torch._scaled_mm(
-            a, b, scale_a, scale_b, use_fast_accum=True, out_dtype=self._get_dtype()
+            a,
+            b.t(),
+            scale_a,
+            scale_b.t(),
+            use_fast_accum=True,
+            out_dtype=self._get_dtype(),
         )
 
     @register_benchmark()
@@ -169,7 +169,12 @@ class Operator(BenchmarkOperator):
             autotune_fallback_to_aten=False,
         ):
             f = lambda a, b: torch._scaled_mm(
-                a, b, scale_a, scale_b, use_fast_accum=True, out_dtype=self._get_dtype()
+                a,
+                b.t(),
+                scale_a,
+                scale_b.t(),
+                use_fast_accum=True,
+                out_dtype=self._get_dtype(),
             )
             compiled = torch.compile(f, dynamic=False)
             compiled(a, b)
@@ -182,9 +187,9 @@ class Operator(BenchmarkOperator):
         def blackwell_persistent_tma_fp8_gemm(self, a, b, scale_a, scale_b):
             return lambda: blackwell_persistent_tma(
                 a,
-                b.T,
+                b,
                 scale_a,
-                scale_b.T,
+                scale_b,
                 self._get_dtype(),
                 self.extra_args.scaling_rowwise,
             )
@@ -199,9 +204,9 @@ class Operator(BenchmarkOperator):
             ):
                 f = lambda a, b: torch._scaled_mm(
                     a,
-                    b,
+                    b.t(),
                     scale_a,
-                    scale_b,
+                    scale_b.t(),
                     use_fast_accum=True,
                     out_dtype=self._get_dtype(),
                 )
@@ -212,17 +217,17 @@ class Operator(BenchmarkOperator):
 
     @register_benchmark()
     def triton_fp8_gemm(self, a, b, scale_a, scale_b):
-        return lambda: tutorial_matmul(a, b)
+        return lambda: tutorial_matmul(a, b.t())
 
     @register_benchmark(enabled=HAS_TMA)
     def triton_persistent_fp8_gemm(self, a, b, scale_a, scale_b):
-        return lambda: matmul_persistent(a, b)
+        return lambda: matmul_persistent(a, b.t())
 
     @register_benchmark(enabled=HAS_TMA and has_experimental_descriptor())
     def triton_tma_persistent_fp8_gemm(self, a, b, scale_a, scale_b):
         b = b.T.contiguous()
-        c, desc_a, desc_b, desc_c = allocate_matmul_tma(a, b)
-        return lambda: matmul_tma_persistent(a, b, c, desc_a, desc_b, desc_c)
+        c, desc_a, desc_b, desc_c = allocate_matmul_tma(a, b.t())
+        return lambda: matmul_tma_persistent(a, b.t(), c, desc_a, desc_b, desc_c)
 
     @register_metric()
     def gbps(self, fn, example_inputs: Any, metrics: BenchmarkOperatorMetrics) -> float:
