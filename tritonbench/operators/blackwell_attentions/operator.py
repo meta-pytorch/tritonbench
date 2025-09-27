@@ -443,6 +443,17 @@ class Operator(BenchmarkOperator):
             q, k, v, self.causal, self.sm_scale, "ws"
         )
 
+    @register_benchmark(enabled=False)
+    def triton_tutorial_flash_dp_persistent_blackwell(
+        self,
+        q: torch.Tensor,
+        k: torch.Tensor,
+        v: torch.Tensor,
+    ) -> Callable:
+        return lambda: blackwell_triton_tutorial_FA2_dp(
+            q, k, v, self.causal, self.sm_scale, "ws_persistent"
+        )
+
     # Only works with triton main, forward only.
     @register_benchmark(enabled=False)
     def gluon_blackwell_tutorial_fwd(

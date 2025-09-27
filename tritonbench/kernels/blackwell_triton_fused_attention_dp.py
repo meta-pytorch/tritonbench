@@ -56,6 +56,7 @@ def _attn_fwd_subtile(
     v,
     dtype: tl.constexpr,
     STAGE: tl.constexpr,
+    SUBTILING: tl.constexpr,
 ):
     qk = tl.dot(q, k)
     if STAGE == 2:
@@ -75,10 +76,13 @@ def _attn_fwd_subtile(
     BM: tl.constexpr = acc.shape[0]
     BN: tl.constexpr = acc.shape[1]
 
-    acc0, acc1 = acc.reshape([BM, 2, BN // 2]).permute(0, 2, 1).split()
-    acc0 = acc0 * alpha[:, None]
-    acc1 = acc1 * alpha[:, None]
-    acc = tl.join(acc0, acc1).permute(0, 2, 1).reshape([BM, BN])
+    if SUBTILING:
+        acc0, acc1 = acc.reshape([BM, 2, BN // 2]).permute(0, 2, 1).split()
+        acc0 = acc0 * alpha[:, None]
+        acc1 = acc1 * alpha[:, None]
+        acc = tl.join(acc0, acc1).permute(0, 2, 1).reshape([BM, BN])
+    else:
+        acc = acc * alpha[:, None]
 
     # prepare p and v for the dot
     p = p.to(dtype)
@@ -117,6 +121,7 @@ def _attn_fwd_inner_oss_dp(
     offs_n: tl.constexpr,  #
     N_CTX: tl.constexpr,
     warp_specialize: tl.constexpr,
+    SUBTILING: tl.constexpr,
 ):
     # range of values handled by this stage
     if STAGE == 1:
@@ -139,10 +144,34 @@ def _attn_fwd_inner_oss_dp(
         v = desc_v.load([offsetkv_y, 0])
 
         l_i0, m_i0, acc0 = _attn_fwd_subtile(
-            q0, k, offs_m0, start_n, offs_n, qk_scale, l_i0, m_i0, acc0, v, dtype, STAGE
+            q0,
+            k,
+            offs_m0,
+            start_n,
+            offs_n,
+            qk_scale,
+            l_i0,
+            m_i0,
+            acc0,
+            v,
+            dtype,
+            STAGE,
+            SUBTILING,
         )
         l_i1, m_i1, acc1 = _attn_fwd_subtile(
-            q1, k, offs_m1, start_n, offs_n, qk_scale, l_i1, m_i1, acc1, v, dtype, STAGE
+            q1,
+            k,
+            offs_m1,
+            start_n,
+            offs_n,
+            qk_scale,
+            l_i1,
+            m_i1,
+            acc1,
+            v,
+            dtype,
+            STAGE,
+            SUBTILING,
         )
 
         offsetkv_y += BLOCK_N
@@ -174,7 +203,7 @@ else:
 
 configs = [
     triton.Config(
-        {"BLOCK_M": BM, "BLOCK_N": BN},
+        {"BLOCK_M": BM, "BLOCK_N": BN, "SUBTILING": subtile},
         num_stages=s,
         num_warps=w,
         pre_hook=_host_descriptor_pre_hook,
@@ -183,6 +212,7 @@ configs = [
     for BN in [128]
     for s in NUM_STAGES_OPTIONS
     for w in [4]
+    for subtile in [True]
 ]
 
 
@@ -222,6 +252,8 @@ def _attn_fwd_tma_dp(
     desc_k,
     desc_v,
     desc_o,
+    pid,
+    off_hz,
     N_CTX,  #
     HEAD_DIM: tl.constexpr,  #
     BLOCK_M: tl.constexpr,  #
@@ -230,10 +262,11 @@ def _attn_fwd_tma_dp(
     STAGE: tl.constexpr,  #
     warp_specialize: tl.constexpr,  #
     dtype: tl.constexpr,
+    SUBTILING: tl.constexpr,
 ):
     tl.static_assert(BLOCK_N <= HEAD_DIM)
-    start_m = tl.program_id(0)
-    off_hz = tl.program_id(1)
+    start_m = pid  # tl.program_id(0)
+    # off_hz = tl.program_id(1)
     off_z = off_hz // H
     off_h = off_hz % H
 
@@ -283,6 +316,7 @@ def _attn_fwd_tma_dp(
             offs_n,
             N_CTX,  #
             warp_specialize,
+            SUBTILING,
         )
     if STAGE & 2:
         acc0, acc1, l_i0, l_i1, m_i0, m_i1 = _attn_fwd_inner_oss_dp(
@@ -309,6 +343,7 @@ def _attn_fwd_tma_dp(
             offs_n,
             N_CTX,  #
             warp_specialize,
+            SUBTILING,
         )
 
     m_i0 += tl.math.log2(l_i0)
@@ -322,6 +357,56 @@ def _attn_fwd_tma_dp(
     m_ptrs1 = M + off_hz * N_CTX + offs_m1
     tl.store(m_ptrs1, m_i1)
     desc_o.store([qo_offset_y + BLOCK_M // 2, 0], acc1.to(dtype))
+
+
+@triton.autotune(
+    configs=list(filter(keep, configs)),
+    key=["N_CTX", "HEAD_DIM", "FP8_OUTPUT", "warp_specialize"],
+    prune_configs_by={"early_config_prune": prune_invalid_configs},
+)
+@triton.jit
+def _attn_fwd(
+    sm_scale,
+    M,  #
+    Z,
+    H,
+    desc_q,
+    desc_k,
+    desc_v,
+    desc_o,
+    N_CTX,  #
+    HEAD_DIM: tl.constexpr,  #
+    BLOCK_M: tl.constexpr,  #
+    BLOCK_N: tl.constexpr,  #
+    FP8_OUTPUT: tl.constexpr,  #
+    STAGE: tl.constexpr,  #
+    warp_specialize: tl.constexpr,  #
+    dtype: tl.constexpr,
+    SUBTILING: tl.constexpr,
+):
+    pid = tl.program_id(0)
+    off_hz = tl.program_id(1)
+    _attn_fwd_tma_dp(
+        sm_scale,
+        M,
+        Z,
+        H,
+        desc_q,
+        desc_k,
+        desc_v,
+        desc_o,
+        pid,
+        off_hz,
+        N_CTX,
+        HEAD_DIM,
+        BLOCK_M,
+        BLOCK_N,
+        FP8_OUTPUT,
+        STAGE,
+        warp_specialize,
+        dtype,
+        SUBTILING,
+    )
 
 
 @triton.autotune(
@@ -348,6 +433,7 @@ def _attn_fwd_persist(
     warp_specialize: tl.constexpr,  #
     OUTER_LOOP: tl.constexpr,
     dtype: tl.constexpr,
+    SUBTILING: tl.constexpr,
 ):
     n_tile_num = tl.cdiv(N_CTX, BLOCK_M)
     prog_id = tl.program_id(0)
@@ -372,6 +458,8 @@ def _attn_fwd_persist(
             desc_k,
             desc_v,
             desc_o,
+            pid,
+            off_hz,
             N_CTX,
             HEAD_DIM,
             BLOCK_M,
@@ -380,6 +468,7 @@ def _attn_fwd_persist(
             STAGE,
             warp_specialize and not OUTER_LOOP,
             dtype,
+            SUBTILING,
         )
         tile_idx += num_progs
 
@@ -474,32 +563,52 @@ class _attention_opt(torch.autograd.Function):
             )
 
         ctx.grid = grid
-        warp_specialize = baseVariant == "ws"
+        warp_specialize = baseVariant == "ws" or baseVariant == "ws_persistent"
+        persistent = baseVariant == "persistent" or baseVariant == "ws_persistent"
         if is_blackwell() and warp_specialize:
             if HEAD_DIM_K == 128 and (
                 q.dtype == torch.float16 or q.dtype == torch.bfloat16
             ):
-                extra_kern_args["maxnreg"] = 168
+                extra_kern_args["maxnreg"] = 128
             else:
                 extra_kern_args["maxnreg"] = 80
-        _attn_fwd_persist[grid_persist](
-            sm_scale,
-            M,  #
-            q.shape[0],
-            q.shape[1],  #
-            desc_q,
-            desc_k,
-            desc_v,
-            desc_o,  #
-            N_CTX=q.shape[2],  #
-            HEAD_DIM=HEAD_DIM_K,  #
-            FP8_OUTPUT=q.dtype == torch.float8_e5m2,  #
-            STAGE=stage,  #
-            warp_specialize=warp_specialize,
-            OUTER_LOOP=True,
-            dtype=torch_dtype_to_triton(q.dtype),
-            **extra_kern_args,
-        )
+        if persistent:
+            _attn_fwd_persist[grid_persist](
+                sm_scale,
+                M,  #
+                q.shape[0],
+                q.shape[1],  #
+                desc_q,
+                desc_k,
+                desc_v,
+                desc_o,  #
+                N_CTX=q.shape[2],  #
+                HEAD_DIM=HEAD_DIM_K,  #
+                FP8_OUTPUT=q.dtype == torch.float8_e5m2,  #
+                STAGE=stage,  #
+                warp_specialize=warp_specialize,
+                OUTER_LOOP=True,
+                dtype=torch_dtype_to_triton(q.dtype),
+                **extra_kern_args,
+            )
+        else:
+            _attn_fwd[grid](
+                sm_scale,
+                M,  #
+                q.shape[0],
+                q.shape[1],  #
+                desc_q,
+                desc_k,
+                desc_v,
+                desc_o,  #
+                N_CTX=q.shape[2],  #
+                HEAD_DIM=HEAD_DIM_K,  #
+                FP8_OUTPUT=q.dtype == torch.float8_e5m2,  #
+                STAGE=stage,  #
+                warp_specialize=warp_specialize,
+                dtype=torch_dtype_to_triton(q.dtype),
+                **extra_kern_args,
+            )
 
         ctx.save_for_backward(q, k, v, o, M)
 
