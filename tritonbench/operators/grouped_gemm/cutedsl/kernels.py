@@ -45,7 +45,7 @@ from .autotuner import (
     autotune,
     AutotuneConfig,
     GemmConfig,
-    get_exhaustive_groupgemm_configs,
+    get_default_groupgemm_configs,
 )
 
 
@@ -2239,7 +2239,6 @@ def grouped_gemm_sm100(
     a_major: str = "m",
     b_major: str = "n",
     c_major: str = "m",
-    tensormap_update_mode: utils.TensorMapUpdateMode = utils.TensorMapUpdateMode.SMEM,
     tolerance: float = 1e-2,
     skip_ref_check: bool = True,
     # autotune key passthrough; we won’t use it other than letting your @autotune hash on it
@@ -2269,7 +2268,7 @@ def grouped_gemm_sm100(
         config.cluster_n,
         config.use_2_cta,
         # mode
-        tensormap_update_mode,
+        config.tensormap_update_mode,
         # arity & shapes (must match because group_count and total_num_clusters are constexpr in your compile)
         num_groups,
         shape_sig,
@@ -2299,7 +2298,7 @@ def grouped_gemm_sm100(
             mma_tiler_mn=(config.tile_m, config.tile_n),
             cluster_shape_mn=(config.cluster_m, config.cluster_n),
             use_2cta_instrs=config.use_2_cta,
-            tensormap_update_mode=tensormap_update_mode,
+            tensormap_update_mode=config.tensormap_update_mode,
             tolerance=tolerance,
             skip_ref_check=skip_ref_check,
         )
@@ -2355,7 +2354,7 @@ grouped_gemm_sm100.compile_cache = {}
 
 
 @autotune(
-    configs=[AutotuneConfig(config=c) for c in get_exhaustive_groupgemm_configs()],
+    configs=[AutotuneConfig(config=c) for c in get_default_groupgemm_configs()],
     key=["shape_sig"],  # we key on the (M,N,K) tuples so each shape-set tunes once
 )
 def grouped_gemm_sm100_tuned(

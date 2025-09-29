@@ -15,6 +15,8 @@ from functools import cached_property, partial
 from pathlib import Path
 from typing import Dict, List, Tuple
 
+import cutlass.utils as utils
+
 import torch
 
 import triton
@@ -333,6 +335,7 @@ class GemmConfig:
     cluster_m: int = 2
     cluster_n: int = 1
     use_2_cta: bool = False
+    tensormap_update_mode: utils.TensorMapUpdateMode = utils.TensorMapUpdateMode.SMEM
 
 
 def get_exhaustive_groupgemm_configs() -> List[GemmConfig]:
@@ -373,34 +376,221 @@ def get_exhaustive_groupgemm_configs() -> List[GemmConfig]:
     configs: List[GemmConfig] = []
 
     # # Non-2cta configs
-    for tile_m in [64, 128]:
-        for tile_n in tile_n_vals:
-            for cluster_m, cluster_n in clusters_no_2cta:
-                configs.append(
-                    GemmConfig(tile_m, tile_n, cluster_m, cluster_n, use_2_cta=False)
-                )
+    for tensormap_update_mode in [
+        utils.TensorMapUpdateMode.SMEM,
+        utils.TensorMapUpdateMode.GMEM,
+    ]:
+        for tile_m in [64, 128]:
+            for tile_n in tile_n_vals:
+                for cluster_m, cluster_n in clusters_no_2cta:
+                    configs.append(
+                        GemmConfig(
+                            tile_m,
+                            tile_n,
+                            cluster_m,
+                            cluster_n,
+                            use_2_cta=False,
+                            tensormap_update_mode=tensormap_update_mode,
+                        )
+                    )
 
-    # 2cta configs
-    for tile_m in [128, 256]:
-        for tile_n in tile_n_vals:
-            for cluster_m, cluster_n in clusters_2cta:
-                configs.append(
-                    GemmConfig(tile_m, tile_n, cluster_m, cluster_n, use_2_cta=True)
-                )
+    for tensormap_update_mode in [
+        utils.TensorMapUpdateMode.SMEM,
+        utils.TensorMapUpdateMode.GMEM,
+    ]:
+        for tile_m in [128, 256]:
+            for tile_n in tile_n_vals:
+                for cluster_m, cluster_n in clusters_2cta:
+                    configs.append(
+                        GemmConfig(
+                            tile_m,
+                            tile_n,
+                            cluster_m,
+                            cluster_n,
+                            use_2_cta=True,
+                            tensormap_update_mode=tensormap_update_mode,
+                        )
+                    )
 
     return configs
 
 
 def get_default_groupgemm_configs() -> List[GemmConfig]:
     return [
-        GemmConfig(tile_m=256, tile_n=160, cluster_m=2, cluster_n=1, use_2_cta=True),
-        GemmConfig(tile_m=256, tile_n=192, cluster_m=2, cluster_n=1, use_2_cta=True),
-        GemmConfig(tile_m=256, tile_n=224, cluster_m=2, cluster_n=1, use_2_cta=True),
-        GemmConfig(tile_m=256, tile_n=256, cluster_m=2, cluster_n=1, use_2_cta=True),
-        GemmConfig(tile_m=256, tile_n=256, cluster_m=4, cluster_n=1, use_2_cta=True),
-        GemmConfig(tile_m=128, tile_n=256, cluster_m=2, cluster_n=1, use_2_cta=True),
-        GemmConfig(tile_m=256, tile_n=224, cluster_m=4, cluster_n=1, use_2_cta=True),
-        GemmConfig(tile_m=128, tile_n=256, cluster_m=2, cluster_n=2, use_2_cta=True),
-        GemmConfig(tile_m=256, tile_n=192, cluster_m=2, cluster_n=2, use_2_cta=True),
-        GemmConfig(tile_m=256, tile_n=224, cluster_m=2, cluster_n=2, use_2_cta=True),
+        GemmConfig(
+            tile_m=128,
+            tile_n=256,
+            cluster_m=2,
+            cluster_n=1,
+            use_2_cta=False,
+            tensormap_update_mode=utils.TensorMapUpdateMode.SMEM,
+        ),
+        GemmConfig(
+            tile_m=256,
+            tile_n=160,
+            cluster_m=2,
+            cluster_n=1,
+            use_2_cta=True,
+            tensormap_update_mode=utils.TensorMapUpdateMode.GMEM,
+        ),
+        GemmConfig(
+            tile_m=256,
+            tile_n=256,
+            cluster_m=2,
+            cluster_n=1,
+            use_2_cta=True,
+            tensormap_update_mode=utils.TensorMapUpdateMode.GMEM,
+        ),
+        GemmConfig(
+            tile_m=64,
+            tile_n=32,
+            cluster_m=1,
+            cluster_n=1,
+            use_2_cta=False,
+            tensormap_update_mode=utils.TensorMapUpdateMode.GMEM,
+        ),
+        GemmConfig(
+            tile_m=64,
+            tile_n=256,
+            cluster_m=1,
+            cluster_n=2,
+            use_2_cta=False,
+            tensormap_update_mode=utils.TensorMapUpdateMode.SMEM,
+        ),
+        GemmConfig(
+            tile_m=128,
+            tile_n=256,
+            cluster_m=1,
+            cluster_n=2,
+            use_2_cta=False,
+            tensormap_update_mode=utils.TensorMapUpdateMode.SMEM,
+        ),
+        GemmConfig(
+            tile_m=256,
+            tile_n=256,
+            cluster_m=2,
+            cluster_n=2,
+            use_2_cta=True,
+            tensormap_update_mode=utils.TensorMapUpdateMode.GMEM,
+        ),
+        GemmConfig(
+            tile_m=128,
+            tile_n=256,
+            cluster_m=1,
+            cluster_n=2,
+            use_2_cta=False,
+            tensormap_update_mode=utils.TensorMapUpdateMode.GMEM,
+        ),
+        GemmConfig(
+            tile_m=64,
+            tile_n=32,
+            cluster_m=1,
+            cluster_n=1,
+            use_2_cta=False,
+            tensormap_update_mode=utils.TensorMapUpdateMode.SMEM,
+        ),
+        GemmConfig(
+            tile_m=256,
+            tile_n=256,
+            cluster_m=2,
+            cluster_n=1,
+            use_2_cta=True,
+            tensormap_update_mode=utils.TensorMapUpdateMode.SMEM,
+        ),
+        GemmConfig(
+            tile_m=128,
+            tile_n=256,
+            cluster_m=1,
+            cluster_n=1,
+            use_2_cta=False,
+            tensormap_update_mode=utils.TensorMapUpdateMode.GMEM,
+        ),
+        GemmConfig(
+            tile_m=256,
+            tile_n=256,
+            cluster_m=8,
+            cluster_n=1,
+            use_2_cta=True,
+            tensormap_update_mode=utils.TensorMapUpdateMode.GMEM,
+        ),
+        GemmConfig(
+            tile_m=64,
+            tile_n=32,
+            cluster_m=1,
+            cluster_n=2,
+            use_2_cta=False,
+            tensormap_update_mode=utils.TensorMapUpdateMode.SMEM,
+        ),
+        GemmConfig(
+            tile_m=256,
+            tile_n=192,
+            cluster_m=2,
+            cluster_n=1,
+            use_2_cta=True,
+            tensormap_update_mode=utils.TensorMapUpdateMode.GMEM,
+        ),
+        GemmConfig(
+            tile_m=256,
+            tile_n=256,
+            cluster_m=2,
+            cluster_n=2,
+            use_2_cta=True,
+            tensormap_update_mode=utils.TensorMapUpdateMode.SMEM,
+        ),
+        GemmConfig(
+            tile_m=128,
+            tile_n=96,
+            cluster_m=1,
+            cluster_n=2,
+            use_2_cta=False,
+            tensormap_update_mode=utils.TensorMapUpdateMode.SMEM,
+        ),
+        GemmConfig(
+            tile_m=64,
+            tile_n=192,
+            cluster_m=1,
+            cluster_n=1,
+            use_2_cta=False,
+            tensormap_update_mode=utils.TensorMapUpdateMode.SMEM,
+        ),
+        GemmConfig(
+            tile_m=64,
+            tile_n=64,
+            cluster_m=1,
+            cluster_n=1,
+            use_2_cta=False,
+            tensormap_update_mode=utils.TensorMapUpdateMode.GMEM,
+        ),
+        GemmConfig(
+            tile_m=64,
+            tile_n=192,
+            cluster_m=1,
+            cluster_n=1,
+            use_2_cta=False,
+            tensormap_update_mode=utils.TensorMapUpdateMode.GMEM,
+        ),
+        GemmConfig(
+            tile_m=128,
+            tile_n=64,
+            cluster_m=1,
+            cluster_n=1,
+            use_2_cta=False,
+            tensormap_update_mode=utils.TensorMapUpdateMode.GMEM,
+        ),
+        GemmConfig(
+            tile_m=64,
+            tile_n=160,
+            cluster_m=1,
+            cluster_n=1,
+            use_2_cta=False,
+            tensormap_update_mode=utils.TensorMapUpdateMode.GMEM,
+        ),
+        GemmConfig(
+            tile_m=64,
+            tile_n=256,
+            cluster_m=1,
+            cluster_n=1,
+            use_2_cta=False,
+            tensormap_update_mode=utils.TensorMapUpdateMode.GMEM,
+        ),
     ]
