@@ -185,13 +185,8 @@ def _maybe_make_tensor_desc(desc_or_ptr, shape, strides, block_shape):
         return tl.make_tensor_descriptor(desc_or_ptr, shape, strides, block_shape)
 
 
-@triton.autotune(
-    configs=list(filter(keep, configs)),
-    key=["N_CTX", "HEAD_DIM", "FP8_OUTPUT", "warp_specialize"],
-    prune_configs_by={"early_config_prune": prune_invalid_configs},
-)
 @triton.jit
-def _attn_fwd(
+def _attn_fwd_impl(
     sm_scale,
     M,  #
     Z,
@@ -200,6 +195,8 @@ def _attn_fwd(
     desc_k,
     desc_v,
     desc_o,
+    pid,
+    off_hz,
     N_CTX,  #
     HEAD_DIM: tl.constexpr,  #
     BLOCK_M: tl.constexpr,  #
@@ -212,8 +209,7 @@ def _attn_fwd(
 ):
     # dtype = tl.float8e5 if FP8_OUTPUT else tl.float16
     tl.static_assert(BLOCK_N <= HEAD_DIM)
-    start_m = tl.program_id(0)
-    off_hz = tl.program_id(1)
+    start_m = pid
     off_z = off_hz // H
     off_h = off_hz % H
 
@@ -321,6 +317,120 @@ def _attn_fwd(
     desc_o.store([qo_offset_y, 0], acc.to(dtype))
 
 
+@triton.autotune(
+    configs=list(filter(keep, configs)),
+    key=["N_CTX", "HEAD_DIM", "FP8_OUTPUT", "warp_specialize"],
+    prune_configs_by={"early_config_prune": prune_invalid_configs},
+)
+@triton.jit
+def _attn_fwd(
+    sm_scale,
+    M,  #
+    Z,
+    H,
+    desc_q,
+    desc_k,
+    desc_v,
+    desc_o,
+    N_CTX,  #
+    HEAD_DIM: tl.constexpr,  #
+    BLOCK_M: tl.constexpr,  #
+    BLOCK_N: tl.constexpr,  #
+    FP8_OUTPUT: tl.constexpr,  #
+    STAGE: tl.constexpr,  #
+    warp_specialize: tl.constexpr,  #
+    IS_HOPPER: tl.constexpr,
+    dtype: tl.constexpr,
+):
+    pid = tl.program_id(0)
+    off_hz = tl.program_id(1)
+    _attn_fwd_impl(
+        sm_scale,
+        M,
+        Z,
+        H,
+        desc_q,
+        desc_k,
+        desc_v,
+        desc_o,
+        pid,
+        off_hz,
+        N_CTX,
+        HEAD_DIM,
+        BLOCK_M,
+        BLOCK_N,
+        FP8_OUTPUT,
+        STAGE,
+        warp_specialize,
+        IS_HOPPER,
+        dtype,
+    )
+
+
+@triton.autotune(
+    configs=list(filter(keep, configs)),
+    key=["N_CTX", "HEAD_DIM", "FP8_OUTPUT", "warp_specialize"],
+    prune_configs_by={"early_config_prune": prune_invalid_configs},
+)
+@triton.jit
+def _attn_fwd_persist(
+    sm_scale,
+    M,  #
+    Z,
+    H,
+    desc_q,
+    desc_k,
+    desc_v,
+    desc_o,
+    N_CTX,  #
+    HEAD_DIM: tl.constexpr,  #
+    BLOCK_M: tl.constexpr,  #
+    BLOCK_N: tl.constexpr,  #
+    FP8_OUTPUT: tl.constexpr,  #
+    STAGE: tl.constexpr,  #
+    warp_specialize: tl.constexpr,  #
+    OUTER_LOOP: tl.constexpr,
+    IS_HOPPER: tl.constexpr,  #
+    dtype: tl.constexpr,
+):
+    n_tile_num = tl.cdiv(N_CTX, BLOCK_M)
+    prog_id = tl.program_id(0)
+    num_progs = tl.num_programs(0)
+    total_tiles = n_tile_num * Z * H
+
+    tiles_per_sm = total_tiles // num_progs
+    if prog_id < total_tiles % num_progs:
+        tiles_per_sm += 1
+
+    tile_idx = prog_id
+    # inner loop warpspec vs. outer loop warpspec
+    for _ in tl.range(0, tiles_per_sm, warp_specialize=warp_specialize and OUTER_LOOP):
+        pid = tile_idx % n_tile_num
+        off_hz = tile_idx // n_tile_num
+        _attn_fwd_impl(
+            sm_scale,
+            M,
+            Z,
+            H,
+            desc_q,
+            desc_k,
+            desc_v,
+            desc_o,
+            pid,
+            off_hz,
+            N_CTX,
+            HEAD_DIM,
+            BLOCK_M,
+            BLOCK_N,
+            FP8_OUTPUT,
+            STAGE,
+            warp_specialize and not OUTER_LOOP,
+            IS_HOPPER,
+            dtype,
+        )
+        tile_idx += num_progs
+
+
 def torch_dtype_to_triton(dtype):
     if dtype == torch.float8_e5m2:
         return tl.float8e5
@@ -391,6 +501,7 @@ class _attention_opt(torch.autograd.Function):
             return torch.empty(size, dtype=torch.int8, device="cuda")
 
         triton.set_allocator(alloc_fn)
+        NUM_SMS = torch.cuda.get_device_properties("cuda").multi_processor_count
 
         def grid(META):
             return (
@@ -399,8 +510,19 @@ class _attention_opt(torch.autograd.Function):
                 1,
             )
 
+        def grid_persist(META):
+            return (
+                min(
+                    NUM_SMS,
+                    triton.cdiv(q.shape[2], META["BLOCK_M"]) * q.shape[0] * q.shape[1],
+                ),
+                1,
+                1,
+            )
+
         ctx.grid = grid
-        warp_specialize = baseVariant == "ws"
+        warp_specialize = baseVariant == "ws" or baseVariant == "ws_persistent"
+        persistent = baseVariant == "persistent" or baseVariant == "ws_persistent"
         if is_blackwell() and warp_specialize:
             if HEAD_DIM_K == 128 and (
                 q.dtype == torch.float16 or q.dtype == torch.bfloat16
@@ -408,24 +530,45 @@ class _attention_opt(torch.autograd.Function):
                 extra_kern_args["maxnreg"] = 168
             else:
                 extra_kern_args["maxnreg"] = 80
-        _attn_fwd[grid](
-            sm_scale,
-            M,  #
-            q.shape[0],
-            q.shape[1],  #
-            desc_q,
-            desc_k,
-            desc_v,
-            desc_o,  #
-            N_CTX=q.shape[2],  #
-            HEAD_DIM=HEAD_DIM_K,  #
-            FP8_OUTPUT=q.dtype == torch.float8_e5m2,  #
-            STAGE=stage,  #
-            warp_specialize=warp_specialize,
-            IS_HOPPER=is_hopper(),  #
-            dtype=torch_dtype_to_triton(q.dtype),
-            **extra_kern_args,
-        )
+        if persistent:
+            _attn_fwd_persist[grid_persist](
+                sm_scale,
+                M,  #
+                q.shape[0],
+                q.shape[1],  #
+                desc_q,
+                desc_k,
+                desc_v,
+                desc_o,  #
+                N_CTX=q.shape[2],  #
+                HEAD_DIM=HEAD_DIM_K,  #
+                FP8_OUTPUT=q.dtype == torch.float8_e5m2,  #
+                STAGE=stage,  #
+                warp_specialize=warp_specialize,
+                OUTER_LOOP=True,
+                IS_HOPPER=is_hopper(),  #
+                dtype=torch_dtype_to_triton(q.dtype),
+                **extra_kern_args,
+            )
+        else:
+            _attn_fwd[grid](
+                sm_scale,
+                M,  #
+                q.shape[0],
+                q.shape[1],  #
+                desc_q,
+                desc_k,
+                desc_v,
+                desc_o,  #
+                N_CTX=q.shape[2],  #
+                HEAD_DIM=HEAD_DIM_K,  #
+                FP8_OUTPUT=q.dtype == torch.float8_e5m2,  #
+                STAGE=stage,  #
+                warp_specialize=warp_specialize,
+                IS_HOPPER=is_hopper(),  #
+                dtype=torch_dtype_to_triton(q.dtype),
+                **extra_kern_args,
+            )
 
         ctx.save_for_backward(q, k, v, o, M)
 

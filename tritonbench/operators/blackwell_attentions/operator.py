@@ -433,6 +433,17 @@ class Operator(BenchmarkOperator):
         )
 
     @register_benchmark(enabled=False)
+    def triton_tutorial_flash_v2_persistent_blackwell(
+        self,
+        q: torch.Tensor,
+        k: torch.Tensor,
+        v: torch.Tensor,
+    ) -> Callable:
+        return lambda: blackwell_triton_tutorial_FA2_opt(
+            q, k, v, self.causal, self.sm_scale, "ws_persistent"
+        )
+
+    @register_benchmark(enabled=False)
     def triton_tutorial_flash_dp_blackwell(
         self,
         q: torch.Tensor,
