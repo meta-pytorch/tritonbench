@@ -207,6 +207,7 @@ configs = [
         num_stages=s,
         num_warps=w,
         pre_hook=_host_descriptor_pre_hook,
+        # ir_override=f"/home/mren/OpenSource/tritonbench/override/_attn_fwd_persist.ttgir"
     )
     for BM in [256]
     for BN in [128]
@@ -495,6 +496,7 @@ class _attention_opt(torch.autograd.Function):
         M = torch.empty(
             (q.shape[0], q.shape[1], q.shape[2]), device=q.device, dtype=torch.float32
         )
+        warp_specialize = baseVariant == "ws" or baseVariant == "ws_persistent"
         # Use device_descriptor for Hopper + warpspec.
         if supports_host_descriptor() and not (is_hopper() and warp_specialize):
             # Note that on Hopper we cannot perform a FP8 dot with a non-transposed second tensor
@@ -562,8 +564,14 @@ class _attention_opt(torch.autograd.Function):
                 1,
             )
 
+        def grid_debug(META):
+            return (
+                1,
+                1,
+                1,
+            )
+
         ctx.grid = grid
-        warp_specialize = baseVariant == "ws" or baseVariant == "ws_persistent"
         persistent = baseVariant == "persistent" or baseVariant == "ws_persistent"
         if is_blackwell() and warp_specialize:
             if HEAD_DIM_K == 128 and (
