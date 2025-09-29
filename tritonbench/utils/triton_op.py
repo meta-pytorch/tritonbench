@@ -1296,7 +1296,7 @@ class BenchmarkOperator(metaclass=PostInitProcessor):
         parts = [x for x in ["tritonbench", unix_user, logging_group] if x]
         tritonbench_dir_name = "_".join(parts)
         benchmark_name = self.benchmark_name
-        fn_part = f"{fn_name}_{self._input_id}" if fn_name else ""
+        fn_part = f"{fn_name}_{self._cur_input_id}" if fn_name else ""
         out_part = Path(tempfile.gettempdir()) / tritonbench_dir_name / benchmark_name
         return out_part / fn_part if fn_part else out_part
 
@@ -1678,10 +1678,10 @@ class BenchmarkOperator(metaclass=PostInitProcessor):
                 assert (
                     self.required_metrics == ["_compile_time_kineto_trace_in_task"]
                     and len(self._only) == 1
-                    and (self._input_id is not None)
+                    and (self._cur_input_id is not None)
                 ), (
                     "_compile_time_kineto_trace_in_task must be measured by itself. "
-                    f"required_metrics: {self.required_metrics}, _only: {self._only}, _input_id: {self._input_id}"
+                    f"required_metrics: {self.required_metrics}, _only: {self._only}, _input_id: {self._cur_input_id}"
                 )
                 from tritonbench.components.compile_time import (
                     do_compile_kineto_trace_in_task,
@@ -1703,10 +1703,10 @@ class BenchmarkOperator(metaclass=PostInitProcessor):
                 assert (
                     self.required_metrics == ["_compile_time_in_task"]
                     and len(self._only) == 1
-                    and (self._input_id is not None)
+                    and (self._cur_input_id is not None)
                 ), (
                     "_compile_time_in_task must be measured by itself. "
-                    f"required_metrics: {self.required_metrics}, _only: {self._only}, _input_id: {self._input_id}"
+                    f"required_metrics: {self.required_metrics}, _only: {self._only}, _input_id: {self._cur_input_id}"
                 )
                 from tritonbench.components.compile_time import do_compile_time_in_task
 
@@ -1739,10 +1739,10 @@ class BenchmarkOperator(metaclass=PostInitProcessor):
                 assert (
                     self.required_metrics == ["_ncu_trace_in_task"]
                     and len(self._only) == 1
-                    and (self._input_id is not None)
+                    and (self._cur_input_id is not None)
                 ), (
                     "_ncu_trace_in_task must be measured by itself. "
-                    f"required_metrics: {self.required_metrics}, _only: {self._only}, _input_id: {self._input_id}"
+                    f"required_metrics: {self.required_metrics}, _only: {self._only}, _input_id: {self._cur_input_id}"
                 )
                 from tritonbench.components.ncu import do_bench_in_task
 
@@ -1756,10 +1756,10 @@ class BenchmarkOperator(metaclass=PostInitProcessor):
                 assert (
                     self.required_metrics == ["_nsys_rep_in_task"]
                     and len(self._only) == 1
-                    and (self._input_id is not None)
+                    and (self._cur_input_id is not None)
                 ), (
                     "_nsys_rep_in_task must be measured by itself. "
-                    f"required_metrics: {self.required_metrics}, _only: {self._only}, _input_id: {self._input_id}"
+                    f"required_metrics: {self.required_metrics}, _only: {self._only}, _input_id: {self._cur_input_id}"
                 )
                 from tritonbench.components.ncu import do_bench_in_task
 

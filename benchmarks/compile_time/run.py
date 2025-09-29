@@ -83,49 +83,35 @@ def get_common_args(op: str, backends: List[str]) -> Dict[str, List[str]]:
 
 def reduce(run_timestamp, output_dir, output_files, args):
     """aggregate all op benchmark csvs into json file"""
-    from tritonbench.utils.path_utils import REPO_PATH
-    from tritonbench.utils.run_utils import get_github_env, get_run_env
+    from tritonbench.utils.scuba_utils import decorate_benchmark_data, log_benchmark
 
-    repo_locs = {
-        "tritonbench": REPO_PATH,
-    }
-    if args.ci and "TRITONBENCH_TRITON_REPO_PATH" in os.environ:
-        repo_locs["triton"] = os.environ.get("TRITONBENCH_TRITON_REPO_PATH", None)
-        repo_locs["pytorch"] = os.environ.get("TRITONBENCH_PYTORCH_REPO_PATH", None)
-    aggregated_obj = {
-        "name": "compile_time",
-        "env": get_run_env(run_timestamp, repo_locs),
-        "metrics": {},
-    }
     # Collecting GitHub environment variables when running in CI environment
-    if args.ci:
-        aggregated_obj["github"] = get_github_env()
+    # Reduce all operator CSV outputs to a single output json
+    benchmark_data = [json.load(open(f, "r")) for f in output_files]
+    aggregated_obj = decorate_benchmark_data(
+        args.name, run_timestamp, args.ci, benchmark_data
+    )
 
-    for result_json_file in output_files:
-        if not exists(result_json_file):
-            logger.warning(
-                f"[compile_time] result json file {result_json_file} does not exist."
-            )
-            continue
-        with open(
-            result_json_file,
-            "r",
-        ) as fp:
-            result_obj = json.load(fp)
-            aggregated_obj["metrics"].update(result_obj)
     result_json_path = os.path.join(output_dir, "result.json")
     with open(result_json_path, "w") as fp:
         json.dump(aggregated_obj, fp, indent=4)
+    if args.log_scuba:
+        log_benchmark(aggregated_obj)
+        logger.info(f"[{args.name}] logging results to scuba.")
     return result_json_path
 
 
 def main() -> None:
     parser = argparse.ArgumentParser()
+    parser.add_argument("--name", default="compile_time", help="Benchmark name.")
     parser.add_argument(
         "--ci", action="store_true", help="Running in GitHub Actions CI mode."
     )
     parser.add_argument(
         "--op", required=False, default=None, help="Run a single operator."
+    )
+    parser.add_argument(
+        "--log-scuba", action="store_true", help="Upload results to Scuba."
     )
     args = parser.parse_args()
     setup_tritonbench_cwd()
