@@ -4,6 +4,7 @@ from typing import Callable, Generator, List, Optional, Tuple
 import torch
 
 from tritonbench.utils.env_utils import is_hip
+from tritonbench.utils.python_utils import try_import
 
 from tritonbench.utils.triton_op import (
     BenchmarkOperator,
@@ -30,6 +31,9 @@ try:
     from .quack import QuackRMSNorm
 except ModuleNotFoundError:
     QuackRMSNorm = None
+
+with try_import("HAS_TILELANG"):
+    from .tilelang import rms_norm as tilelang_rms_norm
 
 
 def parse_op_args(args: List[str]):
@@ -151,6 +155,13 @@ class Operator(BenchmarkOperator):
         module = AITerRMSNorm(hidden_size=H, eps=self.eps).to(self.device)
         module.weight = weight
         self.aiter_rms_op = module
+        return lambda: module(input)
+
+    @register_benchmark(enabled=HAS_TILELANG)
+    def tilelang(self, H, input, weight) -> Callable:
+        module = TilelangRMSNorm(hidden_size=H, eps=self.eps).to(self.device)
+        module.weight = weight
+        self.tilelang_rms_op = module
         return lambda: module(input)
 
     @register_x_val(label="(M, H)")
