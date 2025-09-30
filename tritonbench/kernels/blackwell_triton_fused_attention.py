@@ -11,35 +11,20 @@ Extra Credits:
 
 """
 
-import sys
-
-from typing import Optional
-
 import torch
 
 import triton
 import triton.language as tl
 from triton.tools.tensor_descriptor import TensorDescriptor
 
-
-def is_hip():
-    return triton.runtime.driver.active.get_current_target().backend == "hip"
-
-
-def is_cuda():
-    return triton.runtime.driver.active.get_current_target().backend == "cuda"
-
-
-def supports_host_descriptor():
-    return is_cuda() and torch.cuda.get_device_capability()[0] >= 9
-
-
-def is_blackwell():
-    return is_cuda() and torch.cuda.get_device_capability()[0] == 10
-
-
-def is_hopper():
-    return is_cuda() and torch.cuda.get_device_capability()[0] == 9
+from .blackwell_attention_utils import (
+    is_blackwell,
+    is_cuda,
+    is_hip,
+    is_hopper,
+    is_tile_enabled,
+    supports_host_descriptor,
+)
 
 
 @triton.jit
@@ -97,7 +82,7 @@ def _attn_fwd_inner(
         alpha = tl.math.exp2(m_i - m_ij)
         l_ij = tl.sum(p, 1)
         # -- update output accumulator --
-        if not IS_HOPPER and warp_specialize and BLOCK_M == 128 and HEAD_DIM == 128:
+        if ((not IS_HOPPER and warp_specialize) and BLOCK_M == 128) and HEAD_DIM == 128:
             BM: tl.constexpr = acc.shape[0]
             BN: tl.constexpr = acc.shape[1]
             acc0, acc1 = acc.reshape([BM, 2, BN // 2]).permute(0, 2, 1).split()
@@ -145,18 +130,29 @@ elif supports_host_descriptor():
 else:
     NUM_STAGES_OPTIONS = [2, 3, 4]
 
-configs = [
-    triton.Config(
-        {"BLOCK_M": BM, "BLOCK_N": BN},
-        num_stages=s,
-        num_warps=w,
-        pre_hook=_host_descriptor_pre_hook,
-    )
-    for BM in [64, 128]
-    for BN in [32, 64, 128]
-    for s in NUM_STAGES_OPTIONS
-    for w in [4, 8]
-]
+if is_tile_enabled():
+    configs = [
+        triton.Config(
+            {"BLOCK_M": BM, "BLOCK_N": BN, "occupancy": occ},
+            pre_hook=_host_descriptor_pre_hook,
+        )
+        for BM in [64, 128, 256]
+        for BN in [64, 128]
+        for occ in [1, 2]
+    ]
+else:
+    configs = [
+        triton.Config(
+            {"BLOCK_M": BM, "BLOCK_N": BN},
+            num_stages=s,
+            num_warps=w,
+            pre_hook=_host_descriptor_pre_hook,
+        )
+        for BM in [64, 128]
+        for BN in [32, 64, 128]
+        for s in NUM_STAGES_OPTIONS
+        for w in [4, 8]
+    ]
 
 
 def keep(conf):
@@ -453,6 +449,7 @@ class _attention_opt(torch.autograd.Function):
         M = torch.empty(
             (q.shape[0], q.shape[1], q.shape[2]), device=q.device, dtype=torch.float32
         )
+        warp_specialize = baseVariant == "ws" or baseVariant == "ws_persistent"
         # Use device_descriptor for Hopper + warpspec.
         if supports_host_descriptor() and not (is_hopper() and warp_specialize):
             # Note that on Hopper we cannot perform a FP8 dot with a non-transposed second tensor

@@ -11,35 +11,20 @@ Extra Credits:
 
 """
 
-import sys
-
-from typing import Optional
-
 import torch
 
 import triton
 import triton.language as tl
 from triton.tools.tensor_descriptor import TensorDescriptor
 
-
-def is_hip():
-    return triton.runtime.driver.active.get_current_target().backend == "hip"
-
-
-def is_cuda():
-    return triton.runtime.driver.active.get_current_target().backend == "cuda"
-
-
-def supports_host_descriptor():
-    return is_cuda() and torch.cuda.get_device_capability()[0] >= 9
-
-
-def is_blackwell():
-    return is_cuda() and torch.cuda.get_device_capability()[0] == 10
-
-
-def is_hopper():
-    return is_cuda() and torch.cuda.get_device_capability()[0] == 9
+from .blackwell_attention_utils import (
+    is_blackwell,
+    is_cuda,
+    is_hip,
+    is_hopper,
+    is_tile_enabled,
+    supports_host_descriptor,
+)
 
 
 @triton.jit
@@ -201,20 +186,31 @@ elif supports_host_descriptor():
 else:
     NUM_STAGES_OPTIONS = [3]
 
-configs = [
-    triton.Config(
-        {"BLOCK_M": BM, "BLOCK_N": BN, "SUBTILING": subtile},
-        num_stages=s,
-        num_warps=w,
-        pre_hook=_host_descriptor_pre_hook,
-        # ir_override=f"/home/mren/OpenSource/tritonbench/override/_attn_fwd_persist.ttgir"
-    )
-    for BM in [256]
-    for BN in [128]
-    for s in NUM_STAGES_OPTIONS
-    for w in [4]
-    for subtile in [True]
-]
+if is_tile_enabled():
+    configs = [
+        triton.Config(
+            {"BLOCK_M": BM, "BLOCK_N": BN, "occupancy": occ, "SUBTILING": subtile},
+            pre_hook=_host_descriptor_pre_hook,
+        )
+        for BM in [64, 128, 256]
+        for BN in [64, 128]
+        for occ in [1, 2]
+        for subtile in [True]
+    ]
+else:
+    configs = [
+        triton.Config(
+            {"BLOCK_M": BM, "BLOCK_N": BN, "SUBTILING": subtile},
+            num_stages=s,
+            num_warps=w,
+            pre_hook=_host_descriptor_pre_hook,
+        )
+        for BM in [256]
+        for BN in [128]
+        for s in NUM_STAGES_OPTIONS
+        for w in [4]
+        for subtile in [True, False]
+    ]
 
 
 def keep(conf):
