@@ -3,10 +3,13 @@ import os
 import subprocess
 
 # defines the default ROCM version to compile against
-DEFAULT_ROCM_VERSION = "6.4"
+DEFAULT_ROCM_VERSION = "7.0"
 ROCM_VERSION_MAP = {
     "6.4": {
         "pytorch_url": "rocm6.4",
+    },
+    "7.0": {
+        "pytorch_url": "rocm7.0",
     },
 }
 
