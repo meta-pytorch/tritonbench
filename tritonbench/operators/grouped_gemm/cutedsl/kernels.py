@@ -573,7 +573,7 @@ class GroupedGemmKernel:
 
         #  init barrier for loading A, B with TMA
         if warp_idx == self.epilog_warp_id[0]:
-            for k_stage in range(self.num_ab_stage):
+            for k_stage in range_constexpr(self.num_ab_stage):  # noqa: F821
                 num_tma_producer = self.num_mcast_ctas_a + self.num_mcast_ctas_b - 1
                 with cute.arch.elect_one():
                     cute.arch.mbarrier_init(ab_full_mbar_ptr + k_stage, 1)
@@ -582,7 +582,7 @@ class GroupedGemmKernel:
                     )
         # Accumulator barrier init
         if warp_idx == self.mma_warp_id:
-            for acc_stage in range(self.num_acc_stage):
+            for acc_stage in range_constexpr(self.num_acc_stage):  # noqa: F821
                 with cute.arch.elect_one():
                     cute.arch.mbarrier_init(acc_full_mbar_ptr + acc_stage, 1)
                     cute.arch.mbarrier_init(
@@ -1287,7 +1287,7 @@ class GroupedGemmKernel:
                 #
                 subtile_cnt = cute.size(tTR_tAcc.shape, mode=[3])
                 num_prev_subtiles = tile_sched.num_tiles_executed * subtile_cnt
-                for subtile_idx in range(subtile_cnt):
+                for subtile_idx in range_constexpr(subtile_cnt):  # noqa: F821
                     #
                     # Load accumulator from tensor memory buffer to register
                     #
