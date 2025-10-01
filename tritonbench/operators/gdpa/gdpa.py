@@ -45,7 +45,9 @@ from .math import (
 try:
     # @manual=//triton:triton
     import triton.language.extra.tlx as tlx  # type: ignore
+
     from .gdpa_blackwell_tlx import gdpa_backward_tlx, get_tlx_bwd_autotune_config
+
     HAS_TLX = True
 except ImportError:
     # suppress type checking errors
