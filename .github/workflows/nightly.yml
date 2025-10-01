@@ -28,7 +28,7 @@ on:
   pull_request:
     paths:
       - benchmarks/nightly/**
-      - .github/workflows/_linux-benchmark-h100.yml
+      - .github/workflows/_linux-benchmark-*.yml
       - .github/workflows/nightly.yml
 
 jobs:
