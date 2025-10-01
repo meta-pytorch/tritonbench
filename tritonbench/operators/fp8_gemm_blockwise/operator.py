@@ -1,8 +1,6 @@
 import argparse
 from typing import Any, Callable, Generator, List, Optional, Tuple
 
-import fbgemm_gpu.experimental.gen_ai  # noqa: F401
-
 import torch
 import triton
 
@@ -44,6 +42,8 @@ if is_cuda():
 HAS_CUTLASS = False
 if is_cuda():
     try:
+        import fbgemm_gpu.experimental.gen_ai
+
         cutlass_fp8_block = torch.ops.llama_cpp.fp8_blockwise_matmul
         HAS_CUTLASS = True
     except:

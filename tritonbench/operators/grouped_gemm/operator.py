@@ -87,7 +87,8 @@ class Operator(BenchmarkOperator):
 
         return _inner
 
-    @register_benchmark()
+    # TODO: Does not work on hip
+    @register_benchmark(enabled=is_cuda())
     def torch_compile_grouped_gemm(self, group_A, group_B):
         def _inner():
             torch._dynamo.reset()

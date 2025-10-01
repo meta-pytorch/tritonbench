@@ -2,9 +2,11 @@ import argparse
 from typing import Callable, Generator, List, Optional, Tuple
 
 import torch
+from tritonbench.utils.python_utils import try_import
 
 # We are benchmarking the kernel used inside quantize_comm. Insofar, we are using the fp32_to_mx4 fbgemm API rather than the quantize_mx API.
-from fbgemm_gpu.quantize_utils import fp32_to_mx4, RoundingMode
+with try_import("HAS_FBGEMM"):
+    from fbgemm_gpu.quantize_utils import fp32_to_mx4, RoundingMode
 
 from tritonbench.utils.triton_op import (
     BenchmarkOperator,
@@ -26,7 +28,7 @@ class Operator(BenchmarkOperator):
             _input = torch.randn((sz,), device=self.device, dtype=torch.float32)
             yield _input, 32, 2, 1, RoundingMode.even, False
 
-    @register_benchmark(baseline=True, fwd_only=True)
+    @register_benchmark(baseline=True, fwd_only=True, enabled=HAS_FBGEMM)
     def fbgemm_fp32_to_mx4(self, *args) -> Callable:
         return lambda: fp32_to_mx4(*args, use_triton=True)
 

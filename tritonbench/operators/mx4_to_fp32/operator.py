@@ -4,13 +4,16 @@ from typing import Callable, Generator, List, Optional, Tuple
 import torch
 
 # We are benchmarking the kernel used inside quantize_comm. Insofar, we are using the fp32_to_mx4 fbgemm API rather than the quantize_mx API.
-from fbgemm_gpu.quantize_utils import fp32_to_mx4, mx4_to_fp32
 
+from tritonbench.utils.python_utils import try_import
 from tritonbench.utils.triton_op import (
     BenchmarkOperator,
     register_benchmark,
     register_x_val,
 )
+
+with try_import("HAS_FBGEMM"):
+    from fbgemm_gpu.quantize_utils import fp32_to_mx4, mx4_to_fp32
 
 
 class Operator(BenchmarkOperator):
@@ -34,7 +37,7 @@ class Operator(BenchmarkOperator):
             )
             yield _input, group_size, ebits, mbits
 
-    @register_benchmark(baseline=True, fwd_only=True)
+    @register_benchmark(baseline=True, fwd_only=True, enabled=HAS_FBGEMM)
     def fbgemm_mx4_to_fp32(
         self, tensor: torch.Tensor, group_size: int, ebits: int, mbits: int
     ) -> Callable:
