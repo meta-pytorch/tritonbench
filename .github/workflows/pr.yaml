@@ -1,6 +1,10 @@
 name: TritonBench PR Test
 on:
   pull_request:
+    paths:
+      - .github/workflows/pr.yml
+      - .github/workflows/_linux-test-*.yml
+      - tritonbench/**
   push:
     branches:
       - main
