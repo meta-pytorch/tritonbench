@@ -89,7 +89,7 @@ jobs:
         run: |
           docker exec -t -w /tmp/workspace "${TRITONBENCH_CONTAINER_ID}" bash -c "
             set -eux
-            bash ./.ci/triton/compile.sh --repo ${{ inputs.side_a_triton }} --commit ${{ inputs.side_a_commit }} --side a
+            bash ./.ci/triton/install.sh --repo ${{ inputs.side_a_triton }} --commit ${{ inputs.side_a_commit }} --side a
           "
       - name: Benchmarking
         run: |
