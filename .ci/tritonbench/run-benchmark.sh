@@ -31,6 +31,9 @@ fi
 tritonbench_dir=$(dirname "$(readlink -f "$0")")/../..
 cd "${tritonbench_dir}"
 
+# check if the current repo has "dubious ownership" issue
+git rev-parse --verify HEAD
+
 echo "Running ${BENCHMARK_NAME} benchmark under conda env ${CONDA_ENV}"
 
 . "${SETUP_SCRIPT}"

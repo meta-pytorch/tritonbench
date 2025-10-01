@@ -77,6 +77,7 @@ jobs:
             --security-opt seccomp=unconfined \
             --shm-size=32g \
             --cap-add=SYS_PTRACE \
+            -–user root \
             -v "${GITHUB_WORKSPACE}:/tmp/workspace" \
             -w /tmp/workspace \
             "${DOCKER_IMAGE}"
