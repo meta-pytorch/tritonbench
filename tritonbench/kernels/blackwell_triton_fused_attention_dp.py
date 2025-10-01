@@ -17,6 +17,8 @@ import triton
 import triton.language as tl
 from triton.tools.tensor_descriptor import TensorDescriptor
 
+from .attention_utils import WITH_MAXNREG
+
 from .blackwell_attention_utils import (
     is_blackwell,
     is_cuda,
@@ -204,12 +206,13 @@ else:
             num_stages=s,
             num_warps=w,
             pre_hook=_host_descriptor_pre_hook,
+            # ir_override=f"override/_attn_fwd_persist.ttgir"
         )
         for BM in [256]
         for BN in [128]
         for s in NUM_STAGES_OPTIONS
         for w in [4]
-        for subtile in [True, False]
+        for subtile in [False]  # disable subtiling for now
     ]
 
 
@@ -267,7 +270,7 @@ def _attn_fwd_tma_dp(
     off_z = off_hz // H
     off_h = off_hz % H
 
-    offset_y = off_z + off_h * N_CTX
+    offset_y = off_z * (N_CTX * H) + off_h * N_CTX
     qo_offset_y = offset_y + start_m * BLOCK_M
     # initialize offsets
     offs_m0 = start_m * BLOCK_M + tl.arange(0, BLOCK_M // 2)
@@ -569,7 +572,7 @@ class _attention_opt(torch.autograd.Function):
 
         ctx.grid = grid
         persistent = baseVariant == "persistent" or baseVariant == "ws_persistent"
-        if is_blackwell() and warp_specialize:
+        if WITH_MAXNREG and is_blackwell() and warp_specialize:
             if HEAD_DIM_K == 128 and (
                 q.dtype == torch.float16 or q.dtype == torch.bfloat16
             ):
