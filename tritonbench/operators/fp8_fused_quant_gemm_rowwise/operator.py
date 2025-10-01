@@ -1,7 +1,10 @@
 import argparse
 from typing import Any, Callable, Generator, List, Optional, Tuple
 
-import fbgemm_gpu.experimental.gen_ai  # noqa: F401
+from tritonbench.utils.python_utils import try_import
+
+with try_import("HAS_FBGEMM"):
+    import fbgemm_gpu.experimental.gen_ai  # noqa: F401
 
 import torch
 import triton
