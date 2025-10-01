@@ -5,6 +5,9 @@ from tritonbench.utils.python_utils import try_import
 
 with try_import("HAS_FBGEMM"):
     import fbgemm_gpu.experimental.gen_ai  # noqa: F401
+    from fbgemm_gpu.experimental.gemm.triton_gemm.fp8_gemm import (
+        matmul_fp8_row as triton_fp8_row,
+    )
 
 import torch
 import triton
@@ -43,10 +46,6 @@ def parse_args(args: List[str]) -> argparse.Namespace:
     args = parser.parse_args(args)
     return args
 
-
-from fbgemm_gpu.experimental.gemm.triton_gemm.fp8_gemm import (
-    matmul_fp8_row as triton_fp8_row,
-)
 
 BUILDIN_SHAPES = [
     (1, 2304, 2048),

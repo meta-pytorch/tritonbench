@@ -1082,9 +1082,10 @@ bwd_autotune_configs_ws = {
     "default": tuple(bwd_configs_ws),
 }
 
-bwd_autotune_configs_tlx = {
-    "default": tuple(get_tlx_bwd_autotune_config()),
-}
+if HAS_TLX:
+    bwd_autotune_configs_tlx = {
+        "default": tuple(get_tlx_bwd_autotune_config()),
+    }
 
 
 @lru_cache
