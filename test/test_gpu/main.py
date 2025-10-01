@@ -29,8 +29,11 @@ else:
     if "site-packages" in triton.__file__:
         SKIP_FILE_NAME = "skip_tests_h100_pytorch.yaml"
     else:
-        SKIP_FILE_NAME = "skip_tests_mi350_triton_hip_main.yaml" if is_hip() \
+        SKIP_FILE_NAME = (
+            "skip_tests_mi350_triton_main.yaml"
+            if is_hip()
             else "skip_tests_h100_triton_main.yaml"
+        )
     import os
 
     SKIP_FILE = os.path.abspath(os.path.join(os.path.dirname(__file__), SKIP_FILE_NAME))
