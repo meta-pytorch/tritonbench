@@ -81,6 +81,7 @@ jobs:
             -w /tmp/workspace \
             "${DOCKER_IMAGE}"
           )
+
           # write container id to env
           echo "TRITONBENCH_CONTAINER_ID=${container_name}" >> $GITHUB_ENV
       - name: Compile Triton (On Demand)
@@ -112,7 +113,7 @@ jobs:
       - name: Setup uploader dependencies
         run: |
           sudo apt-get install -y python3-pip
-          pip3 install -y pyyaml
+          pip3 install -r requirements.txt
       - name: Upload result to Scribe
         run: |
           . "${SETUP_SCRIPT}"

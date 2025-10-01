@@ -42,6 +42,16 @@ jobs:
       side_a_commit: ${{ inputs.side_a_commit }}
     secrets:
       TRITONBENCH_SCRIBE_GRAPHQL_ACCESS_TOKEN: ${{ secrets.TRITONBENCH_SCRIBE_GRAPHQL_ACCESS_TOKEN }}
+  mi350-triton-main-nightly-periodic:
+    uses: ./.github/workflows/_linux-benchmark-mi350.yml
+    if: ${{ inputs.test_type != 'abtest' }}
+    with:
+      conda_env: "triton-main"
+      benchmark_name: "nightly"
+      side_a_triton: ${{ inputs.side_a_triton }}
+      side_a_commit: ${{ inputs.side_a_commit }}
+    secrets:
+      TRITONBENCH_SCRIBE_GRAPHQL_ACCESS_TOKEN: ${{ secrets.TRITONBENCH_SCRIBE_GRAPHQL_ACCESS_TOKEN }}
   h100-triton-nightly-abtest:
     uses: ./.github/workflows/_linux-benchmark-abtest-h100.yml
     if: ${{ inputs.test_type == 'abtest' }}
