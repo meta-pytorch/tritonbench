@@ -4,12 +4,12 @@ Log benchmark results to scuba table (Requires Scuba token stored in TRITONBENCH
 
 import json
 import os
-import requests
 import time
 from collections import defaultdict
 
 from typing import Any, Dict, List, Optional
 
+import requests
 
 from tritonbench.utils.gpu_utils import get_nvidia_gpu_states, has_nvidia_smi
 from tritonbench.utils.path_utils import REPO_PATH
@@ -56,6 +56,7 @@ BENCHMARK_SCHEMA = {
     "float": ["metric_value"],
 }
 
+
 def get_github_env() -> Dict[str, str]:
     if "GITHUB_RUN_ID" not in os.environ:
         return {}
@@ -78,6 +79,7 @@ def get_github_env() -> Dict[str, str]:
     out["RUNNER_NAME"] = os.environ["RUNNER_NAME"]
     out["RUNNER_OS"] = os.environ["RUNNER_OS"]
     return out
+
 
 class ScribeUploader:
     def __init__(self, category, schema):

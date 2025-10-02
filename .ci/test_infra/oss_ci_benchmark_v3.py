@@ -8,8 +8,8 @@ import json
 import os
 import re
 import sys
-from pathlib import Path
 from os.path import abspath, exists
+from pathlib import Path
 
 from typing import Any, Dict, List, Tuple
 
@@ -25,6 +25,7 @@ RUNNER_TYPE_MAPPING = {
         "avail_gpu_mem_in_gb": 288,
     },
 }
+
 
 def setup_tritonbench_cwd():
     original_dir = abspath(os.getcwd())
@@ -42,9 +43,11 @@ def setup_tritonbench_cwd():
         sys.path.append(tritonbench_dir)
     return original_dir
 
+
 setup_tritonbench_cwd()
 
 from tritonbench.utils.scuba_utils import get_github_env
+
 
 def parse_runners(
     runner_name: str, runner_type: str, envs: Dict[str, str]

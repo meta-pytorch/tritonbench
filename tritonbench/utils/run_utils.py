@@ -4,12 +4,13 @@ import os
 import subprocess
 import sys
 import time
-import torch
 
 from datetime import datetime
 from pathlib import Path
 
 from typing import Dict, List, Optional
+
+import torch
 
 import yaml
 
