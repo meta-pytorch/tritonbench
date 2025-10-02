@@ -229,5 +229,5 @@ def has_nvidia_smi() -> bool:
     try:
         subprocess.check_output("nvidia-smi")
         return True
-    except subprocess.SubprocessError:
+    except (subprocess.SubprocessError, FileNotFoundError):
         return False
