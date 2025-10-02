@@ -60,7 +60,7 @@ jobs:
           aws-region: us-east-1
       - name: Setup uploader dependencies
         run: |
-          sudo apt-get install -y python-pip3
+          sudo apt-get install -y python3-pip
           pip3 install -r .ci/upload/requirements.txt
       - name: Pull docker image
         uses: pytorch/test-infra/.github/actions/pull-docker-image@main
