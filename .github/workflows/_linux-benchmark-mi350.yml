@@ -98,6 +98,7 @@ jobs:
           "
       - name: Benchmarking
         run: |
+          set -eux
           if [ -n "${{ inputs.side_a_triton }}" ] && [ -n "${{ inputs.side_a_commit }}" ]; then
             docker exec -t -w /tmp/workspace "${TRITONBENCH_CONTAINER_ID}" bash -c "
               set -eux
@@ -111,8 +112,9 @@ jobs:
           fi
           cp -r ".benchmarks/${{ inputs.benchmark_name }}" benchmark-output
           # post-process result.json
-          python3 ./.ci/test_infra/oss_ci_benchmark_v3.py --json benchmark-output/result.json \
-            --add-github-env --output benchmark-output/result.json
+          latest_result_json=$(find ./benchmark-output -name "result.json"  | sort -r | head -n 1)
+          python3 ./.ci/test_infra/oss_ci_benchmark_v3.py --json ${latest_result_json} \
+            --add-github-env --output ${latest_result_json}
       - name: Upload result to GH Actions Artifact
         uses: actions/upload-artifact@v4
         with:
