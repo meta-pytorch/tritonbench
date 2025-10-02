@@ -1,145 +1,145 @@
 fp16_addmm_fwd:
   op: addmm
   args: --op addmm --baseline aten_addmm --metrics tflops,speedup --only triton_addmm,aten_addmm
-# bf16xint16_gemm_fwd:
-#   op: bf16xint16_gemm
-#   args: --op bf16xint16_gemm --metrics tflops --only bf16xbf16
-# cross_entropy_fwd:
-#   op: cross_entropy
-#   args: --op cross_entropy --baseline cross_entropy_loss --metrics speedup --only
-#     liger_cross_entropy_loss,cross_entropy_loss
-# embedding_fwd:
-#   op: embedding
-#   args: --op embedding --baseline torch_embedding --metrics speedup --only liger_embedding,torch_embedding
-# bf16_flash_attention_fwd:
-#   op: flash_attention
-#   args: --op flash_attention --baseline flash_v3 --metrics tflops,speedup --only triton_tutorial_flash_v2,flash_v3
-# bf16_flex_attention_fwd:
-#   op: flex_attention
-#   args: --op flex_attention --baseline eager --metrics tflops,speedup --only compiled,eager
-# fp8_attention_fwd:
-#   op: fp8_attention
-#   args: --op fp8_attention --metrics tflops --only triton_flash_v2_tma
-#   disabled: true
-# fp8_fused_quant_gemm_rowwise_fwd:
-#   op: fp8_fused_quant_gemm_rowwise
-#   args: --op fp8_fused_quant_gemm_rowwise --metrics tflops --only rms_norm_fused
-# fp8_gemm_fwd:
-#   op: fp8_gemm
-#   args: --op fp8_gemm --baseline torch_fp8_gemm --metrics tflops,speedup --only triton_tma_persistent_fp8_gemm,torch_fp8_gemm
-#   disabled: true
-# fp8_gemm_blockwise_fwd:
-#   op: fp8_gemm_blockwise
-#   args: --op fp8_gemm_blockwise --baseline _cutlass --metrics tflops,speedup --only
-#     _triton,_cutlass
-# fp8_gemm_rowwise_fwd:
-#   op: fp8_gemm_rowwise
-#   args: --op fp8_gemm_rowwise --baseline _cutlass_or_ck --metrics tflops,speedup --only
-#     _triton,_cutlass_or_ck
-#   disabled: true
-# fp8_gemm_rowwise_grouped_fwd:
-#   op: fp8_gemm_rowwise_grouped
-#   args: --op fp8_gemm_rowwise_grouped --baseline _cutlass_or_ck --metrics tflops,speedup
-#     --only _triton,_cutlass_or_ck
-#   disabled: true
-# fused_linear_cross_entropy_fwd:
-#   op: fused_linear_cross_entropy
-#   args: --op fused_linear_cross_entropy --baseline torch_lm_head_ce --metrics speedup
-#     --only liger_lm_head_ce,torch_lm_head_ce
-# fused_linear_jsd_fwd:
-#   op: fused_linear_jsd
-#   args: --op fused_linear_jsd --baseline torch_lm_head_jsd --metrics speedup --only
-#     liger_lm_head_jsd,torch_lm_head_jsd
-# geglu_fwd:
-#   op: geglu
-#   args: --op geglu --baseline torch_geglu --metrics speedup --only liger_geglu,torch_geglu
-# fp16_gemm_fwd:
-#   op: gemm
-#   args: --op gemm --baseline aten_matmul --metrics speedup --only triton_tutorial_matmul,aten_matmul
-# fp16_grouped_gemm_fwd:
-#   op: grouped_gemm
-#   args: --op grouped_gemm --baseline torch --metrics tflops,speedup --only triton,torch
-# int4_gemm_fwd:
-#   op: int4_gemm
-#   args: --op int4_gemm --baseline tinygemm --metrics tflops,speedup --only triton,tinygemm
-# jsd_fwd:
-#   op: jsd
-#   args: --op jsd --baseline torch_jsd --metrics speedup --only liger_jsd,torch_jsd
-# kl_div_fwd:
-#   op: kl_div
-#   args: --op kl_div --baseline torch_kl_div --metrics speedup --only liger_kl_div,torch_kl_div
-# layer_norm_fwd:
-#   op: layer_norm
-#   args: --op layer_norm --baseline torch_layer_norm --metrics speedup --only liger_layer_norm,torch_layer_norm
-# low_mem_dropout_fwd:
-#   op: low_mem_dropout
-#   args: --op low_mem_dropout --baseline torch_dropout --metrics speedup --only triton_dropout,torch_dropout
-# bf16_ragged_attention_fwd:
-#   op: ragged_attention
-#   args: --op ragged_attention --metrics tflops --only hstu
-# rms_norm_fwd:
-#   op: rms_norm
-#   args: --op rms_norm --baseline llama_rms --metrics speedup --only liger_rms,llama_rms
-# rope_fwd:
-#   op: rope
-#   args: --op rope --baseline apply_rotary_pos_emb --metrics speedup --only liger_rotary_pos_emb,apply_rotary_pos_emb
-# softmax_fwd:
-#   op: softmax
-#   args: --op softmax --baseline naive_softmax --metrics speedup --only triton_softmax,naive_softmax
-# swiglu_fwd:
-#   op: swiglu
-#   args: --op swiglu --baseline torch_swiglu --metrics speedup --only liger_swiglu,torch_swiglu
-# welford_fwd:
-#   op: welford
-#   args: --op welford --baseline test_no_welford --metrics speedup --only test_welford,test_no_welford
-# cross_entropy_bwd:
-#   op: cross_entropy
-#   args: --op cross_entropy --baseline cross_entropy_loss --metrics speedup --bwd --only
-#     liger_cross_entropy_loss,cross_entropy_loss
-# embedding_bwd:
-#   op: embedding
-#   args: --op embedding --baseline torch_embedding --metrics speedup --bwd --only liger_embedding,torch_embedding
-# bf16_flash_attention_bwd:
-#   op: flash_attention
-#   args: --op flash_attention --baseline flash_v3 --metrics tflops,speedup --bwd --only
-#     triton_tutorial_flash_v2,flash_v3 --causal
-# bf16_flex_attention_bwd:
-#   op: flex_attention
-#   args: --op flex_attention --baseline eager --metrics tflops,speedup --bwd --only
-#     compiled,eager
-# fused_linear_cross_entropy_bwd:
-#   op: fused_linear_cross_entropy
-#   args: --op fused_linear_cross_entropy --baseline torch_lm_head_ce --metrics speedup
-#     --bwd --only liger_lm_head_ce,torch_lm_head_ce
-# fused_linear_jsd_bwd:
-#   op: fused_linear_jsd
-#   args: --op fused_linear_jsd --baseline torch_lm_head_jsd --metrics speedup --bwd
-#     --only liger_lm_head_jsd,torch_lm_head_jsd
-# geglu_bwd:
-#   op: geglu
-#   args: --op geglu --baseline torch_geglu --metrics speedup --bwd --only liger_geglu,torch_geglu
-# jsd_bwd:
-#   op: jsd
-#   args: --op jsd --baseline torch_jsd --metrics speedup --bwd --only liger_jsd,torch_jsd
-# kl_div_bwd:
-#   op: kl_div
-#   args: --op kl_div --baseline torch_kl_div --metrics speedup --bwd --only liger_kl_div,torch_kl_div
-# layer_norm_bwd:
-#   op: layer_norm
-#   args: --op layer_norm --baseline torch_layer_norm --metrics speedup --bwd --only
-#     liger_layer_norm,torch_layer_norm
-# bf16_ragged_attention_bwd:
-#   op: ragged_attention
-#   args: --op ragged_attention --metrics tflops --bwd --only hstu
-# rms_norm_bwd:
-#   op: rms_norm
-#   args: --op rms_norm --baseline llama_rms --metrics speedup --bwd --only liger_rms,llama_rms
-# rope_bwd:
-#   op: rope
-#   args: --op rope --baseline apply_rotary_pos_emb --metrics speedup --bwd --only liger_rotary_pos_emb,apply_rotary_pos_emb
-# swiglu_bwd:
-#   op: swiglu
-#   args: --op swiglu --baseline torch_swiglu --metrics speedup --bwd --only liger_swiglu,torch_swiglu
-# launch_latency:
-#   op: launch_latency
-#   args: --op launch_latency --metrics walltime
+bf16xint16_gemm_fwd:
+  op: bf16xint16_gemm
+  args: --op bf16xint16_gemm --metrics tflops --only bf16xbf16
+cross_entropy_fwd:
+  op: cross_entropy
+  args: --op cross_entropy --baseline cross_entropy_loss --metrics speedup --only
+    liger_cross_entropy_loss,cross_entropy_loss
+embedding_fwd:
+  op: embedding
+  args: --op embedding --baseline torch_embedding --metrics speedup --only liger_embedding,torch_embedding
+bf16_flash_attention_fwd:
+  op: flash_attention
+  args: --op flash_attention --baseline flash_v3 --metrics tflops,speedup --only triton_tutorial_flash_v2,flash_v3
+bf16_flex_attention_fwd:
+  op: flex_attention
+  args: --op flex_attention --baseline eager --metrics tflops,speedup --only compiled,eager
+fp8_attention_fwd:
+  op: fp8_attention
+  args: --op fp8_attention --metrics tflops --only triton_flash_v2_tma
+  disabled: true
+fp8_fused_quant_gemm_rowwise_fwd:
+  op: fp8_fused_quant_gemm_rowwise
+  args: --op fp8_fused_quant_gemm_rowwise --metrics tflops --only rms_norm_fused
+fp8_gemm_fwd:
+  op: fp8_gemm
+  args: --op fp8_gemm --baseline torch_fp8_gemm --metrics tflops,speedup --only triton_tma_persistent_fp8_gemm,torch_fp8_gemm
+  disabled: true
+fp8_gemm_blockwise_fwd:
+  op: fp8_gemm_blockwise
+  args: --op fp8_gemm_blockwise --baseline _cutlass --metrics tflops,speedup --only
+    _triton,_cutlass
+fp8_gemm_rowwise_fwd:
+  op: fp8_gemm_rowwise
+  args: --op fp8_gemm_rowwise --baseline _cutlass_or_ck --metrics tflops,speedup --only
+    _triton,_cutlass_or_ck
+  disabled: true
+fp8_gemm_rowwise_grouped_fwd:
+  op: fp8_gemm_rowwise_grouped
+  args: --op fp8_gemm_rowwise_grouped --baseline _cutlass_or_ck --metrics tflops,speedup
+    --only _triton,_cutlass_or_ck
+  disabled: true
+fused_linear_cross_entropy_fwd:
+  op: fused_linear_cross_entropy
+  args: --op fused_linear_cross_entropy --baseline torch_lm_head_ce --metrics speedup
+    --only liger_lm_head_ce,torch_lm_head_ce
+fused_linear_jsd_fwd:
+  op: fused_linear_jsd
+  args: --op fused_linear_jsd --baseline torch_lm_head_jsd --metrics speedup --only
+    liger_lm_head_jsd,torch_lm_head_jsd
+geglu_fwd:
+  op: geglu
+  args: --op geglu --baseline torch_geglu --metrics speedup --only liger_geglu,torch_geglu
+fp16_gemm_fwd:
+  op: gemm
+  args: --op gemm --baseline aten_matmul --metrics speedup --only triton_tutorial_matmul,aten_matmul
+fp16_grouped_gemm_fwd:
+  op: grouped_gemm
+  args: --op grouped_gemm --baseline torch --metrics tflops,speedup --only triton,torch
+int4_gemm_fwd:
+  op: int4_gemm
+  args: --op int4_gemm --baseline tinygemm --metrics tflops,speedup --only triton,tinygemm
+jsd_fwd:
+  op: jsd
+  args: --op jsd --baseline torch_jsd --metrics speedup --only liger_jsd,torch_jsd
+kl_div_fwd:
+  op: kl_div
+  args: --op kl_div --baseline torch_kl_div --metrics speedup --only liger_kl_div,torch_kl_div
+layer_norm_fwd:
+  op: layer_norm
+  args: --op layer_norm --baseline torch_layer_norm --metrics speedup --only liger_layer_norm,torch_layer_norm
+low_mem_dropout_fwd:
+  op: low_mem_dropout
+  args: --op low_mem_dropout --baseline torch_dropout --metrics speedup --only triton_dropout,torch_dropout
+bf16_ragged_attention_fwd:
+  op: ragged_attention
+  args: --op ragged_attention --metrics tflops --only hstu
+rms_norm_fwd:
+  op: rms_norm
+  args: --op rms_norm --baseline llama_rms --metrics speedup --only liger_rms,llama_rms
+rope_fwd:
+  op: rope
+  args: --op rope --baseline apply_rotary_pos_emb --metrics speedup --only liger_rotary_pos_emb,apply_rotary_pos_emb
+softmax_fwd:
+  op: softmax
+  args: --op softmax --baseline naive_softmax --metrics speedup --only triton_softmax,naive_softmax
+swiglu_fwd:
+  op: swiglu
+  args: --op swiglu --baseline torch_swiglu --metrics speedup --only liger_swiglu,torch_swiglu
+welford_fwd:
+  op: welford
+  args: --op welford --baseline test_no_welford --metrics speedup --only test_welford,test_no_welford
+cross_entropy_bwd:
+  op: cross_entropy
+  args: --op cross_entropy --baseline cross_entropy_loss --metrics speedup --bwd --only
+    liger_cross_entropy_loss,cross_entropy_loss
+embedding_bwd:
+  op: embedding
+  args: --op embedding --baseline torch_embedding --metrics speedup --bwd --only liger_embedding,torch_embedding
+bf16_flash_attention_bwd:
+  op: flash_attention
+  args: --op flash_attention --baseline flash_v3 --metrics tflops,speedup --bwd --only
+    triton_tutorial_flash_v2,flash_v3 --causal
+bf16_flex_attention_bwd:
+  op: flex_attention
+  args: --op flex_attention --baseline eager --metrics tflops,speedup --bwd --only
+    compiled,eager
+fused_linear_cross_entropy_bwd:
+  op: fused_linear_cross_entropy
+  args: --op fused_linear_cross_entropy --baseline torch_lm_head_ce --metrics speedup
+    --bwd --only liger_lm_head_ce,torch_lm_head_ce
+fused_linear_jsd_bwd:
+  op: fused_linear_jsd
+  args: --op fused_linear_jsd --baseline torch_lm_head_jsd --metrics speedup --bwd
+    --only liger_lm_head_jsd,torch_lm_head_jsd
+geglu_bwd:
+  op: geglu
+  args: --op geglu --baseline torch_geglu --metrics speedup --bwd --only liger_geglu,torch_geglu
+jsd_bwd:
+  op: jsd
+  args: --op jsd --baseline torch_jsd --metrics speedup --bwd --only liger_jsd,torch_jsd
+kl_div_bwd:
+  op: kl_div
+  args: --op kl_div --baseline torch_kl_div --metrics speedup --bwd --only liger_kl_div,torch_kl_div
+layer_norm_bwd:
+  op: layer_norm
+  args: --op layer_norm --baseline torch_layer_norm --metrics speedup --bwd --only
+    liger_layer_norm,torch_layer_norm
+bf16_ragged_attention_bwd:
+  op: ragged_attention
+  args: --op ragged_attention --metrics tflops --bwd --only hstu
+rms_norm_bwd:
+  op: rms_norm
+  args: --op rms_norm --baseline llama_rms --metrics speedup --bwd --only liger_rms,llama_rms
+rope_bwd:
+  op: rope
+  args: --op rope --baseline apply_rotary_pos_emb --metrics speedup --bwd --only liger_rotary_pos_emb,apply_rotary_pos_emb
+swiglu_bwd:
+  op: swiglu
+  args: --op swiglu --baseline torch_swiglu --metrics speedup --bwd --only liger_swiglu,torch_swiglu
+launch_latency:
+  op: launch_latency
+  args: --op launch_latency --metrics walltime
