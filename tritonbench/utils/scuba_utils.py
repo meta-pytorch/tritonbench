@@ -4,16 +4,15 @@ Log benchmark results to scuba table (Requires Scuba token stored in TRITONBENCH
 
 import json
 import os
+import requests
 import time
 from collections import defaultdict
 
 from typing import Any, Dict, List, Optional
 
-import requests
 
 from tritonbench.utils.gpu_utils import get_nvidia_gpu_states, has_nvidia_smi
 from tritonbench.utils.path_utils import REPO_PATH
-from tritonbench.utils.run_utils import get_github_env, get_run_env
 
 CATEGORY_NAME = "perfpipe_pytorch_user_benchmarks"
 
@@ -57,6 +56,28 @@ BENCHMARK_SCHEMA = {
     "float": ["metric_value"],
 }
 
+def get_github_env() -> Dict[str, str]:
+    if "GITHUB_RUN_ID" not in os.environ:
+        return {}
+    out = {}
+    out["GITHUB_ACTION"] = os.environ["GITHUB_ACTION"]
+    out["GITHUB_ACTOR"] = os.environ["GITHUB_ACTOR"]
+    out["GITHUB_BASE_REF"] = os.environ["GITHUB_BASE_REF"]
+    out["GITHUB_REF"] = os.environ["GITHUB_REF"]
+    out["GITHUB_REF_PROTECTED"] = os.environ["GITHUB_REF_PROTECTED"]
+    out["GITHUB_REPOSITORY"] = os.environ["GITHUB_REPOSITORY"]
+    out["GITHUB_RUN_ATTEMPT"] = os.environ["GITHUB_RUN_ATTEMPT"]
+    out["GITHUB_RUN_ID"] = os.environ["GITHUB_RUN_ID"]
+    out["GITHUB_RUN_NUMBER"] = os.environ["GITHUB_RUN_NUMBER"]
+    out["GITHUB_WORKFLOW"] = os.environ["GITHUB_WORKFLOW"]
+    out["GITHUB_WORKFLOW_REF"] = os.environ["GITHUB_WORKFLOW_REF"]
+    out["GITHUB_WORKFLOW_SHA"] = os.environ["GITHUB_WORKFLOW_SHA"]
+    out["JOB_NAME"] = os.environ["JOB_NAME"]
+    out["RUNNER_ARCH"] = os.environ["RUNNER_ARCH"]
+    out["RUNNER_TYPE"] = os.environ["RUNNER_TYPE"]
+    out["RUNNER_NAME"] = os.environ["RUNNER_NAME"]
+    out["RUNNER_OS"] = os.environ["RUNNER_OS"]
+    return out
 
 class ScribeUploader:
     def __init__(self, category, schema):
@@ -133,6 +154,7 @@ def decorate_benchmark_data(
     name, run_timestamp, ci: bool, benchmark_data: List[Dict[str, Any]]
 ):
     """aggregate benchmark_data into a single object"""
+    from tritonbench.utils.run_utils import get_run_env
 
     repo_locs = {
         "tritonbench": REPO_PATH,

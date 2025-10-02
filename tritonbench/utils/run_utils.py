@@ -4,6 +4,7 @@ import os
 import subprocess
 import sys
 import time
+import torch
 
 from datetime import datetime
 from pathlib import Path
@@ -44,8 +45,6 @@ def get_run_env(
     Gather environment of the benchmark.
     repo_locs: Git repository dict of the repositories.
     """
-    import torch
-
     run_env = {}
     run_env["benchmark_date"] = run_timestamp
     run_env["cuda_version"] = torch.version.cuda if torch.version.cuda else "unknown"
@@ -71,30 +70,6 @@ def get_run_env(
             run_env[f"{repo}_branch"] = "unknown"
             run_env[f"{repo}_commit_time"] = "unknown"
     return run_env
-
-
-def get_github_env() -> Dict[str, str]:
-    if "GITHUB_RUN_ID" not in os.environ:
-        return {}
-    out = {}
-    out["GITHUB_ACTION"] = os.environ["GITHUB_ACTION"]
-    out["GITHUB_ACTOR"] = os.environ["GITHUB_ACTOR"]
-    out["GITHUB_BASE_REF"] = os.environ["GITHUB_BASE_REF"]
-    out["GITHUB_REF"] = os.environ["GITHUB_REF"]
-    out["GITHUB_REF_PROTECTED"] = os.environ["GITHUB_REF_PROTECTED"]
-    out["GITHUB_REPOSITORY"] = os.environ["GITHUB_REPOSITORY"]
-    out["GITHUB_RUN_ATTEMPT"] = os.environ["GITHUB_RUN_ATTEMPT"]
-    out["GITHUB_RUN_ID"] = os.environ["GITHUB_RUN_ID"]
-    out["GITHUB_RUN_NUMBER"] = os.environ["GITHUB_RUN_NUMBER"]
-    out["GITHUB_WORKFLOW"] = os.environ["GITHUB_WORKFLOW"]
-    out["GITHUB_WORKFLOW_REF"] = os.environ["GITHUB_WORKFLOW_REF"]
-    out["GITHUB_WORKFLOW_SHA"] = os.environ["GITHUB_WORKFLOW_SHA"]
-    out["JOB_NAME"] = os.environ["JOB_NAME"]
-    out["RUNNER_ARCH"] = os.environ["RUNNER_ARCH"]
-    out["RUNNER_TYPE"] = os.environ["RUNNER_TYPE"]
-    out["RUNNER_NAME"] = os.environ["RUNNER_NAME"]
-    out["RUNNER_OS"] = os.environ["RUNNER_OS"]
-    return out
 
 
 def run_config(config_file: str, args: List[str]):
