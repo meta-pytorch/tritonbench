@@ -74,9 +74,8 @@ def get_run_env(
 
 
 def get_github_env() -> Dict[str, str]:
-    assert (
-        "GITHUB_RUN_ID" in os.environ
-    ), "GITHUB_RUN_ID environ must exist to obtain GitHub env"
+    if "GITHUB_RUN_ID" not in os.environ:
+        return {}
     out = {}
     out["GITHUB_ACTION"] = os.environ["GITHUB_ACTION"]
     out["GITHUB_ACTOR"] = os.environ["GITHUB_ACTOR"]

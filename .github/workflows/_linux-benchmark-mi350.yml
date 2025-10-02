@@ -106,6 +106,9 @@ jobs:
             "
           fi
           cp -r ".benchmarks/${{ inputs.benchmark_name }}" benchmark-output
+          # post-process result.json
+          python3 ./.ci/test_infra/oss_ci_benchmark_v3.py --json benchmark-output/result.json \
+            --add-github-env --output benchmark-output/result.json
       - name: Upload result to GH Actions Artifact
         uses: actions/upload-artifact@v4
         with:
@@ -119,12 +122,12 @@ jobs:
         run: |
           . "${SETUP_SCRIPT}"
           latest_result_json=$(find ./benchmark-output -name "result.json"  | sort -r | head -n 1)
-          python ./.ci/upload/scribe.py --json ${latest_result_json}
+          python3 ./.ci/upload/scribe.py --json ${latest_result_json}
       - name: Rewrite Tritonbench json to ClickHouse style
         run: |
           . "${SETUP_SCRIPT}"
           latest_result_json=$(find ./benchmark-output -name "result.json"  | sort -r | head -n 1)
-          python ./.ci/test_infra/oss_ci_benchmark_v3.py --json ${latest_result_json} \
+          python3 ./.ci/test_infra/oss_ci_benchmark_v3.py --json ${latest_result_json} \
                  --output benchmark-output/results/result.json
       - name: Upload result to ClickHouse
         uses: pytorch/test-infra/.github/actions/upload-benchmark-results@main
