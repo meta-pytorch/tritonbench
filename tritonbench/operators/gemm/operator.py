@@ -25,6 +25,10 @@ else:
     def _tlx_matmul(*args, **kwargs):
         raise RuntimeError("TLX not available in this Triton version")
 
+from tritonbench.utils.python_utils import try_import
+with try_import("HAS_TILELANG"):
+    from .tilelang import tilelang_matmul_func
+
 
 from tritonbench.utils.data_utils import get_production_shapes
 from tritonbench.utils.env_utils import (
@@ -32,6 +36,7 @@ from tritonbench.utils.env_utils import (
     is_cuda,
     is_fbcode,
     supports_tma,
+    is_cu130,
 )
 
 from tritonbench.utils.path_utils import REPO_PATH
@@ -471,6 +476,12 @@ class Operator(BenchmarkOperator):
                 return lambda: _tlx_matmul(a, b) + bias
             else:
                 return lambda: _tlx_matmul(a, b)
+
+        @register_benchmark(enabled=HAS_TILELANG and is_cu130())
+        def tilelang_blackwell_matmul(self, a, b, bias) -> Callable:
+            assert bias is None, "Tilelang does not support bias"
+            assert a.dtype == torch.bfloat16, "Tilelang only supports bf16"
+            return tilelang_matmul_func(a, b)
 
     @register_x_val(label="(M, N, K)")
     def get_x_val(self, example_inputs) -> Tuple[int, int, int]:
