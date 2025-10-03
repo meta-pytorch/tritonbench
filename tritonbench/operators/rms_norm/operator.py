@@ -161,7 +161,7 @@ class Operator(BenchmarkOperator):
     def tilelang(self, H, input, weight) -> Callable:
         module = TileLangRMSNorm(hidden_size=H, eps=self.eps).to(self.device)
         module.weight = weight
-        return lambda: module(input)
+        return module(input)
 
     @register_x_val(label="(M, H)")
     def get_x_val(self, example_inputs) -> Tuple[int, int]:
