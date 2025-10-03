@@ -4,8 +4,6 @@ import torch
 import tilelang
 import tilelang.language as T
 
-tilelang.disable_cache()
-
 
 def rms_norm_splitk(M, N, blk_m, blk_k):
     dtype = "float"
