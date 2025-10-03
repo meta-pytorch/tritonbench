@@ -1,6 +1,10 @@
+# Original source: 
+# https://github.com/tile-ai/tilelang/blob/main/examples/norm/test_rms_norm.py
 import torch
 import tilelang
 import tilelang.language as T
+
+tilelang.disable_cache()
 
 
 def rms_norm_splitk(M, N, blk_m, blk_k):
@@ -32,9 +36,8 @@ def rms_norm_splitk(M, N, blk_m, blk_k):
 
     return main
 
-@tilelang.jit(out_idx=[-1], pass_configs={"tl.disable_tma_lower": True})
-def rms_norm(M, N, blk_m, variance_epsilon=1e-12):
-    dtype = "float"
+
+def rms_norm(M, N, blk_m, dtype, variance_epsilon=1e-12):
 
     @T.prim_func
     def main(A: T.Tensor((M, N), dtype), B: T.Tensor((M, N), dtype)):
@@ -57,6 +60,13 @@ def rms_norm(M, N, blk_m, variance_epsilon=1e-12):
 
     return main
 
+TILELANG_DTYPE_MAP = {
+    torch.bfloat16: "bfloat16",
+    torch.float16: "float16",
+    torch.float32: "float",
+}
+
+
 class TileLangRMSNorm(torch.nn.Module):
     def __init__(self, hidden_size, eps=1e-6):
         """
@@ -68,4 +78,18 @@ class TileLangRMSNorm(torch.nn.Module):
 
     def forward(self, hidden_states):
         M, N = hidden_states.size()
-        kernel = rms_norm(M, N, 1, self.variance_epsilon)
+        dtype = TILELANG_DTYPE_MAP[hidden_states.dtype]
+        blk_m = 1
+        blk_k = 512
+
+        kernel = rms_norm(M, N, blk_m, dtype, self.variance_epsilon)
+        jit_kernel = tilelang.compile(
+            kernel,
+            out_idx=[-1],
+            target="cuda",
+            pass_configs={
+                tilelang.PassConfigKey.TL_DISABLE_TMA_LOWER: True,
+            }
+        )
+        return lambda: jit_kernel(hidden_states)
+
