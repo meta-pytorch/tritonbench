@@ -25,7 +25,9 @@ else:
     def _tlx_matmul(*args, **kwargs):
         raise RuntimeError("TLX not available in this Triton version")
 
+
 from tritonbench.utils.python_utils import try_import
+
 with try_import("HAS_TILELANG"):
     from .tilelang import tilelang_matmul_func
 
@@ -33,10 +35,10 @@ with try_import("HAS_TILELANG"):
 from tritonbench.utils.data_utils import get_production_shapes
 from tritonbench.utils.env_utils import (
     get_nvidia_gpu_model,
+    is_cu130,
     is_cuda,
     is_fbcode,
     supports_tma,
-    is_cu130,
 )
 
 from tritonbench.utils.path_utils import REPO_PATH

@@ -74,8 +74,10 @@ def is_hip_mi300():
 def supports_tma():
     return is_cuda() and torch.cuda.get_device_capability()[0] >= 9
 
+
 def is_cu130():
     return is_cuda() and torch.version.cuda == "13.0"
+
 
 def set_env():
     # set cutlass dir

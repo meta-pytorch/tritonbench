@@ -1,8 +1,8 @@
-# Original source: 
+# Original source:
 # https://github.com/tile-ai/tilelang/blob/main/examples/norm/test_rms_norm.py
-import torch
 import tilelang
 import tilelang.language as T
+import torch
 
 tilelang.disable_cache()
 
@@ -38,7 +38,6 @@ def rms_norm_splitk(M, N, blk_m, blk_k):
 
 
 def rms_norm(M, N, blk_m, dtype, variance_epsilon=1e-12):
-
     @T.prim_func
     def main(A: T.Tensor((M, N), dtype), B: T.Tensor((M, N), dtype)):
         with T.Kernel(T.ceildiv(M, blk_m), threads=128) as bx:
@@ -47,7 +46,7 @@ def rms_norm(M, N, blk_m, dtype, variance_epsilon=1e-12):
             A_local = T.alloc_fragment((blk_m, N), dtype)
             A_powsum = T.alloc_fragment((blk_m,), dtype)
 
-            T.copy(A[bx * blk_m:(bx + 1) * blk_m, :], A_shared)
+            T.copy(A[bx * blk_m : (bx + 1) * blk_m, :], A_shared)
             T.copy(A_shared, A_local)
             for i, j in T.Parallel(blk_m, N):
                 A_pow_local[i, j] = A_local[i, j] * A_local[i, j]
@@ -56,9 +55,10 @@ def rms_norm(M, N, blk_m, dtype, variance_epsilon=1e-12):
                 A_powsum[i] = T.rsqrt(A_powsum[i] / N) + variance_epsilon
             for i, j in T.Parallel(blk_m, N):
                 A_local[i, j] *= A_powsum[i]
-            T.copy(A_local, B[bx * blk_m:(bx + 1) * blk_m, :])
+            T.copy(A_local, B[bx * blk_m : (bx + 1) * blk_m, :])
 
     return main
+
 
 TILELANG_DTYPE_MAP = {
     torch.bfloat16: "bfloat16",
@@ -89,7 +89,6 @@ class TileLangRMSNorm(torch.nn.Module):
             target="cuda",
             pass_configs={
                 tilelang.PassConfigKey.TL_DISABLE_TMA_LOWER: True,
-            }
+            },
         )
         return lambda: jit_kernel(hidden_states)
-
