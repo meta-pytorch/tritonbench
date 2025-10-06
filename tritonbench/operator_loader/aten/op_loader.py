@@ -51,7 +51,7 @@ def get_aten_loader_cls_by_name(aten_op_name: str, aten_op_input: Optional[str] 
     If input is not provided, use the default input from the config file.
     """
     op_cls_name = aten_op_name.replace(".", "_")
-    module_name = f"tritonbench.operator_loader.loaders.{op_cls_name}"
+    module_name = f"tritonbench.operator_loader.aten.{op_cls_name}"
     op_name_module = types.ModuleType(module_name)
     op_class = AtenOperator
     op_class.__module__ = module_name

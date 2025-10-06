@@ -39,7 +39,7 @@ dtype_abbrs = {
 
 dtype_abbrs_parsing = {value: key for key, value in dtype_abbrs.items()}
 
-INPUT_CONFIG_DIR = Path(__file__).parent.parent.joinpath("input_configs")
+from tritonbench.data import INPUT_CONFIG_DIR
 
 
 def truncate_inp(arg):

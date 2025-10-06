@@ -198,12 +198,13 @@ def _split_params_by_comma(params: Optional[str]) -> List[str]:
 def _find_op_name_from_module_path(module_path: str) -> str:
     PATH_PREFIX = "tritonbench.operators."
     # We have a separate operator loader for aten operator benchmark.
-    PATH_PREFIX_LOADER = "tritonbench.operator_loader.loaders."
+    PATH_PREFIX_LOADER = "tritonbench.operator_loader."
     assert (
         PATH_PREFIX in module_path or PATH_PREFIX_LOADER in module_path
     ), f"We rely on module path prefix to identify operator name. Expected {PATH_PREFIX}<operator_name>, get {module_path}."
     if PATH_PREFIX_LOADER in module_path:
         suffix = module_path.partition(PATH_PREFIX_LOADER)[2]
+        suffix = suffix.partition(".")[2]
     else:
         suffix = module_path.partition(PATH_PREFIX)[2]
     if suffix.startswith("fb."):
@@ -948,7 +949,9 @@ class BenchmarkOperator(metaclass=PostInitProcessor):
         self._num_inputs = self._available_num_inputs - len(self._input_ids)
         self._input_ids = [i for i in range(0, self._num_inputs)]
 
-    def add_benchmark(self, bm_func_name: str, bm_callable: Callable):
+    def add_benchmark(
+        self, bm_func_name: str, bm_callable: Callable, baseline: bool = False
+    ):
         def _inner(self, *args, **kwargs):
             return bm_callable(*args, **kwargs)
 
@@ -956,11 +959,14 @@ class BenchmarkOperator(metaclass=PostInitProcessor):
             "operator_name": self.name,
             "func_name": bm_func_name,
             "enabled": True,
+            "baseline": baseline,
         }
         decorated_func = register_benchmark(**decorator_kwargs)(_inner)
         bound_method = types.MethodType(decorated_func, self)
         setattr(self, bm_func_name or bm_callable.__name__, bound_method)
-        REGISTERED_BENCHMARKS[bm_func_name] = _inner
+        if self.name not in REGISTERED_BENCHMARKS:
+            REGISTERED_BENCHMARKS[self.name] = {}
+        REGISTERED_BENCHMARKS[self.name][bm_func_name] = _inner
 
     def run(
         self,
