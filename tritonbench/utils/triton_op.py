@@ -681,6 +681,8 @@ class BenchmarkOperator(metaclass=PostInitProcessor):
     device: str = "cuda"
     # By default, do not touch the input data dtype
     DEFAULT_PRECISION = "bypass"
+    # Whether the operator is forward-only
+    FWD_ONLY: bool = False
     # By default, only collect latency metrics
     # Each operator can override to define their own default metrics
     DEFAULT_METRICS = ["latency"]
@@ -2264,6 +2266,10 @@ class BenchmarkOperator(metaclass=PostInitProcessor):
         if metric_name == "tflops":
             return bool(getattr(cls, "flops", None))
         return bool(getattr(cls, metric_name, None))
+
+    @classmethod
+    def has_bwd(cls) -> bool:
+        return not cls.FWD_ONLY
 
     @classmethod
     def has_baseline(cls) -> Optional[str]:
