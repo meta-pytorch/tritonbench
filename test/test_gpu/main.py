@@ -90,15 +90,14 @@ def _run_one_operator(args: List[str]):
     # Test backward (if applicable)
     if tb_args.op in FWD_ONLY_OPS:
         return
-    if op.has_bwd():
-        del op
-        if tb_args.op in BWD_ARGS_OPS:
-            args.extend(BWD_ARGS_OPS[tb_args.op])
-            tb_args, extra_args = parser.parse_known_args(args)
-        tb_args.mode = "bwd"
-        op = Operator(tb_args=tb_args, extra_args=extra_args)
-        op.run()
-        check_ci_output(op)
+    del op
+    if tb_args.op in BWD_ARGS_OPS:
+        args.extend(BWD_ARGS_OPS[tb_args.op])
+        tb_args, extra_args = parser.parse_known_args(args)
+    tb_args.mode = "bwd"
+    op = Operator(tb_args=tb_args, extra_args=extra_args)
+    op.run()
+    check_ci_output(op)
 
 
 def _run_operator_in_task(op: str, args: List[str]):

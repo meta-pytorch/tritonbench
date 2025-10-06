@@ -2260,10 +2260,6 @@ class BenchmarkOperator(metaclass=PostInitProcessor):
                     f.write(sass)
 
     @classmethod
-    def has_bwd(cls) -> bool:
-        return cls.get_bwd_fn is not BenchmarkOperator.get_bwd_fn
-
-    @classmethod
     def has_metric(cls, metric_name: str) -> bool:
         if metric_name == "tflops":
             return bool(getattr(cls, "flops", None))
