@@ -419,16 +419,6 @@ class Operator(BenchmarkOperator):
 
         return sdpa_fn
 
-    def get_bwd_fn(self, fwd_fn: Callable) -> Callable:
-        o = fwd_fn()
-        o_tensor = input_filter(
-            lambda x: isinstance(x, torch.Tensor) and x.requires_grad,
-            o,
-        )
-        assert o_tensor is not None, "No tensor found in output that requires grad."
-        do = torch.rand_like(o_tensor)
-        return lambda: o_tensor.backward(do, retain_graph=True)
-
     def get_grad_to_none(self, args) -> List[torch.Tensor]:
         """Return tensors whose gradients should be set to None between iterations."""
         q, k, v, *_ = args

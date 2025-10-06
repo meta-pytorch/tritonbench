@@ -90,8 +90,3 @@ class Operator(BenchmarkOperator):
             example_inputs[0].size(1),
             example_inputs[0].size(2),
         )
-
-    def get_bwd_fn(self, fwd_fn: Callable) -> Callable:
-        y = fwd_fn()
-        do = torch.randn_like(y)
-        return lambda: y.backward(do, retain_graph=True)

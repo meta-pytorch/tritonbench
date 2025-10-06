@@ -60,8 +60,3 @@ class Operator(BenchmarkOperator):
     def get_x_val(self, example_inputs) -> Tuple[int, int, int]:
         V, D, input_tensor, _ = example_inputs
         return (input_tensor.size(0), input_tensor.size(1), D, V)
-
-    def get_bwd_fn(self, fwd_fn: Callable) -> Callable:
-        y = fwd_fn()
-        do = torch.randn_like(y)
-        return lambda: y.backward(do, retain_graph=True)

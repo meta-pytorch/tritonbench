@@ -171,10 +171,6 @@ class Operator(BenchmarkOperator):
     def get_x_val(self, example_inputs) -> Tuple[int, int]:
         return (example_inputs[0].size(0), example_inputs[0].size(1))
 
-    def get_bwd_fn(self, fwd_fn: Callable) -> Callable:
-        y = fwd_fn()
-        return lambda: y.backward(retain_graph=True)
-
     def get_grad_to_none(self, args) -> List[torch.Tensor]:
         student_input = args[0]
         return [

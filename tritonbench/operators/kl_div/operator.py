@@ -54,9 +54,5 @@ class Operator(BenchmarkOperator):
         input_tensor = example_inputs[0]
         return (self.B, self.T, input_tensor.size(1))
 
-    def get_bwd_fn(self, fwd_fn: Callable) -> Callable:
-        y = fwd_fn()
-        return lambda: y.backward(retain_graph=True)
-
     def get_grad_to_none(self, args) -> List[torch.Tensor]:
         return [args[0]]

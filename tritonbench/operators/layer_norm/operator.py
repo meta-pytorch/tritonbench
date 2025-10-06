@@ -102,44 +102,6 @@ class Operator(BenchmarkOperator):
         (x, w_shape, weight, bias, eps) = args
         return lambda: quack_layernorm(x, weight, eps, bias)
 
-    def get_bwd_fn(self, fwd_fn: Callable) -> Callable:
-        from torch.utils._pytree import tree_map
-
-        # Extract tensors that require gradients from example_inputs
-        grad_tensors = []
-
-        def extract_if_requires_grad(x):
-            if isinstance(x, torch.Tensor) and x.requires_grad:
-                grad_tensors.append(x)
-            return x
-
-        # Use tree_map to find all grad tensors in example_inputs
-        # example_inputs is set by the benchmark framework and contains the current input
-        tree_map(extract_if_requires_grad, self.example_inputs)
-
-        state = {"y": None, "dy": None}
-
-        def bwd_fn():
-            # Clear existing gradients
-            for t in grad_tensors:
-                if t.grad is not None:
-                    t.grad = None
-
-            # Initialize on first call
-            if state["y"] is None:
-                output = fwd_fn()
-                state["y"] = output[0] if isinstance(output, tuple) else output
-                torch.manual_seed(0)
-                state["dy"] = 0.1 * torch.randn_like(state["y"])
-
-            # Run backward
-            state["y"].backward(state["dy"], retain_graph=True)
-
-            # Return the tensors (not gradients) for accuracy checking
-            return grad_tensors
-
-        return bwd_fn
-
     def get_grad_to_none(self, args) -> List[torch.Tensor]:
         x = args[0]
         return [x]

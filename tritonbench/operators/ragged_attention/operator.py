@@ -140,16 +140,6 @@ class Operator(BenchmarkOperator):
                 requires_grad=self.requires_grad,
             )
 
-    def get_bwd_fn(self, fwd_fn: Callable[..., Any]) -> Callable[..., Any]:
-        o = fwd_fn()
-        o_tensor = input_filter(
-            lambda x: isinstance(x, torch.Tensor),
-            o,
-        )
-        do = torch.rand_like(o_tensor)
-        fn = lambda: o_tensor.backward(do, retain_graph=True)
-        return fn
-
     def _flops(
         self,
         batch_size: int,

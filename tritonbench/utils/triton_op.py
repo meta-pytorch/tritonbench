@@ -28,6 +28,7 @@ import psutil
 import tabulate
 import torch
 import triton
+from torch.utils._pytree import tree_map
 
 from tritonbench.components.do_bench import do_bench_wrapper, Latency
 from tritonbench.components.export import export_data
@@ -1155,9 +1156,40 @@ class BenchmarkOperator(metaclass=PostInitProcessor):
         return self._cur_input_id
 
     def get_bwd_fn(self, fwd_fn: Callable) -> Callable:
-        raise NotImplementedError(
-            "Each operator must implement its own backward function."
-        )
+        # Extract tensors that require gradients from example_inputs
+        grad_tensors = []
+
+        def extract_if_requires_grad(x):
+            if isinstance(x, torch.Tensor) and x.requires_grad:
+                grad_tensors.append(x)
+            return x
+
+        # Use tree_map to find all grad tensors in example_inputs
+        # example_inputs is set by the benchmark framework and contains the current input
+        tree_map(extract_if_requires_grad, self.example_inputs)
+
+        state = {"y": None, "dy": None}
+
+        def bwd_fn():
+            # Clear existing gradients
+            for t in grad_tensors:
+                if t.grad is not None:
+                    t.grad = None
+
+            # Initialize on first call
+            if state["y"] is None:
+                output = fwd_fn()
+                state["y"] = output[0] if isinstance(output, tuple) else output
+                torch.manual_seed(0)
+                state["dy"] = 0.1 * torch.randn_like(state["y"])
+
+            # Run backward
+            state["y"].backward(state["dy"], retain_graph=True)
+
+            # Return the tensors (not gradients) for accuracy checking
+            return grad_tensors
+
+        return bwd_fn
 
     def get_input_iter(self) -> Generator:
         """Return the dynamic input iterator for the model."""
