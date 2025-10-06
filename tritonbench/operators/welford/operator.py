@@ -1,17 +1,11 @@
 import argparse
-import csv
-import os
-import statistics
 from typing import Any, Callable, Generator, List, Optional
 
-import numpy
 import torch
-import triton
 from torch._dynamo.testing import rand_strided, same
 
 from tritonbench.utils.triton_op import (
     BenchmarkOperator,
-    BenchmarkOperatorMetrics,
     register_benchmark,
     register_metric,
 )
@@ -38,6 +32,7 @@ BUILDIN_SHAPES = [
 
 class Operator(BenchmarkOperator):
     DEFAULT_METRICS = ["latency", "speedup", "accuracy"]
+    FWD_ONLY = True
 
     def __init__(
         self, tb_args: argparse.Namespace, extra_args: Optional[List[str]] = None

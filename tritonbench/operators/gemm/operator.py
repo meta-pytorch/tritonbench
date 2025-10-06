@@ -176,6 +176,7 @@ def read_shapes_from_csv(csv_path: str) -> List[List[int]]:
 class Operator(BenchmarkOperator):
     DEFAULT_METRICS = ["latency", "speedup", "tflops"]
     DEFAULT_PRECISION = "fp16"
+    FWD_ONLY = True
 
     def __init__(
         self, tb_args: argparse.Namespace, extra_args: Optional[List[str]] = None

@@ -43,6 +43,7 @@ def parse_op_args(args: List[str]):
 
 class Operator(BenchmarkOperator):
     DEFAULT_PRECISION = "fp16"
+    FWD_ONLY = True
     is_compute_bound = False
 
     def __init__(

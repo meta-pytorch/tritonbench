@@ -53,6 +53,7 @@ def get_default_shapes():
 class Operator(BenchmarkOperator):
     DEFAULT_PRECISION = "bf16"
     DEFAULT_METRICS = ["latency", "speedup", "accuracy"]
+    FWD_ONLY = True
 
     @register_benchmark(baseline=True)
     def aten_grouped_mm(self, group_A, group_B):

@@ -17,6 +17,7 @@ from .kernels import get_trivial_add_kernel, nop_kernel, nop_with_args_kernel
 
 class Operator(BenchmarkOperator):
     DEFAULT_METRICS = ["walltime"]
+    FWD_ONLY = True
 
     def get_input_iter(self):
         yield tuple()

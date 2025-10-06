@@ -15,6 +15,7 @@ from .kernels import triton_add_kernel
 
 class Operator(BenchmarkOperator):
     DEFAULT_METRICS = ["latency", "gbps"]
+    FWD_ONLY = True
 
     @register_metric()
     def gbps(self, fn, example_inputs, metrics: BenchmarkOperatorMetrics):

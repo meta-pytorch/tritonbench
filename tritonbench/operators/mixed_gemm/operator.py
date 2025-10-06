@@ -80,7 +80,7 @@ def _generate_default_shapes():
 
 class Operator(BenchmarkOperator):
     DEFAULT_PRECISION = "bf16"
-
+    FWD_ONLY = True
     DEFAULT_METRICS = ["latency", "speedup"]
 
     def __init__(

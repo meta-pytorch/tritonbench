@@ -35,6 +35,7 @@ from .kernel import (
 
 class Operator(BenchmarkOperator):
     DEFAULT_METRICS = ["tflops", "gbps", "latency"]
+    FWD_ONLY = True
 
     def __init__(
         self, tb_args: argparse.Namespace, extra_args: Optional[List[str]] = None
