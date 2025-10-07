@@ -53,6 +53,7 @@ def parse_op_args(args: List[str]):
 class Operator(BenchmarkOperator):
     DEFAULT_METRICS = ["latency", "tflops"]
     DEFAULT_PRECISION = "fp8"
+    FWD_ONLY = True
 
     def __init__(
         self, tb_args: argparse.Namespace, extra_args: Optional[List[str]] = None

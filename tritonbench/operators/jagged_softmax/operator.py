@@ -75,6 +75,7 @@ def parse_op_args(args: List[str]):
 class Operator(BenchmarkOperator):
     DEFAULT_METRICS = ["latency", "accuracy", "best_config"]
     DEFAULT_PRECISION = "fp32"
+    FWD_ONLY = True
 
     def __init__(
         self, tb_args: argparse.Namespace, extra_args: Optional[List[str]] = None
