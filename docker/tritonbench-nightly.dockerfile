@@ -109,7 +109,7 @@ RUN cd /workspace/tritonbench && \
 # Build meta-triton conda env
 RUN cd /workspace/tritonbench && \
     bash .ci/triton/install.sh --conda-env "${CONDA_ENV_META_TRITON}" \
-        --repo facebookexperimental/triton --commit main --side single \
+        --repo facebookexperimental/triton --commit ws-3.5 --side single \
         --install-dir /workspace/meta-triton
 
 # Output setup script for inspection
