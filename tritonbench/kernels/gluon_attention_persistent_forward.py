@@ -1165,7 +1165,7 @@ def attention_kernel(  #
     M,
     Z,
     H,
-    N_CTX: gl.tensor,
+    N_CTX,
     desc_q,
     desc_k,
     desc_v,
