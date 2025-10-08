@@ -37,7 +37,8 @@ def _attn_fwd_subtile(
     start_n,
     offs_n,
     qk_scale,
-    l_i,
+    l_i0,
+    l_i1,  # used when FADD2_REDUCE is true
     m_i,
     acc,
     v,
@@ -45,6 +46,7 @@ def _attn_fwd_subtile(
     STAGE: tl.constexpr,
     SUBTILING: tl.constexpr,
     VECT_MUL: tl.constexpr,
+    FADD2_REDUCE: tl.constexpr,
 ):
     qk = tl.dot(q, k)
     if STAGE == 2:
@@ -61,7 +63,8 @@ def _attn_fwd_subtile(
     p = tl.math.exp2(qk)
     # -- compute correction factor
     alpha = tl.math.exp2(m_i - m_ij)
-    l_ij = tl.sum(p, 1)
+    if not FADD2_REDUCE:
+        l_ij = tl.sum(p, 1)
 
     # -- update output accumulator --
     BM: tl.constexpr = acc.shape[0]
@@ -79,16 +82,27 @@ def _attn_fwd_subtile(
     else:
         acc = acc * alpha[:, None]
 
+    # update m_i and l_i
+    # place this at the end of the loop to reduce register pressure
+    PM: tl.constexpr = p.shape[0]
+    PN: tl.constexpr = p.shape[1]
+    if FADD2_REDUCE:
+        p0, p1 = p.reshape([PM, 2, PN // 2]).permute(0, 2, 1).split()
+        l_ij0, l_ij1 = tl.reduce((p0, p1), axis=1, combine_fn=_reduce_fadd2)
+        l_i0 = l_i0 * alpha + l_ij0
+        l_i1 = l_i1 * alpha + l_ij1
+
+    # We can potentially move these to be before updating l_ij, so the dot
+    # is not blocked.
     # prepare p and v for the dot
     p = p.to(dtype)
     # note that this non transposed v for FP8 is only supported on Blackwell
     acc = tl.dot(p, v, acc)
-    # update m_i and l_i
-    # place this at the end of the loop to reduce register pressure
-    l_i = l_i * alpha + l_ij
+    if not FADD2_REDUCE:
+        l_i0 = l_i0 * alpha + l_ij
     m_i = m_ij
 
-    return l_i, m_i, acc
+    return l_i0, l_i1, m_i, acc
 
 
 @triton.jit
@@ -96,7 +110,9 @@ def _attn_fwd_inner_oss_dp(
     acc0,
     acc1,
     l_i0,
+    l_i0_1,
     l_i1,
+    l_i1_1,
     m_i0,
     m_i1,
     q0,
@@ -118,6 +134,7 @@ def _attn_fwd_inner_oss_dp(
     warp_specialize: tl.constexpr,
     SUBTILING: tl.constexpr,
     VECT_MUL: tl.constexpr,
+    FADD2_REDUCE: tl.constexpr,
 ):
     # range of values handled by this stage
     if STAGE == 1:
@@ -139,7 +156,7 @@ def _attn_fwd_inner_oss_dp(
         k = desc_k.load([offsetkv_y, 0]).T
         v = desc_v.load([offsetkv_y, 0])
 
-        l_i0, m_i0, acc0 = _attn_fwd_subtile(
+        l_i0, l_i0_1, m_i0, acc0 = _attn_fwd_subtile(
             q0,
             k,
             offs_m0,
@@ -147,6 +164,7 @@ def _attn_fwd_inner_oss_dp(
             offs_n,
             qk_scale,
             l_i0,
+            l_i0_1,
             m_i0,
             acc0,
             v,
@@ -154,8 +172,9 @@ def _attn_fwd_inner_oss_dp(
             STAGE,
             SUBTILING,
             VECT_MUL,
+            FADD2_REDUCE,
         )
-        l_i1, m_i1, acc1 = _attn_fwd_subtile(
+        l_i1, l_i1_1, m_i1, acc1 = _attn_fwd_subtile(
             q1,
             k,
             offs_m1,
@@ -163,6 +182,7 @@ def _attn_fwd_inner_oss_dp(
             offs_n,
             qk_scale,
             l_i1,
+            l_i1_1,
             m_i1,
             acc1,
             v,
@@ -170,11 +190,12 @@ def _attn_fwd_inner_oss_dp(
             STAGE,
             SUBTILING,
             VECT_MUL,
+            FADD2_REDUCE,
         )
 
         offsetkv_y += BLOCK_N
 
-    return acc0, acc1, l_i0, l_i1, m_i0, m_i1
+    return acc0, acc1, l_i0, l_i0_1, l_i1, l_i1_1, m_i0, m_i1
 
 
 def _host_descriptor_pre_hook(nargs):
@@ -208,6 +229,7 @@ if is_tile_enabled():
                 "occupancy": occ,
                 "SUBTILING": subtile,
                 "VECT_MUL": vectmul,
+                "FADD2_REDUCE": add2reduce,
             },
             pre_hook=_host_descriptor_pre_hook,
             minRegAutoWS=24,
@@ -217,12 +239,19 @@ if is_tile_enabled():
         for BN in [64, 128]
         for occ in [1, 2]
         for subtile in [True]
-        for vectmul in [True]
+        for vectmul in [False]
+        for add2reduce in [False]
     ]
 else:
     configs = [
         triton.Config(
-            {"BLOCK_M": BM, "BLOCK_N": BN, "SUBTILING": subtile, "VECT_MUL": vectmul},
+            {
+                "BLOCK_M": BM,
+                "BLOCK_N": BN,
+                "SUBTILING": subtile,
+                "VECT_MUL": vectmul,
+                "FADD2_REDUCE": add2reduce,
+            },
             num_stages=s,
             num_warps=w,
             pre_hook=_host_descriptor_pre_hook,
@@ -236,6 +265,7 @@ else:
         for w in [4]
         for subtile in [True]
         for vectmul in [False]
+        for add2reduce in [False]
     ]
 
 
@@ -307,6 +337,26 @@ def _fma_f32x2(a, b, c):
 
 
 @triton.jit
+def _reduce_fadd2(p0a, p1a, p0b, p1b):
+    return tl.inline_asm_elementwise(
+        """
+        {
+            .reg .b64 rc, ra, rb;
+            mov.b64 ra, { $2, $4 };
+            mov.b64 rb, { $3, $5 };
+            add.f32x2 rc, ra, rb;
+            mov.b64 { $0, $1 }, rc;
+        }
+        """,
+        "=r,=r,r,r,r,r",
+        [p0a, p0b, p1a, p1b],
+        dtype=[tl.float32, tl.float32],
+        is_pure=True,
+        pack=1,
+    )
+
+
+@triton.jit
 def _attn_fwd_tma_dp(
     sm_scale,
     M,  #
@@ -328,8 +378,9 @@ def _attn_fwd_tma_dp(
     dtype: tl.constexpr,
     SUBTILING: tl.constexpr,
     VECT_MUL: tl.constexpr,
+    FADD2_REDUCE: tl.constexpr,
 ):
-    tl.static_assert(BLOCK_N <= HEAD_DIM)
+    # tl.static_assert(BLOCK_N <= HEAD_DIM)
     start_m = pid  # tl.program_id(0)
     # off_hz = tl.program_id(1)
     off_z = off_hz // H
@@ -343,11 +394,11 @@ def _attn_fwd_tma_dp(
     offs_n = tl.arange(0, BLOCK_N)
 
     m_i0 = tl.zeros([BLOCK_M // 2], dtype=tl.float32) - float("inf")
-    l_i0 = tl.zeros([BLOCK_M // 2], dtype=tl.float32) + 1.0
+    l_i0_0 = tl.zeros([BLOCK_M // 2], dtype=tl.float32) + 1.0
     acc0 = tl.zeros([BLOCK_M // 2, HEAD_DIM], dtype=tl.float32)
 
     m_i1 = tl.zeros([BLOCK_M // 2], dtype=tl.float32) - float("inf")
-    l_i1 = tl.zeros([BLOCK_M // 2], dtype=tl.float32) + 1.0
+    l_i1_0 = tl.zeros([BLOCK_M // 2], dtype=tl.float32) + 1.0
     acc1 = tl.zeros([BLOCK_M // 2, HEAD_DIM], dtype=tl.float32)
 
     qk_scale = sm_scale
@@ -356,12 +407,21 @@ def _attn_fwd_tma_dp(
     q0 = desc_q.load([qo_offset_y, 0])
     q1 = desc_q.load([qo_offset_y + BLOCK_M // 2, 0])
 
+    if FADD2_REDUCE:
+        l_i0_1 = tl.zeros([BLOCK_M // 2], dtype=tl.float32)
+        l_i1_1 = tl.zeros([BLOCK_M // 2], dtype=tl.float32)
+    else:
+        l_i0_1 = 0
+        l_i1_1 = 0
+
     if STAGE & 1:
-        acc0, acc1, l_i0, l_i1, m_i0, m_i1 = _attn_fwd_inner_oss_dp(
+        acc0, acc1, l_i0_0, l_i0_1, l_i1_0, l_i1_1, m_i0, m_i1 = _attn_fwd_inner_oss_dp(
             acc0,
             acc1,
-            l_i0,
-            l_i1,
+            l_i0_0,
+            l_i0_1,
+            l_i1_0,
+            l_i1_1,
             m_i0,
             m_i1,
             q0,
@@ -383,13 +443,16 @@ def _attn_fwd_tma_dp(
             warp_specialize,
             SUBTILING,
             VECT_MUL,
+            FADD2_REDUCE,
         )
     if STAGE & 2:
-        acc0, acc1, l_i0, l_i1, m_i0, m_i1 = _attn_fwd_inner_oss_dp(
+        acc0, acc1, l_i0_0, l_i0_1, l_i1_0, l_i1_1, m_i0, m_i1 = _attn_fwd_inner_oss_dp(
             acc0,
             acc1,
-            l_i0,
-            l_i1,
+            l_i0_0,
+            l_i0_1,
+            l_i1_0,
+            l_i1_1,
             m_i0,
             m_i1,
             q0,
@@ -411,7 +474,15 @@ def _attn_fwd_tma_dp(
             warp_specialize,
             SUBTILING,
             VECT_MUL,
+            FADD2_REDUCE,
         )
+
+    if FADD2_REDUCE:
+        l_i0 = l_i0_0 + l_i0_1
+        l_i1 = l_i1_0 + l_i1_1
+    else:
+        l_i0 = l_i0_0
+        l_i1 = l_i1_0
 
     m_i0 += tl.math.log2(l_i0)
     acc0 = acc0 / l_i0[:, None]
@@ -451,6 +522,7 @@ def _attn_fwd(
     dtype: tl.constexpr,
     SUBTILING: tl.constexpr,
     VECT_MUL: tl.constexpr,
+    FADD2_REDUCE: tl.constexpr,
 ):
     pid = tl.program_id(0)
     off_hz = tl.program_id(1)
@@ -475,6 +547,7 @@ def _attn_fwd(
         dtype,
         SUBTILING,
         VECT_MUL,
+        FADD2_REDUCE,
     )
 
 
@@ -493,7 +566,7 @@ def _attn_fwd_persist(
     desc_k,
     desc_v,
     desc_o,
-    N_CTX,  #
+    N_CTX,  #: tl.constexpr,  #
     HEAD_DIM: tl.constexpr,  #
     BLOCK_M: tl.constexpr,  #
     BLOCK_N: tl.constexpr,  #
@@ -504,6 +577,7 @@ def _attn_fwd_persist(
     dtype: tl.constexpr,
     SUBTILING: tl.constexpr,
     VECT_MUL: tl.constexpr,
+    FADD2_REDUCE: tl.constexpr,
 ):
     n_tile_num = tl.cdiv(N_CTX, BLOCK_M)
     prog_id = tl.program_id(0)
@@ -540,6 +614,7 @@ def _attn_fwd_persist(
             dtype,
             SUBTILING,
             VECT_MUL,
+            FADD2_REDUCE,
         )
         tile_idx += num_progs
 
