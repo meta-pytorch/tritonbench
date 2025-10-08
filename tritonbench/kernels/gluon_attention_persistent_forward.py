@@ -211,7 +211,7 @@ class AttentionConfig:
     qk_scale: gl.tensor
     Z: gl.tensor
     H: gl.tensor
-    N_CTX: gl.tensor
+    N_CTX: gl.constexpr
 
     BLOCK_M: gl.constexpr
     BLOCK_N: gl.constexpr
@@ -1165,7 +1165,7 @@ def attention_kernel(  #
     M,
     Z,
     H,
-    N_CTX,
+    N_CTX: gl.constexpr,
     desc_q,
     desc_k,
     desc_v,

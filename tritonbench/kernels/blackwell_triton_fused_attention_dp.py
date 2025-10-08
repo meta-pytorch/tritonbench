@@ -314,7 +314,7 @@ def _attn_fwd_tma_dp(
     desc_o,
     pid,
     off_hz,
-    N_CTX,  #
+    N_CTX: tl.constexpr,  #
     HEAD_DIM: tl.constexpr,  #
     BLOCK_M: tl.constexpr,  #
     BLOCK_N: tl.constexpr,  #
@@ -437,7 +437,7 @@ def _attn_fwd(
     desc_k,
     desc_v,
     desc_o,
-    N_CTX,  #
+    N_CTX: tl.constexpr,  #
     HEAD_DIM: tl.constexpr,  #
     BLOCK_M: tl.constexpr,  #
     BLOCK_N: tl.constexpr,  #
@@ -489,7 +489,7 @@ def _attn_fwd_persist(
     desc_k,
     desc_v,
     desc_o,
-    N_CTX,  #
+    N_CTX: tl.constexpr,  #
     HEAD_DIM: tl.constexpr,  #
     BLOCK_M: tl.constexpr,  #
     BLOCK_N: tl.constexpr,  #

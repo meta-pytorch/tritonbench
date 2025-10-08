@@ -470,7 +470,7 @@ class Operator(BenchmarkOperator):
             q, k, v, self.causal, self.sm_scale, "ws"
         )
 
-    @register_benchmark(enabled=False)
+    @register_benchmark(enabled=HAS_BLACKWELL_AUTOWS)
     def triton_tutorial_flash_dp_persistent_blackwell(
         self,
         q: torch.Tensor,
@@ -492,7 +492,7 @@ class Operator(BenchmarkOperator):
         return lambda: gluon_blackwell_fwd(q, k, v, self.causal, self.sm_scale)
 
     # Only works with triton main, forward only.
-    @register_benchmark(enabled=False)
+    @register_benchmark(enabled=SUPPORT_GLUON)
     def gluon_blackwell_tutorial_persistent_fwd(
         self,
         q: torch.Tensor,
