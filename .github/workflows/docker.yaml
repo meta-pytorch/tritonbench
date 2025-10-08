@@ -63,8 +63,8 @@ jobs:
           docker push ghcr.io/meta-pytorch/tritonbench:${DOCKER_TAG}
           docker push ghcr.io/meta-pytorch/tritonbench:latest
           set -x
-          if [[ -n "${inputs.tags}" ]]; then
-            IFS=',' read -ra tags <<< "${{ inputs.tags }}"
+          if [[ -n "${{ github.event.inputs.tags }}" ]]; then
+            IFS=',' read -ra tags <<< "${{ github.event.inputs.tags }}"
             for tag in "${tags[@]}"; do
                 docker tag ghcr.io/meta-pytorch/tritonbench:latest ghcr.io/meta-pytorch/tritonbench:${tag}
                 docker push ghcr.io/meta-pytorch/tritonbench:${tag}
