@@ -28,7 +28,7 @@ try:
     )
 
     HAS_BLACKWELL_AUTOWS = True
-except (ImportError, IOError, AttributeError):
+except (ImportError, IOError, AttributeError, TypeError):
     # Needs compiler that supports autoWS
     HAS_BLACKWELL_AUTOWS = False
 
