@@ -72,7 +72,8 @@ def _attn_fwd_subtile(
         qk -= m_ij[:, None]
     else:
         m_ij = tl.maximum(m_i, tl.max(qk, 1) * qk_scale)
-        if VECT_MUL:
+        # TODO: Figure out why vector FMA slows things down.
+        if VECT_MUL and False:
             qk = _fma_f32x2(qk, qk_scale, -m_ij[:, None])
         else:
             qk = qk * qk_scale - m_ij[:, None]
@@ -262,7 +263,7 @@ if is_tile_enabled():
         for BN in [64, 128]
         for occ in [1, 2]
         for subtile in [True]
-        for vectmul in [False]
+        for vectmul in [True]
         for add2reduce in [False]
     ]
 else:
