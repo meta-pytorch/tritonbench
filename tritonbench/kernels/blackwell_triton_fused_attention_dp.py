@@ -72,7 +72,7 @@ def _attn_fwd_subtile(
         qk -= m_ij[:, None]
     else:
         m_ij = tl.maximum(m_i, tl.max(qk, 1) * qk_scale)
-        if VECT_MUL:
+        if VECT_MUL == 2 or VECT_MUL == 3:
             qk = _fma_f32x2(qk, qk_scale, -m_ij[:, None])
         else:
             qk = qk * qk_scale - m_ij[:, None]
@@ -88,7 +88,7 @@ def _attn_fwd_subtile(
 
     if SUBTILING:
         acc0, acc1 = acc.reshape([BM, 2, BN // 2]).permute(0, 2, 1).split()
-        if VECT_MUL:
+        if VECT_MUL == 1 or VECT_MUL == 3:
             acc0 = _mul_f32x2(acc0, alpha[:, None])
             acc1 = _mul_f32x2(acc1, alpha[:, None])
         else:
@@ -262,12 +262,12 @@ if is_tile_enabled():
         for BN in [64, 128]
         for occ in [1, 2]
         for subtile in [True]
-        for vectmul in [False]
+        for vectmul in [0]
         for add2reduce in [False]
     ]
 else:
     # Helper to build config with optional minRegAutoWS/maxRegAutoWS
-    def make_standard_config(BM, BN, s, w, subtile, vectmul, add2reduce):
+    def make_standard_config(BM, BN, s, w, subtile, vectmul, add2reduce, maxreg):
         config_kwargs = {
             "BLOCK_M": BM,
             "BLOCK_N": BN,
@@ -284,19 +284,20 @@ else:
         # Only add minRegAutoWS/maxRegAutoWS if supported (triton/tree/ws-3.5)
         if HAS_REG_AUTO_WS:
             extra_kwargs["minRegAutoWS"] = 24
-            extra_kwargs["maxRegAutoWS"] = 152
+            extra_kwargs["maxRegAutoWS"] = maxreg
 
         return triton.Config(config_kwargs, **extra_kwargs)
 
     configs = [
-        make_standard_config(BM, BN, s, w, subtile, vectmul, add2reduce)
+        make_standard_config(BM, BN, s, w, subtile, vectmul, add2reduce, maxreg)
         for BM in [256]
         for BN in [64, 128]
         for s in NUM_STAGES_OPTIONS
         for w in [4]
         for subtile in [True]
-        for vectmul in [False]
+        for vectmul in [1]
         for add2reduce in [False]
+        for maxreg in [152, 192]
     ]
 
 

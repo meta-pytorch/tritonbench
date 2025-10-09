@@ -239,7 +239,7 @@ if is_tile_enabled():
     ]
 else:
     # Helper to build config with optional minRegAutoWS/maxRegAutoWS
-    def make_standard_config(BM, BN, s, w, subtile, vectmul, add2reduce):
+    def make_standard_config(BM, BN, s, w, subtile, vectmul, add2reduce, maxreg):
         config_kwargs = {
             "BLOCK_M": BM,
             "BLOCK_N": BN,
@@ -256,13 +256,13 @@ else:
         # Only add minRegAutoWS/maxRegAutoWS if supported (triton/tree/ws-3.5)
         if HAS_REG_AUTO_WS:
             extra_kwargs["minRegAutoWS"] = 24
-            extra_kwargs["maxRegAutoWS"] = 152
+            extra_kwargs["maxRegAutoWS"] = maxreg
             extra_kwargs["data_partition_factor"] = 2
 
         return triton.Config(config_kwargs, **extra_kwargs)
 
     configs = [
-        make_standard_config(BM, BN, s, w, subtile, vectmul, add2reduce)
+        make_standard_config(BM, BN, s, w, subtile, vectmul, add2reduce, maxreg)
         for BM in [256]
         for BN in [64, 128]
         for s in NUM_STAGES_OPTIONS
@@ -270,6 +270,7 @@ else:
         for subtile in [True]
         for vectmul in [1]
         for add2reduce in [False]
+        for maxreg in [152, 192]
     ]
 
 
@@ -384,7 +385,6 @@ def _attn_fwd_tma_dp(
     VECT_MUL: tl.constexpr,
     FADD2_REDUCE: tl.constexpr,
 ):
-    tl.static_assert(BLOCK_N <= HEAD_DIM)
     start_m = pid  # tl.program_id(0)
     # off_hz = tl.program_id(1)
     off_z = off_hz // H
@@ -687,7 +687,7 @@ class _attention_opt(torch.autograd.Function):
             ):
                 extra_kern_args["maxnreg"] = 128
             else:
-                extra_kern_args["maxnreg"] = 80
+                extra_kern_args["maxnreg"] = 128
         if persistent:
             _attn_fwd_persist[grid_persist](
                 sm_scale,
