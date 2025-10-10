@@ -72,7 +72,7 @@ def _attn_fwd_subtile(
         qk -= m_ij[:, None]
     else:
         m_ij = tl.maximum(m_i, tl.max(qk, 1) * qk_scale)
-        if VECT_MUL == 2 or VECT_MUL == 3:
+        if VECT_MUL & 2:
             qk = _fma_f32x2(qk, qk_scale, -m_ij[:, None])
         else:
             qk = qk * qk_scale - m_ij[:, None]
@@ -88,7 +88,7 @@ def _attn_fwd_subtile(
 
     if SUBTILING:
         acc0, acc1 = acc.reshape([BM, 2, BN // 2]).permute(0, 2, 1).split()
-        if VECT_MUL == 1 or VECT_MUL == 3:
+        if VECT_MUL & 1:
             acc0 = _mul_f32x2(acc0, alpha[:, None])
             acc1 = _mul_f32x2(acc1, alpha[:, None])
         else:
