@@ -17,6 +17,8 @@ import triton
 import triton.language as tl
 from triton.tools.tensor_descriptor import TensorDescriptor
 
+from .attention_utils import WITH_MAXNREG
+
 from .blackwell_attention_utils import (
     is_blackwell,
     is_cuda,
@@ -681,7 +683,7 @@ class _attention_opt(torch.autograd.Function):
 
         ctx.grid = grid
         persistent = baseVariant == "persistent" or baseVariant == "ws_persistent"
-        if is_blackwell() and warp_specialize:
+        if WITH_MAXNREG and is_blackwell() and warp_specialize:
             if HEAD_DIM_K == 128 and (
                 q.dtype == torch.float16 or q.dtype == torch.bfloat16
             ):
