@@ -11,6 +11,8 @@ Extra Credits:
 
 """
 
+import os
+
 import torch
 
 import triton
@@ -27,6 +29,8 @@ from .blackwell_attention_utils import (
     is_tile_enabled,
     supports_host_descriptor,
 )
+
+FORCE_ON_DEVICE = os.getenv("FORCE_ON_DEVICE") == "1"
 
 
 # Check if Triton version supports minRegAutoWS and maxRegAutoWS
@@ -628,6 +632,32 @@ def _attn_fwd_persist(
         tiles_per_sm += 1
 
     tile_idx = prog_id
+    y_dim = Z * H * N_CTX
+    desc_q = _maybe_make_tensor_desc(
+        desc_q,
+        shape=[y_dim, HEAD_DIM],
+        strides=[HEAD_DIM, 1],
+        block_shape=[BLOCK_M // 2, HEAD_DIM],
+    )
+    desc_k = _maybe_make_tensor_desc(
+        desc_k,
+        shape=[y_dim, HEAD_DIM],
+        strides=[HEAD_DIM, 1],
+        block_shape=[BLOCK_N, HEAD_DIM],
+    )
+    desc_v = _maybe_make_tensor_desc(
+        desc_v,
+        shape=[y_dim, HEAD_DIM],
+        strides=[HEAD_DIM, 1],
+        block_shape=[BLOCK_N, HEAD_DIM],
+    )
+    desc_o = _maybe_make_tensor_desc(
+        desc_o,
+        shape=[y_dim, HEAD_DIM],
+        strides=[HEAD_DIM, 1],
+        block_shape=[BLOCK_M // 2, HEAD_DIM],
+    )
+
     # inner loop warpspec vs. outer loop warpspec
     for _ in tl.range(0, tiles_per_sm, warp_specialize=warp_specialize and OUTER_LOOP):
         pid = tile_idx % n_tile_num
@@ -682,7 +712,11 @@ class _attention_opt(torch.autograd.Function):
         )
         warp_specialize = baseVariant == "ws" or baseVariant == "ws_persistent"
         # Use device_descriptor for Hopper + warpspec.
-        if supports_host_descriptor() and not (is_hopper() and warp_specialize):
+        if (
+            not FORCE_ON_DEVICE
+            and supports_host_descriptor()
+            and not (is_hopper() and warp_specialize)
+        ):
             # Note that on Hopper we cannot perform a FP8 dot with a non-transposed second tensor
             y_dim = q.shape[0] * q.shape[1] * q.shape[2]
 
