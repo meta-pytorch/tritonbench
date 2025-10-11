@@ -157,7 +157,11 @@ def _attn_fwd_inner_oss_dp(
 
     # loop over k, v and update accumulator
     for start_n in tl.range(
-        lo, hi, BLOCK_N, warp_specialize=warp_specialize, disallow_acc_multi_buffer=True
+        lo,
+        hi,
+        BLOCK_N,
+        warp_specialize=warp_specialize,
+        disallow_acc_multi_buffer=True,
     ):
         start_n = tl.multiple_of(start_n, BLOCK_N)
 
@@ -248,6 +252,7 @@ else:
             "SUBTILING": subtile,
             "VECT_MUL": vectmul,
             "FADD2_REDUCE": add2reduce,
+            "DP_FACTOR": 2,
         }
         extra_kwargs = {
             "num_stages": s,
@@ -259,7 +264,6 @@ else:
         if HAS_REG_AUTO_WS:
             extra_kwargs["minRegAutoWS"] = 24
             extra_kwargs["maxRegAutoWS"] = maxreg
-            extra_kwargs["data_partition_factor"] = 2
 
         return triton.Config(config_kwargs, **extra_kwargs)
 
@@ -556,6 +560,7 @@ def _attn_fwd_persist(
     SUBTILING: tl.constexpr,
     VECT_MUL: tl.constexpr,
     FADD2_REDUCE: tl.constexpr,
+    DP_FACTOR: tl.constexpr,
 ):
     n_tile_num = tl.cdiv(N_CTX, BLOCK_M)
     prog_id = tl.program_id(0)
@@ -594,7 +599,12 @@ def _attn_fwd_persist(
     )
 
     # inner loop warpspec vs. outer loop warpspec
-    for _ in tl.range(0, tiles_per_sm, warp_specialize=warp_specialize and OUTER_LOOP):
+    for _ in tl.range(
+        0,
+        tiles_per_sm,
+        warp_specialize=warp_specialize and OUTER_LOOP,
+        data_partition_factor=DP_FACTOR,
+    ):
         pid = tile_idx % n_tile_num
         off_hz = tile_idx // n_tile_num
         _attn_fwd_tma_dp(
