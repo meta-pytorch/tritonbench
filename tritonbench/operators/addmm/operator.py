@@ -20,6 +20,7 @@ from tritonbench.operators.gemm import stream_k
 from tritonbench.utils.triton_op import (
     BenchmarkOperator,
     BenchmarkOperatorMetrics,
+    Mode,
     PRECISION_DTYPE_MAPPING,
     register_benchmark,
     register_metric,
@@ -81,7 +82,6 @@ LARGE_K_SHAPES = list(itertools.product([13], [2**i for i in range(6, 26)], [2])
 class Operator(BenchmarkOperator):
     DEFAULT_METRICS = ["tflops", "best_config"]
     DEFAULT_PRECISION = "fp16"
-    FWD_ONLY = True
 
     def __init__(
         self, tb_args: argparse.Namespace, extra_args: Optional[List[str]] = None
@@ -171,6 +171,7 @@ class Operator(BenchmarkOperator):
             if hasattr(self, "dtypes") and self.dtypes:
                 self.tb_args.precision = "bypass"
                 self.dtype = PRECISION_DTYPE_MAPPING[self.dtypes[shape_id]]
+            requires_grad = self.mode in (Mode.BWD, Mode.FWD_BWD)
             if hasattr(self, "strides"):
                 # generate shapes with different strides
                 strides = self.strides[shape_id]
@@ -188,13 +189,13 @@ class Operator(BenchmarkOperator):
                 original_n = max(n, strides[2][0])
                 a = torch.randn(
                     (m, n), device=self.device, dtype=self.dtype
-                ).requires_grad_(False)
+                ).requires_grad_(requires_grad)
                 mat1 = torch.randn(
                     (original_m, original_k), device=self.device, dtype=self.dtype
-                ).requires_grad_(False)
+                ).requires_grad_(requires_grad)
                 mat2 = torch.randn(
                     (original_k, original_n), device=self.device, dtype=self.dtype
-                ).requires_grad_(False)
+                ).requires_grad_(requires_grad)
                 a = a.as_strided((m, n), strides[0])
                 mat1 = mat1.as_strided((m, k), strides[1])
                 mat2 = mat2.as_strided((k, n), strides[2])
@@ -203,13 +204,13 @@ class Operator(BenchmarkOperator):
                 m, k, n = shape
                 a = torch.randn(
                     (m, n), device=self.device, dtype=self.dtype
-                ).requires_grad_(False)
+                ).requires_grad_(requires_grad)
                 mat1 = torch.randn(
                     (m, k), device=self.device, dtype=self.dtype
-                ).requires_grad_(False)
+                ).requires_grad_(requires_grad)
                 mat2 = torch.randn(
                     (k, n), device=self.device, dtype=self.dtype
-                ).requires_grad_(False)
+                ).requires_grad_(requires_grad)
                 if self.col_major:
                     mat2 = mat2.T.contiguous().T
                 yield a, mat1, mat2

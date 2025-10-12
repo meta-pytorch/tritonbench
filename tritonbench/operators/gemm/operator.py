@@ -47,6 +47,7 @@ from tritonbench.utils.triton_op import (
     BenchmarkOperator,
     BenchmarkOperatorMetrics,
     llama_shapes,
+    Mode,
     PRECISION_DTYPE_MAPPING,
     register_benchmark,
     register_metric,
@@ -176,7 +177,6 @@ def read_shapes_from_csv(csv_path: str) -> List[List[int]]:
 class Operator(BenchmarkOperator):
     DEFAULT_METRICS = ["latency", "speedup", "tflops"]
     DEFAULT_PRECISION = "fp16"
-    FWD_ONLY = True
 
     def __init__(
         self, tb_args: argparse.Namespace, extra_args: Optional[List[str]] = None
@@ -543,6 +543,7 @@ class Operator(BenchmarkOperator):
             if hasattr(self, "dtypes") and self.dtypes:
                 self.tb_args.precision = "bypass"
                 self.dtype = PRECISION_DTYPE_MAPPING[self.dtypes[shape_id]]
+            requires_grad = self.mode in (Mode.BWD, Mode.FWD_BWD)
             if hasattr(self, "strides"):
                 strides = self.strides[shape_id]
                 assert (
@@ -558,28 +559,32 @@ class Operator(BenchmarkOperator):
                 actual_n = max(n, strides[1][0])
                 a = self._scaled_randn(
                     (actual_m, actual_k), scale=k, device=self.device, dtype=self.dtype
-                )
+                ).requires_grad_(requires_grad)
                 w = self._scaled_randn(
                     (actual_k, actual_n), scale=k, device=self.device, dtype=self.dtype
+                ).requires_grad_(requires_grad)
+                a = a.as_strided(size=[m, k], stride=strides[0]).requires_grad_(
+                    requires_grad
                 )
-                a = a.as_strided(size=[m, k], stride=strides[0])
-                w = w.as_strided(size=[k, n], stride=strides[1])
+                w = w.as_strided(size=[k, n], stride=strides[1]).requires_grad_(
+                    requires_grad
+                )
             else:
                 a = self._scaled_randn(
                     (m, k), scale=k, device=self.device, dtype=self.dtype
-                )
+                ).requires_grad_(requires_grad)
                 w = self._scaled_randn(
                     (k, n), scale=k, device=self.device, dtype=self.dtype
-                )
+                ).requires_grad_(requires_grad)
                 # Convert inputs to column-major if layout is "n" (non-transposed)
                 if self.layout[0] == "n":
-                    a = a.T.contiguous().T
+                    a = a.T.contiguous().T.requires_grad_(requires_grad)
                 if self.layout[1] == "n":
-                    w = w.T.contiguous().T
+                    w = w.T.contiguous().T.requires_grad_(requires_grad)
             if not bias == None:
                 bias = torch.randn(
                     (bias), device=self.device, dtype=self.dtype
-                ).requires_grad_(False)
+                ).requires_grad_(requires_grad)
 
             yield a, w, bias
 

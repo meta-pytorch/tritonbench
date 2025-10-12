@@ -1,0 +1,7 @@
+bf16_flash_attention_fwd_shape4:
+  op:
+    blackwell_attentions
+  args:
+    --op blackwell_attentions --seq-len 8192 --batch 4 --n-heads 32 --d-head 128 --metrics tflops --rep 3000 --sleep 1.0 --only triton_tutorial_flash_dp_persistent_blackwell --simple-output --force
+  envs:
+    TRITON_ALWAYS_COMPILE=1

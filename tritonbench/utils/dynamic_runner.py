@@ -1,13 +1,14 @@
-from typing import Callable, Dict, Generator, List, Optional
+from typing import Any, Callable, Dict, Generator, List, Optional
 
-from tritonbench.utils.triton_op import BenchmarkOperator
+from tritonbench.utils.triton_op import BenchmarkOperator, BenchmarkOperatorResult
 
 
 def dynamic_run(
     benchmarks: Dict[str, Callable],
     input_iter: Optional[Generator],
-    **kwargs,
-) -> None:
+    silent=False,
+    **kwargs: Any,
+) -> BenchmarkOperatorResult:
     """
     Run a list of benchmarks with a given set of inputs and kwargs.
     Kwargs in this case are the command-line arguments available in tritonbench.
@@ -46,13 +47,17 @@ def dynamic_run(
         op.add_benchmark(bm_func_name=k, bm_callable=v)
 
     op.run()
-    print(op.output)
+    if not silent:
+        print(op.output)
     return op.output
 
 
 def dynamic_run_once(
-    benchmarks: Dict[str, Callable], single_input: Optional[List], **kwargs
-):
+    benchmarks: Dict[str, Callable],
+    single_input: Optional[List[Any]],
+    silent=False,
+    **kwargs: Any,
+) -> BenchmarkOperatorResult:
     """
     Run a list of benchmarks with a given set of inputs and kwargs.
     Kwargs in this case are the command-line arguments available in tritonbench.
@@ -81,5 +86,5 @@ def dynamic_run_once(
         return generator
 
     input_generator = input_iterator(*single_input)
-    output = dynamic_run(benchmarks, input_generator, **kwargs)
+    output = dynamic_run(benchmarks, input_generator, silent=silent, **kwargs)
     return output

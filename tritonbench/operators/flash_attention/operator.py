@@ -566,7 +566,7 @@ class Operator(BenchmarkOperator):
                         yield (BATCH, self.H, SEQ_LEN, SEQ_LEN_KV, self.D_HEAD)
                         SEQ_LEN *= 2
                 return
-            for i in range(SEQ_LEN_LOG2, 15):
+            for i in range(SEQ_LEN_LOG2, 14):
                 N_CTX = 2**i
                 # BATCH = 16384 // N_CTX
                 # H = 2048 // D_HEAD

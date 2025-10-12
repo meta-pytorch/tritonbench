@@ -265,7 +265,13 @@ def _do_bench_profiler(
     cache = triton.runtime.driver.active.get_empty_cache_for_benchmark()
 
     # First, estimate the runtime to calculate iterations
-    estimate_ms = benchmarker.benchmark_gpu(fn, estimation_iters=5, benchmark_iters=10)
+    estimate_ms = triton.testing.do_bench(
+        fn,
+        warmup=warmup,
+        rep=rep,
+        grad_to_none=grad_to_none,
+        return_mode="mean",
+    )
 
     # Calculate number of iterations based on target rep time
     if estimate_ms == 0:

@@ -18,6 +18,9 @@ on:
       nightly_date:
         description: "PyTorch nightly version"
         required: false
+      tags:
+        description: "Tags to attach to the docker image, split by comma"
+        required: false
 env:
   CONDA_ENV: "tritonbench"
   DOCKER_IMAGE: "ghcr.io/meta-pytorch/tritonbench:latest"
@@ -49,19 +52,24 @@ jobs:
           # and it is github.ref_name when triggered by workflow_dispatch
           branch_name=${{ github.head_ref || github.ref_name }}
           docker build . --build-arg TRITONBENCH_BRANCH="${branch_name}" --build-arg FORCE_DATE="${NIGHTLY_DATE}" \
-              -f tritonbench-nightly.dockerfile -t ghcr.io/meta-pytorch/tritonbench:latest
-          # Extract pytorch version from the docker
-          PYTORCH_VERSION=$(docker run -e SETUP_SCRIPT="${SETUP_SCRIPT}" ghcr.io/meta-pytorch/tritonbench:latest bash -c '. "${SETUP_SCRIPT}"; python -c "import torch; print(torch.__version__)"')
-          export DOCKER_TAG=$(awk '{match($0, /dev[0-9]+/, arr); print arr[0]}' <<< "${PYTORCH_VERSION}")
-          docker tag ghcr.io/meta-pytorch/tritonbench:latest ghcr.io/meta-pytorch/tritonbench:${DOCKER_TAG}
+              -f tritonbench-nightly.dockerfile -t ghcr.io/meta-pytorch/tritonbench:latest          
       - name: Push docker to remote
         if: github.event_name != 'pull_request'
         run: |
           # Extract pytorch version from the docker
           PYTORCH_VERSION=$(docker run -e SETUP_SCRIPT="${SETUP_SCRIPT}" ghcr.io/meta-pytorch/tritonbench:latest bash -c '. "${SETUP_SCRIPT}"; python -c "import torch; print(torch.__version__)"')
           export DOCKER_TAG=$(awk '{match($0, /dev[0-9]+/, arr); print arr[0]}' <<< "${PYTORCH_VERSION}")
+          docker tag ghcr.io/meta-pytorch/tritonbench:latest ghcr.io/meta-pytorch/tritonbench:${DOCKER_TAG}
           docker push ghcr.io/meta-pytorch/tritonbench:${DOCKER_TAG}
           docker push ghcr.io/meta-pytorch/tritonbench:latest
+          set -x
+          if [[ -n "${{ github.event.inputs.tags }}" ]]; then
+            IFS=',' read -ra tags <<< "${{ github.event.inputs.tags }}"
+            for tag in "${tags[@]}"; do
+                docker tag ghcr.io/meta-pytorch/tritonbench:latest ghcr.io/meta-pytorch/tritonbench:${tag}
+                docker push ghcr.io/meta-pytorch/tritonbench:${tag}
+            done
+          fi
 concurrency:
   group: ${{ github.workflow }}-${{ github.event.pull_request.number || github.sha }}-${{ github.event_name == 'workflow_dispatch' }}
   cancel-in-progress: true

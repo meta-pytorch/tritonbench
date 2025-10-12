@@ -4,6 +4,7 @@ FROM ${BASE_IMAGE}
 ENV LANG=C.UTF-8 LC_ALL=C.UTF-8
 ENV CONDA_ENV=pytorch
 ENV CONDA_ENV_TRITON_MAIN=triton-main
+ENV CONDA_ENV_META_TRITON=meta-triton
 ENV SETUP_SCRIPT=/workspace/setup_instance.sh
 ARG OVERRIDE_GENCODE="-gencode arch=compute_80,code=sm_80 -gencode arch=compute_86,code=sm_86 -gencode arch=compute_90,code=sm_90 -gencode arch=compute_90a,code=sm_90a"
 ARG OVERRIDE_GENCODE_CUDNN="-gencode arch=compute_80,code=sm_80 -gencode arch=compute_86,code=sm_86 -gencode arch=compute_90,code=sm_90 -gencode arch=compute_90a,code=sm_90a"
@@ -104,6 +105,12 @@ RUN cd /workspace/tritonbench && \
     bash .ci/triton/install.sh --conda-env "${CONDA_ENV_TRITON_MAIN}" \
         --repo triton-lang/triton --commit main --side single \
         --install-dir /workspace/triton-main
+
+# Build meta-triton conda env
+RUN cd /workspace/tritonbench && \
+    bash .ci/triton/install.sh --conda-env "${CONDA_ENV_META_TRITON}" \
+        --repo facebookexperimental/triton --commit ws-3.5 --side single \
+        --install-dir /workspace/meta-triton
 
 # Output setup script for inspection
 RUN cat "${SETUP_SCRIPT}"

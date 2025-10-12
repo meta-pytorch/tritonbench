@@ -414,6 +414,13 @@ class _matmul(torch.autograd.Function):
         fp8_fast_accum=True,
         output_dtype=None,
     ):
+        # Save tensors for backward
+        ctx.save_for_backward(a, b)
+        ctx.acc_dtype = acc_dtype
+        ctx.input_precision = input_precision
+        ctx.fp8_fast_accum = fp8_fast_accum
+        ctx.output_dtype = output_dtype
+
         return _matmul._call(
             a,
             b,
@@ -422,6 +429,33 @@ class _matmul(torch.autograd.Function):
             fp8_fast_accum=fp8_fast_accum,
             output_dtype=output_dtype,
         )
+
+    @staticmethod
+    def backward(ctx, grad_output):
+        a, b = ctx.saved_tensors
+        grad_a = grad_b = None
+
+        if ctx.needs_input_grad[0]:
+            grad_a = _matmul._call(
+                grad_output,
+                b.t(),
+                acc_dtype=ctx.acc_dtype,
+                input_precision=ctx.input_precision,
+                fp8_fast_accum=ctx.fp8_fast_accum,
+                output_dtype=None,
+            )
+
+        if ctx.needs_input_grad[1]:
+            grad_b = _matmul._call(
+                a.t(),
+                grad_output,
+                acc_dtype=ctx.acc_dtype,
+                input_precision=ctx.input_precision,
+                fp8_fast_accum=ctx.fp8_fast_accum,
+                output_dtype=None,
+            )
+
+        return grad_a, grad_b, None, None, None, None
 
 
 matmul = _matmul.apply

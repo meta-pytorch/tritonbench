@@ -530,6 +530,25 @@ def _compute_offsets_persistent(tile_idx, n_tile_num, H, N_CTX, BLOCK_M):
     return start_m, off_hz, lo, hi, qo_offset_y, kv_offset_y
 
 
+@triton.jit
+def _split_n(x, SPLIT_FACTOR: tl.constexpr):
+    if SPLIT_FACTOR == 1:
+        return (x, )
+    else:
+        x0, x1 = x.reshape([x.shape[0], 2, x.shape[1] // 2]).permute(0, 2, 1).split()
+        return _split_n(x0, SPLIT_FACTOR // 2) + _split_n(x1, SPLIT_FACTOR // 2)
+
+@triton.jit
+def _join_n(xs):
+    if len(xs) == 1:
+        return xs[0]
+    else:
+        x0 = _join_n(xs[:len(xs) // 2])
+        x1 = _join_n(xs[len(xs) // 2:])
+        x = tl.join(x0, x1).permute(0, 2, 1).reshape([x0.shape[0], x0.shape[1] * 2])
+        return x
+
+
 @triton.autotune(configs=configs_persistent, key=["N_CTX", "HEAD_DIM", "FP8_OUTPUT"])
 @triton.jit
 def _attn_fwd_ws_persistent(
@@ -711,12 +730,12 @@ def _attn_fwd_ws_persistent(
                 for cid in tl.static_range(0, NUM_MMA_GROUPS):
                     tlx.barrier_wait(o_fulls[cid], phase)
                     tlx.fence_async_shared()
-                    tlx.barrier_arrive(o_empties[cid])
                     qo_offset_y_split = qo_offset_y + cid * BLOCK_M_SPLIT
                     tlx.async_descriptor_store(
                         desc_o, o_tiles[cid], [qo_offset_y_split, 0]
                     )
                     tlx.async_descriptor_store_wait(0)
+                    tlx.barrier_arrive(o_empties[cid])
 
                 tile_idx += num_progs
 
@@ -751,17 +770,27 @@ def _attn_fwd_ws_persistent(
                     tlx.local_store(alpha_tiles[cid * HEAD_DIM], alpha[:, None])
                     tlx.barrier_arrive(alpha_fulls[cid])
 
-                    qk = _fma_f32x2(qk, qk_scale, -m_ij[:, None])
-                    p = tl.math.exp2(qk)
-                    l_ij = tl.sum(p, 1)
-                    p = p.to(tlx.dtype_of(desc_v))
 
                     # prepare p for the v dot
                     # Use p[1] for cid=0, and p[3] for cid=1
                     p_bufIdx = 1 + cid * NUM_MMA_GROUPS
-                    tlx.local_store(p_tiles[p_bufIdx], p)
-                    tlx.barrier_arrive(p_fulls[cid])
 
+                    qk = _fma_f32x2(qk, qk_scale, -m_ij[:, None])
+                    qks = _split_n(qk, NUM_MMA_SLICES)
+                    ps = ()
+                    for slice_id in tl.static_range(0, NUM_MMA_SLICES):
+                        p_i = tl.math.exp2(qks[slice_id])
+                        p_slice = tlx.subslice(
+                            p_tiles[p_bufIdx],
+                            HEAD_DIM * slice_id // NUM_MMA_SLICES,
+                            HEAD_DIM // NUM_MMA_SLICES,
+                        )
+                        tlx.local_store(p_slice, p_i.to(tlx.dtype_of(desc_v)))
+                        ps = ps + (p_i, )
+
+                    tlx.barrier_arrive(p_fulls[cid])
+                    p = _join_n(ps)
+                    l_ij = tl.sum(p, 1)
                     l_i = l_i * alpha + l_ij
                     m_i = m_ij
                     accum_cnt_qk += 1

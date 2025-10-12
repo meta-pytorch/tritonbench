@@ -287,7 +287,7 @@ def streamk_amd_gemm(
         start_iter = end_iter
 
 
-def streamk_amd_matmul(a, b, bias=None):
+def _streamk_amd_matmul_impl(a, b, bias=None):
     M, K = a.shape
     _, N = b.shape
     dtype = a.dtype
@@ -389,6 +389,36 @@ def streamk_amd_matmul(a, b, bias=None):
     # print(c)
     # print(a @ b)
     return c
+
+
+class _StreamKAmdMatmul(torch.autograd.Function):
+    @staticmethod
+    def forward(ctx, a, b, bias=None):
+        # Save tensors for backward
+        ctx.save_for_backward(a, b, bias)
+        return _streamk_amd_matmul_impl(a, b, bias)
+
+    @staticmethod
+    def backward(ctx, grad_output):
+        a, b, bias = ctx.saved_tensors
+        grad_a = grad_b = grad_bias = None
+
+        if ctx.needs_input_grad[0]:
+            grad_a = _streamk_amd_matmul_impl(grad_output, b.t().contiguous())
+
+        if ctx.needs_input_grad[1]:
+            grad_b = _streamk_amd_matmul_impl(a.t().contiguous(), grad_output)
+
+        if ctx.needs_input_grad[2] and bias is not None:
+            grad_bias = grad_output.sum(dim=0)
+            if bias.dim() == 2:
+                grad_bias = grad_bias.unsqueeze(0)
+
+        return grad_a, grad_b, grad_bias
+
+
+def streamk_amd_matmul(a, b, bias=None):
+    return _StreamKAmdMatmul.apply(a, b, bias)
 
 
 def _matmul_launch_metadata(grid, kernel, args):
@@ -601,7 +631,7 @@ def streamk_cuda_gemm(
                 c_desc.atomic_add([offs_am, offs_bn], c)
 
 
-def streamk_cuda_matmul(a, b):
+def _streamk_cuda_matmul_impl(a, b):
     assert a.dtype == b.dtype, "Incompatible dtypes"
 
     M, K = a.shape
@@ -649,3 +679,28 @@ def streamk_cuda_matmul(a, b):
         NUM_SMS=num_sms,  #
     )
     return c
+
+
+class _StreamKCudaMatmul(torch.autograd.Function):
+    @staticmethod
+    def forward(ctx, a, b):
+        # Save tensors for backward
+        ctx.save_for_backward(a, b)
+        return _streamk_cuda_matmul_impl(a, b)
+
+    @staticmethod
+    def backward(ctx, grad_output):
+        a, b = ctx.saved_tensors
+        grad_a = grad_b = None
+
+        if ctx.needs_input_grad[0]:
+            grad_a = _streamk_cuda_matmul_impl(grad_output, b.t().contiguous())
+
+        if ctx.needs_input_grad[1]:
+            grad_b = _streamk_cuda_matmul_impl(a.t().contiguous(), grad_output)
+
+        return grad_a, grad_b
+
+
+def streamk_cuda_matmul(a, b):
+    return _StreamKCudaMatmul.apply(a, b)

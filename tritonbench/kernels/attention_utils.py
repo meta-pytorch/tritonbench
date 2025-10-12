@@ -16,7 +16,7 @@ WITH_COMPPIPE = os.getenv("ENABLE_COMPPIPE")
 PEEL_LAST = os.getenv("PEEL_LAST_ITER")
 WITH_TMA = os.getenv("WITH_TMA")
 HAS_EXPLICIT_WS = os.getenv("ENABLE_EXPLICIT_WS")
-SUPPORT_GLUON = os.getenv("WITH_GLUON")
+SUPPORT_GLUON = os.getenv("WITH_GLUON") == "1"
 WITH_MAXNREG = os.getenv("WITH_MAXNREG")
 
 

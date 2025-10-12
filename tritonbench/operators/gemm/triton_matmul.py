@@ -149,7 +149,7 @@ def leaky_relu(x):
 # and (1) checks any shape constraint; (2) allocates the output; (3) launches the above kernel.
 
 
-def matmul(a, b, activation=""):
+def _matmul_impl(a, b, activation=""):
     # Check constraints.
     assert a.shape[1] == b.shape[0], "Incompatible dimensions"
     M, K = a.shape
@@ -185,3 +185,29 @@ def matmul(a, b, activation=""):
         ENABLE_BUFFER_OPS_ASSUMES=enable_buffer_ops_assumes,
     )
     return c
+
+
+class _TritonMatmul(torch.autograd.Function):
+    @staticmethod
+    def forward(ctx, a, b, activation=""):
+        # Save tensors for backward
+        ctx.save_for_backward(a, b)
+        ctx.activation = activation
+        return _matmul_impl(a, b, activation)
+
+    @staticmethod
+    def backward(ctx, grad_output):
+        a, b = ctx.saved_tensors
+        grad_a = grad_b = None
+
+        if ctx.needs_input_grad[0]:
+            grad_a = _matmul_impl(grad_output, b.t().contiguous(), "")
+
+        if ctx.needs_input_grad[1]:
+            grad_b = _matmul_impl(a.t().contiguous(), grad_output, "")
+
+        return grad_a, grad_b, None
+
+
+def matmul(a, b, activation=""):
+    return _TritonMatmul.apply(a, b, activation)

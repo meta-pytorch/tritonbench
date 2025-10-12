@@ -220,7 +220,7 @@ def torch_reduction(c_buf, a):
 compiled_reduction = torch.compile(torch_reduction)
 
 
-def matmul_partition_k(a, b, triton_reduce=False):
+def _matmul_partition_k_impl(a, b, triton_reduce=False):
     # Check constraints.
     assert a.shape[1] == b.shape[0], "Incompatible dimensions"
     assert a.is_contiguous(), "Matrix A must be contiguous"
@@ -284,3 +284,33 @@ def matmul_partition_k(a, b, triton_reduce=False):
         return c
     else:
         return compiled_reduction(c_buf, a)
+
+
+class _PartitionKMatmul(torch.autograd.Function):
+    @staticmethod
+    def forward(ctx, a, b, triton_reduce=False):
+        # Save tensors for backward
+        ctx.save_for_backward(a, b)
+        ctx.triton_reduce = triton_reduce
+        return _matmul_partition_k_impl(a, b, triton_reduce)
+
+    @staticmethod
+    def backward(ctx, grad_output):
+        a, b = ctx.saved_tensors
+        grad_a = grad_b = None
+
+        if ctx.needs_input_grad[0]:
+            grad_a = _matmul_partition_k_impl(
+                grad_output, b.t().contiguous(), ctx.triton_reduce
+            )
+
+        if ctx.needs_input_grad[1]:
+            grad_b = _matmul_partition_k_impl(
+                a.t().contiguous(), grad_output, ctx.triton_reduce
+            )
+
+        return grad_a, grad_b, None
+
+
+def matmul_partition_k(a, b, triton_reduce=False):
+    return _PartitionKMatmul.apply(a, b, triton_reduce)
