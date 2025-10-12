@@ -437,7 +437,7 @@ class Operator(BenchmarkOperator):
             q, k, v, self.causal, self.sm_scale, "tma_ws_persistent_blackwell"
         )
 
-    @register_benchmark(enabled=True)
+    @register_benchmark(enabled=False)
     def triton_tutorial_flash_v2_blackwell(
         self,
         q: torch.Tensor,
@@ -459,7 +459,7 @@ class Operator(BenchmarkOperator):
             q, k, v, self.causal, self.sm_scale, "ws_persistent"
         )
 
-    @register_benchmark(enabled=True)
+    @register_benchmark(enabled=False)
     def triton_tutorial_flash_dp_blackwell(
         self,
         q: torch.Tensor,
