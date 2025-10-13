@@ -124,6 +124,23 @@ class Operator(BenchmarkOperator):
 
         return _inner
 
+    @register_benchmark(enabled=False)
+    def preprocessed_pt2_cute_grouped_mm(self, group_A, group_B):
+        torch._dynamo.reset()
+
+        A_packed, B_shared, offs = self.list_input_to_jagged(group_A, group_B)
+        compiled = torch.compile(torch._grouped_mm, dynamic=False)
+
+        def _inner():
+            with inductor_config.patch(
+                max_autotune=True,
+                max_autotune_gemm_backends="CUTEDSL",
+                autotune_fallback_to_aten=False,
+            ):
+                return compiled(A_packed, B_shared, offs=offs, bias=None)
+
+        return _inner
+
     @register_benchmark()
     def triton_grouped_gemm(self, group_A, group_B):
         def _inner():
