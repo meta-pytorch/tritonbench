@@ -481,7 +481,7 @@ def do_bench_wrapper(
                 if latency_measure_mode == "profiler"
                 else _do_bench_inductor
                 if latency_measure_mode == "inductor_benchmarker"
-                else triton.testing.do_bench
+                else triton.runtime.driver.active.get_benchmarker()
             )
 
             return Latency(

@@ -533,18 +533,19 @@ def _compute_offsets_persistent(tile_idx, n_tile_num, H, N_CTX, BLOCK_M):
 @triton.jit
 def _split_n(x, SPLIT_FACTOR: tl.constexpr):
     if SPLIT_FACTOR == 1:
-        return (x, )
+        return (x,)
     else:
         x0, x1 = x.reshape([x.shape[0], 2, x.shape[1] // 2]).permute(0, 2, 1).split()
         return _split_n(x0, SPLIT_FACTOR // 2) + _split_n(x1, SPLIT_FACTOR // 2)
+
 
 @triton.jit
 def _join_n(xs):
     if len(xs) == 1:
         return xs[0]
     else:
-        x0 = _join_n(xs[:len(xs) // 2])
-        x1 = _join_n(xs[len(xs) // 2:])
+        x0 = _join_n(xs[: len(xs) // 2])
+        x1 = _join_n(xs[len(xs) // 2 :])
         x = tl.join(x0, x1).permute(0, 2, 1).reshape([x0.shape[0], x0.shape[1] * 2])
         return x
 
@@ -770,7 +771,6 @@ def _attn_fwd_ws_persistent(
                     tlx.local_store(alpha_tiles[cid * HEAD_DIM], alpha[:, None])
                     tlx.barrier_arrive(alpha_fulls[cid])
 
-
                     # prepare p for the v dot
                     # Use p[1] for cid=0, and p[3] for cid=1
                     p_bufIdx = 1 + cid * NUM_MMA_GROUPS
@@ -786,7 +786,7 @@ def _attn_fwd_ws_persistent(
                             HEAD_DIM // NUM_MMA_SLICES,
                         )
                         tlx.local_store(p_slice, p_i.to(tlx.dtype_of(desc_v)))
-                        ps = ps + (p_i, )
+                        ps = ps + (p_i,)
 
                     tlx.barrier_arrive(p_fulls[cid])
                     p = _join_n(ps)
