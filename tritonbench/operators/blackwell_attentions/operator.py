@@ -142,6 +142,11 @@ def parse_op_args(args: List[str]):
         help="sliding window size as (left_window, right_window). Use (-1, -1) to disable sliding window",
     )
     parser.add_argument(
+        "--deterministic",
+        action="store_true",
+        help="enable deterministic algorithms by calling torch.use_deterministic_algorithms(True)",
+    )
+    parser.add_argument(
         "--native-sdpa", action="store_true", help="Use SDPA native choice."
     )
     parser.add_argument(
@@ -206,6 +211,12 @@ class Operator(BenchmarkOperator):
         # Prioritize sliding window over causal when both are specified
         if self.causal and self.local:
             self.causal = False
+
+        # Enable deterministic algorithms if requested
+        if args.deterministic:
+            torch.use_deterministic_algorithms(True)
+        else:
+            torch.use_deterministic_algorithms(False)
 
         self.native_sdpa = args.native_sdpa
         self.pt2_sdpa = args.pt2_sdpa
