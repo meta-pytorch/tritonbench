@@ -122,6 +122,16 @@ SPLIT_K_SHAPES = [
     for k in [4096 * i for i in range(1, 9)]
 ]
 
+NON_SQUARE_SHAPES = [
+    (2048, 1024, 1024, None),
+    (16384, 512, 2048, None),
+    (1024, 2048, 2048, None),
+    (2048, 1024, 8192, None),
+    (32768, 1024, 1024, None),
+    (2048, 8192, 2048, None),
+]
+
+
 IS_B200 = is_cuda() and get_nvidia_gpu_model() == "NVIDIA B200"
 
 
@@ -147,6 +157,7 @@ def parse_args(args: List[str]) -> argparse.Namespace:
     parser.add_argument("--bias", type=int)
     parser.add_argument("--input", type=str)
     parser.add_argument("--splitk", action="store_true", default=False)
+    parser.add_argument("--non-square", action="store_true", default=False)
     parser.add_argument("--llama", action="store_true", default=False)
     parser.add_argument("--buffer-ops", action="store_true", default=False)
     parser.add_argument("--layout", type=str, default="tn")
@@ -193,6 +204,8 @@ class Operator(BenchmarkOperator):
             self.shapes = read_shapes_from_csv(gemm_args.input)
         elif gemm_args.splitk:
             self.shapes = SPLIT_K_SHAPES
+        elif gemm_args.non_square:
+            self.shapes = NON_SQUARE_SHAPES
         elif gemm_args.llama:
             self.shapes = llama_shapes()
         elif gemm_args.m and gemm_args.k and gemm_args.n:
