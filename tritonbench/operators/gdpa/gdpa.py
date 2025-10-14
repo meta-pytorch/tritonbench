@@ -191,7 +191,7 @@ def _gdpa_fwd_inner_ws(
 # re-tuning.
 configs = [
     triton_config(
-        {"BLOCK_M": BM, "BLOCK_N": BN, "NUM_CONSUMER_GROUPS": 1},
+        {"BLOCK_M": BM, "BLOCK_N": BN, "NUM_CONSUMER_GROUPS": 1, 'matrix_instr_nonkdim': 16},
         num_stages=s,
         num_warps=w,
     )
@@ -1017,6 +1017,7 @@ bwd_configs = [
             "BLOCK_M2": BN1,
             "BLOCK_N2": BM1,
             "NUM_CONSUMER_GROUPS": 1,
+            'matrix_instr_nonkdim': 16,
         },
         num_stages=s,
         num_warps=w,
@@ -1989,6 +1990,7 @@ def generalized_dot_product_attention(
         ad_to_request_offset = create_dummy_tensor(query)
 
     activation_enum_int = activation_string_to_int(activation)
+    print(f"activation_enum_int = {activation_enum_int}")
     kernel_info = capture_triton(kernel_fn)[grid](
         q,
         query_offset,
