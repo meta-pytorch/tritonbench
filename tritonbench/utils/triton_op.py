@@ -1018,6 +1018,13 @@ class BenchmarkOperator(metaclass=PostInitProcessor):
                 if self.reset_dynamo:
                     torch._dynamo.reset()
                 x_val = self.get_x_val(self.example_inputs)
+                x_val_label = REGISTERED_X_VALS.get(self.name, "x_val")
+                table = tabulate.tabulate(
+                    [[x_val]], headers=[x_val_label], tablefmt="simple"
+                )
+                logger.warning(
+                    f"Running input ID {input_id}:\n{table}",
+                )
                 if "proton" in self.required_metrics:
                     proton.activate(self._proton_session_id)
                     proton.enter_scope(f"x_val_{x_val}")
