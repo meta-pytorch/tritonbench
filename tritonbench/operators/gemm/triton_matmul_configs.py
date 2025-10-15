@@ -319,20 +319,23 @@ def get_full_amd_config_space(use_splitk: bool):
 def get_tileir_configs():
     block_mnk_range = [16, 32, 64, 128, 256]
     occ_range = [1, 2]
+    num_ctas_range = [1, 2]
     configs = []
     for block_m in block_mnk_range:
         for block_n in block_mnk_range:
             for block_k in block_mnk_range:
                 for occ in occ_range:
-                    configs.append(
-                        triton.Config(
-                            {
-                                "BLOCK_M": block_m,
-                                "BLOCK_N": block_n,
-                                "BLOCK_K": block_k,
-                                "GROUP_M": 8,
-                                "occupancy": occ,
-                            },
+                    for num_ctas in num_ctas_range:
+                        configs.append(
+                            triton.Config(
+                                {
+                                    "BLOCK_M": block_m,
+                                    "BLOCK_N": block_n,
+                                    "BLOCK_K": block_k,
+                                    "GROUP_M": 8,
+                                    "occupancy": occ,
+                                },
+                                num_ctas=num_ctas,
+                            )
                         )
-                    )
     return configs
