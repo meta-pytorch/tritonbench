@@ -26,3 +26,13 @@ The second one corresponds to the actual computation kernel, which is from CUDNN
 
 ![Kineto Trace](https://ossci-datasets.s3.us-east-1.amazonaws.com/tritonbench/docs/_static/img/kineto_trace_fig_2.png "Kineto Trace - Zoomed into Profile Iteration")
 
+## Kineto Trace with CUDA Graph enabled
+
+If the operator supports CUDA Graph, we can generate Kineto trace with CUDA Graph enabled. To do that, simply combine `--cudagraph` with `--metrics kineto_trace`.
+
+Below, it is an example Kineto trace with CUDA Graph enabled. The trace file is generated with the following command:
+
+```
+$ python run.py --op flash_attention --num-inputs 2 --metrics kineto_trace --only flash_v3,cudnn,triton_tutorial_flash_v2 --cudagraph
+```
+
