@@ -606,7 +606,9 @@ class Operator(BenchmarkOperator):
         baseline_output = baseline_fn()
         # Float atomics introduce non-determinism for some GEMMs (e.g., Stream-K)
         # So we use a slightly larger tolerance here.
-        return torch.allclose(output, baseline_output, atol=1e-5, rtol=0.5)
+        atol = self.tb_args.atol if self.tb_args.atol is not None else 1e-5
+        rtol = self.tb_args.rtol if self.tb_args.rtol is not None else 0.5
+        return torch.allclose(output, baseline_output, atol=atol, rtol=rtol)
 
     def plot(self):
         @triton.testing.perf_report(

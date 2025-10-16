@@ -509,15 +509,23 @@ class Operator(BenchmarkOperator):
         if torch.isnan(output).any():
             return False
 
+        if output.dtype in [torch.bfloat16, torch.float16]:
+            default_rtol = 1e-2
+            default_atol = 2e-2
+        else:
+            default_rtol = 1e-5
+            default_atol = 1e-8
+
+        rtol = self.tb_args.rtol if self.tb_args.rtol is not None else default_rtol
+        atol = self.tb_args.atol if self.tb_args.atol is not None else default_atol
+
         try:
-            # Use relaxed tolerance for bfloat16/float16
-            # Using atol=2e-2 and rtol=1e-2 to provide some margin
-            if output.dtype in [torch.bfloat16, torch.float16]:
-                torch.testing.assert_close(
-                    output, baseline_output, rtol=1e-2, atol=2e-2
-                )
-            else:
-                torch.testing.assert_close(output, baseline_output)
+            torch.testing.assert_close(
+                output,
+                baseline_output,
+                rtol=rtol,
+                atol=atol,
+            )
             return True
         except Exception:
             return False

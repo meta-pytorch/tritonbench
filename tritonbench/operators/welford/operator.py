@@ -2,7 +2,7 @@ import argparse
 from typing import Any, Callable, Generator, List, Optional
 
 import torch
-from torch._dynamo.testing import rand_strided, same
+from torch._dynamo.testing import rand_strided
 
 from tritonbench.utils.triton_op import (
     BenchmarkOperator,
@@ -77,9 +77,24 @@ class Operator(BenchmarkOperator):
     def accuracy(self, fn: Callable, baseline_fn: Callable) -> bool:
         output = fn()
         baseline_output = baseline_fn()
-        tol = 1e-2
+
         # The triton_welford functions return a tuple (output, input, mean, rsqrt)
         # while eager_layer_norm returns just the output tensor
         if isinstance(output, tuple):
-            output = output[0]  # Extract just the output tensor from the tuple
-        return same(output, baseline_output, tol=tol, exact_dtype=True)
+            output = output[0]
+        if isinstance(baseline_output, tuple):
+            baseline_output = baseline_output[0]
+
+        rtol = self.tb_args.rtol if self.tb_args.rtol is not None else 1e-2
+        atol = self.tb_args.atol if self.tb_args.atol is not None else 1e-2
+
+        try:
+            torch.testing.assert_close(
+                output,
+                baseline_output,
+                rtol=rtol,
+                atol=atol,
+            )
+            return True
+        except AssertionError:
+            return False
