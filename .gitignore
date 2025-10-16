@@ -21,3 +21,4 @@ build/
 *.hatchet
 autotuner.log
 .venv/
+.install/

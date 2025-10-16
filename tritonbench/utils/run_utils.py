@@ -73,6 +73,23 @@ def get_run_env(
     return run_env
 
 
+def run_in_helion(op: str, op_args: Dict[str, str], extra_envs: Dict[str, str]):
+    HELION_PATH = REPO_PATH.joinpath(".install", "helion")
+    assert HELION_PATH.exists(), f"Helion path {HELION_PATH} must exist. Run python install.py --helion to install Helion."
+    environ = os.environ.copy()
+    environ.update(extra_envs)
+    cmd = [sys.executable] + op_args
+    print(
+        f"[tritonbench] Running helion benchmark: " + " ".join(cmd),
+        flush=True,
+    )
+    subprocess.check_call(
+        cmd,
+        cwd=HELION_PATH,
+        env=environ,
+    )
+
+
 def run_config(config_file: str, args: List[str]):
     assert Path(config_file).exists(), f"Config file {config_file} must exist."
     with open(config_file, "r") as fp:
@@ -82,21 +99,24 @@ def run_config(config_file: str, args: List[str]):
         op_name = benchmark_config["op"]
         op_args = benchmark_config["args"].split(" ") + args
         env_string = benchmark_config.get("envs", None)
-        disabled = benchmark_config.get("disabled", False)
-        if disabled:
-            logger.info(f"Skipping disabled benchmark {benchmark_name}.")
-            continue
         extra_envs = {}
         if env_string:
             for env_part in env_string.split(" "):
                 key, val = env_part.split("=")
                 extra_envs[key] = val
-        run_in_task(
-            op=op_name,
-            op_args=op_args,
-            benchmark_name=benchmark_name,
-            extra_envs=extra_envs,
-        )
+        disabled = benchmark_config.get("disabled", False)
+        if disabled:
+            logger.info(f"Skipping disabled benchmark {benchmark_name}.")
+            continue
+        if benchmark_config.get("runner", None) == "helion":
+            run_in_helion(op, op_args, extra_envs)
+        else:
+            run_in_task(
+                op=op_name,
+                op_args=op_args,
+                benchmark_name=benchmark_name,
+                extra_envs=extra_envs,
+            )
 
 
 def run_one_operator(task_args: List[str], with_bwd: bool = False):
