@@ -1,4 +1,4 @@
-# TritonBench Inputs
+# TritonBench Input Data
 
 In TritonBench, users can customize the input data to run. Here is an overview of the CLI options related to inputs.
 

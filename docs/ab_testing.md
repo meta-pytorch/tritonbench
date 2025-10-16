@@ -1,4 +1,4 @@
-# A/B Testing Documentation
+# TritonBench A/B Testing
 
 ## Overview
 
