@@ -10,3 +10,8 @@ In TritonBench, users can customize the input data to run. Here is an overview o
 | `--input-loader`      | Specify a json file to load inputs from the input json file.                                                                                                                                                         |
 
 
+## Input Data Collection
+
+We keep a set of input data in the [data/input_configs](https://github.com/meta-pytorch/tritonbench/tree/main/tritonbench/data/input_configs) directory.
+The input data is organized by model names and is in json format. User can specify the input config by `--input-loader <path-to-input-json>`.
+TritonBench will generate synthetic inputs based on the input config.
