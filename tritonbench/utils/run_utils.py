@@ -5,32 +5,30 @@ import os
 import subprocess
 import sys
 import time
-import torch
-import yaml
 
 from datetime import datetime
 from pathlib import Path
 
 from typing import Dict, List, Optional
 
+import torch
+import yaml
 
 from tritonbench.operator_loader import get_op_loader_bench_cls_by_name, is_loader_op
 from tritonbench.operators import load_opbench_by_name
 from tritonbench.operators_collection import list_operators_by_collection
 from tritonbench.utils.ab_test import compare_ab_results, run_ab_test
 from tritonbench.utils.env_utils import is_fbcode
+from tritonbench.utils.git_utils import get_branch, get_commit_time, get_current_hash
 from tritonbench.utils.gpu_utils import gpu_lockdown
 from tritonbench.utils.list_operator_details import list_operator_details
-from tritonbench.utils.parser import get_parser
-from tritonbench.utils.triton_op import BenchmarkOperatorResult
-from tritonbench.utils.env_utils import is_fbcode
-from tritonbench.utils.git_utils import get_branch, get_commit_time, get_current_hash
 from tritonbench.utils.parser import get_parser
 from tritonbench.utils.path_utils import (
     add_cmd_parameter,
     remove_cmd_parameter,
     REPO_PATH,
 )
+from tritonbench.utils.triton_op import BenchmarkOperatorResult
 from tritonbench.utils.tritonparse_utils import tritonparse_init, tritonparse_parse
 
 try:
