@@ -8,7 +8,8 @@ from pathlib import Path
 REPO_PATH = Path(os.path.abspath(__file__)).parent.parent.parent
 CURRENT_DIR = Path(os.path.abspath(__file__)).parent
 HELION_INSTALL_PATH = REPO_PATH.joinpath(".install")
-HEION_COMMIT = "1aaba3f33fcbd730ce24a13bcd76d49e0f536ede"
+HELION_REPO = "https://github.com/xuzhao9/helion.git"
+HEION_COMMIT = "bb3846b725a5899ab6d2e9ff0a862b8f59d079b3"
 
 
 def install_helion():
@@ -16,7 +17,7 @@ def install_helion():
     HELION_PATH = HELION_INSTALL_PATH.joinpath("helion")
     if HELION_PATH.exists():
         shutil.rmtree(HELION_PATH)
-    git_clone_cmd = ["git", "clone", "https://github.com/pytorch/helion.git"]
+    git_clone_cmd = ["git", "clone", HELION_REPO]
     subprocess.check_call(git_clone_cmd, cwd=HELION_INSTALL_PATH)
     git_checkout_cmd = ["git", "checkout", HEION_COMMIT]
     subprocess.check_call(git_checkout_cmd, cwd=HELION_PATH)
