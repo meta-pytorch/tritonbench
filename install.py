@@ -205,7 +205,7 @@ if __name__ == "__main__":
         from tools.quack.install import install_quack
 
         install_quack()
-    if args.helion or args.all:
+    if args.helion:
         logger.info("[tritonbench] installing helion...")
         from tools.helion.install import install_helion
 
