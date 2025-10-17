@@ -160,7 +160,7 @@ if __name__ == "__main__":
         setup_hip(args)
 
     if args.numpy or not has_pkg("numpy"):
-        pip_install_requirements("requirements_numpy.txt", add_build_constraints=False)
+        pip_install_requirements("requirements-numpy.txt", add_build_constraints=False)
 
     # generate build constraints before installing anything
     deps = get_pkg_versions(TRITONBENCH_DEPS)
