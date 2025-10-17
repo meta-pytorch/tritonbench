@@ -203,11 +203,6 @@ def _run(args: argparse.Namespace, extra_args: List[str]) -> BenchmarkOperatorRe
         opbench.run(args.warmup, args.rep, sleep=args.sleep)
     finally:
         metrics = opbench.output
-        if not args.skip_print:
-            if args.csv:
-                metrics.write_csv_to_file(sys.stdout)
-            else:
-                print(metrics)
         if is_fbcode() and args.log_scuba:
             from tritonbench.fb.utils import log_benchmark  # @manual
 
@@ -258,6 +253,11 @@ def _run(args: argparse.Namespace, extra_args: List[str]) -> BenchmarkOperatorRe
                 output_file = os.path.join(args.output_dir, f"{args.op}.json")
                 with open(output_file, "w") as f:
                     metrics.write_json_to_file(f)
+        if not args.skip_print:
+            if args.csv:
+                metrics.write_csv_to_file(sys.stdout)
+            else:
+                print(metrics)
         return metrics
 
 
