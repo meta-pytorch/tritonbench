@@ -3,6 +3,6 @@ bf16_blackwell_attentions_fwd_helion_shape1:
   op:
     blackwell_attentions
   args:
-    --kernel blackwell_attentions --d-head 128 --seq-len 8192 --batch 8 --n-heads 16 --metrics tflops --simple-output --rep 3000 --sleep 1.0 --num-inputs 1 --only helion_blackwell_attention --force --input-id 0
+    --kernel blackwell_attentions --d-head 128 --seq-len 8192 --batch 8 --n-heads 16 --metrics tflops --simple-output --rep 3000 --sleep 1.0 --num-inputs 1 --only helion_blackwell_attention_tritonbench --force --input-id 0
   envs:
     HELION_BENCHMARK_DISABLE_LOGGING=1
