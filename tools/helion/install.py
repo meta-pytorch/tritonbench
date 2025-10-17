@@ -9,7 +9,7 @@ REPO_PATH = Path(os.path.abspath(__file__)).parent.parent.parent
 CURRENT_DIR = Path(os.path.abspath(__file__)).parent
 HELION_INSTALL_PATH = REPO_PATH.joinpath(".install")
 HELION_REPO = "https://github.com/xuzhao9/helion.git"
-HEION_COMMIT = "bb3846b725a5899ab6d2e9ff0a862b8f59d079b3"
+HEION_COMMIT = "xz9/ptxas-knobs"
 
 
 def install_helion():
