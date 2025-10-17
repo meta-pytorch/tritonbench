@@ -171,7 +171,7 @@ if __name__ == "__main__":
     # checkout submodules
     checkout_submodules(REPO_PATH)
     # install submodules
-    if args.fa3 or args.all:
+    if args.fa3:
         # we need to install fa3 above all other dependencies
         logger.info("[tritonbench] installing fa3...")
         from tools.flash_attn.install import install_fa3
