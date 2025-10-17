@@ -7,6 +7,7 @@ Note: make sure to `python install.py` first or otherwise make sure the benchmar
 
 from tritonbench.utils.run_utils import tritonbench_run
 
+from typing import Optional, List
 
 def run(args: Optional[List[str]] = None):
     tritonbench_run(args)
