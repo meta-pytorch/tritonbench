@@ -22,6 +22,8 @@ class PowerManagerTask(ManagerTask):
         pm = globals()["pm"]
         pm.start()
 
+    @base_task.run_in_worker(scoped=True)
+    @staticmethod
     def stop_monitor(self):
         pm = globals()["pm"]
         pm.stop()
