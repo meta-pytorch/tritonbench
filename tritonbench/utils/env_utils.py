@@ -87,6 +87,10 @@ def is_tile_enabled():
     return os.getenv("ENABLE_TILE", "0") == "1"
 
 
+def is_mtia():
+    return triton.runtime.driver.active.get_current_target().backend == "mtia"
+
+
 def set_env():
     # set cutlass dir
     # by default we use the cutlass version built with pytorch

@@ -4,6 +4,15 @@ import subprocess
 from contextlib import contextmanager
 from typing import Dict, List, Optional
 
+from tritonbench.utils.env_utils import is_mtia
+
+if is_mtia():
+    from tritonbench.utils.fb.mtia_utils import MTIA_COMPUTE_SPECS, MTIA_MEMORY_SPECS
+else:
+    MTIA_COMPUTE_SPECS = {}
+    MTIA_MEMORY_SPECS = {}
+
+
 # NVIDIA A100 GPU Spec:
 # https://www.nvidia.com/content/dam/en-zz/Solutions/Data-Center/a100/pdf/nvidia-a100-datasheet-us-nvidia-1758950-r4-web.pdf
 NV_A100 = {
@@ -55,6 +64,7 @@ HW_ROOFLINE_SPECS: Dict[
         "NVIDIA H100": NV_H100,
         "AMD MI300X": AMD_MI300X,
         "NVIDIA B200": NV_B200,
+        **MTIA_COMPUTE_SPECS,
     },
     False: {
         # https://www.nvidia.com/en-gb/data-center/h100
@@ -62,6 +72,7 @@ HW_ROOFLINE_SPECS: Dict[
         "NVIDIA H100": 2000,
         # https://www.amd.com/content/dam/amd/en/documents/instinct-tech-docs/data-sheets/amd-instinct-mi300x-platform-data-sheet.pdf
         "AMD MI300X": 5300,
+        **MTIA_MEMORY_SPECS,
     },
 }
 

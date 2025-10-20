@@ -45,6 +45,7 @@ from tritonbench.utils.env_utils import (
     apply_precision,
     is_fbcode,
     is_hip,
+    is_mtia,
     set_env,
     set_random_seed,
 )
@@ -2195,8 +2196,17 @@ class BenchmarkOperator(metaclass=PostInitProcessor):
 
         rooflines = HW_ROOFLINE_SPECS[self.is_compute_bound]
 
+        def _get_mtia_device_name():
+            from tritonbench.utils.fb.mtia_utils import get_mtia_device_name
+
+            return get_mtia_device_name()
+
         device_name = (
-            torch.cuda.get_device_name() if not torch.version.hip else "AMD MI300X"
+            "AMD MI300X"
+            if torch.version.hip
+            else _get_mtia_device_name()
+            if is_mtia()
+            else torch.cuda.get_device_name()
         )
         assert (
             device_name in rooflines
