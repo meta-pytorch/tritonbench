@@ -32,6 +32,7 @@ It benchmarks the following FMHA kernels:
 """
 
 import argparse
+import logging
 import os
 from contextlib import nullcontext
 
@@ -67,6 +68,7 @@ from .generate_inputs import (
     sweep_inputs,
 )
 
+logger = logging.getLogger(__name__)
 
 # [Optional] flash_attn v2
 with try_import("HAS_FLASH_V2"):
@@ -163,6 +165,9 @@ def parse_op_args(args: List[str]):
         ),
         help="specify input types",
     )
+    parser.add_argument(
+        "--deterministic", action="store_true", help="Run with deterministic mode."
+    )
     return parser.parse_args(args)
 
 
@@ -188,6 +193,14 @@ class Operator(BenchmarkOperator):
         # Use standard scale factor: 1/sqrt(head_dim)
         self.sm_scale = 1.0 / (self.D_HEAD**0.5)
         self.input_types = args.input_types
+        self.deterministic = args.deterministic
+        if self.deterministic:
+            logger.warning(
+                "--deterministic is on. Some operators might not support "
+                "deterministic runs (we guarantee that Flash Attention v2 and "
+                "v3 support this mode)"
+            )
+            torch.use_deterministic_algorithms(True)
 
     @register_benchmark(baseline=True)
     def aten(
@@ -256,7 +269,10 @@ class Operator(BenchmarkOperator):
     ) -> Callable:
         qkv = make_packed_qkv(q, k, v)
         fn = lambda: flash_attn_func(
-            qkv, softmax_scale=self.sm_scale, causal=self.causal
+            qkv,
+            softmax_scale=self.sm_scale,
+            causal=self.causal,
+            deterministic=self.deterministic,
         )
         return fn
 
@@ -402,7 +418,9 @@ class Operator(BenchmarkOperator):
             q = q.transpose(1, 2).contiguous()
             k = k.transpose(1, 2).contiguous()
             v = v.transpose(1, 2).contiguous()
-            fn = lambda: flash_attn_v3(q, k, v, self.sm_scale, self.causal)
+            fn = lambda: flash_attn_v3(  # noqa
+                q, k, v, self.sm_scale, self.causal, deterministic=self.deterministic
+            )
             return fn
 
         @register_benchmark(enabled=HAS_CUDA_124 and has_warp_spec())
