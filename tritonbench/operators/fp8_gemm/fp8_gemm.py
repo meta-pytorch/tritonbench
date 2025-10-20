@@ -1,4 +1,5 @@
 import argparse
+
 import logging
 
 from typing import Any, Callable, List, Optional
@@ -6,6 +7,8 @@ from typing import Any, Callable, List, Optional
 import torch
 import torch._inductor.config as inductor_config
 import triton
+
+from torch._inductor.kernel.mm import scaling_pairs, ScalingType
 
 from tritonbench.operators.fp8_gemm.persistent import blackwell_persistent_tma
 from tritonbench.utils.env_utils import get_nvidia_gpu_model, is_cuda
@@ -46,7 +49,7 @@ except Exception as e:
 def parse_args(args):
     parser = argparse.ArgumentParser(description="TritonBench fp8_gemm")
     parser.add_argument("--llama", action="store_true")
-    parser.add_argument("--scaling_rowwise", action="store_true")
+    parser.add_argument("--scaling-pair", type=str, default="TensorWise,TensorWise")
     parser.add_argument("--m", type=int)
     parser.add_argument("--k", type=int)
     parser.add_argument("--n", type=int)
@@ -65,6 +68,58 @@ def get_fp8_dtype():
     return torch.float8_e4m3fnuz
 
 
+def get_scaling_recipe(scaling_recipe: str) -> int:
+    if scaling_recipe == "TensorWise":
+        return ScalingType.TensorWise
+    elif scaling_recipe == "RowWise":
+        return ScalingType.RowWise
+    else:
+        raise ValueError(f"Invalid scaling recipe: {scaling_recipe}")
+
+
+def get_scale(
+    x: torch.Tensor,
+    scaling_recipe: ScalingType,
+    transpose: bool = False,
+    custom_scale: float = None,
+) -> (torch.Tensor, torch.Tensor):
+    def _get_scale_per_tensor(
+        x: torch.Tensor, custom_scale: float = None
+    ) -> (torch.Tensor, torch.Tensor):
+        # For tensor-wise scaling, kernel requires a float32 scale tensor
+        if custom_scale:
+            return torch.tensor(custom_scale, dtype=torch.float32, device=x.device)
+        scale = torch.finfo(torch.float8_e4m3fn).max / x.abs().max()
+        x *= scale
+        return x, scale.to(torch.float32)
+
+    def _get_scale_per_row(
+        x: torch.Tensor, transpose: bool = False
+    ) -> (torch.Tensor, torch.Tensor):
+        if transpose:  # scale_b.shape should be [1, N]
+            scale = (
+                torch.finfo(torch.float8_e4m3fn).max
+                / x.abs().max(dim=0, keepdim=True).values
+            )
+        else:  # scale_a.shape should be [M, 1]
+            scale = (
+                torch.finfo(torch.float8_e4m3fn).max
+                / x.abs().max(dim=1, keepdim=True).values
+            )
+        x = x.mul(scale)
+        return x, scale.to(
+            torch.float32
+        )  # For row-wise scaling, kernel requires a float32 scale tensor
+
+    match scaling_recipe:
+        case ScalingType.TensorWise:
+            return _get_scale_per_tensor(x, custom_scale=custom_scale)
+        case ScalingType.RowWise:
+            return _get_scale_per_row(x, transpose=transpose)
+        case _:
+            raise AssertionError(f"Unsupported scaling type {scaling_recipe}")
+
+
 class Operator(BenchmarkOperator):
     DEFAULT_METRICS = ["tflops", "gbps", "latency"]
     DEFAULT_PRECISION = "fp8"
@@ -78,53 +133,39 @@ class Operator(BenchmarkOperator):
 
         self.fp8_dtype = get_fp8_dtype()
 
+        scaling_recipe_a, scaling_recipe_b = self.extra_args.scaling_pair.split(",")
+        if (scaling_recipe_a, scaling_recipe_b) not in [
+            (a.name, b.name) for a, b in scaling_pairs
+        ]:
+            raise ValueError(
+                f"Invalid scaling pair: {scaling_recipe_a}, {scaling_recipe_b}. See torch/_inductor/kernel/mm.py::scaling_pairs for valid pairs."
+            )
+        self.scaling_recipe_a = get_scaling_recipe(scaling_recipe_a)
+        self.scaling_recipe_b = get_scaling_recipe(scaling_recipe_b)
+
     def _get_dtype(self):
-        if self.extra_args.scaling_rowwise:
-            return torch.bfloat16
-        else:
+        if (
+            self.scaling_recipe_a == ScalingType.TensorWise
+            and self.scaling_recipe_b == ScalingType.TensorWise
+        ):
             return torch.float16
+        return torch.bfloat16
 
     def get_input_iter(self):
-        def _get_scale_per_tensor(
-            x: torch.Tensor, custom_scale: float = None
-        ) -> torch.Tensor:
-            # For tensor-wise scaling, kernel requires a float32 scale tensor
-            if custom_scale:
-                return torch.tensor(custom_scale, dtype=torch.float32, device=x.device)
-            scale = torch.finfo(self.fp8_dtype).max / x.abs().max()
-            return scale.to(torch.float32)
-
-        def _get_scale_per_row(
-            x: torch.Tensor, transpose: bool = False
-        ) -> torch.Tensor:
-            if transpose:  # scale_b.shape should be [1, N]
-                scale = (
-                    torch.finfo(self.fp8_dtype).max
-                    / x.abs().max(dim=0, keepdim=True).values
-                )
-            else:  # scale_a.shape should be [M, 1]
-                scale = (
-                    torch.finfo(self.fp8_dtype).max
-                    / x.abs().max(dim=1, keepdim=True).values
-                )
-            return scale.to(
-                torch.float32
-            )  # For row-wise scaling, kernel requires a float32 scale tensor
-
         def args(m, n, k):
             a = torch.randn(m, k, device=self.device).to(self._get_dtype())
             b = torch.randn(n, k, device=self.device).to(self._get_dtype())
 
-            if self.extra_args.scaling_rowwise:
-                scale_a = _get_scale_per_row(a)
-                scale_b = _get_scale_per_row(b)
-            else:
-                scale_a = _get_scale_per_tensor(
-                    a, custom_scale=self.extra_args.per_tensor_scale_a
-                )
-                scale_b = _get_scale_per_tensor(
-                    b, custom_scale=self.extra_args.per_tensor_scale_b
-                )
+            a, scale_a = get_scale(
+                a,
+                self.scaling_recipe_a,
+                custom_scale=self.extra_args.per_tensor_scale_a,
+            )
+            b, scale_b = get_scale(
+                b,
+                self.scaling_recipe_b,
+                custom_scale=self.extra_args.per_tensor_scale_b,
+            )
 
             # Kernels expect dtype=float8_e4m3fn(uz)
             a = a.to(self.fp8_dtype)
@@ -198,13 +239,21 @@ class Operator(BenchmarkOperator):
 
         @register_benchmark(enabled=True)
         def blackwell_persistent_tma_fp8_gemm(self, a, b, scale_a, scale_b):
+            if self.scaling_recipe_a == self.scaling_recipe_b == ScalingType.TensorWise:
+                scaling_recipe_int = 0
+            elif self.scaling_recipe_a == self.scaling_recipe_b == ScalingType.RowWise:
+                scaling_recipe_int = 1
+            else:
+                raise ValueError(
+                    f"Invalid scaling pair: {self.scaling_recipe_a}, {self.scaling_recipe_b} for blackwell_persistent_tma_fp8_gemm."
+                )
             return lambda: blackwell_persistent_tma(
                 a,
                 b,
                 scale_a,
                 scale_b,
                 self._get_dtype(),
-                self.extra_args.scaling_rowwise,
+                scaling_recipe_int,
             )
 
         @register_benchmark(enabled=True)

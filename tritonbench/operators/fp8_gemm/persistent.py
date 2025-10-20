@@ -1,9 +1,12 @@
 from functools import lru_cache
+
 from typing import Optional
 
 import torch
 import triton
 import triton.language as tl
+
+from torch._inductor.kernel.mm import ScalingType
 
 from tritonbench.utils.env_utils import is_cuda
 from tritonbench.utils.triton_utils import has_experimental_descriptor
@@ -410,9 +413,7 @@ def matmul_tma_persistent(a, b, c, desc_a, desc_b, desc_c):
 #       - 1 warp = 32 threads, so each thread block requires 128 / 32 = 4 warps
 
 
-def blackwell_persistent_tma(
-    a, b, scale_a_ptr, scale_b_ptr, acc_dtype, scaling_rowwise
-):
+def blackwell_persistent_tma(a, b, scale_a_ptr, scale_b_ptr, acc_dtype, scaling_mode):
     configs = matmul_configs_blackwell()
 
     # Check constraints.
@@ -471,7 +472,7 @@ def blackwell_persistent_tma(
         NUM_SMS=NUM_SMS,  #
         num_stages=configs[shape_dtype]["num_stages"],  #
         num_warps=configs[shape_dtype]["num_warps"],  #
-        SCALING_ROWWISE=scaling_rowwise,
+        SCALING_MODE=scaling_mode,  #
         WARP_SPECIALIZE=configs[shape_dtype]["WARP_SPECIALIZE"],  #
         EPILOGUE_SUBTILE=configs[shape_dtype]["EPILOGUE_SUBTILE"],  #
     )
@@ -504,7 +505,7 @@ def blackwell_persistent_tma_kernel(
     GROUP_SIZE_M: tl.constexpr,  #
     ACC_TYPE: tl.constexpr,
     NUM_SMS: tl.constexpr,
-    SCALING_ROWWISE: tl.constexpr,  #
+    SCALING_MODE: tl.constexpr,  #
     WARP_SPECIALIZE: tl.constexpr,
     EPILOGUE_SUBTILE: tl.constexpr,
 ):  #
@@ -538,7 +539,7 @@ def blackwell_persistent_tma_kernel(
     tile_id_c = start_pid - NUM_SMS
     num_pid_in_group = GROUP_SIZE_M * num_pid_n
 
-    if SCALING_ROWWISE:
+    if SCALING_MODE == ScalingType.RowWise:
         # For row-wise scaling, we'll use the pointers as-is
         scale_a = scale_a_ptr
         scale_b = scale_b_ptr
@@ -563,7 +564,7 @@ def blackwell_persistent_tma_kernel(
             b_block = b_desc.load([offs_bn, offs_k])
             accumulator = tl.dot(a_block, b_block.T, accumulator, out_dtype=tl.float32)
 
-        if SCALING_ROWWISE:
+        if SCALING_MODE == ScalingType.RowWise:
             offs_scale_m = offs_am + tl.arange(0, BLOCK_SIZE_M)
             offs_scale_n = offs_bn + tl.arange(0, BLOCK_SIZE_N)
 
