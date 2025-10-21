@@ -45,7 +45,11 @@ if SUPPORT_GLUON:
         attention_forward as gluon_blackwell_persistent_fwd,
     )
 
+import logging
+
 from tritonbench.utils.env_utils import get_nvidia_gpu_model, is_cuda
+
+logger = logging.getLogger(__name__)
 
 # [Optional] flash_attn v2
 try:
@@ -217,6 +221,11 @@ class Operator(BenchmarkOperator):
         # Enable deterministic algorithms if requested
         if args.deterministic:
             torch.use_deterministic_algorithms(True)
+            logger.warning(
+                "--deterministic is on. Some operators might not support "
+                "deterministic runs (we guarantee that Flash Attention v2 "
+                "Cutlass Attention support this mode)"
+            )
         else:
             torch.use_deterministic_algorithms(False)
 
@@ -224,6 +233,7 @@ class Operator(BenchmarkOperator):
         self.pt2_sdpa = args.pt2_sdpa
         self.input_types = args.input_types
         self.sm_scale = args.sm_scale if args.sm_scale else 1.0 / math.sqrt(self.D_HEAD)
+        self.deterministic = args.deterministic
 
     @register_benchmark()
     def aten(
@@ -312,6 +322,7 @@ class Operator(BenchmarkOperator):
             softmax_scale=self.sm_scale,
             causal=self.causal,
             window_size=self.window_size,
+            deterministic=self.deterministic,
         )
         return fn
 
