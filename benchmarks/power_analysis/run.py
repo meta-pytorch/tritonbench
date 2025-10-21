@@ -27,8 +27,13 @@ def setup_tritonbench_cwd():
     return original_dir
 
 
-from tritonbench.components.power.power_manager_task import PowerManagerTask
+from tritonbench.utils.run_utils import load_operator_by_args
 
 
 if __name__ == "__main__":
-    pass
+    args = ["--op", "gemm", "--num-inputs", "1", "--only", "triton_tutorial_matmul"]
+    opbench = load_operator_by_args(args)
+    for x_val, inputs, bm_name, bm in opbench.run(ret_mode="yield"):
+        print("x_val: ", x_val)
+        print("bm_name", bm_name)
+        bm()

@@ -91,7 +91,9 @@ def get_run_env(
 
 def run_in_helion(op: str, op_args: Dict[str, str], extra_envs: Dict[str, str]):
     HELION_PATH = REPO_PATH.joinpath(".install", "helion")
-    assert HELION_PATH.exists(), f"Helion path {HELION_PATH} must exist. Run python install.py --helion to install Helion."
+    assert (
+        HELION_PATH.exists()
+    ), f"Helion path {HELION_PATH} must exist. Run python install.py --helion to install Helion."
     environ = os.environ.copy()
     environ.update(extra_envs)
     cmd = [sys.executable, "benchmarks/run.py"] + op_args
@@ -293,20 +295,24 @@ def run_config(config_file: str, args: List[str]):
             )
 
 
-def run_one_operator(task_args: List[str], with_bwd: bool = False):
+def load_operator_by_args(task_args: List[str]):
     parser = get_parser(task_args)
     tb_args, extra_args = parser.parse_known_args(task_args)
     Operator = load_opbench_by_name(tb_args.op)
+    return Operator(tb_args=tb_args, extra_args=extra_args)
 
-    op = Operator(tb_args=tb_args, extra_args=extra_args)
+
+def run_one_operator(task_args: List[str], with_bwd: bool = False):
+    op = load_operator_by_args(task_args)
     op.run()
-    if with_bwd and op.has_bwd() and not tb_args.op in FWD_ONLY_OPS:
+    if with_bwd and op.has_bwd() and not op.name in FWD_ONLY_OPS:
+        op_name = copy.deepcopy(op.name)
         del op
-        if tb_args.op in BWD_ARGS_OPS:
+        if op_name in BWD_ARGS_OPS:
+            task_args = copy.deepcopy(task_args)
             task_args.extend(BWD_ARGS_OPS[tb_args.op])
-            tb_args, extra_args = parser.parse_known_args(task_args)
-        tb_args.mode = "bwd"
-        op = Operator(tb_args=tb_args, extra_args=extra_args)
+        task_args.extend(["--mode", "bwd"])
+        op = load_operator_by_args(task_args)
         op.run()
 
 
