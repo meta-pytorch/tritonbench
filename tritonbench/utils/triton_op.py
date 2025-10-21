@@ -988,6 +988,7 @@ class BenchmarkOperator(metaclass=PostInitProcessor):
         rep=DEFAULT_REP,
         quantiles=DEFAULT_QUANTILES,
         sleep=DEFAULT_SLEEP,
+        ret_mode="benchmark",
     ) -> None:
         """Benchmarking the operator and returning its metrics."""
         metrics = []
@@ -1132,11 +1133,17 @@ class BenchmarkOperator(metaclass=PostInitProcessor):
                         time.sleep(sleep)
                     return acc
 
-                y_vals: Dict[str, BenchmarkOperatorMetrics] = functools.reduce(
-                    _reduce_benchmarks, benchmarks, {}
-                )
+                if ret_mode == "yield":
+                    for bm_name in benchmarks:
+                        fn = self._get_bm_func(bm_name)
+                        self._cur_backend_name = bm_name
+                        yield x_val, self.example_inputs, bm_name, fn
+                else:
+                    y_vals: Dict[str, BenchmarkOperatorMetrics] = functools.reduce(
+                        _reduce_benchmarks, benchmarks, {}
+                    )
+                    metrics.append((x_val, y_vals))
                 self._cur_backend_name = None
-                metrics.append((x_val, y_vals))
                 del self.example_inputs  # save some memory
                 if "proton" in self.required_metrics:
                     proton.activate(self._proton_session_id)
@@ -1168,6 +1175,8 @@ class BenchmarkOperator(metaclass=PostInitProcessor):
         finally:
             if self.tb_args.power_chart:
                 power_chart_end()
+            if ret_mode == "yield":
+                return
             self.output = BenchmarkOperatorResult(
                 benchmark_name=self.tb_args.benchmark_name,
                 op_name=self.name,
