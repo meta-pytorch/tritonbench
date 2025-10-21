@@ -191,18 +191,18 @@ def _gdpa_fwd_inner_ws(
 # re-tuning.
 configs = [
     triton_config(
-        {"BLOCK_M": BM, "BLOCK_N": BN, "NUM_CONSUMER_GROUPS": 1, 'matrix_instr_nonkdim': 16},
+        {"BLOCK_M": BM, "BLOCK_N": BN, "NUM_CONSUMER_GROUPS": 1, 'matrix_instr_nonkdim': 16 },
+        num_stages=s,
+        num_warps=w,
+    ) if is_hip() else triton_config(
+        {"BLOCK_M": BM, "BLOCK_N": BN, "NUM_CONSUMER_GROUPS": 1},
         num_stages=s,
         num_warps=w,
     )
-    # for BM in [32, 64, 128]  # [32, 64, 128, 256]
-    # for BN in [32, 64, 128]  # 32, 64, 128]
-    # for s in ([1, 2] if is_hip() else [1, 3])  # 3, 4, 7])
-    # for w in [4, 8]  # 4, 8]
-    for BM in [128]  # [32, 64, 128, 256]
-    for BN in [32]  # 32, 64, 128]
-    for s in ([2] if is_hip() else [1, 3])  # 3, 4, 7])
-    for w in [4]  # 4, 8]
+    for BM in [32, 64, 128]  # [32, 64, 128, 256]
+    for BN in [32, 64, 128]  # 32, 64, 128]
+    for s in ([1, 2] if is_hip() else [1, 3])  # 3, 4, 7])
+    for w in [4, 8]  # 4, 8]
 ]
 
 
@@ -1014,36 +1014,33 @@ def _gdpa_bwd_dq(
 
 
 bwd_configs = [
-    # triton_config(
-    #     {
-    #         "BLOCK_M1": BM1,
-    #         "BLOCK_N1": BN1,
-    #         "BLOCK_M2": BN1,
-    #         "BLOCK_N2": BM1,
-    #         "NUM_CONSUMER_GROUPS": 1,
-    #         'matrix_instr_nonkdim': 16,
-    #     },
-    #     num_stages=s,
-    #     num_warps=w,
-    # )
-    # for BM1 in [32, 64]
-    # for BN1 in [32, 64, 128]
-    # for s in ([1, 2] if is_hip() else [1, 3])
-    # for w in [4, 8]
-
     triton_config(
         {
-            "BLOCK_M1": 32,
-            "BLOCK_N1": 64,
-            "BLOCK_M2": 64,
-            "BLOCK_N2": 32,
+            "BLOCK_M1": BM1,
+            "BLOCK_N1": BN1,
+            "BLOCK_M2": BN1,
+            "BLOCK_N2": BM1,
             "NUM_CONSUMER_GROUPS": 1,
             'matrix_instr_nonkdim': 16,
         },
-        num_stages=2,
-        num_warps=4,
+        num_stages=s,
+        num_warps=w,
+    ) if is_hip() else triton_config(
+        {
+            "BLOCK_M1": BM1,
+            "BLOCK_N1": BN1,
+            "BLOCK_M2": BN1,
+            "BLOCK_N2": BM1,
+            "NUM_CONSUMER_GROUPS": 1,
+        },
+        num_stages=s,
+        num_warps=w,
     )
 
+    for BM1 in [32, 64]
+    for BN1 in [32, 64, 128]
+    for s in ([1, 2] if is_hip() else [1, 3])
+    for w in [4, 8]
 ]
 
 bwd_configs_ws = [
