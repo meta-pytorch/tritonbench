@@ -1,6 +1,7 @@
 import argparse
 import contextlib
 import csv
+import itertools
 import os
 from typing import Any, Callable, Generator, List, Optional, Tuple
 
@@ -122,12 +123,24 @@ SPLIT_K_SHAPES = [
     for k in [4096 * i for i in range(1, 9)]
 ]
 
-NON_SQUARE_SHAPES = [
-    (256, 256, 256, None),
-    (8192, 4096, 1024, None),
-    (16384, 2048, 1024, None),
-    (8192, 8192, 256, None),
-    (4096, 8192, 1024, None),
+LARGE_M_SHAPES = [
+    (m, x, x, None)
+    for m in [4096 * i for i in range(1, 4)]
+    for x in [1024 * i for i in range(1, 3)]
+]
+
+LARGE_N_SHAPES = [
+    (x, n, x, None)
+    for n in [4096 * i for i in range(1, 4)]
+    for x in [1024 * i for i in range(1, 3)]
+]
+
+
+NON_SQUARE = [
+    shape
+    for sublist in itertools.zip_longest(LARGE_M_SHAPES, LARGE_N_SHAPES)
+    for shape in sublist
+    if shape is not None
 ]
 
 IS_B200 = is_cuda() and get_nvidia_gpu_model() == "NVIDIA B200"
@@ -203,7 +216,7 @@ class Operator(BenchmarkOperator):
         elif gemm_args.splitk:
             self.shapes = SPLIT_K_SHAPES
         elif gemm_args.non_square:
-            self.shapes = NON_SQUARE_SHAPES
+            self.shapes = NON_SQUARE
         elif gemm_args.llama:
             self.shapes = llama_shapes()
         elif gemm_args.m and gemm_args.k and gemm_args.n:
