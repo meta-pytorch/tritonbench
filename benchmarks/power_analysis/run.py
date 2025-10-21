@@ -7,6 +7,8 @@ import logging
 import os
 import sys
 
+import torch
+
 CURRENT_DIR = os.path.dirname(os.path.abspath(__file__))
 
 logger = logging.getLogger(__name__)
@@ -34,11 +36,27 @@ setup_tritonbench_cwd()
 
 from tritonbench.utils.run_utils import load_operator_by_args
 
+REPCNT = 2000
+
+
+def get_parser():
+    parser = argparse.ArgumentParser()
+    parser.add_argument("--repcnt", type=int, default=REPCNT)
+    return parser
+
+
+def power_analysis_bm(bm, args) -> None:
+    for _iter in range(args.repcnt):
+        bm()
+    torch.cuda.synchronize()
+
 
 if __name__ == "__main__":
-    args = ["--op", "gemm", "--num-inputs", "1", "--only", "triton_tutorial_matmul"]
-    opbench = load_operator_by_args(args)
-    for x_val, inputs, bm_name, bm in opbench.run(ret_mode="yield"):
+    parser = get_parser()
+    args = parser.parse_args()
+    tb_args = ["--op", "gemm", "--num-inputs", "1", "--only", "triton_tutorial_matmul"]
+    opbench = load_operator_by_args(tb_args)
+    for x_val, inputs, bm_name, bm in opbench.yield_benchmarks():
         print("x_val: ", x_val)
-        print("bm_name", bm_name)
-        bm()
+        print("bm_name: ", bm_name)
+        power_analysis_bm(bm, args)

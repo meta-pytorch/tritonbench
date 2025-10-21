@@ -982,6 +982,10 @@ class BenchmarkOperator(metaclass=PostInitProcessor):
         bound_method = types.MethodType(_inner, self)
         setattr(self, bm_func_name or bm_callable.__name__, bound_method)
 
+    def yield_benchmarks(self):
+        for x_val, example_input, bm_name, bm in self.run(ret_mode="yield"):
+            yield (x_val, example_input, bm_name, bm)
+
     def run(
         self,
         warmup=DEFAULT_WARMUP,
