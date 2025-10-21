@@ -59,10 +59,8 @@ def activation_string_to_int(s: str):
 
 @triton.jit
 def tanh(x):
-    # Tanh is just a scaled sigmoid
-    tmp = fast_expf(-2.0 * x)
-    return fast_dividef((1 - tmp), (1 + tmp))
-    # return 2 * tl.sigmoid(2 * x) - 1
+    exp_x = fast_expf(-2.0 * x)
+    return fast_dividef((1 - exp_x), (1 + exp_x))
 
 
 @triton.jit
