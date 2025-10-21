@@ -167,15 +167,25 @@ def _do_bench_inductor(fn, warmup, rep, return_mode="all", grad_to_none=None):
 
 
 def _do_bench_cudagraph_with_cache_clear(
-    fn, rep=20, grad_to_none=None, quantiles=None, return_mode="mean"
+    fn,
+    rep=20,
+    grad_to_none=None,
+    quantiles=None,
+    return_mode="mean",
+    skip_cache_clearing=False,
 ):
     """Clone of triton.testing.do_bench_cudagraph with explicit L2 cache clearing."""
     assert return_mode in ["min", "max", "mean", "median", "all"]
 
-    cache = triton.runtime.driver.active.get_empty_cache_for_benchmark()
+    cache = (
+        triton.runtime.driver.active.get_empty_cache_for_benchmark()
+        if not skip_cache_clearing
+        else None
+    )
+    clear_cache_fn = cache.zero_ if not skip_cache_clearing else lambda *args: None
 
     with torch.cuda.stream(torch.cuda.Stream()):
-        cache.zero_()
+        clear_cache_fn()
         fn()
         if grad_to_none is not None:
             for x in grad_to_none:
@@ -187,7 +197,7 @@ def _do_bench_cudagraph_with_cache_clear(
         end_event = torch.cuda.Event(enable_timing=True)
         start_event.record()
         for _ in range(5):
-            cache.zero_()
+            clear_cache_fn()
             fn()
         end_event.record()
         torch.cuda.synchronize()
@@ -201,14 +211,14 @@ def _do_bench_cudagraph_with_cache_clear(
                 if grad_to_none is not None:
                     for x in grad_to_none:
                         x.grad = None
-                cache.zero_()
+                clear_cache_fn()
                 fn()
         torch.cuda.synchronize()
 
         cache_clear_graph = torch.cuda.CUDAGraph()
         with torch.cuda.graph(cache_clear_graph):
             for _ in range(n_repeat):
-                cache.zero_()
+                clear_cache_fn()
         torch.cuda.synchronize()
 
         n_retries = 10
@@ -243,7 +253,13 @@ def _do_bench_cudagraph_with_cache_clear(
 
 
 def _do_bench_profiler(
-    fn, warmup, rep, return_mode="all", grad_to_none=None, use_cudagraph=False
+    fn,
+    warmup,
+    rep,
+    return_mode="all",
+    grad_to_none=None,
+    use_cudagraph=False,
+    skip_cache_clearing=False,
 ):
     """Measure GPU kernel execution time using PyTorch profiler.
 
@@ -262,7 +278,11 @@ def _do_bench_profiler(
         List of measured kernel times in milliseconds (if return_mode="all") or single value.
     """
     # Get cache for L2 cache clearing
-    cache = triton.runtime.driver.active.get_empty_cache_for_benchmark()
+    cache = (
+        triton.runtime.driver.active.get_empty_cache_for_benchmark()
+        if not skip_cache_clearing
+        else None
+    )
 
     # First, estimate the runtime to calculate iterations
     estimate_ms = triton.testing.do_bench(
@@ -279,12 +299,14 @@ def _do_bench_profiler(
     else:
         n_repeat = max(1, int(rep / estimate_ms))
 
+    clear_cache_fn = cache.zero_ if not skip_cache_clearing else lambda *args: None
+
     # Helper function to execute one iteration
     def run_iteration():
         if grad_to_none is not None:
             for x in grad_to_none:
                 x.grad = None
-        cache.zero_()
+        clear_cache_fn()
         fn()
 
     if use_cudagraph:
@@ -443,6 +465,7 @@ def do_bench_wrapper(
     use_cuda_graphs: bool = False,
     bypass_fail: bool = False,
     latency_measure_mode: str = "triton_do_bench",
+    skip_cache_clearing: bool = False,
 ) -> Optional[Latency]:
     """Wrapper to triton's do_bench to gain latency.
 
@@ -473,11 +496,12 @@ def do_bench_wrapper(
                         rep=rep,
                         return_mode="all",
                         grad_to_none=grad_to_none,
+                        skip_cache_clearing=skip_cache_clearing,
                     )
                 )
         else:
             bench_fn = (
-                _do_bench_profiler
+                partial(_do_bench_profiler, skip_cache_clearing=skip_cache_clearing)
                 if latency_measure_mode == "profiler"
                 else _do_bench_inductor
                 if latency_measure_mode == "inductor_benchmarker"

@@ -316,6 +316,11 @@ def get_parser(args=None):
         "Example: '--side-b \"--dynamic\"'",
     )
     parser.add_argument("--log-scuba", action="store_true", help="Log to scuba.")
+    parser.add_argument(
+        "--skip-cache-clearing",
+        action="store_true",
+        help="Skip the L2 cache clearing during benchmarking",
+    )
 
     if is_fbcode():
         parser.add_argument(
