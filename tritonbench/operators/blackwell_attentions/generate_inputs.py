@@ -83,7 +83,7 @@ def fa3_paper_inputs(dtype, device) -> Generator:
 def sweep_inputs(dtype, device) -> Generator:
     D = 128
     batch_sizes = [2**i for i in range(6)]
-    num_heads = [5, 8, 16, 24]
+    num_heads = [1, 4, 8, 16]
     seqlen = [512 * (2**i) for i in range(6)]
     for B in batch_sizes:
         for H in num_heads:
