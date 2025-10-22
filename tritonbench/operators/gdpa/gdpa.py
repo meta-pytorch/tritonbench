@@ -75,6 +75,9 @@ def is_hip():
         return False
 
 
+PID_SWIZZLE_SIZE = tl.constexpr(8 if is_hip() else None)
+
+
 @torch.fx.wrap
 def create_dummy_tensor(x):
     return torch.ones(1, device=x.device, dtype=torch.int32)
@@ -508,7 +511,13 @@ def _gdpa_fwd(
     IS_DENSE_KV: tl.constexpr,
     activation_enum_int: tl.constexpr,
 ):
+    pid = tl.program_id(0)
     off_hz = tl.program_id(1)
+    if PID_SWIZZLE_SIZE is not None:
+        # Swizzle PIDs so that adjacent programs land on the same XCD for
+        # better cache locality.
+        n_tile_num = tl.cdiv(N_CTX, BLOCK_M)
+        off_hz, pid = tl.swizzle2d(off_hz, pid, H * Z, n_tile_num, PID_SWIZZLE_SIZE)
     if USE_START_END_OFFSETS:
         off_z = (off_hz // H) * 2
     else:
@@ -521,7 +530,6 @@ def _gdpa_fwd(
         off_q_z = off_z
     off_h = off_hz % H
     off_h_kv = off_h // G
-    pid = tl.program_id(0)
 
     _gdpa_fwd_compute(
         Q,
@@ -1564,10 +1572,17 @@ def _gdpa_bwd(
     IS_DENSE_KV: tl.constexpr,
     activation_enum_int: tl.constexpr,
 ):
+    pid0 = tl.program_id(0)
+    pid2 = tl.program_id(2)
+    if PID_SWIZZLE_SIZE is not None:
+        # Swizzle PIDs so that adjacent programs land on the same XCD for
+        # better cache locality.
+        pid2, pid0 = tl.swizzle2d(pid2, pid0, Z, tl.num_programs(0), PID_SWIZZLE_SIZE)
+
     if USE_START_END_OFFSETS:
-        off_z = tl.program_id(2) * 2
+        off_z = pid2 * 2
     else:
-        off_z = tl.program_id(2)
+        off_z = pid2
     if SORT_BY_SEQ_LENGTH:
         off_z = tl.load(seq_index + off_z)
     if BROADCAST_Q:
@@ -1575,7 +1590,7 @@ def _gdpa_bwd(
     else:
         off_q_z = off_z
 
-    off_seq_h = tl.program_id(0)
+    off_seq_h = pid0
     off_h = off_seq_h % H
     off_h_kv = off_h // G
     pid = off_seq_h // H
