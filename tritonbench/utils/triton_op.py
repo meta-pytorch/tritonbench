@@ -36,6 +36,7 @@ from tritonbench.components.export import export_data
 from tritonbench.components.power.chart import power_chart_begin, power_chart_end
 from tritonbench.data import SUPPORTED_INPUT_OPS
 from tritonbench.utils.constants import (
+    DEFAULT_POWER_REPCNT,
     DEFAULT_QUANTILES,
     DEFAULT_REP,
     DEFAULT_SLEEP,
@@ -995,6 +996,8 @@ class BenchmarkOperator(metaclass=PostInitProcessor):
             self.power_manager_task = power_chart_begin(
                 self.benchmark_name, self.tb_args.output_dir
             )
+            if not self.tb_args.repcnt:
+                self.tb_args.repcnt = DEFAULT_POWER_REPCNT
         try:
             if "proton" in self.required_metrics:
                 import triton.profiler as proton
