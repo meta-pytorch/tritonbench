@@ -4,14 +4,18 @@ import time
 from dataclasses import dataclass
 from pathlib import Path
 
+from typing import Dict, Optional
+
 from pynvml import nvmlDeviceGetHandleByIndex, nvmlInit, nvmlShutdown
+from tritonbench.components.tasks.base import run_in_worker
 from tritonbench.components.tasks.manager import ManagerTask
 
 # query every 100 ms
 DEFAULT_QUERY_INTERVAL = 0.1
 
 
-class PowerEvent(dataclass):
+@dataclass
+class PowerEvent:
     timestamp: float
     power_limit: float
     power_draw_average: float
@@ -25,7 +29,8 @@ class PowerEvent(dataclass):
     sw_thermal_slowdown: str
 
 
-class BenchmarkEvent(dataclass):
+@dataclass
+class BenchmarkEvent:
     op: str
     backend: str
     event_type: str
@@ -102,14 +107,14 @@ class PowerManagerTask(ManagerTask):
             "pm",
         )
 
-    @base_task.run_in_worker(scoped=True)
+    @run_in_worker(scoped=True)
     @staticmethod
-    def start_monitor(self):
+    def start_monitor() -> None:
         pm = globals()["pm"]
         pm.start()
 
-    @base_task.run_in_worker(scoped=True)
+    @run_in_worker(scoped=True)
     @staticmethod
-    def stop_monitor(self):
+    def stop_monitor() -> None:
         pm = globals()["pm"]
         pm.stop()

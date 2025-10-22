@@ -1,4 +1,9 @@
-from tritonbench.components.tasks.base import TaskBase
+import threading
+
+from typing import Any, Dict, Optional
+
+from tritonbench.components.tasks.base import run_in_worker, TaskBase
+from tritonbench.components.workers import subprocess_worker
 
 
 class ManagerTask(TaskBase):
@@ -19,7 +24,7 @@ class ManagerTask(TaskBase):
         self._obj_name = obj_name
         self._worker = Worker(timeout=timeout, extra_env=extra_env)
 
-    @base_task.run_in_worker(scoped=True)
+    @run_in_worker(scoped=True)
     @staticmethod
     def make_instance(
         module_path: str,
@@ -41,7 +46,7 @@ class ManagerTask(TaskBase):
         globals()["manager"] = Ctor()
 
     # Set attribute from the object in the worker process
-    @base_task.run_in_worker(scoped=True)
+    @run_in_worker(scoped=True)
     @staticmethod
     def set_manager_attribute(
         attr: str, value: Any, field: str = None, classattr: bool = False
@@ -58,7 +63,7 @@ class ManagerTask(TaskBase):
                 setattr(manager, attr, value)
 
     # Get attribute from the object in the worker process
-    @base_task.run_in_worker(scoped=True)
+    @run_in_worker(scoped=True)
     @staticmethod
     def get_manager_attribute(
         attr: str, field: str = None, classattr: bool = False
