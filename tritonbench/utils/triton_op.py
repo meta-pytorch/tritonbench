@@ -994,7 +994,7 @@ class BenchmarkOperator(metaclass=PostInitProcessor):
         metrics: list[tuple[Any, dict[str, BenchmarkOperatorMetrics]]] = []
         if self.tb_args.power_chart:
             power_manager_task = PowerManagerTask.create(self.tb_args.output_dir)
-            power_manager_task.start_monitor()
+            power_manager_task.start()
             if not self.tb_args.repcnt:
                 self.tb_args.repcnt = DEFAULT_POWER_REPCNT
         try:
@@ -1172,7 +1172,7 @@ class BenchmarkOperator(metaclass=PostInitProcessor):
             raise
         finally:
             if self.tb_args.power_chart:
-                power_manager_task.stop_monitor()
+                power_manager_task.stop()
                 power_manager_task.finalize(metrics)
             self.output = BenchmarkOperatorResult(
                 benchmark_name=self.tb_args.benchmark_name,

@@ -103,7 +103,7 @@ class PowerManagerTask(ManagerTask):
         Path(self.output_dir).mkdir(parents=True, exist_ok=True)
         self.query_interval = query_interval
 
-    def start_monitor(self) -> None:
+    def start(self) -> None:
         self.make_instance(
             "tritonbench.components.power.power_manager",
             None,
@@ -112,26 +112,26 @@ class PowerManagerTask(ManagerTask):
         self.set_manager_attribute("gpu_id", 0)
         self.set_manager_attribute("output_dir", str(self.output_dir))
         self.set_manager_attribute("query_interval", self.query_interval)
-        self.start()
+        self._start()
 
-    def stop_monitor(self) -> None:
-        self.stop()
+    def stop(self) -> None:
+        self._stop()
 
     @run_in_worker(scoped=True)
     @staticmethod
-    def start() -> None:
+    def _start() -> None:
         pm = globals()["manager"]
         pm.start()
 
     @run_in_worker(scoped=True)
     @staticmethod
-    def stop() -> None:
+    def _stop() -> None:
         pm = globals()["manager"]
         pm.stop()
 
     @run_in_worker(scoped=True)
     @staticmethod
-    def pm_finalize() -> None:
+    def _finalize() -> None:
         pm = globals()["manager"]
         pm.finalize()
 
@@ -142,4 +142,4 @@ class PowerManagerTask(ManagerTask):
     def finalize(self, metrics) -> None:
         # finalize the metrics
         # finalize the power manager task, and draw the charts
-        self.pm_finalize()
+        self._finalize()
