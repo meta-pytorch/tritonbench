@@ -67,14 +67,13 @@ class GPUCollectorThread:
 
 
 class PowerManager:
-    def __init__(
-        self, gpu_id=None, query_interval=DEFAULT_QUERY_INTERVAL, output_dir=None
-    ) -> None:
-        self.output_dir = Path(output_dir)
-        self.output_dir.mkdir(parents=True, exist_ok=True)
-        self.collector = GPUCollectorThread(gpu_id, query_interval)
+    def __init__(self) -> None:
+        self.gpu_id = None
+        self.output_dir = None
+        self.query_interval = None
 
     def start(self) -> None:
+        self.collector = GPUCollectorThread(self.gpu_id, self.query_interval)
         self._t = threading.Thread(target=self.collector.start)
         self._t.start()
 
@@ -96,25 +95,40 @@ class PowerManagerTask(ManagerTask):
         extra_env: Optional[Dict[str, str]] = None,
     ) -> None:
         super().__init__(timeout, extra_env)
+        assert output_dir, "output_dir must be specified for the power chart."
         self.output_dir = output_dir
         self.query_interval = query_interval
 
-    def start_task(self) -> None:
+    def start_monitor(self) -> None:
         self.make_instance(
             "tritonbench.components.power.power_manager",
             None,
             "PowerManager",
-            "pm",
         )
+        self.set_manager_attribute("gpu_id", 0)
+        self.set_manager_attribute("output_dir", str(self.output_dir))
+        self.set_manager_attribute("query_interval", self.query_interval)
+        self.start()
+
+    def stop_monitor(self) -> None:
+        self.stop()
 
     @run_in_worker(scoped=True)
     @staticmethod
-    def start_monitor() -> None:
-        pm = globals()["pm"]
+    def start() -> None:
+        pm = globals()["manager"]
         pm.start()
 
     @run_in_worker(scoped=True)
     @staticmethod
-    def stop_monitor() -> None:
-        pm = globals()["pm"]
+    def stop() -> None:
+        pm = globals()["manager"]
         pm.stop()
+
+    @staticmethod
+    def create(output_dir) -> None:
+        return PowerManagerTask(output_dir, DEFAULT_QUERY_INTERVAL)
+
+    def finalize(self, metrics) -> None:
+        # finalize the power manager task, and draw the charts
+        pass

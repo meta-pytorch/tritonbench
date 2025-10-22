@@ -33,7 +33,7 @@ from torch.utils._pytree import tree_map
 from tritonbench.components.do_bench import do_bench_wrapper, Latency
 from tritonbench.components.export import export_data
 
-from tritonbench.components.power.chart import power_chart_begin, power_chart_end
+from tritonbench.components.power import PowerManagerTask
 from tritonbench.data import SUPPORTED_INPUT_OPS
 from tritonbench.utils.constants import (
     DEFAULT_POWER_REPCNT,
@@ -993,9 +993,8 @@ class BenchmarkOperator(metaclass=PostInitProcessor):
         """Benchmarking the operator and returning its metrics."""
         metrics: list[tuple[Any, dict[str, BenchmarkOperatorMetrics]]] = []
         if self.tb_args.power_chart:
-            self.power_manager_task = power_chart_begin(
-                self.benchmark_name, self.tb_args.output_dir
-            )
+            power_manager_task = PowerManagerTask.create(self.tb_args.output_dir)
+            power_manager_task.start_monitor()
             if not self.tb_args.repcnt:
                 self.tb_args.repcnt = DEFAULT_POWER_REPCNT
         try:
@@ -1173,7 +1172,8 @@ class BenchmarkOperator(metaclass=PostInitProcessor):
             raise
         finally:
             if self.tb_args.power_chart:
-                power_chart_end(self.power_manager_task)
+                power_manager_task.stop_monitor()
+                power_manager_task.finalize(metrics)
             self.output = BenchmarkOperatorResult(
                 benchmark_name=self.tb_args.benchmark_name,
                 op_name=self.name,

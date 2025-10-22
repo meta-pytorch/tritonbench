@@ -1,3 +1,4 @@
+import gc
 import threading
 
 from typing import Any, Dict, Optional
@@ -22,7 +23,9 @@ class ManagerTask(TaskBase):
         assert self._lock.acquire(blocking=False), "Failed to acquire lock."
 
         self._obj_name = obj_name
-        self._worker = Worker(timeout=timeout, extra_env=extra_env)
+        self._worker = subprocess_worker.SubprocessWorker(
+            timeout=timeout, extra_env=extra_env
+        )
 
     @run_in_worker(scoped=True)
     @staticmethod

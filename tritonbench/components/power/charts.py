@@ -21,7 +21,7 @@ def _get_cuda_device_id():
     return torch.cuda.current_device()
 
 
-def _gen_power_charts(benchmark_name: str, device_name: str, power_csv_file: str):
+def gen_power_charts(benchmark_name: str, device_name: str, power_csv_file: str):
     # Read CSV
     with open(power_csv_file) as f:
         reader = csv.reader(f)
@@ -89,17 +89,25 @@ def _gen_power_charts(benchmark_name: str, device_name: str, power_csv_file: str
     )
 
 
-def power_chart_begin(benchmark_name, output_dir) -> PowerManagerTask:
-    power_output_dir = os.path.join(output_dir, benchmark_name)
-    power_manager_task = PowerManagerTask(power_output_dir, DEFAULT_QUERY_INTERVAL)
-    power_manager_task.start_monitor()
-    return power_manager_task
+def gen_metrics_charts(metrics):
+    for x_val in metrics:
+        for backend in metrics[x_val]:
+            # Generate charts for each metric and backend
+            # Generate synthetic time axis (100 ms per sample)
+            n_samples = len(next(iter(metrics[x_val][backend].values())))
+            x_val = [i for i in range(n_samples)]  # seconds (0.1s = 100 ms)
+            plt.figure(figsize=(10, 6))
+            plt.plot(x_val, metrics[x_val][backend], label=backend)
+            plt.title(
+                f"[tritonbench] {metrics.name} {backend} latency on input {x_val} over time"
+            )
 
 
 def power_chart_end(power_manager_task):
     assert power_manager_task is not None, "Power manager task cannot be None"
     power_manager_task.stop_monitor()
     # generate the chart based on csv
+    metrics = power_manager_task.metrics
     power_output_dir = power_manager_task.power_output_dir
     power_csv_path = power_manager_task.power_csv_path
     benchmark_name = os.path.basename(power_output_dir)

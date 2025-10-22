@@ -1,1 +1,1 @@
-from .chart import power_chart_begin, power_chart_end
+from .power_manager import PowerManagerTask
