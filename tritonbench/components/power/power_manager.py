@@ -6,7 +6,7 @@ from pathlib import Path
 
 from typing import Dict, Optional
 
-from pynvml import nvmlDeviceGetHandleByIndex, nvmlInit, nvmlShutdown
+from pynvml import NVML_SUCCESS, nvmlDeviceGetHandleByIndex, nvmlInit, nvmlShutdown
 from tritonbench.components.tasks.base import run_in_worker
 from tritonbench.components.tasks.manager import ManagerTask
 
@@ -38,7 +38,7 @@ class BenchmarkEvent:
 
 
 def check_nvml_status(nvml_status):
-    if nvml_status != 0:
+    if nvml_status:
         raise RuntimeError("NVML initialization failed")
 
 
@@ -53,7 +53,7 @@ class GPUCollectorThread:
         self.sampling_interval = query_interval
         self.events = []
         check_nvml_status(nvmlInit())
-        check_nvml_status(nvmlDeviceGetHandleByIndex(self.gpu_id))
+        self.handle = nvmlDeviceGetHandleByIndex(int(self.gpu_id))
 
     def start(self):
         while self.continue_monitoring:
@@ -61,9 +61,10 @@ class GPUCollectorThread:
             time.sleep(self.sampling_interval)
 
     def output(self) -> str:
-        header = PowerEvent.fields()
-        for event in self.events:
-            pass
+        pass
+        # header = PowerEvent.fields()
+        # for event in self.events:
+        #     pass
 
 
 class PowerManager:
@@ -80,10 +81,12 @@ class PowerManager:
     def stop(self) -> None:
         self.collector.continue_monitoring = False
         self._t.join()
+
+    def finalize(self) -> None:
         # flush results to file
-        result_file = self.output_dir / "power.csv"
-        with open(result_file, "w") as fp:
-            fp.write(self.collector.output())
+        result_file = os.path.join(self.output_dir, "power.csv")
+        # with open(result_file, "w") as fp:
+        #     fp.write(self.collector.output())
 
 
 class PowerManagerTask(ManagerTask):
@@ -97,6 +100,7 @@ class PowerManagerTask(ManagerTask):
         super().__init__(timeout, extra_env)
         assert output_dir, "output_dir must be specified for the power chart."
         self.output_dir = output_dir
+        Path(self.output_dir).mkdir(parents=True, exist_ok=True)
         self.query_interval = query_interval
 
     def start_monitor(self) -> None:
@@ -125,10 +129,17 @@ class PowerManagerTask(ManagerTask):
         pm = globals()["manager"]
         pm.stop()
 
+    @run_in_worker(scoped=True)
+    @staticmethod
+    def pm_finalize() -> None:
+        pm = globals()["manager"]
+        pm.finalize()
+
     @staticmethod
     def create(output_dir) -> None:
         return PowerManagerTask(output_dir, DEFAULT_QUERY_INTERVAL)
 
     def finalize(self, metrics) -> None:
+        # finalize the metrics
         # finalize the power manager task, and draw the charts
-        pass
+        self.pm_finalize()
