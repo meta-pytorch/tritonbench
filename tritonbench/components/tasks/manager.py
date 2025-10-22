@@ -22,7 +22,9 @@ class ManagerTask(TaskBase):
     @base_task.run_in_worker(scoped=True)
     @staticmethod
     def make_instance(
-        module_path: str, package: Optional[str], class_name: str, obj_name: str
+        module_path: str,
+        package: Optional[str],
+        class_name: str,
     ) -> None:
         import importlib
         import os
@@ -36,7 +38,43 @@ class ManagerTask(TaskBase):
 
         # Populate global namespace so subsequent calls to worker.run can access `Model`
         globals()["Ctor"] = Ctor
-        globals()[obj_name] = Ctor()
+        globals()["manager"] = Ctor()
+
+    # Set attribute from the object in the worker process
+    @base_task.run_in_worker(scoped=True)
+    @staticmethod
+    def set_manager_attribute(
+        attr: str, value: Any, field: str = None, classattr: bool = False
+    ) -> None:
+        if classattr:
+            manager = globals()["manager"].__class__
+        else:
+            manager = globals()["manager"]
+        if hasattr(manager, attr):
+            if field:
+                manager_attr = getattr(manager, attr)
+                setattr(manager_attr, field, value)
+            else:
+                setattr(manager, attr, value)
+
+    # Get attribute from the object in the worker process
+    @base_task.run_in_worker(scoped=True)
+    @staticmethod
+    def get_manager_attribute(
+        attr: str, field: str = None, classattr: bool = False
+    ) -> Any:
+        if classattr:
+            manager = globals()["manager"].__class__
+        else:
+            manager = globals()["manager"]
+        if hasattr(manager, attr):
+            if field:
+                manager_attr = getattr(manager, attr)
+                return getattr(manager_attr, field)
+            else:
+                return getattr(manager, attr)
+        else:
+            return None
 
     def gc_collect(self) -> None:
         self.worker.run(

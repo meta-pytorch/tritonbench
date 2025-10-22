@@ -995,9 +995,11 @@ class BenchmarkOperator(metaclass=PostInitProcessor):
         ret_mode="benchmark",
     ) -> None:
         """Benchmarking the operator and returning its metrics."""
-        metrics = []
+        metrics: list[tuple[Any, dict[str, BenchmarkOperatorMetrics]]] = []
         if self.tb_args.power_chart:
-            power_chart_begin(self.benchmark_name, self.tb_args.power_chart)
+            self.power_manager_task = power_chart_begin(
+                self.benchmark_name, self.tb_args.output_dir
+            )
         try:
             if "proton" in self.required_metrics:
                 import triton.profiler as proton
@@ -1124,6 +1126,7 @@ class BenchmarkOperator(metaclass=PostInitProcessor):
                         fn_name=bm_name,
                         warmup=warmup,
                         rep=rep,
+                        repcnt=self.tb_args.repcnt,
                         quantiles=quantiles,
                         baseline=baseline,
                     )
@@ -1178,7 +1181,7 @@ class BenchmarkOperator(metaclass=PostInitProcessor):
             raise
         finally:
             if self.tb_args.power_chart:
-                power_chart_end()
+                power_chart_end(self.power_manager_task)
             if ret_mode == "yield":
                 return
             self.output = BenchmarkOperatorResult(
@@ -1584,6 +1587,7 @@ class BenchmarkOperator(metaclass=PostInitProcessor):
         fn_name: str,
         warmup=DEFAULT_WARMUP,
         rep=DEFAULT_REP,
+        repcnt=None,
         quantiles=DEFAULT_QUANTILES,
         baseline: bool = False,
     ) -> BenchmarkOperatorMetrics:
@@ -1616,6 +1620,7 @@ class BenchmarkOperator(metaclass=PostInitProcessor):
                     fn,
                     warmup,
                     rep,
+                    repcnt,
                     grad_to_none=self.get_grad_to_none(self.example_inputs),
                     device=self.device,
                     use_cuda_graphs=self.use_cuda_graphs,

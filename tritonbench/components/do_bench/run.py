@@ -7,6 +7,8 @@ import torch
 import triton
 from torch._inductor.runtime.benchmarking import benchmarker
 
+from .power import do_bench_power
+
 NS_TO_MS = 1e-6
 
 # Kernel name for L2 cache clearing - we want to exclude this from latency measurements
@@ -438,6 +440,7 @@ def do_bench_wrapper(
     fn,
     warmup,
     rep,
+    repcnt,
     grad_to_none,
     device: str = "cuda",
     use_cuda_graphs: bool = False,
@@ -475,13 +478,20 @@ def do_bench_wrapper(
                         grad_to_none=grad_to_none,
                     )
                 )
+        elif repcnt:
+            # benchmark using repcnt
+            return Latency(
+                times=do_bench_power(fn, repcnt=repcnt, grad_to_none=grad_to_none)
+            )
         else:
             bench_fn = (
                 _do_bench_profiler
                 if latency_measure_mode == "profiler"
-                else _do_bench_inductor
-                if latency_measure_mode == "inductor_benchmarker"
-                else triton.runtime.driver.active.get_benchmarker()
+                else (
+                    _do_bench_inductor
+                    if latency_measure_mode == "inductor_benchmarker"
+                    else triton.runtime.driver.active.get_benchmarker()
+                )
             )
 
             return Latency(

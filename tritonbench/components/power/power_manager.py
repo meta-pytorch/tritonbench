@@ -7,6 +7,9 @@ from pathlib import Path
 from pynvml import nvmlDeviceGetHandleByIndex, nvmlInit, nvmlShutdown
 from tritonbench.components.tasks.manager import ManagerTask
 
+# query every 100 ms
+DEFAULT_QUERY_INTERVAL = 0.1
+
 
 class PowerEvent(dataclass):
     timestamp: float
@@ -35,14 +38,14 @@ def check_nvml_status(nvml_status):
 
 
 class GPUCollectorThread:
-    def __init__(self, gpu_id=None) -> None:
+    def __init__(self, gpu_id=None, query_interval=DEFAULT_QUERY_INTERVAL) -> None:
         self.gpu_id = (
             int(gpu_id) if gpu_id else os.environ.get("CUDA_VISIBLE_DEVICES", "0")
         )
         # Assume Python GIL so not protecting this using Atomics
         self.continue_monitoring = True
         # Sampling interval in seconds
-        self.sampling_interval = 0.1
+        self.sampling_interval = query_interval
         self.events = []
         check_nvml_status(nvmlInit())
         check_nvml_status(nvmlDeviceGetHandleByIndex(self.gpu_id))
@@ -59,10 +62,12 @@ class GPUCollectorThread:
 
 
 class PowerManager:
-    def __init__(self, gpu_id=None, output_dir=None) -> None:
+    def __init__(
+        self, gpu_id=None, query_interval=DEFAULT_QUERY_INTERVAL, output_dir=None
+    ) -> None:
         self.output_dir = Path(output_dir)
         self.output_dir.mkdir(parents=True, exist_ok=True)
-        self.collector = GPUCollectorThread(gpu_id)
+        self.collector = GPUCollectorThread(gpu_id, query_interval)
 
     def start(self) -> None:
         self._t = threading.Thread(target=self.collector.start)
@@ -72,7 +77,7 @@ class PowerManager:
         self.collector.continue_monitoring = False
         self._t.join()
         # flush results to file
-        result_file = self.output_dir / "power_events.csv"
+        result_file = self.output_dir / "power.csv"
         with open(result_file, "w") as fp:
             fp.write(self.collector.output())
 
@@ -80,10 +85,14 @@ class PowerManager:
 class PowerManagerTask(ManagerTask):
     def __init__(
         self,
+        output_dir: str,
+        query_interval: float,
         timeout: Optional[float] = None,
         extra_env: Optional[Dict[str, str]] = None,
     ) -> None:
         super().__init__(timeout, extra_env)
+        self.output_dir = output_dir
+        self.query_interval = query_interval
 
     def start_task(self) -> None:
         self.make_instance(

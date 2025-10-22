@@ -196,10 +196,10 @@ def get_parser(args=None):
         help="Dump Triton IR to specific directory.",
     )
     parser.add_argument(
-        "--power-chart",
+        "--repcnt",
         type=str,
         default=None,
-        help="Dump GPU power chart to specific directory.",
+        help="Number of repetitions to benchmark. Overrides --rep.",
     )
     parser.add_argument(
         "--gpu-lockdown",
