@@ -45,18 +45,19 @@ def get_parser():
     return parser
 
 
-def power_analysis_bm(bm, args) -> None:
-    for _iter in range(args.repcnt):
-        bm()
-    torch.cuda.synchronize()
-
-
 if __name__ == "__main__":
     parser = get_parser()
     args = parser.parse_args()
-    tb_args = ["--op", "gemm", "--num-inputs", "1", "--only", "triton_tutorial_matmul"]
+    tb_args = [
+        "--op",
+        "gemm",
+        "--num-inputs",
+        "1",
+        "--only",
+        "triton_tutorial_matmul",
+        "--repcnt",
+        "2000",
+        "--power-chart",
+    ]
     opbench = load_operator_by_args(tb_args)
-    for x_val, inputs, bm_name, bm in opbench.yield_benchmarks():
-        print("x_val: ", x_val)
-        print("bm_name: ", bm_name)
-        power_analysis_bm(bm, args)
+    opbench.run()

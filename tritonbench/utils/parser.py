@@ -196,6 +196,11 @@ def get_parser(args=None):
         help="Dump Triton IR to specific directory.",
     )
     parser.add_argument(
+        "--power-chart",
+        action="store_true",
+        help="Output power chart",
+    )
+    parser.add_argument(
         "--repcnt",
         type=str,
         default=None,
