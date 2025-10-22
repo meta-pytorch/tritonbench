@@ -1,11 +1,13 @@
 from typing import List
 
+import triton
+
 
 def do_bench_power(fn: callable, repcnt: int, grad_to_none) -> List[float]:
-    di = runtime.driver.active.get_device_interface()
+    di = triton.runtime.driver.active.get_device_interface()
 
-    cache = runtime.driver.active.get_empty_cache_for_benchmark()
-    n_repeat = repcnt
+    cache = triton.runtime.driver.active.get_empty_cache_for_benchmark()
+    n_repeat = int(repcnt)
 
     start_event = [di.Event(enable_timing=True) for i in range(n_repeat)]
     end_event = [di.Event(enable_timing=True) for i in range(n_repeat)]
@@ -19,7 +21,7 @@ def do_bench_power(fn: callable, repcnt: int, grad_to_none) -> List[float]:
             for x in grad_to_none:
                 x.grad = None
         # we clear the L2 cache before each run
-        runtime.driver.active.clear_cache(cache)
+        triton.runtime.driver.active.clear_cache(cache)
         # record time of `fn`
         start_event[i].record()
         fn()
