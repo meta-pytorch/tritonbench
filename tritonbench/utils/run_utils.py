@@ -91,9 +91,7 @@ def get_run_env(
 
 def run_in_helion(op: str, op_args: Dict[str, str], extra_envs: Dict[str, str]):
     HELION_PATH = REPO_PATH.joinpath(".install", "helion")
-    assert (
-        HELION_PATH.exists()
-    ), f"Helion path {HELION_PATH} must exist. Run python install.py --helion to install Helion."
+    assert HELION_PATH.exists(), f"Helion path {HELION_PATH} must exist. Run python install.py --helion to install Helion."
     environ = os.environ.copy()
     environ.update(extra_envs)
     cmd = [sys.executable, "benchmarks/run.py"] + op_args
