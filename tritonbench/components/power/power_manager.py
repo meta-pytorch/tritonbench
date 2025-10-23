@@ -14,7 +14,6 @@ from pynvml import (
     NVML_CLOCK_SM,
     NVML_FI_DEV_POWER_CURRENT_LIMIT,
     NVML_FI_DEV_POWER_INSTANT,
-    NVML_FI_DEV_POWER_MAX_LIMIT,
     NVML_SUCCESS,
     NVML_TEMPERATURE_GPU,
     nvmlDeviceGetClock,
@@ -77,7 +76,7 @@ class GPUCollectorThread:
                 handle, NVML_CLOCK_MEM, NVML_CLOCK_ID_CURRENT
             )
             power_info = nvmlDeviceGetFieldValues(
-                handle, [NVML_FI_DEV_POWER_INSTANT, NVML_FI_DEV_POWER_MAX_LIMIT]
+                handle, [NVML_FI_DEV_POWER_INSTANT, NVML_FI_DEV_POWER_CURRENT_LIMIT]
             )
             gpu_temp = nvmlDeviceGetTemperature(handle, NVML_TEMPERATURE_GPU)
             self.events.append(
