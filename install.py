@@ -148,6 +148,7 @@ if __name__ == "__main__":
     parser.add_argument("--xformers", action="store_true", help="Install xformers")
     parser.add_argument("--tile", action="store_true", help="install tile lang")
     parser.add_argument("--aiter", action="store_true", help="install AMD's aiter")
+    parser.add_argument("--kraken", action="store_true", help="install Kraken")
     parser.add_argument(
         "--tritonparse", action="store_true", help="Install tritonparse"
     )
@@ -210,6 +211,11 @@ if __name__ == "__main__":
         from tools.helion.install import install_helion
 
         install_helion()
+    if args.kraken:
+        logger.info("[tritonbench] installing kraken...")
+        from tools.kraken.install import install_kraken
+
+        install_kraken()
     if args.xformers:
         logger.info("[tritonbench] installing xformers...")
         from tools.xformers.install import install_xformers
