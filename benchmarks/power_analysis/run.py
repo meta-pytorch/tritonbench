@@ -39,6 +39,38 @@ from tritonbench.utils.run_utils import load_operator_by_args
 REPCNT = 2000
 
 
+workloads = [
+    # gemm
+    [
+        "--op",
+        "gemm",
+        "--only",
+        "aten_matmul,triton_tutorial_matmul,triton_blackwell_warpspec_persistent_matmul",
+        "--m",
+        "4096",
+        "--n",
+        "4096",
+        "--k",
+        "4096",
+        "--repcnt",
+        "2000",
+        "--force",
+    ],
+    # blackwell_attention
+    # rms norm
+    [
+        "--op",
+        "rms_norm",
+        "--only",
+        "triton_tutorial_rms_norm",
+        "--repcnt",
+        "2000",
+        "--force",
+    ],
+    #
+]
+
+
 def get_parser():
     parser = argparse.ArgumentParser()
     parser.add_argument("--repcnt", type=int, default=REPCNT)

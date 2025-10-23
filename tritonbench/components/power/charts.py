@@ -89,6 +89,7 @@ def plot_latencies(output_dir, gpu_id, metrics: "BenchmarkOperatorResult") -> No
             n_samples = len(latency_times)
             x = [i for i in range(n_samples)]  # seconds (0.1s = 100 ms)
             plt.scatter(x, latency_times, label=backend, s=10)
+        plt.legend()
         plt.xlabel("Iteration")
         plt.ylabel("Latency (ms)")
         plt.title(
