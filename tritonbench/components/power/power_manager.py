@@ -24,6 +24,7 @@ from pynvml import (
     nvmlInit,
     nvmlShutdown,
 )
+from tritonbench.components.power.charts import plot_latencies, plot_power_charts
 from tritonbench.components.tasks.base import run_in_worker
 from tritonbench.components.tasks.manager import ManagerTask
 
@@ -39,14 +40,6 @@ class PowerEvent:
     power_draw_instant: float
     power_draw_current_limit: float
     gpu_temp: float
-
-
-@dataclass
-class BenchmarkEvent:
-    op: str
-    backend: str
-    event_type: str
-    metrics: Dict[str, float]
 
 
 def check_nvml_status(nvml_status):
@@ -81,7 +74,7 @@ class GPUCollectorThread:
             gpu_temp = nvmlDeviceGetTemperature(handle, NVML_TEMPERATURE_GPU)
             self.events.append(
                 PowerEvent(
-                    timestamp=time.time_ns(),
+                    timestamp=int(time.time_ns() / 1e3),
                     sm_clock=sm_clock,
                     mem_clock=mem_clock,
                     power_draw_instant=power_info[0].value.uiVal,
@@ -129,12 +122,14 @@ class PowerManager:
 class PowerManagerTask(ManagerTask):
     def __init__(
         self,
+        gpu_id: int,
         output_dir: str,
         query_interval: float,
         timeout: Optional[float] = None,
         extra_env: Optional[Dict[str, str]] = None,
     ) -> None:
         super().__init__(timeout, extra_env)
+        self.gpu_id = gpu_id
         assert output_dir, "output_dir must be specified for the power chart."
         self.output_dir = output_dir
         Path(self.output_dir).mkdir(parents=True, exist_ok=True)
@@ -146,7 +141,7 @@ class PowerManagerTask(ManagerTask):
             None,
             "PowerManager",
         )
-        self.set_manager_attribute("gpu_id", 0)
+        self.set_manager_attribute("gpu_id", self.gpu_id)
         self.set_manager_attribute("output_dir", str(self.output_dir))
         self.set_manager_attribute("query_interval", self.query_interval)
         self._start()
@@ -173,10 +168,13 @@ class PowerManagerTask(ManagerTask):
         pm.finalize()
 
     @staticmethod
-    def create(output_dir) -> None:
-        return PowerManagerTask(output_dir, DEFAULT_QUERY_INTERVAL)
+    def create(gpu_id, output_dir, query_interval=DEFAULT_QUERY_INTERVAL) -> None:
+        return PowerManagerTask(gpu_id, output_dir, query_interval)
 
     def finalize(self, metrics) -> None:
-        # finalize the metrics
-        # finalize the power manager task, and draw the charts
+        # finalize the power manager task
         self._finalize()
+        # draw the latency charts
+        plot_latencies(self.output_dir, self.gpu_id, metrics)
+        # draw the power charts
+        plot_power_charts(self.output_dir, os.path.join(self.output_dir, "power.csv"))

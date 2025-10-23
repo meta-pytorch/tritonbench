@@ -161,6 +161,10 @@ def do_bench_walltime(fn, warmup=25, rep=DEFAULT_REP):
     return wall_time_ms
 
 
+def _get_current_device_id() -> int:
+    return torch.cuda.current_device()
+
+
 def gemm_shapes(prefill: bool = False):
     """Gets an extensive list of GEMM shapes for benchmarking"""
     if not is_fbcode():
@@ -993,7 +997,10 @@ class BenchmarkOperator(metaclass=PostInitProcessor):
         """Benchmarking the operator and returning its metrics."""
         metrics: list[tuple[Any, dict[str, BenchmarkOperatorMetrics]]] = []
         if self.tb_args.power_chart:
-            power_manager_task = PowerManagerTask.create(self.tb_args.output_dir)
+            power_manager_task = PowerManagerTask.create(
+                _get_current_device_id(),
+                self.tb_args.output_dir,
+            )
             power_manager_task.start()
             if not self.tb_args.repcnt:
                 self.tb_args.repcnt = DEFAULT_POWER_REPCNT

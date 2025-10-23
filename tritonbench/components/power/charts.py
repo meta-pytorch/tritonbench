@@ -17,35 +17,17 @@ logger = logging.getLogger(__name__)
 logger.setLevel(logging.INFO)
 
 
-def _get_cuda_device_id():
-    return torch.cuda.current_device()
-
-
-def gen_power_charts(benchmark_name: str, device_name: str, power_csv_file: str):
+def plot_power_charts(output_dir: str, gpu_id: str, power_csv_file: str):
     # Read CSV
     with open(power_csv_file) as f:
-        reader = csv.reader(f)
+        reader = csv.reader(f, delimiter=";")
         header = next(reader)  # first row as header
         header = [col.strip() for col in header]
         data = {col: [] for col in header}
 
         for row in reader:
             for col, value in zip(header, row):
-                if value == "[N/A]":
-                    logger.warning(
-                        f"[tritonbench][power] {col} is not available, skipping"
-                    )
-                    value = 0.0
-                else:
-                    value = (
-                        float(value)
-                        if col
-                        not in [
-                            "clocks_event_reasons.hw_thermal_slowdown",
-                            "clocks_event_reasons.sw_thermal_slowdown",
-                        ]
-                        else value
-                    )
+                value = float(value)
                 data[col].append(value)
 
     # Generate synthetic time axis (100 ms per sample)
@@ -63,7 +45,9 @@ def gen_power_charts(benchmark_name: str, device_name: str, power_csv_file: str)
         f"[tritonbench] {benchmark_name} power consumption over time on {device_name}"
     )
     plt.savefig(
-        os.path.join(POWER_OUTPUT_DIR, "power.png"), dpi=300, bbox_inches="tight"
+        os.path.join(output_dir, f"{benchmark_name}-power.png"),
+        dpi=300,
+        bbox_inches="tight",
     )
     # Plot temp chart
     plt.figure(figsize=(10, 6))
@@ -74,7 +58,9 @@ def gen_power_charts(benchmark_name: str, device_name: str, power_csv_file: str)
     plt.legend()
     plt.title(f"[tritonbench] {benchmark_name} temperature over time on {device_name}")
     plt.savefig(
-        os.path.join(POWER_OUTPUT_DIR, "temp.png"), dpi=300, bbox_inches="tight"
+        os.path.join(output_dir, f"{benchmark_name}-temp.png"),
+        dpi=300,
+        bbox_inches="tight",
     )
     # Plot frequency chart
     plt.figure(figsize=(10, 6))
@@ -85,11 +71,13 @@ def gen_power_charts(benchmark_name: str, device_name: str, power_csv_file: str)
     plt.legend()
     plt.title(f"[tritonbench] {benchmark_name} frequency over time on {device_name}")
     plt.savefig(
-        os.path.join(POWER_OUTPUT_DIR, "freq.png"), dpi=300, bbox_inches="tight"
+        os.path.join(output_dir, f"{benchmark_name}-freq.png"),
+        dpi=300,
+        bbox_inches="tight",
     )
 
 
-def gen_metrics_charts(metrics):
+def plot_latencies(output_dir, gpu_id, metrics) -> None:
     for x_val in metrics:
         for backend in metrics[x_val]:
             # Generate charts for each metric and backend
@@ -99,18 +87,13 @@ def gen_metrics_charts(metrics):
             plt.figure(figsize=(10, 6))
             plt.plot(x_val, metrics[x_val][backend], label=backend)
             plt.title(
-                f"[tritonbench] {metrics.name} {backend} latency on input {x_val} over time"
+                f"[tritonbench] latency over time chart on device {gpu_id} for {metrics.name} {backend} on input {x_val}"
             )
-
-
-def power_chart_end(power_manager_task):
-    assert power_manager_task is not None, "Power manager task cannot be None"
-    power_manager_task.stop_monitor()
-    # generate the chart based on csv
-    metrics = power_manager_task.metrics
-    power_output_dir = power_manager_task.power_output_dir
-    power_csv_path = power_manager_task.power_csv_path
-    benchmark_name = os.path.basename(power_output_dir)
-    device_name = torch.cuda.get_device_name(_get_cuda_device_id())
-    _gen_power_charts(benchmark_name, device_name, power_csv_path)
-    logger.warning(f"[tritonbench][power] Power chart saved to {power_output_dir}.")
+            plt.savefig(
+                os.path.join(
+                    output_dir,
+                    f"{metrics.name}_{backend}_shape_{x_val}_latency.png",
+                    dpi=300,
+                    bbox_inches="tight",
+                )
+            )
