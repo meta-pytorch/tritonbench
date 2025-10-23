@@ -191,14 +191,19 @@ def _gdpa_fwd_inner_ws(
 # re-tuning.
 configs = [
     triton_config(
-        {"BLOCK_M": BM, "BLOCK_N": BN, "NUM_CONSUMER_GROUPS": 1},
+        {
+            "BLOCK_M": BM,
+            "BLOCK_N": BN,
+            "NUM_CONSUMER_GROUPS": 1,
+            **({"matrix_instr_nonkdim": 16} if is_hip() else {}),
+        },
         num_stages=s,
         num_warps=w,
     )
     for BM in [32, 64, 128]  # [32, 64, 128, 256]
-    for BN in [32, 64, 128]  # 32, 64, 128]
+    for BN in ([16, 32, 64] if is_hip() else [32, 64, 128])  # 32, 64, 128]
     for s in ([1, 2] if is_hip() else [1, 3])  # 3, 4, 7])
-    for w in [4, 8]  # 4, 8]
+    for w in ([2, 4] if is_hip() else [4, 8])  # 4, 8]
 ]
 
 
@@ -1017,14 +1022,15 @@ bwd_configs = [
             "BLOCK_M2": BN1,
             "BLOCK_N2": BM1,
             "NUM_CONSUMER_GROUPS": 1,
+            **({"matrix_instr_nonkdim": 16, "waves_per_eu": 3} if is_hip() else {}),
         },
         num_stages=s,
         num_warps=w,
     )
-    for BM1 in [32, 64]
-    for BN1 in [32, 64, 128]
+    for BM1 in ([16, 32] if is_hip() else [32, 64])
+    for BN1 in ([16, 32, 64] if is_hip() else [32, 64, 128])
     for s in ([1, 2] if is_hip() else [1, 3])
-    for w in [4, 8]
+    for w in ([1, 2, 4] if is_hip() else [4, 8])
 ]
 
 bwd_configs_ws = [
