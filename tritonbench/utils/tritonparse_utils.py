@@ -6,6 +6,8 @@ For more details, see: https://github.com/meta-pytorch/tritonparse
 
 import importlib.util
 
+from .env_utils import is_fbcode
+
 
 def tritonparse_init(tritonparse_log_path):
     """
@@ -63,9 +65,13 @@ def tritonparse_parse(tritonparse_log_path):
         try:
             from tritonparse.utils import unified_parse
 
+            if is_fbcode():
+                out = None
+            else:
+                out = (f"{tritonparse_log_path}/parsed_logs",)
             unified_parse(
                 f"{tritonparse_log_path}/raw_logs",
-                f"{tritonparse_log_path}/parsed_logs",
+                out=out,
                 overwrite=True,
             )
         except Exception as e:
