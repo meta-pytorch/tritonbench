@@ -1,32 +1,45 @@
+import csv
+import dataclasses
 import os
 import threading
 import time
-from dataclasses import dataclass
+from dataclasses import asdict, dataclass, fields
 from pathlib import Path
 
 from typing import Dict, Optional
 
-from pynvml import NVML_SUCCESS, nvmlDeviceGetHandleByIndex, nvmlInit, nvmlShutdown
+from pynvml import (
+    NVML_CLOCK_ID_CURRENT,
+    NVML_CLOCK_MEM,
+    NVML_CLOCK_SM,
+    NVML_FI_DEV_POWER_CURRENT_LIMIT,
+    NVML_FI_DEV_POWER_INSTANT,
+    NVML_FI_DEV_POWER_MAX_LIMIT,
+    NVML_SUCCESS,
+    NVML_TEMPERATURE_GPU,
+    nvmlDeviceGetClock,
+    nvmlDeviceGetFieldValues,
+    nvmlDeviceGetHandleByIndex,
+    nvmlDeviceGetPerformanceState,
+    nvmlDeviceGetTemperature,
+    nvmlInit,
+    nvmlShutdown,
+)
 from tritonbench.components.tasks.base import run_in_worker
 from tritonbench.components.tasks.manager import ManagerTask
 
-# query every 100 ms
-DEFAULT_QUERY_INTERVAL = 0.1
+# query every 10 ms
+DEFAULT_QUERY_INTERVAL = 0.01
 
 
 @dataclass
 class PowerEvent:
     timestamp: float
-    power_limit: float
-    power_draw_average: float
+    sm_clock: float
+    mem_clock: float
     power_draw_instant: float
-    power_draw_max_limit: float
-    temp_gpu: float
-    temp_memory: float
-    clock_current_sm: float
-    clock_current_memory: float
-    hw_thermal_slowdown: str
-    sw_thermal_slowdown: str
+    power_draw_current_limit: float
+    gpu_temp: float
 
 
 @dataclass
@@ -52,19 +65,33 @@ class GPUCollectorThread:
         # Sampling interval in seconds
         self.sampling_interval = query_interval
         self.events = []
+        self.iter = []
         check_nvml_status(nvmlInit())
-        self.handle = nvmlDeviceGetHandleByIndex(int(self.gpu_id))
 
     def start(self):
+        handle = nvmlDeviceGetHandleByIndex(int(self.gpu_id))
         while self.continue_monitoring:
             # check gpu power event
+            sm_clock = nvmlDeviceGetClock(handle, NVML_CLOCK_SM, NVML_CLOCK_ID_CURRENT)
+            mem_clock = nvmlDeviceGetClock(
+                handle, NVML_CLOCK_MEM, NVML_CLOCK_ID_CURRENT
+            )
+            power_info = nvmlDeviceGetFieldValues(
+                handle, [NVML_FI_DEV_POWER_INSTANT, NVML_FI_DEV_POWER_MAX_LIMIT]
+            )
+            gpu_temp = nvmlDeviceGetTemperature(handle, NVML_TEMPERATURE_GPU)
+            self.events.append(
+                PowerEvent(
+                    timestamp=time.time_ns(),
+                    sm_clock=sm_clock,
+                    mem_clock=mem_clock,
+                    power_draw_instant=power_info[0].value.uiVal,
+                    power_draw_current_limit=power_info[1].value.uiVal,
+                    gpu_temp=gpu_temp,
+                )
+            )
             time.sleep(self.sampling_interval)
-
-    def output(self) -> str:
-        pass
-        # header = PowerEvent.fields()
-        # for event in self.events:
-        #     pass
+        nvmlShutdown()
 
 
 class PowerManager:
@@ -85,8 +112,19 @@ class PowerManager:
     def finalize(self) -> None:
         # flush results to file
         result_file = os.path.join(self.output_dir, "power.csv")
-        # with open(result_file, "w") as fp:
-        #     fp.write(self.collector.output())
+        with open(result_file, "w", newline="") as csvfile:
+            # Get the field names from the dataclass to use as CSV header
+            fieldnames = [field.name for field in fields(PowerEvent)]
+
+            # Create a DictWriter object
+            writer = csv.DictWriter(csvfile, fieldnames=fieldnames, delimiter=";")
+
+            # Write the header row
+            writer.writeheader()
+
+            # Write each dataclass instance as a row in the CSV
+            for event in self.collector.events:
+                writer.writerow(asdict(event))
 
 
 class PowerManagerTask(ManagerTask):

@@ -18,8 +18,8 @@ CACHE_CLEAR_KERNEL = "void at::native::vectorized_elementwise_kernel<4, at::nati
 class Latency:
     times: List[float]
 
-    def __init__(self, times):
-        self.times = self._remove_outliers_iqr(times)
+    def __init__(self, times, remove_outliers=True):
+        self.times = self._remove_outliers_iqr(times) if remove_outliers else times
 
     def __str__(self):
         """By default, use p50"""
@@ -481,7 +481,8 @@ def do_bench_wrapper(
         elif repcnt:
             # benchmark using repcnt
             return Latency(
-                times=do_bench_power(fn, repcnt=repcnt, grad_to_none=grad_to_none)
+                times=do_bench_power(fn, repcnt=repcnt, grad_to_none=grad_to_none),
+                remove_outliers=False,
             )
         else:
             bench_fn = (
