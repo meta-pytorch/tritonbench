@@ -998,6 +998,7 @@ class BenchmarkOperator(metaclass=PostInitProcessor):
         metrics: list[tuple[Any, dict[str, BenchmarkOperatorMetrics]]] = []
         if self.tb_args.power_chart:
             power_manager_task = PowerManagerTask.create(
+                self.benchmark_name,
                 _get_current_device_id(),
                 self.tb_args.output_dir,
             )
@@ -1178,10 +1179,7 @@ class BenchmarkOperator(metaclass=PostInitProcessor):
                 os._exit(1)
             raise
         finally:
-            if self.tb_args.power_chart:
-                power_manager_task.stop()
-                power_manager_task.finalize(metrics)
-            self.output = BenchmarkOperatorResult(
+            result = BenchmarkOperatorResult(
                 benchmark_name=self.tb_args.benchmark_name,
                 op_name=self.name,
                 op_mode=self.mode.value,
@@ -1189,6 +1187,10 @@ class BenchmarkOperator(metaclass=PostInitProcessor):
                 simple_mode=self.tb_args.simple_output,
                 result=metrics,
             )
+            if self.tb_args.power_chart:
+                power_manager_task.stop()
+                power_manager_task.finalize(result)
+            self.output = result
 
     def get_x_val(self, example_inputs) -> Any:
         return self._cur_input_id

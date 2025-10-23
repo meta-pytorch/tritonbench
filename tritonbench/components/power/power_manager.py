@@ -77,8 +77,8 @@ class GPUCollectorThread:
                     timestamp=int(time.time_ns() / 1e3),
                     sm_clock=sm_clock,
                     mem_clock=mem_clock,
-                    power_draw_instant=power_info[0].value.uiVal,
-                    power_draw_current_limit=power_info[1].value.uiVal,
+                    power_draw_instant=power_info[0].value.uiVal / 1000.0,
+                    power_draw_current_limit=power_info[1].value.uiVal / 1000.0,
                     gpu_temp=gpu_temp,
                 )
             )
@@ -122,6 +122,7 @@ class PowerManager:
 class PowerManagerTask(ManagerTask):
     def __init__(
         self,
+        benchmark_name: str,
         gpu_id: int,
         output_dir: str,
         query_interval: float,
@@ -130,6 +131,7 @@ class PowerManagerTask(ManagerTask):
     ) -> None:
         super().__init__(timeout, extra_env)
         self.gpu_id = gpu_id
+        self.benchmark_name = benchmark_name
         assert output_dir, "output_dir must be specified for the power chart."
         self.output_dir = output_dir
         Path(self.output_dir).mkdir(parents=True, exist_ok=True)
@@ -168,8 +170,10 @@ class PowerManagerTask(ManagerTask):
         pm.finalize()
 
     @staticmethod
-    def create(gpu_id, output_dir, query_interval=DEFAULT_QUERY_INTERVAL) -> None:
-        return PowerManagerTask(gpu_id, output_dir, query_interval)
+    def create(
+        benchmark_name, gpu_id, output_dir, query_interval=DEFAULT_QUERY_INTERVAL
+    ) -> None:
+        return PowerManagerTask(benchmark_name, gpu_id, output_dir, query_interval)
 
     def finalize(self, metrics) -> None:
         # finalize the power manager task
@@ -177,4 +181,9 @@ class PowerManagerTask(ManagerTask):
         # draw the latency charts
         plot_latencies(self.output_dir, self.gpu_id, metrics)
         # draw the power charts
-        plot_power_charts(self.output_dir, os.path.join(self.output_dir, "power.csv"))
+        plot_power_charts(
+            self.benchmark_name,
+            self.gpu_id,
+            self.output_dir,
+            os.path.join(self.output_dir, "power.csv"),
+        )
