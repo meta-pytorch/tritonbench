@@ -28,13 +28,15 @@ def plot_power_charts(
 
     # Generate synthetic time axis (100 ms per sample)
     n_samples = len(next(iter(data.values())))
-    time = [data["timestamp"][i] for i in range(n_samples)]  # seconds (0.1s = 100 ms)
+    time = [
+        (data["timestamp"][i] - data["timestamp"][0]) / 1000.0 for i in range(n_samples)
+    ]  # seconds (0.1s = 100 ms)
 
     # Plot power chart
     plt.figure(figsize=(10, 6))
     for power_col in header[3:5]:
         plt.plot(time, data[power_col], label=power_col)
-    plt.xlabel("Time (us)")
+    plt.xlabel("Time (ms)")
     plt.ylabel("Power (W)")
     plt.legend()
     plt.title(
@@ -49,7 +51,7 @@ def plot_power_charts(
     plt.figure(figsize=(10, 6))
     for temp_col in header[5:]:
         plt.plot(time, data[temp_col], label=temp_col)
-        plt.xlabel("Time (s)")
+        plt.xlabel("Time (ms)")
         plt.ylabel("Temperature (C)")
     plt.legend()
     plt.title(
@@ -64,7 +66,7 @@ def plot_power_charts(
     plt.figure(figsize=(10, 6))
     for temp_col in header[1:3]:
         plt.plot(time, data[temp_col], label=temp_col)
-        plt.xlabel("Time (us)")
+        plt.xlabel("Time (ms)")
         plt.ylabel("Frequency (MHz)")
     plt.legend()
     plt.title(f"[tritonbench] {benchmark_name} frequency over time on device {gpu_id}")
@@ -86,7 +88,7 @@ def plot_latencies(output_dir, gpu_id, metrics: "BenchmarkOperatorResult") -> No
             latency_times = result_dict[x_val][backend].latency.times[1:]
             n_samples = len(latency_times)
             x = [i for i in range(n_samples)]  # seconds (0.1s = 100 ms)
-            plt.plot(x, latency_times, label=backend)
+            plt.scatter(x, latency_times, label=backend, s=10)
         plt.xlabel("Iteration")
         plt.ylabel("Latency (ms)")
         plt.title(
