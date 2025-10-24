@@ -1,3 +1,4 @@
+import logging
 import statistics
 import time
 from functools import partial
@@ -10,7 +11,7 @@ from torch._inductor.runtime.benchmarking import benchmarker
 from .power import do_bench_power
 
 NS_TO_MS = 1e-6
-
+logger = logging.getLogger(__name__)
 # Kernel name for L2 cache clearing - we want to exclude this from latency measurements
 CACHE_CLEAR_KERNEL = "void at::native::vectorized_elementwise_kernel<4, at::native::FillFunctor<int>, std::array<char*, 1ul> >(int, at::native::FillFunctor<int>, std::array<char*, 1ul>)"
 
@@ -53,7 +54,7 @@ class Latency:
         filtered_data = [x for x in data if lower_bound <= x and x <= upper_bound]
         end_len = len(filtered_data)
         if end_len != starting_length:
-            print(
+            logger.debug(
                 f"Removed {starting_length - end_len} outliers from {starting_length} samples"
             )
         return filtered_data
