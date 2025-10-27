@@ -59,8 +59,8 @@ def activation_string_to_int(s: str):
 
 @triton.jit
 def tanh(x):
-    exp_x = fast_expf(-2.0 * x)
-    return fast_dividef((1 - exp_x), (1 + exp_x))
+    exp_x2 = fast_expf(2.0 * x)
+    return fast_dividef((exp_x2 - 1), (1 + exp_x2))
 
 
 @triton.jit
