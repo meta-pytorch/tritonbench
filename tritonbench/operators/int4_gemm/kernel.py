@@ -1,6 +1,4 @@
-"""
-Triton implementation by @jlebar: https://gist.github.com/jlebar/3435b2c00deea53258887ce37231e5e2
-"""
+"""Triton bf16 x int4 GEMM closely matching the Helion reference kernel."""
 
 import torch
 import triton
@@ -9,23 +7,30 @@ import triton.language as tl
 AUTOTUNE_CONFIGS = [
     triton.Config(
         {
-            "BLOCK_SIZE_M": 16,
+            "BLOCK_SIZE_M": 64,
             "BLOCK_SIZE_N": 128,
-            "BLOCK_SIZE_K": 256,
-            "GROUP_SIZE_M": 32,
+            "BLOCK_SIZE_K": 64,
         },
-        num_stages=4,
+        num_stages=2,
         num_warps=4,
     ),
     triton.Config(
         {
             "BLOCK_SIZE_M": 128,
-            "BLOCK_SIZE_N": 256,
-            "BLOCK_SIZE_K": 128,
-            "GROUP_SIZE_M": 32,
+            "BLOCK_SIZE_N": 64,
+            "BLOCK_SIZE_K": 64,
         },
-        num_stages=4,
+        num_stages=2,
         num_warps=8,
+    ),
+    triton.Config(
+        {
+            "BLOCK_SIZE_M": 32,
+            "BLOCK_SIZE_N": 128,
+            "BLOCK_SIZE_K": 32,
+        },
+        num_stages=1,
+        num_warps=4,
     ),
 ]
 
@@ -74,116 +79,108 @@ def _group_quantize_tensor(w, n_bit=4, q_group_size=16):
     return out_uint8, scales_and_zeros
 
 
+def quantize_int4_weights(w, q_group_size):
+    """Quantize weights into packed int4 values with per-group metadata."""
+
+    packed, scales_and_zeros = _group_quantize_tensor(
+        w.to(torch.bfloat16), n_bit=4, q_group_size=q_group_size
+    )
+
+    packed = packed.transpose(0, 1).contiguous().to(torch.int8)
+    scales = scales_and_zeros[..., 0].contiguous()
+    zeros = scales_and_zeros[..., 1].contiguous()
+
+    return packed, scales, zeros
+
+
 @triton.autotune(configs=AUTOTUNE_CONFIGS, key=["M", "N", "K"])
 @triton.jit
 def matmul_kernel(
-    # Pointers to matrices
     a_ptr,
-    b_ptr,
+    b_packed_ptr,
     c_ptr,
-    # Matrix dimensions.
     M,
     N,
     K,
-    # The stride variables represent how much to increase the ptr by when moving by 1
-    # element in a particular dimension. E.g. `stride_am` is how much to increase `a_ptr`
-    # by to get the element one row down (A has M rows).
-    #
-    # We assume `b` is packed with 2 `int4` elements per K, i.e. it's a
-    # (K//2)xNx(2xint4) matrix, represented in Triton as (K//2)xNxi8.  If K
-    # is the minor dimension, then stride_bk should logically be 0.5.  But
-    # we don't want a fractional stride!  So let the given stride be the
-    # stride per 2xint4.
+    K_HALF,
     stride_am,
     stride_ak,
     stride_bk,
     stride_bn,
     stride_cm,
     stride_cn,
-    # Meta-parameters
     BLOCK_SIZE_M: tl.constexpr,
     BLOCK_SIZE_N: tl.constexpr,
     BLOCK_SIZE_K: tl.constexpr,
-    GROUP_SIZE_M: tl.constexpr,
 ):
-    """Kernel for computing the matmul C = A x B.
-    A has shape (M, K), B has shape (K, N) and C has shape (M, N)
-    """
-    tl.device_assert(K % BLOCK_SIZE_K == 0)
+    """Compute C = A x B with B stored as packed int4 values."""
 
-    # -----------------------------------------------------------
-    # Map program ids `pid` to the block of C it should compute.
-    # This is done in a grouped ordering to promote L2 data reuse.
-    # See above `L2 Cache Optimizations` section for details.
+    tl.static_assert(BLOCK_SIZE_K % 2 == 0)
+    tl.device_assert(K % 2 == 0)
+
     pid = tl.program_id(axis=0)
-    num_pid_m = tl.cdiv(M, BLOCK_SIZE_M)
-    num_pid_n = tl.cdiv(N, BLOCK_SIZE_N)
-    num_pid_in_group = GROUP_SIZE_M * num_pid_n
-    group_id = pid // num_pid_in_group
-    first_pid_m = group_id * GROUP_SIZE_M
-    group_size_m = min(num_pid_m - first_pid_m, GROUP_SIZE_M)
-    pid_m = first_pid_m + (pid % group_size_m)
-    pid_n = (pid % num_pid_in_group) // group_size_m
+    num_blocks_m = tl.cdiv(M, BLOCK_SIZE_M)
+    num_blocks_n = tl.cdiv(N, BLOCK_SIZE_N)
+    pid_m = pid % num_blocks_m
+    pid_n = pid // num_blocks_m
 
-    # ----------------------------------------------------------
-    # Create pointers for the first blocks of A and B.
-    # We will advance this pointer as we move in the K direction
-    # and accumulate
-    # `a_ptrs` is a block of [BLOCK_SIZE_M, BLOCK_SIZE_K] pointers
-    # `b_ptrs` is a block of [BLOCK_SIZE_K // 2, BLOCK_SIZE_N] pointers
-    # See above `Pointer Arithmetic` section for details
-    offs_am = (pid_m * BLOCK_SIZE_M + tl.arange(0, BLOCK_SIZE_M)) % M
-    offs_bn = (pid_n * BLOCK_SIZE_N + tl.arange(0, BLOCK_SIZE_N)) % N
-    offs_ak = tl.arange(0, BLOCK_SIZE_K)
-    offs_bk = tl.arange(0, BLOCK_SIZE_K // 2)
-    a_ptrs = a_ptr + (offs_am[:, None] * stride_am + offs_ak[None, :] * stride_ak)
-    b_ptrs = b_ptr + (offs_bk[:, None] * stride_bk + offs_bn[None, :] * stride_bn)
+    offs_m = pid_m * BLOCK_SIZE_M + tl.arange(0, BLOCK_SIZE_M)
+    offs_n = pid_n * BLOCK_SIZE_N + tl.arange(0, BLOCK_SIZE_N)
+    offs_k = tl.arange(0, BLOCK_SIZE_K)
+    offs_k_packed = tl.arange(0, BLOCK_SIZE_K // 2)
 
-    # -----------------------------------------------------------
-    # Iterate to compute a block of the C matrix.
-    # We accumulate into a `[BLOCK_SIZE_M, BLOCK_SIZE_N]` block
-    # of fp32 values for higher accuracy.
-    # `accumulator` will be converted back to fp16 after the loop.
+    a_ptrs = a_ptr + (offs_m[:, None] * stride_am + offs_k[None, :] * stride_ak)
+    b_ptrs = b_packed_ptr + (
+        offs_k_packed[:, None] * stride_bk + offs_n[None, :] * stride_bn
+    )
+    c_ptrs = c_ptr + (offs_m[:, None] * stride_cm + offs_n[None, :] * stride_cn)
+
+    mask_m = offs_m[:, None] < M
+    mask_n = offs_n[None, :] < N
     accumulator = tl.zeros((BLOCK_SIZE_M, BLOCK_SIZE_N), dtype=tl.float32)
-    for k in range(0, tl.cdiv(K, BLOCK_SIZE_K)):
-        a = tl.load(a_ptrs, mask=offs_ak[None, :] < K - k * BLOCK_SIZE_K, other=0.0)
-        b = tl.load(b_ptrs)
-        tl.static_assert(b.dtype == tl.int8)
 
-        # Unpack `b` into an fp16 matrix, taking care to sign-extend b_lo.  Use
-        # _4_i8 because the literal "4" is considered an i32, which causes the
-        # shift operands to be widened to i32.
+    num_k_tiles = tl.cdiv(K, BLOCK_SIZE_K)
+
+    for k_iter in range(0, num_k_tiles):
+        k_offset = k_iter * BLOCK_SIZE_K
+
+        a_mask = mask_m & (offs_k[None, :] + k_offset < K)
+        a_tile = tl.load(a_ptrs, mask=a_mask, other=0.0)
+
+        b_mask = (offs_k_packed[:, None] + (k_offset // 2) < K_HALF) & mask_n
+        b_tile_packed = tl.load(b_ptrs, mask=b_mask, other=0)
+
         _4_i8 = tl.full((1,), 4, dtype=tl.int8)
-        b_lo = (b << _4_i8) >> _4_i8
-        b_hi = b >> _4_i8
-        # Workaround: Convert before the join() so that Triton can load the data
-        # after the join using ldmatrix.
-        b_f16 = (
-            tl.join(b_lo.to(tl.bfloat16), b_hi.to(tl.bfloat16))
+        b_lo = (b_tile_packed << _4_i8) >> _4_i8
+        b_hi = b_tile_packed >> _4_i8
+
+        b_unpacked = (
+            tl.join(b_lo.to(tl.float32), b_hi.to(tl.float32))
             .permute(0, 2, 1)
             .reshape(BLOCK_SIZE_K, BLOCK_SIZE_N)
         )
 
-        accumulator += tl.dot(a, b_f16)
+        a_expanded = tl.expand_dims(a_tile.to(tl.float32), 2)
+        b_expanded = tl.expand_dims(b_unpacked, 0)
+        accumulator += tl.sum(a_expanded * b_expanded, axis=1)
+
         a_ptrs += BLOCK_SIZE_K * stride_ak
-        b_ptrs += BLOCK_SIZE_K * stride_bk // 2
+        b_ptrs += (BLOCK_SIZE_K // 2) * stride_bk
 
-    c = accumulator.to(tl.bfloat16)
-
-    offs_cm = pid_m * BLOCK_SIZE_M + tl.arange(0, BLOCK_SIZE_M)
-    offs_cn = pid_n * BLOCK_SIZE_N + tl.arange(0, BLOCK_SIZE_N)
-    c_ptrs = c_ptr + stride_cm * offs_cm[:, None] + stride_cn * offs_cn[None, :]
-    c_mask = (offs_cm[:, None] < M) & (offs_cn[None, :] < N)
-    tl.store(c_ptrs, c, mask=c_mask)
+    c_tile = accumulator.to(tl.bfloat16)
+    tl.store(c_ptrs, c_tile, mask=mask_m & mask_n)
 
 
-def matmul(a, b):
+def matmul(a, b_packed):
     assert (
-        a.shape[1] == b.shape[0] * 2
-    ), f"Incompatible dimensions: {a.shape[1], b.shape[0] * 2}"
+        a.shape[1] == b_packed.shape[0] * 2
+    ), f"Incompatible dimensions: {(a.shape[1], b_packed.shape[0] * 2)}"
     assert a.is_contiguous(), "Matrix A must be contiguous"
+    if not b_packed.is_contiguous():
+        b_packed = b_packed.contiguous()
+
     M, K = a.shape
-    _, N = b.shape
+    K_half, N = b_packed.shape
 
     c = torch.empty((M, N), device=a.device, dtype=torch.bfloat16)
     grid = lambda META: (
@@ -191,15 +188,16 @@ def matmul(a, b):
     )
     matmul_kernel[grid](
         a,
-        b,
+        b_packed,
         c,
         M,
         N,
         K,
+        K_half,
         a.stride(0),
         a.stride(1),
-        b.stride(0),
-        b.stride(1),
+        b_packed.stride(0),
+        b_packed.stride(1),
         c.stride(0),
         c.stride(1),
     )
@@ -207,6 +205,17 @@ def matmul(a, b):
 
 
 def pack_2xint4(t):
-    # Packs a KxNxfp16 matrix into a (K//2)xNx(2xint4) matrix.
-    t = t.to(torch.int8).reshape(t.shape[0] // 2, 2, t.shape[1]).permute(1, 0, 2)
-    return (t[0] & 0xF) | (t[1] << 4)
+    """Pack a KxN matrix of int8 into (K//2)xN with low/high nibble pairing."""
+
+    t_int8 = t.to(torch.int8)
+    t_view = t_int8.reshape(t_int8.shape[0] // 2, 2, t_int8.shape[1]).permute(1, 0, 2)
+    return (t_view[0] & 0xF) | (t_view[1] << 4)
+
+
+__all__ = [
+    "_group_quantize_tensor",
+    "quantize_int4_weights",
+    "matmul_kernel",
+    "matmul",
+    "pack_2xint4",
+]
