@@ -8,7 +8,7 @@ import torch
 import triton
 import triton.language as tl
 from torch._C import _cuda_getCurrentRawStream as get_raw_stream
-from torch._inductor.runtime import triton_helpers, triton_heuristics
+from torch._inductor.runtime import triton_helpers
 from torch._inductor.runtime.triton_helpers import libdevice
 
 empty_strided_cuda = torch._C._dynamo.guards._empty_strided_cuda

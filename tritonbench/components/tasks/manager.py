@@ -35,11 +35,8 @@ class ManagerTask(TaskBase):
         class_name: str,
     ) -> None:
         import importlib
-        import os
-        import traceback
 
         # required as this is in child process
-        from tritonbench.components.power.power_manager import PowerManager
 
         module = importlib.import_module(module_path, package=package)
         Ctor = getattr(module, class_name)

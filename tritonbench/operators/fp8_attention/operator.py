@@ -6,7 +6,7 @@ https://research.colfax-intl.com/adding-fp8-to-flashattention/
 import argparse
 import math
 
-from typing import Any, Callable, Generator, List, Optional, Tuple
+from typing import Any, Callable, Generator, List, Optional
 
 import torch
 

@@ -6,13 +6,11 @@ Triton implementation by @jlebar: https://gist.github.com/jlebar/3435b2c00deea53
 """
 
 import argparse
-import statistics
 
 from typing import Any, List, Optional
 
 import torch
 import triton
-import triton.language as tl
 
 from tritonbench.utils.triton_op import (
     BenchmarkOperator,
@@ -21,7 +19,7 @@ from tritonbench.utils.triton_op import (
     register_metric,
 )
 
-from .kernel import _group_quantize_tensor, matmul, matmul_kernel, pack_2xint4
+from .kernel import _group_quantize_tensor, matmul, pack_2xint4
 
 
 class Operator(BenchmarkOperator):

@@ -7,7 +7,6 @@ import logging
 import os
 import sys
 
-import torch
 
 CURRENT_DIR = os.path.dirname(os.path.abspath(__file__))
 

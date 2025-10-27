@@ -48,13 +48,11 @@ The following metrics are measured by this benchmark:
 
 # Import necessary libraries and modules
 import argparse
-import random
 from typing import Any, Callable, Generator, List, Optional, Tuple
 
 import torch
 import triton
 
-from tritonbench.utils.data_utils import get_production_shapes
 
 from tritonbench.utils.triton_op import (
     BenchmarkOperator,

@@ -1996,7 +1996,7 @@ def compile_cutedsl_grouped_gemm(
         C_cpu = torch.zeros((m, n, 1), dtype=torch.float32)
         torch_fp32_tensors_abc_seed.append([A_cpu, B_cpu, C_cpu])
 
-    print(f"Running Blackwell Grouped GEMM test with:")
+    print("Running Blackwell Grouped GEMM test with:")
     print(f"{num_groups} groups")
     for i, (m, n, k, l) in enumerate(problem_sizes_mnkl):
         print(f"Group {i}: {m}x{n}x{k}x{l}")

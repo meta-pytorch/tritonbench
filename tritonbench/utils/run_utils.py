@@ -96,7 +96,7 @@ def run_in_helion(op: str, op_args: Dict[str, str], extra_envs: Dict[str, str]):
     environ.update(extra_envs)
     cmd = [sys.executable, "benchmarks/run.py"] + op_args
     print(
-        f"[tritonbench] Running helion benchmark: " + " ".join(cmd),
+        "[tritonbench] Running helion benchmark: " + " ".join(cmd),
         flush=True,
     )
     subprocess.check_call(
@@ -303,7 +303,7 @@ def load_operator_by_args(task_args: List[str]):
 def run_one_operator(task_args: List[str], with_bwd: bool = False):
     op = load_operator_by_args(task_args)
     op.run()
-    if with_bwd and op.has_bwd() and not op.name in FWD_ONLY_OPS:
+    if with_bwd and op.has_bwd() and op.name not in FWD_ONLY_OPS:
         op_name = copy.deepcopy(op.name)
         del op
         if op_name in BWD_ARGS_OPS:

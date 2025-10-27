@@ -2,11 +2,10 @@ import argparse
 import itertools
 import math
 import os
-from typing import Callable, Generator, List, Optional, Tuple
+from typing import Callable, Generator, List, Optional
 
 import torch
 import triton
-import triton.language as tl
 
 from tritonbench.utils.triton_op import (
     BenchmarkOperator,
@@ -18,7 +17,6 @@ from tritonbench.utils.triton_op import (
 from .kernels import (
     triton_sum_kernel_1D_result_buffer_then_sum,
     triton_sum_kernel_1D_result_sum_then_buffer,
-    triton_sum_kernel_2D_result_dim_1,
     triton_sum_kernel_2D_result_dim_1_sum_then_buffer,
     triton_sum_kernel_scalar_result,
 )

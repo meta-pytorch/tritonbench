@@ -15,6 +15,10 @@ dependencies = [
 [tool.setuptools.packages.find]
 include = ["tritonbench*"]
 
+[tool.ruff]
+fix = true
+extend-select = ["W292"]
+
 [tool.ufmt]
 formatter = "ruff-api"
 sorter = "usort"

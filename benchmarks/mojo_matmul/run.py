@@ -4,14 +4,10 @@ To install modular nightly:
 pip install --pre modular --index-url https://dl.modular.com/public/nightly/python/simple/
 """
 
-import argparse
-import json
-import logging
 import os
 import sys
 
 from os.path import abspath, exists
-from typing import Dict, List
 
 
 def setup_tritonbench_cwd():
@@ -36,15 +32,13 @@ setup_tritonbench_cwd()
 from typing import Callable
 
 import max.graph as mg
-import torch
 
 from max import driver, engine
-from max.graph import DeviceRef, Graph, ops, TensorType, TensorValue
-from max.graph.type import DType, Shape, ShapeLike
+from max.graph import DeviceRef, ops, TensorType
+from max.graph.type import DType
 
 from tritonbench.operators import load_opbench_by_name
 from tritonbench.utils.parser import get_parser
-from tritonbench.utils.triton_op import register_benchmark
 
 
 def promote_mojo_tensor_to_fp32(mojo_tensor, dtype):

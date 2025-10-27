@@ -1,5 +1,5 @@
 import argparse
-from typing import Any, Callable, Generator, List, Optional
+from typing import Callable, Generator, List, Optional
 
 import torch
 from torch._dynamo.testing import rand_strided
@@ -7,7 +7,6 @@ from torch._dynamo.testing import rand_strided
 from tritonbench.utils.triton_op import (
     BenchmarkOperator,
     register_benchmark,
-    register_metric,
 )
 
 from .triton_welford import (

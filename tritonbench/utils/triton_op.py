@@ -819,8 +819,8 @@ class BenchmarkOperator(metaclass=PostInitProcessor):
                 )
             if self._input_sample_mode == "equally-spaced-k":
                 raise ValueError(
-                    f"Cannot use --input-sample-mode equally-spaced-k with multiple input IDs. "
-                    f"Either specify multiple IDs directly or use equally-spaced-k with --num-inputs."
+                    "Cannot use --input-sample-mode equally-spaced-k with multiple input IDs. "
+                    "Either specify multiple IDs directly or use equally-spaced-k with --num-inputs."
                 )
             # Validate that all IDs are within range
             invalid_ids = [

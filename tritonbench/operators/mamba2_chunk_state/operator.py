@@ -3,20 +3,16 @@ import functools
 import itertools
 import os
 import sys
-from contextlib import nullcontext
-from itertools import chain
 
-from typing import Any, Callable, Generator, List, Optional
+from typing import Any, Generator, List, Optional
 
 import torch
 
-from tritonbench.utils.input import input_filter
 from tritonbench.utils.python_utils import try_import
 
 from tritonbench.utils.triton_op import (
     BenchmarkOperator,
     BenchmarkOperatorMetrics,
-    Mode as BenchmarkMode,
     register_benchmark,
     register_metric,
     register_x_val,

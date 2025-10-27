@@ -3,7 +3,7 @@
 # pyre-strict
 import math
 from functools import lru_cache
-from typing import Any, List, Optional
+from typing import Any, Optional
 
 import torch
 import triton  # @manual=//triton:triton

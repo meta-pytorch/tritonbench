@@ -1,5 +1,5 @@
 import argparse
-from typing import Generator, List, Optional
+from typing import List, Optional
 
 import torch
 import triton

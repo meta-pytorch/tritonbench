@@ -16,7 +16,6 @@ try:
 except ImportError:
     streamk_matmul = None
 
-from tritonbench.operators.gemm import stream_k
 from tritonbench.utils.triton_op import (
     BenchmarkOperator,
     BenchmarkOperatorMetrics,

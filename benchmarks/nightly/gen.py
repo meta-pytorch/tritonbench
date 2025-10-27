@@ -59,7 +59,7 @@ def gen_run(operators: List[str], bwd: bool = False) -> Dict[str, Any]:
             cmd.append("--bwd")
         # add backends
         run_backends = list(TRITON_OPS[op].keys())
-        if _has_meaningful_baseline(op) and not BASELINE_OPS[op] in run_backends:
+        if _has_meaningful_baseline(op) and BASELINE_OPS[op] not in run_backends:
             run_backends.append(BASELINE_OPS[op])
         cmd.extend(["--only", ",".join(run_backends)])
         out[run_name] = {}

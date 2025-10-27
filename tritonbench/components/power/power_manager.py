@@ -1,5 +1,4 @@
 import csv
-import dataclasses
 import os
 import threading
 import time
@@ -14,12 +13,10 @@ from pynvml import (
     NVML_CLOCK_SM,
     NVML_FI_DEV_POWER_CURRENT_LIMIT,
     NVML_FI_DEV_POWER_INSTANT,
-    NVML_SUCCESS,
     NVML_TEMPERATURE_GPU,
     nvmlDeviceGetClock,
     nvmlDeviceGetFieldValues,
     nvmlDeviceGetHandleByIndex,
-    nvmlDeviceGetPerformanceState,
     nvmlDeviceGetTemperature,
     nvmlInit,
     nvmlShutdown,

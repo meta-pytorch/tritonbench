@@ -1,4 +1,4 @@
-from typing import Any, Callable, Generator, List
+from typing import Callable, Generator, List
 
 import torch
 import triton

@@ -107,7 +107,7 @@ def run():
     logger.info(f"[nightly] logging result json file to {result_json_file}.")
     if args.log_scuba:
         log_benchmark(aggregated_obj)
-        logger.info(f"[nightly] logging results to scuba.")
+        logger.info("[nightly] logging results to scuba.")
 
 
 if __name__ == "__main__":

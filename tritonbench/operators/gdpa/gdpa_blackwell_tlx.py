@@ -10,7 +10,7 @@ import triton.language.extra.tlx as tlx
 from triton.tools.tensor_descriptor import TensorDescriptor
 
 from .gdpa_utils import get_num_sms
-from .math import activation_string_to_int, fast_gelu_grad, gelu, gelu_grad
+from .math import activation_string_to_int, gelu, gelu_grad
 
 
 def _host_descriptor_pre_hook(nargs):

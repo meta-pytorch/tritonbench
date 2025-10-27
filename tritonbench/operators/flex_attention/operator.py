@@ -26,7 +26,6 @@ try:
 except ImportError:
     pass
 
-from tritonbench.utils.input import input_filter
 from tritonbench.utils.triton_op import (
     BenchmarkOperator,
     BenchmarkOperatorMetrics,
@@ -379,7 +378,7 @@ class Operator(BenchmarkOperator):
             )
         elif mod_type == "document_mask":
             # Document mask requires special handling with varlen function
-            print(f"[SKIP] Flash Attention v3 document_mask not implemented yet")
+            print("[SKIP] Flash Attention v3 document_mask not implemented yet")
             raise NotImplementedError(
                 "Flash Attention v3 document_mask not implemented yet"
             )

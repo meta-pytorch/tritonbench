@@ -1,19 +1,12 @@
 import argparse
-import csv
-import os
-import statistics
-from typing import Any, Callable, Generator, List, Optional
+from typing import Callable, Generator, List, Optional
 
-import numpy
 import torch
-import triton
 from torch._dynamo.testing import rand_strided, same
 
 from tritonbench.utils.triton_op import (
     BenchmarkOperator,
-    BenchmarkOperatorMetrics,
     register_benchmark,
-    register_metric,
 )
 
 from .triton_attention import (

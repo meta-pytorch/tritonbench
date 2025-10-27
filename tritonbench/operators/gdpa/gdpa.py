@@ -19,7 +19,6 @@ from functools import lru_cache
 from typing import Tuple
 
 import torch
-import torch.nn.functional as F
 
 import triton  # @manual=//triton:triton
 import triton.language as tl  # @manual=//triton:triton

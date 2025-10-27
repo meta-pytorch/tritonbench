@@ -24,7 +24,6 @@ from .blackwell_attention_utils import (
     is_blackwell,
     is_cuda,
     is_hip,
-    is_hopper,
     supports_host_descriptor,
 )
 

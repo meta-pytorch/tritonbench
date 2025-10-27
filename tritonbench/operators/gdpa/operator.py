@@ -133,7 +133,7 @@ def parse_args(args):
         "--kv_len",
         default=None,
         type=int,
-        help=f"Sequence length for K/V, if None, the tensor will be jagged and have the same length as Q",
+        help="Sequence length for K/V, if None, the tensor will be jagged and have the same length as Q",
     )
     parser.add_argument(
         "--activation",

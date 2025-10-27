@@ -1,9 +1,6 @@
 import csv
 import logging
 import os
-import signal
-import subprocess
-import time
 
 import matplotlib.pyplot as plt
 

@@ -187,7 +187,7 @@ def _is_sdpa_cudnn_attention_available():
     try:
         _sdpa_cudnn_attention(q, k, v)
         return True
-    except RuntimeError as e:
+    except RuntimeError:
         return False
 
 

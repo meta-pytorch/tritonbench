@@ -3,8 +3,6 @@ Set of common attention utils that are exclusive to Blackwell. Separated to avoi
 generic attention kernels.
 """
 
-import os
-from functools import lru_cache
 
 import torch
 import triton

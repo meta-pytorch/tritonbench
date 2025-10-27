@@ -2,7 +2,6 @@
 Utilities for listing operator details including metrics and backends in tritonbench.
 """
 
-import sys
 from dataclasses import fields
 from typing import Dict, List, Optional
 
@@ -10,7 +9,6 @@ from typing import Dict, List, Optional
 INDENT = "  "  # Base indentation unit (2 spaces)
 INDENT2 = INDENT * 2  # Double indentation (4 spaces)
 
-from tritonbench.operators_collection import list_operators_by_collection
 from tritonbench.utils.operator_utils import (
     batch_load_operators,
     get_backends_for_operator,
@@ -18,7 +16,7 @@ from tritonbench.utils.operator_utils import (
     get_overridden_metrics_for_operator,
     is_operator_loaded,
 )
-from tritonbench.utils.triton_op import BenchmarkOperatorMetrics, REGISTERED_BENCHMARKS
+from tritonbench.utils.triton_op import BenchmarkOperatorMetrics
 
 
 def get_builtin_metrics() -> List[str]:
