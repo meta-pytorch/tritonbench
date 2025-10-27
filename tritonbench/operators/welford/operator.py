@@ -4,10 +4,7 @@ from typing import Callable, Generator, List, Optional
 import torch
 from torch._dynamo.testing import rand_strided
 
-from tritonbench.utils.triton_op import (
-    BenchmarkOperator,
-    register_benchmark,
-)
+from tritonbench.utils.triton_op import BenchmarkOperator, register_benchmark
 
 from .triton_welford import (
     fused_native_layer_norm as triton_welford,

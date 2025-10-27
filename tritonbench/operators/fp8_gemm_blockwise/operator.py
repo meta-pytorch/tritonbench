@@ -42,12 +42,10 @@ if is_cuda():
 HAS_CUTLASS = False
 if is_cuda():
     try:
-
         cutlass_fp8_block = torch.ops.llama_cpp.fp8_blockwise_matmul
         HAS_CUTLASS = True
     except:
         try:
-
             cutlass_fp8_block = torch.ops.fbgemm.f8f8bf16_blockwise
             HAS_CUTLASS = True
         except:

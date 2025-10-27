@@ -4,10 +4,7 @@ from typing import Callable, Generator, List, Optional
 import torch
 from torch._dynamo.testing import rand_strided, same
 
-from tritonbench.utils.triton_op import (
-    BenchmarkOperator,
-    register_benchmark,
-)
+from tritonbench.utils.triton_op import BenchmarkOperator, register_benchmark
 
 from .triton_attention import (
     triton_attention_no_exp2 as triton_test_no_exp2,

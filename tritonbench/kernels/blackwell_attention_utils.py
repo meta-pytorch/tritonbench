@@ -3,7 +3,6 @@ Set of common attention utils that are exclusive to Blackwell. Separated to avoi
 generic attention kernels.
 """
 
-
 import torch
 import triton
 

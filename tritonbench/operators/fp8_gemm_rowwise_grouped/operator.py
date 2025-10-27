@@ -53,7 +53,6 @@ from typing import Any, Callable, Generator, List, Optional, Tuple
 import torch
 import triton
 
-
 from tritonbench.utils.triton_op import (
     BenchmarkOperator,
     BenchmarkOperatorMetrics,

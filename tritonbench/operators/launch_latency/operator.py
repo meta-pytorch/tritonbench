@@ -3,10 +3,7 @@ from torch import zeros
 from torch._inductor.utils import triton_version_uses_attrs_dict
 from triton.compiler import CompiledKernel
 
-from tritonbench.utils.triton_op import (
-    BenchmarkOperator,
-    register_benchmark,
-)
+from tritonbench.utils.triton_op import BenchmarkOperator, register_benchmark
 
 from .kernels import get_trivial_add_kernel, nop_kernel, nop_with_args_kernel
 

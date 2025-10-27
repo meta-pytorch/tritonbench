@@ -96,7 +96,6 @@ class OpTask(base_task.TaskBase):
     @base_task.run_in_worker(scoped=True)
     @staticmethod
     def _maybe_import_operator(package: str, op_name: str) -> Dict[str, Any]:
-
         from tritonbench.operators import load_opbench_by_name
 
         Operator = load_opbench_by_name(op_name)
