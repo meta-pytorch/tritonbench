@@ -17,7 +17,7 @@ include = ["tritonbench*"]
 
 [tool.ruff]
 fix = true
-extend-select = ["W292"]
+exclude = ["submodules"]
 
 [tool.ufmt]
 formatter = "ruff-api"
