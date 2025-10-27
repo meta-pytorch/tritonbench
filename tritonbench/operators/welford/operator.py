@@ -55,10 +55,66 @@ class Operator(BenchmarkOperator):
             p3, normalized_shape=(p3.shape[-1],), weight=p1, bias=p2, eps=1e-05
         )
 
+    def eager_welford(self, p1, p2, p3) -> Callable:
+        eps = 1e-05
+
+        def _broadcast(param, ref_tensor):
+            if param is None:
+                return None
+            return param.to(torch.float32).view(
+                *([1] * (ref_tensor.dim() - 1)), ref_tensor.shape[-1]
+            )
+
+        def _welford_impl() -> torch.Tensor:
+            x = p3
+            weight = p1
+            bias = p2
+
+            original_dtype = x.dtype
+            x_fp32 = x.to(torch.float32)
+            last_dim = x_fp32.shape[-1]
+
+            # Flatten leading dimensions to run the reduction as a batch of rows.
+            x_flat = x_fp32.reshape(-1, last_dim)
+
+            mean = torch.zeros(
+                x_flat.shape[0], dtype=torch.float32, device=x_fp32.device
+            )
+            m2 = torch.zeros_like(mean)
+
+            for idx in range(last_dim):
+                xi = x_flat[:, idx]
+                delta = xi - mean
+                mean = mean + delta / float(idx + 1)
+                delta2 = xi - mean
+                m2 = m2 + delta * delta2
+
+            var = m2 / float(last_dim)
+
+            mean = mean.unsqueeze(-1)
+            var = var.unsqueeze(-1)
+
+            inv_std = torch.rsqrt(var + eps)
+            normalized_flat = (x_flat - mean) * inv_std
+            normalized = normalized_flat.view_as(x_fp32)
+
+            weight_broadcast = _broadcast(weight, x_fp32)
+            bias_broadcast = _broadcast(bias, x_fp32)
+
+            if weight_broadcast is not None:
+                normalized = normalized * weight_broadcast
+            if bias_broadcast is not None:
+                normalized = normalized + bias_broadcast
+
+            return normalized.to(original_dtype)
+
+        return _welford_impl
+
     @register_benchmark()
-    def torch_compile_layer_norm(self, p1, p2, p3) -> Callable:
+    def torch_compile_welford(self, p1, p2, p3) -> Callable:
         return torch.compile(
-            self.eager_layer_norm(p1, p2, p3), mode="max-autotune-no-cudagraphs"
+            self.eager_welford(p1, p2, p3),
+            mode="max-autotune-no-cudagraphs",
         )
 
     def get_x_val(self, example_inputs) -> float:
