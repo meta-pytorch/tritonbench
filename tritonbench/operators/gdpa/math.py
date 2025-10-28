@@ -78,8 +78,13 @@ def gelu_grad(x):
 if not HAS_FAST_TANH_INSTRUCTION:
 
     @triton.jit
+    def sigmoid_approx_fp32(x):
+        exp_neg_x = fast_expf(-x)
+        return fast_dividef(1.0, 1.0 + exp_neg_x)
+
+    @triton.jit
     def tanh_approx_fp32(x):
-        return 2 * fast_dividef(1.0, 1.0 + fast_expf(-2.0 * x)) - 1.0
+        return 2 * sigmoid_approx_fp32(2 * x) - 1.0
 
 else:
 
@@ -97,15 +102,57 @@ else:
         )
         return output
 
+    @triton.jit
+    def sigmoid_approx_fp32(x):
+        output = 0.5 * tanh_approx_fp32(0.5 * x) + 0.5
+        return output
 
-@triton.jit
-def fast_gelu(x):
-    return x * 0.5 * (1 + tanh_approx_fp32(0.7978845608 * x * (1.0 + 0.044715 * x * x)))
 
+if not HAS_FAST_TANH_INSTRUCTION:
 
-@triton.jit
-def fast_gelu_grad(x):
-    tanh_out = tanh_approx_fp32(0.7978845608 * x * (1.0 + 0.044715 * x * x))
-    return 0.5 * x * (
-        (1 - tanh_out * tanh_out) * (0.7978845608 + 0.1070322243 * x * x)
-    ) + 0.5 * (1 + tanh_out)
+    @triton.jit
+    def fast_gelu(x):
+        k = 2.0 * 0.7978845608
+        x_sq = x * x
+        sigmoid_out = sigmoid_approx_fp32(x * (k + k * 0.044715 * x_sq))
+        return x * sigmoid_out, (x_sq, sigmoid_out)
+
+    @triton.jit
+    def fast_gelu_grad(x, _intermediates=None):
+        k = 2.0 * 0.7978845608
+        if _intermediates is None:
+            x_sq = x * x
+            sigmoid_out = sigmoid_approx_fp32(x * (k + k * 0.044715 * x_sq))
+        else:
+            x_sq, sigmoid_out = _intermediates
+
+        return (
+            x
+            * (
+                (sigmoid_out - sigmoid_out * sigmoid_out)
+                * (k + 2 * 0.1070322243 * x_sq)
+            )
+            + sigmoid_out
+        )
+
+else:
+
+    @triton.jit
+    def fast_gelu(x):
+        k = 0.7978845608
+        x_sq = x * x
+        tanh_out = tanh_approx_fp32(x * (k + k * 0.044715 * x_sq))
+        return x * 0.5 * (1 + tanh_out), (x_sq, tanh_out)
+
+    @triton.jit
+    def fast_gelu_grad(x, _intermediates=None):
+        k = 0.7978845608
+        if _intermediates is None:
+            x_sq = x * x
+            tanh_out = tanh_approx_fp32(x * (k + k * 0.044715 * x_sq))
+        else:
+            x_sq, tanh_out = _intermediates
+
+        return 0.5 * x * (
+            (1 - tanh_out * tanh_out) * (k + 0.1070322243 * x_sq)
+        ) + 0.5 * (1 + tanh_out)

@@ -33,14 +33,7 @@ from .gdpa_utils import (
     get_num_sms,
     is_tma_supported,
 )
-from .math import (
-    activation_string_to_int,
-    fast_gelu,
-    fast_gelu_grad,
-    gelu,
-    gelu_grad,
-    tanh_approx_fp32,
-)
+from .math import activation_string_to_int, fast_gelu, fast_gelu_grad, gelu, gelu_grad
 
 try:
     # @manual=//triton:triton
@@ -159,7 +152,7 @@ def _gdpa_fwd_inner_ws(
             # activation = gelu TypeError("cannot convert JITFunction(ads_mkl.ops.triton.math:gelu) of type <class 'triton.runtime.jit.JITFunction'> to tensor")
             p = gelu(qk)
         elif activation_enum_int == 2:
-            p = fast_gelu(qk)
+            p, _ = fast_gelu(qk)
         else:
             # rest of the enums are not supported yet
             p = qk
@@ -839,8 +832,7 @@ def _gdpa_bwd_dkdv(
         elif activation_enum_int == 1:
             ppT = gelu(pT)
         elif activation_enum_int == 2:
-            tanh_out = tanh_approx_fp32(0.7978845608 * pT * (1 + 0.044715 * pT * pT))
-            ppT = 0.5 * pT * (1 + tanh_out)
+            ppT, _intermediates = fast_gelu(pT)
         else:
             # rest of the enums are not supported yet
             ppT = pT
@@ -855,12 +847,7 @@ def _gdpa_bwd_dkdv(
             # activation = gelu TypeError("cannot convert JITFunction(ads_mkl.ops.triton.math:gelu) of type <class 'triton.runtime.jit.JITFunction'> to tensor")
             pT = gelu_grad(pT)
         elif activation_enum_int == 2:
-            pT = (
-                0.5
-                * pT
-                * (1 - tanh_out * tanh_out)
-                * (0.7978845608 + 0.1070322243 * pT * pT)
-            ) + 0.5 * (1 + tanh_out)
+            pT = fast_gelu_grad(pT, _intermediates)
         else:
             pT = 1
         pT *= qk_scale
