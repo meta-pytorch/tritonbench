@@ -7,6 +7,7 @@ from typing import List, Optional
 import torch
 import triton
 from torch._inductor.runtime.benchmarking import benchmarker
+from tritonbench.utils.constants import DEFAULT_N_REP, DEFAULT_N_WARMUP
 
 from .power import do_bench_power
 
@@ -298,7 +299,7 @@ def _do_bench_profiler(
 
     # Calculate number of iterations based on target rep time
     if estimate_ms == 0:
-        n_repeat = 100  # Default if function is very fast
+        n_repeat = DEFAULT_N_REP  # Default if function is very fast
     else:
         n_repeat = max(1, int(rep / estimate_ms))
 
@@ -321,7 +322,9 @@ def _do_bench_profiler(
         torch.cuda.synchronize()
     else:
         # Regular mode warmup
-        n_warmup = max(1, int(warmup / estimate_ms)) if estimate_ms > 0 else 25
+        n_warmup = (
+            max(1, int(warmup / estimate_ms)) if estimate_ms > 0 else DEFAULT_N_WARMUP
+        )
 
         torch.cuda.synchronize()
         for _ in range(n_warmup):

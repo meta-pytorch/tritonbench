@@ -2141,9 +2141,12 @@ class BenchmarkOperator(metaclass=PostInitProcessor):
         kineto_output_dir.mkdir(parents=True, exist_ok=True)
         return do_bench_kineto(
             fn=fn,
+            warmup=self.tb_args.warmup,
+            rep=self.tb_args.rep,
             grad_to_none=self.get_grad_to_none(self.example_inputs),
             output_dir=kineto_output_dir,
             use_cuda_graphs=self.use_cuda_graphs,
+            skip_cache_clearing=self.tb_args.skip_cache_clearing,
         )
 
     def compile_time(
