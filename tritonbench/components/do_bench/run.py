@@ -506,7 +506,13 @@ def do_bench_wrapper(
         elif repcnt:
             # benchmark using repcnt
             return Latency(
-                times=do_bench_power(fn, repcnt=repcnt, grad_to_none=grad_to_none),
+                times=do_bench_power(
+                    fn,
+                    repcnt=repcnt,
+                    grad_to_none=grad_to_none,
+                    skip_cache_clearing=skip_cache_clearing,
+                    use_cuda_graphs=use_cuda_graphs,
+                ),
                 remove_outliers=False,
             )
         else:
