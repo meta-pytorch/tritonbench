@@ -45,6 +45,10 @@ except Exception as e:
     HAS_TMA = False
     logger.warning(f"Failed to import TMA: {e}")
 
+HAS_CUDA_129 = (
+    torch.cuda.is_available() and torch.version.cuda and torch.version.cuda >= "12.9"
+)
+
 
 def parse_args(args):
     parser = argparse.ArgumentParser(description="TritonBench fp8_gemm")
@@ -73,6 +77,10 @@ def get_scaling_recipe(scaling_recipe: str) -> int:
         return ScalingType.TensorWise
     elif scaling_recipe == "RowWise":
         return ScalingType.RowWise
+    elif scaling_recipe == "BlockWise1x128":
+        return ScalingType.BlockWise1x128
+    elif scaling_recipe == "BlockWise128x128":
+        return ScalingType.BlockWise128x128
     else:
         raise ValueError(f"Invalid scaling recipe: {scaling_recipe}")
 
@@ -89,7 +97,7 @@ def get_scale(
         # For tensor-wise scaling, kernel requires a float32 scale tensor
         if custom_scale:
             return torch.tensor(custom_scale, dtype=torch.float32, device=x.device)
-        scale = torch.finfo(torch.float8_e4m3fn).max / x.abs().max()
+        scale = (torch.finfo(torch.float8_e4m3fn).max / x.abs().max()).reciprocal()
         x *= scale
         return x, scale.to(torch.float32)
 
@@ -100,22 +108,46 @@ def get_scale(
             scale = (
                 torch.finfo(torch.float8_e4m3fn).max
                 / x.abs().max(dim=0, keepdim=True).values
-            )
+            ).reciprocal()
         else:  # scale_a.shape should be [M, 1]
             scale = (
                 torch.finfo(torch.float8_e4m3fn).max
                 / x.abs().max(dim=1, keepdim=True).values
-            )
+            ).reciprocal()
         x = x.mul(scale)
         return x, scale.to(
             torch.float32
         )  # For row-wise scaling, kernel requires a float32 scale tensor
+
+    def _get_scale_per_block(
+        x: torch.Tensor, block_outer: int, block_inner: int
+    ) -> (torch.Tensor, torch.Tensor):
+        x = x.unflatten(1, (-1, block_inner)).unflatten(0, (-1, block_outer))
+        amax = x.abs().amax(dim=[1, 3], keepdim=True).float()
+        scale = (
+            torch.finfo(torch.float8_e4m3fn).max / amax
+        ).reciprocal()  # keeps scale small enough such that scaling doesn't cause inf values
+        x = (
+            x.mul(scale).flatten(2, 3).flatten(0, 1)
+        )  # scale input up to dynamic range of float8_e4m3fn
+        scale = scale.flatten(2, 3).flatten(0, 1)
+
+        if block_outer == 1 and block_inner == 128:
+            scale = (
+                scale.t().contiguous().t()
+            )  # 1x128 blocks need scales to be outer-dim-major
+
+        return x, scale.to(torch.float32)
 
     match scaling_recipe:
         case ScalingType.TensorWise:
             return _get_scale_per_tensor(x, custom_scale=custom_scale)
         case ScalingType.RowWise:
             return _get_scale_per_row(x, transpose=transpose)
+        case ScalingType.BlockWise1x128:
+            return _get_scale_per_block(x, 1, 128)
+        case ScalingType.BlockWise128x128:
+            return _get_scale_per_block(x, 128, 128)
         case _:
             raise AssertionError(f"Unsupported scaling type {scaling_recipe}")
 
@@ -142,6 +174,19 @@ class Operator(BenchmarkOperator):
             )
         self.scaling_recipe_a = get_scaling_recipe(scaling_recipe_a)
         self.scaling_recipe_b = get_scaling_recipe(scaling_recipe_b)
+
+        blockwise_scaling_types = [
+            ScalingType.BlockWise1x128,
+            ScalingType.BlockWise128x128,
+        ]
+        self.contains_blockwise_scaling = (
+            self.scaling_recipe_a in blockwise_scaling_types
+            or self.scaling_recipe_b in blockwise_scaling_types
+        )
+
+        self.use_fast_accum = (
+            False if self.contains_blockwise_scaling else True
+        )  # BlockWise scaled_gemm does not support use_fast_accum=True
 
     def _get_dtype(self):
         if (
@@ -205,12 +250,16 @@ class Operator(BenchmarkOperator):
 
     @register_benchmark(baseline=True)
     def torch_fp8_gemm(self, a, b, scale_a, scale_b):
+        assert (
+            not self.contains_blockwise_scaling or HAS_CUDA_129
+        ), "BlockWise scaling variants for scaled_gemm require CUDA 12.9+"
+
         return lambda: torch._scaled_mm(
             a,
             b.t(),
             scale_a,
             scale_b.t(),
-            use_fast_accum=True,
+            use_fast_accum=self.use_fast_accum,
             out_dtype=self._get_dtype(),
         )
 
@@ -227,7 +276,7 @@ class Operator(BenchmarkOperator):
                 b.t(),
                 scale_a,
                 scale_b.t(),
-                use_fast_accum=True,
+                use_fast_accum=self.use_fast_accum,
                 out_dtype=self._get_dtype(),
             )
             compiled = torch.compile(f, dynamic=False)
