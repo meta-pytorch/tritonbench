@@ -95,6 +95,7 @@ BASELINE_BENCHMARKS: Dict[str, str] = {}
 BASELINE_SKIP_METRICS = {
     "speedup",
     "accuracy",
+    "determinism",
     "mem_footprint_compression_ratio",
     "nsys_gpu_speedup",
 }
@@ -115,6 +116,19 @@ class Mode(Enum):
     BWD = "bwd"
     FWD_BWD = "fwd_bwd"
     FWD_NO_GRAD = "fwd_no_grad"
+
+
+class DeterminismResult(Enum):
+    """Result of determinism checks.
+
+    PASS (deterministic): Bitwise identical across 3 runs
+    NON_DETERMINISTIC: Not bitwise identical but within accuracy tolerance
+    FAIL: Fails accuracy tolerance check
+    """
+
+    PASS = "pass"
+    NON_DETERMINISTIC = "non_deterministic"
+    FAIL = "fail"
 
 
 class TimerContext:
@@ -227,8 +241,10 @@ class BenchmarkOperatorMetrics:
     tflops: Optional[float] = None
     # speedup over baseline
     speedup: Optional[float] = None
-    # accuracy over baseline
+    # accuracy over baseline (only for baseline comparison)
     accuracy: Optional[bool] = None
+    # determinism check result (independent of accuracy)
+    determinism: Optional[DeterminismResult] = None
     # wall time
     walltime: Optional[float] = None
     # compile time
@@ -441,6 +457,8 @@ class BenchmarkOperatorResult:
                 )
             elif isinstance(table_cell, bool):
                 return 1.0 if table_cell else 0.0
+            elif isinstance(table_cell, DeterminismResult):
+                return table_cell.value
             elif isinstance(table_cell, str):
                 if ";" in table_cell:
                     logger.warning(
@@ -1510,17 +1528,91 @@ class BenchmarkOperator(metaclass=PostInitProcessor):
 
         return True
 
+    def _check_determinism(self, fn: Callable, num_runs: int) -> DeterminismResult:
+        """Check determinism by running the same function multiple times.
+
+        Three possible results:
+        - PASS (deterministic): Bitwise identical across all runs
+        - NON_DETERMINISTIC: Not bitwise identical but within accuracy tolerance
+        - FAIL: Fails accuracy tolerance check
+
+        Args:
+            fn: The function to test for determinism
+            num_runs: Number of times to run the function
+
+        Returns:
+            DeterminismResult indicating the determinism status
+        """
+        try:
+            logger.info(f"Running determinism check: {num_runs} runs")
+
+            # Capture the first output
+            first_output = fn()
+            is_non_deterministic = False
+
+            # Compare each subsequent run against the first
+            for run_idx in range(1, num_runs):
+                current_output = fn()
+
+                # bitwise comparison
+                if torch.equal(first_output, current_output):
+                    # Bitwise identical, continue to next run
+                    continue
+
+                try:
+                    torch.testing.assert_close(
+                        first_output,
+                        current_output,
+                        rtol=self.tb_args.rtol,
+                        atol=self.tb_args.atol,
+                    )
+                    # Within tolerance but not bitwise identical
+                    is_non_deterministic = True
+                    logger.warning(
+                        f"Determinism check on run {run_idx + 1}/{num_runs}: "
+                        f"Output differs bitwise but within accuracy tolerance"
+                    )
+                except AssertionError:
+                    # Outside tolerance - determinism check failed
+                    logger.error(
+                        f"Determinism check failed on run {run_idx + 1}/{num_runs}: "
+                        f"Output differs beyond accuracy tolerance"
+                    )
+                    return DeterminismResult.FAIL
+
+            if is_non_deterministic:
+                logger.warning(
+                    f"Determinism check: operation is non-deterministic but within accuracy tolerance"
+                )
+                return DeterminismResult.NON_DETERMINISTIC
+            else:
+                logger.info(
+                    f"Determinism check passed: all {num_runs} runs produced bitwise identical results"
+                )
+                return DeterminismResult.PASS
+
+        except Exception as e:
+            logger.error(f"Exception during determinism check: {e}")
+            return DeterminismResult.FAIL
+
     def accuracy(self, fn: Callable, baseline_fn: Callable) -> bool:
         try:
             if self.mode == Mode.FWD:
                 output = fn()
                 baseline_output = baseline_fn()
-                torch.testing.assert_close(
-                    output,
-                    baseline_output,
-                    rtol=self.tb_args.rtol,
-                    atol=self.tb_args.atol,
-                )
+                if self.tb_args.bitwise:
+                    # Bitwise comparison: exact equality, no tolerance
+                    if not torch.equal(output, baseline_output):
+                        raise AssertionError(
+                            "Bitwise comparison failed: outputs are not exactly equal"
+                        )
+                else:
+                    torch.testing.assert_close(
+                        output,
+                        baseline_output,
+                        rtol=self.tb_args.rtol,
+                        atol=self.tb_args.atol,
+                    )
             elif self.mode == Mode.BWD:
                 # Get tensors with gradients from both implementations
                 grad_tensors = fn()
@@ -1551,12 +1643,19 @@ class BenchmarkOperator(metaclass=PostInitProcessor):
                     )
 
                     # Check forward outputs match
-                    torch.testing.assert_close(
-                        fwd_output,
-                        baseline_fwd_output,
-                        rtol=self.tb_args.rtol,
-                        atol=self.tb_args.atol,
-                    )
+                    if self.tb_args.bitwise:
+                        # Bitwise comparison: exact equality, no tolerance
+                        if not torch.equal(fwd_output, baseline_fwd_output):
+                            raise AssertionError(
+                                "Bitwise comparison failed: forward outputs are not exactly equal"
+                            )
+                    else:
+                        torch.testing.assert_close(
+                            fwd_output,
+                            baseline_fwd_output,
+                            rtol=self.tb_args.rtol,
+                            atol=self.tb_args.atol,
+                        )
 
                     # Check backward gradients using helper
                     if not self._check_gradients(impl_grads, baseline_grads, "FWD_BWD"):
@@ -1570,12 +1669,19 @@ class BenchmarkOperator(metaclass=PostInitProcessor):
             else:  # FWD_NO_GRAD
                 output = fn()
                 baseline_output = baseline_fn()
-                torch.testing.assert_close(
-                    output,
-                    baseline_output,
-                    rtol=self.tb_args.rtol,
-                    atol=self.tb_args.atol,
-                )
+                if self.tb_args.bitwise:
+                    # Bitwise comparison: exact equality, no tolerance
+                    if not torch.equal(output, baseline_output):
+                        raise AssertionError(
+                            "Bitwise comparison failed: outputs are not exactly equal"
+                        )
+                else:
+                    torch.testing.assert_close(
+                        output,
+                        baseline_output,
+                        rtol=self.tb_args.rtol,
+                        atol=self.tb_args.atol,
+                    )
             return True
         except Exception as e:
             logger.warning(f"Exception during accuracy check: {e}")
@@ -1671,6 +1777,8 @@ class BenchmarkOperator(metaclass=PostInitProcessor):
                     if self.baseline_metrics and self.baseline_metrics.error_msg
                     else None
                 )
+            if not baseline and "determinism" in self.required_metrics:
+                metrics.determinism = self._check_determinism(fn, num_runs=3)
             if not baseline and "accuracy" in self.required_metrics:
                 metrics.accuracy = (
                     self.accuracy(fn, self.baseline_fn) if self.baseline_fn else None

@@ -64,7 +64,7 @@ def execute_kernel_simple_fused(x, max_seqlen, sum_then_buffer):
             MAX_SEQLEN=max_seqlen,
         )
 
-    return None
+    return kernel_output
 
 
 def execute_kernel_variable_length_loop(x, sum_then_buffer):

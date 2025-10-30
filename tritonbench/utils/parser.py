@@ -304,6 +304,12 @@ def get_parser(args=None):
         default=None,
         help="Absolute tolerance for accuracy metric.",
     )
+    parser.add_argument(
+        "--bitwise",
+        action="store_true",
+        default=False,
+        help="Enable bitwise accuracy comparison (atol=0, rtol=0). When enabled, results must match exactly bit-for-bit.",
+    )
 
     # A/B Testing parameters
     parser.add_argument(
