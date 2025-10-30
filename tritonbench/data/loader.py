@@ -5,7 +5,14 @@ from typing import Any
 
 from tritonbench.utils.env_utils import is_fbcode
 
-SUPPORTED_INPUT_OPS = ["highway_self_gating", "grouped_gemm"]
+SUPPORTED_INPUT_OPS = [
+    "highway_self_gating",
+    "grouped_gemm",
+    "addmm",
+    "bmm",
+    "gemm",
+    "jagged_dense_dense_sum",
+]
 
 INPUT_CONFIG_DIR = Path(__file__).parent.joinpath("input_configs")
 INTERNAL_INPUT_CONFIG_DIR = (

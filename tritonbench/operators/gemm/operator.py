@@ -556,6 +556,7 @@ class Operator(BenchmarkOperator):
         return (torch.randn(*args, **kwargs) + 1) / scale
 
     def get_input_iter(self) -> Generator:
+        requires_grad = self.requires_grad
         for shape_id, shape in enumerate(self.shapes):
             if len(shape) == 4:
                 m, n, k, bias = shape
@@ -564,47 +565,17 @@ class Operator(BenchmarkOperator):
                 bias = None
             else:
                 raise ValueError(f"Invalid shape {shape}")
-            if hasattr(self, "dtypes") and self.dtypes:
-                self.tb_args.precision = "bypass"
-                self.dtype = PRECISION_DTYPE_MAPPING[self.dtypes[shape_id]]
-            requires_grad = self.mode in (Mode.BWD, Mode.FWD_BWD)
-            if hasattr(self, "strides"):
-                strides = self.strides[shape_id]
-                assert (
-                    len(strides) == 2
-                ), f"Can only have 2 strides from input, get: {strides}"
-                assert (
-                    len(strides[0]) == 2 and len(strides[1]) == 2
-                ), f"Can only deal with 2D strides, get: {strides}"
-                # The shape might from a tensor view, which is different from the original shape
-                # Try to infer the original shape from both shape and strides
-                actual_m = max(m, strides[0][1])
-                actual_k = max(k, strides[0][0], strides[1][1])
-                actual_n = max(n, strides[1][0])
-                a = self._scaled_randn(
-                    (actual_m, actual_k), scale=k, device=self.device, dtype=self.dtype
-                ).requires_grad_(requires_grad)
-                w = self._scaled_randn(
-                    (actual_k, actual_n), scale=k, device=self.device, dtype=self.dtype
-                ).requires_grad_(requires_grad)
-                a = a.as_strided(size=[m, k], stride=strides[0]).requires_grad_(
-                    requires_grad
-                )
-                w = w.as_strided(size=[k, n], stride=strides[1]).requires_grad_(
-                    requires_grad
-                )
-            else:
-                a = self._scaled_randn(
-                    (m, k), scale=k, device=self.device, dtype=self.dtype
-                ).requires_grad_(requires_grad)
-                w = self._scaled_randn(
-                    (k, n), scale=k, device=self.device, dtype=self.dtype
-                ).requires_grad_(requires_grad)
-                # Convert inputs to column-major if layout is "n" (non-transposed)
-                if self.layout[0] == "n":
-                    a = a.T.contiguous().T.requires_grad_(requires_grad)
-                if self.layout[1] == "n":
-                    w = w.T.contiguous().T.requires_grad_(requires_grad)
+            a = self._scaled_randn(
+                (m, k), scale=k, device=self.device, dtype=self.dtype
+            ).requires_grad_(requires_grad)
+            w = self._scaled_randn(
+                (k, n), scale=k, device=self.device, dtype=self.dtype
+            ).requires_grad_(requires_grad)
+            # Convert inputs to column-major if layout is "n" (non-transposed)
+            if self.layout[0] == "n":
+                a = a.T.contiguous().T.requires_grad_(requires_grad)
+            if self.layout[1] == "n":
+                w = w.T.contiguous().T.requires_grad_(requires_grad)
             if not bias == None:
                 bias = torch.randn(
                     (bias), device=self.device, dtype=self.dtype

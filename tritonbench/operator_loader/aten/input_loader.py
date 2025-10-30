@@ -172,6 +172,8 @@ class OperatorInputLoader:
             obj = json.load(f)
 
         for operator in obj:
+            if operator == "metadata":
+                continue
             op_inps = Counter()
             for inputs in obj[operator]:
                 cnt = inputs["count"]

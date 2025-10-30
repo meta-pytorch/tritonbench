@@ -106,6 +106,7 @@ PRECISION_DTYPE_MAPPING = {
     "tf32": torch.float32,
     "fp16": torch.float16,
     "bf16": torch.bfloat16,
+    "float": torch.float32,
 }
 _RANGE_NAME = "tritonbench_range"
 
