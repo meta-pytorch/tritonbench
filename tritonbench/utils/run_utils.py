@@ -204,7 +204,7 @@ def _run(args: argparse.Namespace, extra_args: List[str]) -> BenchmarkOperatorRe
     finally:
         metrics = opbench.output
         if is_fbcode() and args.log_scuba:
-            from tritonbench.fb.utils import log_benchmark  # @manual
+            from .fb.utils import log_benchmark  # @manual
 
             kwargs = {
                 "metrics": metrics,
