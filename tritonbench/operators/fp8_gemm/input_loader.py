@@ -15,14 +15,14 @@ Expected op_inputs format:
 }
 """
 
-from typing import Callable
+from typing import Any, Callable
 
 from tritonbench.operator_loader.aten.input_loader import OperatorInputLoader
 
 
 class InputLoader(OperatorInputLoader):
-    def __init__(self, tritonbench_op: str, op_name: str, json_file_path: str):
-        super().__init__(op_name, json_file_path)
+    def __init__(self, tritonbench_op: str, input_config: Any):
+        super().__init__(tritonbench_op.name, input_config)
         self.op = tritonbench_op
 
     def get_input_iter(

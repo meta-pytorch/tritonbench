@@ -5,6 +5,8 @@ from typing import Any, Callable, Generator, List, Optional, Tuple
 import torch
 import triton
 
+from tritonbench.data import get_input_loader
+
 from tritonbench.utils.jagged_utils import (
     ABSOLUTE_TOLERANCE,
     generate_input_vals,
@@ -208,9 +210,7 @@ class Operator(BenchmarkOperator):
                 RANDOM_CHOICE_MARGIN=RANDOM_CHOICE_MARGIN,
             )
         else:
-            from tritonbench.data.fb.input_loader import get_input_loader_jagged
-
-            loader = get_input_loader_jagged(self)
+            loader = get_input_loader(self, loader="jagged")
             for jagged_values, jagged_offsets, dense_0, _ in loader():
                 nested_tensor = jagged_to_nested_tensor(jagged_values, jagged_offsets)
                 # Yueming: in the future, if we integrate more input shapes for other jagged operators,

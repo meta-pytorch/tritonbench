@@ -3,7 +3,6 @@ Load aten inputs from serialized txt files.
 """
 
 import functools
-import json
 import logging
 import math
 from collections import Counter, defaultdict
@@ -37,8 +36,6 @@ dtype_abbrs = {
 }
 
 dtype_abbrs_parsing = {value: key for key, value in dtype_abbrs.items()}
-
-from tritonbench.data import INPUT_CONFIG_DIR
 
 
 def truncate_inp(arg):
@@ -164,18 +161,15 @@ def deserialize_args(inps):
 
 
 class OperatorInputLoader:
-    def __init__(self, op_name: str, json_file_path: str):
+    def __init__(self, op_name: str, input_config: Any):
         self.op_name = op_name
         self.operator_db = defaultdict(Counter)
 
-        with open(json_file_path, "r") as f:
-            obj = json.load(f)
-
-        for operator in obj:
+        for operator in input_config:
             if operator == "metadata":
                 continue
             op_inps = Counter()
-            for inputs in obj[operator]:
+            for inputs in input_config[operator]:
                 cnt = inputs["count"]
                 inps = inputs["inputs"]
                 op_inps[inps] += cnt
@@ -185,7 +179,9 @@ class OperatorInputLoader:
                     "Embedding inputs not yet implemented, input data cannot be randomized"
                 )
         if self.op_name not in self.operator_db:
-            raise RuntimeError(f"Could not find {self.op_name} in {json_file_path}.")
+            raise RuntimeError(
+                f"Could not find {self.op_name} in {list(input_config.keys())}."
+            )
 
     def get_input_iter(
         self,
@@ -225,10 +221,3 @@ class OperatorInputLoader:
         for operator, counter_dict in other.operator_db.items():
             for inps, cnt in counter_dict.items():
                 self.operator_db[operator][inps] += cnt
-
-
-def get_input_iter(tritonbench_op: Any, op: str, input: str) -> Generator:
-    aten_op_name = tritonbench_op.aten_op_name
-    input_file_path = INPUT_CONFIG_DIR.joinpath(input)
-    operator_inputs_loader = OperatorInputLoader(aten_op_name, input_file_path)
-    return operator_inputs_loader.get_input_iter()

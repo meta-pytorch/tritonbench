@@ -34,7 +34,7 @@ from tritonbench.components.do_bench import do_bench_wrapper, Latency
 from tritonbench.components.export import export_data
 
 from tritonbench.components.power import PowerManagerTask
-from tritonbench.data import SUPPORTED_INPUT_OPS
+from tritonbench.data import get_input_loader
 from tritonbench.utils.constants import (
     DEFAULT_POWER_REPCNT,
     DEFAULT_QUANTILES,
@@ -808,22 +808,7 @@ class BenchmarkOperator(metaclass=PostInitProcessor):
     # Run the post initialization
     def __post__init__(self):
         if self.tb_args.input_loader:
-            if (
-                is_fbcode()
-                and not hasattr(self, "aten_op_name")
-                and self.name not in SUPPORTED_INPUT_OPS
-            ):
-                from tritonbench.data.fb.input_loader import get_input_loader
-
-                self.get_input_iter = get_input_loader(
-                    self, self.name, self.tb_args.input_loader
-                )
-            else:
-                from tritonbench.data import get_input_loader
-
-                self.get_input_iter = get_input_loader(
-                    self, self.name, self.tb_args.input_loader
-                )
+            self.get_input_iter = get_input_loader(self, self.tb_args.input_loader)
         # Count total available inputs directly
         self._available_num_inputs = sum(1 for _ in self.get_input_iter())
 
