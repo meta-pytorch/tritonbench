@@ -16,7 +16,6 @@ try:
 except ImportError:
     streamk_matmul = None
 
-from tritonbench.operators.gemm import stream_k
 from tritonbench.utils.triton_op import (
     BenchmarkOperator,
     BenchmarkOperatorMetrics,
@@ -28,53 +27,56 @@ from tritonbench.utils.triton_op import (
 from .data_io import parse_args
 
 
+# Shape encoding information: (M, K, N, BIAS_1D_Y)
 BUILDIN_SHAPES = [
-    (20120, 1536, 512),
-    (34579, 1536, 512),
-    (34839, 1536, 512),
-    (35561, 1536, 512),
-    (35916, 1536, 512),
-    (19735, 1536, 512),
-    (34533, 1536, 512),
-    (35791, 1536, 512),
-    (35844, 1536, 512),
-    (20116, 1536, 512),
-    (33887, 1536, 512),
-    (20203, 1536, 512),
-    (33961, 1536, 512),
-    (19747, 1536, 512),
-    (34181, 1536, 512),
-    (35541, 1536, 512),
-    (36032, 1536, 512),
-    (15168, 1536, 512),
-    (35249, 1536, 512),
-    (33894, 1536, 512),
-    (20067, 1536, 512),
-    (27456, 1536, 512),
-    (19410, 1536, 512),
-    (35884, 1536, 512),
-    (35917, 1536, 512),
-    (19632, 1536, 512),
-    (35656, 1536, 512),
-    (35405, 1536, 512),
-    (35503, 1536, 512),
-    (35504, 1536, 512),
-    (35605, 1536, 512),
-    (34238, 1536, 512),
-    (33660, 1536, 512),
-    (35410, 1536, 512),
-    (20211, 1536, 512),
-    (34308, 1536, 512),
-    (34516, 1536, 512),
-    (20224, 1536, 512),
-    (35678, 1536, 512),
-    (35380, 1536, 512),
-    (35901, 1536, 512),
-    (20068, 1536, 512),
+    (20120, 1536, 512, False),
+    (34579, 1536, 512, False),
+    (34839, 1536, 512, False),
+    (35561, 1536, 512, False),
+    (35916, 1536, 512, False),
+    (19735, 1536, 512, False),
+    (34533, 1536, 512, False),
+    (35791, 1536, 512, False),
+    (35844, 1536, 512, False),
+    (20116, 1536, 512, False),
+    (33887, 1536, 512, False),
+    (20203, 1536, 512, False),
+    (33961, 1536, 512, False),
+    (19747, 1536, 512, False),
+    (34181, 1536, 512, False),
+    (35541, 1536, 512, False),
+    (36032, 1536, 512, False),
+    (15168, 1536, 512, False),
+    (35249, 1536, 512, False),
+    (33894, 1536, 512, False),
+    (20067, 1536, 512, False),
+    (27456, 1536, 512, False),
+    (19410, 1536, 512, False),
+    (35884, 1536, 512, False),
+    (35917, 1536, 512, False),
+    (19632, 1536, 512, False),
+    (35656, 1536, 512, False),
+    (35405, 1536, 512, False),
+    (35503, 1536, 512, False),
+    (35504, 1536, 512, False),
+    (35605, 1536, 512, False),
+    (34238, 1536, 512, False),
+    (33660, 1536, 512, False),
+    (35410, 1536, 512, False),
+    (20211, 1536, 512, False),
+    (34308, 1536, 512, False),
+    (34516, 1536, 512, False),
+    (20224, 1536, 512, False),
+    (35678, 1536, 512, False),
+    (35380, 1536, 512, False),
+    (35901, 1536, 512, False),
+    (20068, 1536, 512, False),
 ]
 
-# M=13, K=2^6..2^25, N=2
-LARGE_K_SHAPES = list(itertools.product([13], [2**i for i in range(6, 26)], [2]))
+# M=13, K=2^6..2^25, N=2, BIAS_1D_Y=False
+LARGE_K_SHAPES = list(
+    itertools.product([13], [2**i for i in range(6, 26)], [2], [False])
+)
 
 
 class Operator(BenchmarkOperator):
@@ -86,8 +88,10 @@ class Operator(BenchmarkOperator):
     ):
         super().__init__(tb_args, extra_args)
         addmm_args = parse_args(self.extra_args)
-        if addmm_args.m and addmm_args.n and addmm_args.k:
-            self.shapes = [(addmm_args.m, addmm_args.k, addmm_args.n)]
+        if addmm_args.m and addmm_args.n and addmm_args.k and addmm_args.bias_1D_y:
+            self.shapes = [
+                (addmm_args.m, addmm_args.k, addmm_args.n, addmm_args.bias_1D_y)
+            ]
         elif addmm_args.large_k_shapes:
             self.shapes = LARGE_K_SHAPES
         else:
@@ -166,10 +170,15 @@ class Operator(BenchmarkOperator):
 
     def get_input_iter(self) -> Generator:
         for _shape_id, shape in enumerate(self.shapes):
-            m, k, n = shape
-            a = torch.randn(
-                (m, n), device=self.device, dtype=self.dtype
-            ).requires_grad_(self.requires_grad)
+            m, k, n, bias_1D_y = shape
+            if bias_1D_y:
+                a = torch.randn(n, device=self.device, dtype=self.dtype).requires_grad_(
+                    self.requires_grad
+                )
+            else:
+                a = torch.randn(
+                    (m, n), device=self.device, dtype=self.dtype
+                ).requires_grad_(self.requires_grad)
             mat1 = torch.randn(
                 (m, k), device=self.device, dtype=self.dtype
             ).requires_grad_(self.requires_grad)
