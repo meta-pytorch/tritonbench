@@ -5,6 +5,7 @@ from typing import Any, Callable, Generator, List, Optional, Tuple
 import torch
 import torch._inductor.config as inductor_config
 import triton
+from tritonbench.utils.env_utils import is_fbcode
 
 try:
     from hammer.ops.triton.triton_hstu_linear import triton_addmm
@@ -25,6 +26,11 @@ from tritonbench.utils.triton_op import (
 )
 
 from .data_io import parse_args
+
+if is_fbcode():
+    from tritonbench.utils.fb.addmm_prod import get_prod_shapes
+else:
+    get_prod_shapes = lambda x: None
 
 
 # Shape encoding information: (M, K, N, BIAS_1D_Y)
@@ -88,7 +94,10 @@ class Operator(BenchmarkOperator):
     ):
         super().__init__(tb_args, extra_args)
         addmm_args = parse_args(self.extra_args)
-        if addmm_args.m and addmm_args.n and addmm_args.k and addmm_args.bias_1D_y:
+        prod_shapes = get_prod_shapes(addmm_args.config)
+        if prod_shapes:
+            self.shapes = prod_shapes
+        elif addmm_args.m and addmm_args.n and addmm_args.k and addmm_args.bias_1D_y:
             self.shapes = [
                 (addmm_args.m, addmm_args.k, addmm_args.n, addmm_args.bias_1D_y)
             ]
