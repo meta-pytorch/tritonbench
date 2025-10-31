@@ -363,8 +363,11 @@ def run_in_task(
         sys.exit(1)
 
 
-def setup_output_dir(bm_name: str):
+def setup_output_dir(bm_name: str, ci: bool = False):
     current_timestamp = datetime.fromtimestamp(time.time()).strftime("%Y%m%d%H%M%S")
     output_dir = BENCHMARKS_OUTPUT_DIR.joinpath(bm_name, f"run-{current_timestamp}")
     Path.mkdir(output_dir, parents=True, exist_ok=True)
+    # set writable permission for all users (used by the ci env)
+    if ci:
+        output_dir.chmod(0o777)
     return current_timestamp, output_dir.absolute()

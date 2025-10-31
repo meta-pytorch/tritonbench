@@ -119,7 +119,7 @@ def main() -> None:
     from tritonbench.utils.run_utils import run_in_task, setup_output_dir
 
     output_files = []
-    run_timestamp, output_dir = setup_output_dir("compile_time")
+    run_timestamp, output_dir = setup_output_dir("compile_time", ci=args.ci)
     op_args_list = {}
     if args.op:
         op_list = [args.op]

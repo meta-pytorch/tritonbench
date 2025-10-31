@@ -73,7 +73,7 @@ def run():
     from tritonbench.utils.run_utils import run_in_task, setup_output_dir
     from tritonbench.utils.scuba_utils import decorate_benchmark_data, log_benchmark
 
-    run_timestamp, output_dir = setup_output_dir("nightly")
+    run_timestamp, output_dir = setup_output_dir("nightly", ci=args.ci)
     # Run each operator
     output_files = []
     operator_benchmarks = get_operator_benchmarks()
