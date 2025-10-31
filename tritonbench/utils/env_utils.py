@@ -72,6 +72,10 @@ def is_hip_mi300():
     return is_hip() and target.arch == "gfx942"
 
 
+def is_b200():
+    return is_cuda() and get_nvidia_gpu_model() == "NVIDIA B200"
+
+
 def supports_tma():
     return is_cuda() and torch.cuda.get_device_capability()[0] >= 9
 

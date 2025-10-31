@@ -9,6 +9,7 @@ import os
 from typing import Callable, Optional, Tuple
 
 import torch
+from tritonbench.utils.env_utils import is_b200
 
 from tritonbench.utils.path_utils import add_ld_library_path
 
@@ -575,7 +576,7 @@ class Operator(BenchmarkOperator):
             cache_logical_dtype_int=1,  # FP8 = 1
         )
 
-    @register_benchmark(enabled=HAS_FLASH_CUTE)
+    @register_benchmark(enabled=HAS_FLASH_CUTE and is_b200())
     def flash_cute_dsl(
         self,
         q: torch.Tensor,

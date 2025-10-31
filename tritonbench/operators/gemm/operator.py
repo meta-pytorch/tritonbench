@@ -35,7 +35,7 @@ with try_import("HAS_TILELANG"):
 
 from tritonbench.utils.data_utils import get_production_shapes
 from tritonbench.utils.env_utils import (
-    get_nvidia_gpu_model,
+    is_b200,
     is_cu130,
     is_cuda,
     is_fbcode,
@@ -48,8 +48,6 @@ from tritonbench.utils.triton_op import (
     BenchmarkOperator,
     BenchmarkOperatorMetrics,
     llama_shapes,
-    Mode,
-    PRECISION_DTYPE_MAPPING,
     register_benchmark,
     register_metric,
     register_x_val,
@@ -142,8 +140,6 @@ NON_SQUARE = [
     for shape in sublist
     if shape is not None
 ]
-
-IS_B200 = is_cuda() and get_nvidia_gpu_model() == "NVIDIA B200"
 
 
 @contextlib.contextmanager
@@ -257,14 +253,16 @@ class Operator(BenchmarkOperator):
         else:
             return lambda: matmul_partition_k(a, bt)
 
-    @register_benchmark(enabled=HAS_PERSISTENT)
+    @register_benchmark(enabled=HAS_PERSISTENT, fwd_only=True)
     def triton_persistent_matmul(self, a, b, bias) -> Callable:
         if bias is not None:
             return lambda: matmul_persistent(a, b) + bias
         else:
             return lambda: matmul_persistent(a, b)
 
-    @register_benchmark(enabled=not is_fbcode() and HAS_PERSISTENT and supports_tma())
+    @register_benchmark(
+        enabled=not is_fbcode() and HAS_PERSISTENT and supports_tma(), fwd_only=True
+    )
     def triton_tma_persistent_matmul(self, a, b, bias) -> Callable:
         b = b.T.contiguous()
         if bias is not None:
@@ -272,7 +270,9 @@ class Operator(BenchmarkOperator):
         else:
             return lambda: matmul_tma_persistent(a, b)
 
-    @register_benchmark(enabled=not is_fbcode() and HAS_PERSISTENT and supports_tma())
+    @register_benchmark(
+        enabled=not is_fbcode() and HAS_PERSISTENT and supports_tma(), fwd_only=True
+    )
     def triton_tma_persistent_cached_matmul(self, a, b, bias) -> Callable:
         b = b.T.contiguous()
         if bias is not None:
@@ -323,7 +323,7 @@ class Operator(BenchmarkOperator):
 
         return op
 
-    @register_benchmark(enabled=HAS_HAMMER)
+    @register_benchmark(enabled=HAS_HAMMER, fwd_only=True)
     def hstu_triton_matmul(self, a, b, bias) -> Callable:
         if bias is not None:
             return lambda: hstu_triton_matmul_kernel(a, b) + bias
@@ -429,7 +429,7 @@ class Operator(BenchmarkOperator):
         else:
             return lambda: compiled_decompose_k(a, b)
 
-    if IS_B200:
+    if is_b200():
 
         @register_benchmark(enabled=False)
         def triton_blackwell_warpspec_persistent_matmul(self, a, b, bias) -> Callable:
