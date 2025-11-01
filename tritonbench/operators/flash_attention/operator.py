@@ -78,6 +78,9 @@ with try_import("HAS_FLASH_V2"):
 
     from .test_fmha_utils import make_packed_qkv
 
+with try_import("HAS_AITER"):
+    from aiter.ops.triton.mha import flash_attn_func as aiter_flash_attn_func
+
 HAS_CUDA_124 = (
     torch.cuda.is_available() and torch.version.cuda and torch.version.cuda >= "12.4"
 )
@@ -361,6 +364,21 @@ class Operator(BenchmarkOperator):
             k,
             v,
         )
+
+
+    @register_benchmark(enabled=is_hip() and HAS_AITER)
+    def aiter(self, q, k, v):
+        def _inner():
+            return aiter_flash_attn_func(
+                q,
+                k,
+                v,
+                softmax_scale=self.sm_scale,
+                causal=self.causal,
+                deterministic=self.deterministic,
+            )
+        return _inner
+
 
     if IS_B200:
         # Only enable calling this benchmark directly.
