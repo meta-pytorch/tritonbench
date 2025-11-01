@@ -365,7 +365,6 @@ class Operator(BenchmarkOperator):
             v,
         )
 
-
     @register_benchmark(enabled=is_hip() and HAS_AITER)
     def aiter(self, q, k, v):
         def _inner():
@@ -377,8 +376,8 @@ class Operator(BenchmarkOperator):
                 causal=self.causal,
                 deterministic=self.deterministic,
             )
-        return _inner
 
+        return _inner
 
     if IS_B200:
         # Only enable calling this benchmark directly.
