@@ -10,7 +10,13 @@ except ModuleNotFoundError:
     # In CI environment, we don't have torch installed at this point
     is_mtia = lambda: False
 
-if is_mtia():
+# Defer MTIA check to avoid triggering Triton driver initialization at import time
+try:
+    _is_mtia = is_mtia()
+except Exception:
+    _is_mtia = False
+
+if _is_mtia:
     from tritonbench.utils.fb.mtia_utils import MTIA_COMPUTE_SPECS, MTIA_MEMORY_SPECS
 else:
     MTIA_COMPUTE_SPECS = {}

@@ -63,13 +63,19 @@ def is_hip() -> bool:
 
 
 def is_hip_mi200():
-    target = triton.runtime.driver.active.get_current_target()
-    return is_hip() and target.arch == "gfx90a"
+    try:
+        target = triton.runtime.driver.active.get_current_target()
+        return is_hip() and target.arch == "gfx90a"
+    except Exception:
+        return False
 
 
 def is_hip_mi300():
-    target = triton.runtime.driver.active.get_current_target()
-    return is_hip() and target.arch == "gfx942"
+    try:
+        target = triton.runtime.driver.active.get_current_target()
+        return is_hip() and target.arch == "gfx942"
+    except Exception:
+        return False
 
 
 def is_b200():
@@ -92,7 +98,10 @@ def is_tile_enabled():
 
 
 def is_mtia():
-    return triton.runtime.driver.active.get_current_target().backend == "mtia"
+    try:
+        return triton.runtime.driver.active.get_current_target().backend == "mtia"
+    except Exception:
+        return False
 
 
 def set_env():
