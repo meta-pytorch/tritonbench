@@ -891,6 +891,9 @@ class BenchmarkOperator(metaclass=PostInitProcessor):
             f"Input IDs to run: {self._input_ids}",
         )
 
+    def get_backend(self, bm_func_name: str):
+        return REGISTERED_BENCHMARKS[self.name][bm_func_name]
+
     def _get_bm_func(self, bm_func_name: str):
         fwd_fn_lambda = getattr(self, bm_func_name, None)
         assert callable(fwd_fn_lambda), (
