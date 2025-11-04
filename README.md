@@ -11,15 +11,16 @@ The benchmark suite should be self-contained of its dependencies. To install, fo
 
 Step 1: clone the repository and checkout all submodules
 
-```
-$ git clone https://github.com/meta-pytorch/tritonbench.git
-$ git submodule update --init --recursive
+``` bash
+git clone https://github.com/meta-pytorch/tritonbench.git
+cd tritonbench
+git submodule update --init --recursive
 ```
 
 Step 2: run install.py
 
-```
-$ python install.py
+``` bash
+python install.py
 ```
 
 By default, it will install the latest PyTorch nightly release and use the Triton version bundled with it.
@@ -28,17 +29,20 @@ By default, it will install the latest PyTorch nightly release and use the Trito
 
 To benchmark an operator, run the following command:
 
-```
-$ python run.py --op gemm
+``` bash
+python run.py --op gemm
 ```
 
 ## Install as a library
 
 To install as a library:
 
+``` bash
+pip install -e .
 ```
-$ pip install -e .
-# in your own benchmark script
+
+In your own benchmark script:
+``` python
 import tritonbench
 from tritonbench.utils import parser
 op_args = parser.parse_args()
