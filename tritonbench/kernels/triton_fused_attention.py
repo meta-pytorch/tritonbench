@@ -20,8 +20,6 @@ import torch
 import triton
 import triton.language as tl
 
-from ..utils.triton_utils import AsyncTaskContext
-
 from .attention_utils import (
     HAS_EXPLICIT_WS,  # guard new tuning configs such as num_consumer_groups
     HAS_TMA_DESC,
@@ -275,55 +273,49 @@ def _attn_fwd_inner_ws(
     for start_n in tl.range(lo, hi, BLOCK_N):  # , loop_schedule=LOOP_SCHEDULE):
         start_n = tl.multiple_of(start_n, BLOCK_N)
         # -- compute qk ----
-        with AsyncTaskContext([0]):
-            if ENABLE_TMA:
-                k = desc_k.load(
-                    [start_n.to(tl.int32) + (qvk_offset // stride_kn).to(tl.int32), 0]
+        if ENABLE_TMA:
+            k = desc_k.load(
+                [start_n.to(tl.int32) + (qvk_offset // stride_kn).to(tl.int32), 0]
+            )
+        else:
+            k = tl.load(K_block_ptr, boundary_check=(1,), padding_option="zero")
+        if ENABLE_TMA:
+            k = tl.trans(k)
+        qk = tl.dot(q, k)
+        if STAGE == 2:
+            mask = offs_m[:, None] >= (start_n + offs_n[None, :])
+            qk = qk * qk_scale + tl.where(mask, 0, -1.0e6)
+            m_ij = tl.maximum(m_i, tl.max(qk, 1))
+            qk -= m_ij[:, None]
+        else:
+            m_ij = tl.maximum(m_i, tl.max(qk, 1) * qk_scale)
+            qk = qk * qk_scale - m_ij[:, None]
+        p = tl.math.exp2(qk)
+        l_ij = tl.sum(p, 1)
+        # -- update m_i and l_i
+        alpha = tl.math.exp2(m_i - m_ij)
+        l_i = l_i * alpha + l_ij
+        # -- update output accumulator --
+        acc = acc * alpha[:, None]
+        # update acc
+        if ENABLE_TMA:
+            if fp8_v:
+                v = desc_v.load(
+                    [(qvk_offset // stride_vn).to(tl.int32), start_n.to(tl.int32)]
                 )
             else:
-                k = tl.load(K_block_ptr, boundary_check=(1,), padding_option="zero")
-        with AsyncTaskContext([1, 2]):
+                v = desc_v.load([(qvk_offset // stride_vk + start_n).to(tl.int32), 0])
+        else:
+            v = tl.load(V_block_ptr, boundary_check=(0,), padding_option="zero")
+        if fp8_v:
             if ENABLE_TMA:
-                k = tl.trans(k)
-            qk = tl.dot(q, k)
-            if STAGE == 2:
-                mask = offs_m[:, None] >= (start_n + offs_n[None, :])
-                qk = qk * qk_scale + tl.where(mask, 0, -1.0e6)
-                m_ij = tl.maximum(m_i, tl.max(qk, 1))
-                qk -= m_ij[:, None]
-            else:
-                m_ij = tl.maximum(m_i, tl.max(qk, 1) * qk_scale)
-                qk = qk * qk_scale - m_ij[:, None]
-            p = tl.math.exp2(qk)
-            l_ij = tl.sum(p, 1)
-            # -- update m_i and l_i
-            alpha = tl.math.exp2(m_i - m_ij)
-            l_i = l_i * alpha + l_ij
-            # -- update output accumulator --
-            acc = acc * alpha[:, None]
-            # update acc
-        with AsyncTaskContext([0]):
-            if ENABLE_TMA:
-                if fp8_v:
-                    v = desc_v.load(
-                        [(qvk_offset // stride_vn).to(tl.int32), start_n.to(tl.int32)]
-                    )
-                else:
-                    v = desc_v.load(
-                        [(qvk_offset // stride_vk + start_n).to(tl.int32), 0]
-                    )
-            else:
-                v = tl.load(V_block_ptr, boundary_check=(0,), padding_option="zero")
-        with AsyncTaskContext([1, 2]):
-            if fp8_v:
-                if ENABLE_TMA:
-                    v = tl.trans(v)
-                p = p.to(tl.float8e5)
-            else:
-                p = p.to(tl.bfloat16)
-            acc = tl.dot(p, v, acc)
-            # update m_i and l_i
-            m_i = m_ij
+                v = tl.trans(v)
+            p = p.to(tl.float8e5)
+        else:
+            p = p.to(tl.bfloat16)
+        acc = tl.dot(p, v, acc)
+        # update m_i and l_i
+        m_i = m_ij
         if not ENABLE_TMA:
             V_block_ptr = tl.advance(V_block_ptr, (BLOCK_N, 0))
             K_block_ptr = tl.advance(K_block_ptr, (0, BLOCK_N))
@@ -388,95 +380,83 @@ def _attn_fwd_inner_ws_with_dp(
     for start_n in tl.range(lo, hi, BLOCK_N):  # , loop_schedule=LOOP_SCHEDULE):
         start_n = tl.multiple_of(start_n, BLOCK_N)
         # -- compute qk ----
-        with AsyncTaskContext([LOAD_K]):
-            if ENABLE_TMA:
-                k = desc_k.load(
-                    [start_n.to(tl.int32) + (qvk_offset // stride_kn).to(tl.int32), 0]
+        if ENABLE_TMA:
+            k = desc_k.load(
+                [start_n.to(tl.int32) + (qvk_offset // stride_kn).to(tl.int32), 0]
+            )
+        else:
+            k = tl.load(K_block_ptr, boundary_check=(1,), padding_option="zero")
+
+        if ENABLE_TMA:  # feeds into gemm
+            k = tl.trans(k)
+        qk0 = tl.dot(q0, k)
+        qk1 = tl.dot(q1, k)
+        if STAGE == 2:
+            mask = offs_m0[:, None] >= (start_n + offs_n[None, :])
+            qk0 = qk0 * qk_scale + tl.where(mask, 0, -1.0e6)
+            m_ij0 = tl.maximum(m_i0, tl.max(qk0, 1))
+            qk0 -= m_ij0[:, None]
+        else:
+            m_ij0 = tl.maximum(m_i0, tl.max(qk0, 1) * qk_scale)
+            qk0 = qk0 * qk_scale - m_ij0[:, None]
+        p0 = tl.math.exp2(qk0)
+        l_ij0 = tl.sum(p0, 1)
+        # -- update m_i and l_i
+        alpha0 = tl.math.exp2(m_i0 - m_ij0)
+        l_i0 = l_i0 * alpha0 + l_ij0
+        if ALPHA_REMAT:
+            alpha0_re = tl.math.exp2(m_i0 - m_ij0)
+            # -- update output accumulator --
+            acc0 = acc0 * alpha0_re[:, None]
+        else:
+            acc0 = acc0 * alpha0[:, None]
+        # update acc
+        if fp8_v:
+            p0 = p0.to(tl.float8e5)
+        else:
+            p0 = p0.to(tl.bfloat16)
+        # update m_i and l_i
+        m_i0 = m_ij0
+        if STAGE == 2:
+            mask = offs_m1[:, None] >= (start_n + offs_n[None, :])
+            qk1 = qk1 * qk_scale + tl.where(mask, 0, -1.0e6)
+            m_ij1 = tl.maximum(m_i1, tl.max(qk1, 1))
+            qk1 -= m_ij1[:, None]
+        else:
+            m_ij1 = tl.maximum(m_i1, tl.max(qk1, 1) * qk_scale)
+            qk1 = qk1 * qk_scale - m_ij1[:, None]
+        p1 = tl.math.exp2(qk1)
+        l_ij1 = tl.sum(p1, 1)
+        # -- update m_i and l_i
+        alpha1 = tl.math.exp2(m_i1 - m_ij1)
+        l_i1 = l_i1 * alpha1 + l_ij1
+        if ALPHA_REMAT:
+            alpha1_re = tl.math.exp2(m_i1 - m_ij1)
+            # -- update output accumulator --
+            acc1 = acc1 * alpha1_re[:, None]
+        else:
+            acc1 = acc1 * alpha1[:, None]
+        # update acc
+        if fp8_v:
+            p1 = p1.to(tl.float8e5)
+        else:
+            p1 = p1.to(tl.bfloat16)
+        # update m_i and l_i
+        m_i1 = m_ij1
+        if ENABLE_TMA:
+            if fp8_v:
+                v = desc_v.load(
+                    [(qvk_offset // stride_vn).to(tl.int32), start_n.to(tl.int32)]
                 )
             else:
-                k = tl.load(K_block_ptr, boundary_check=(1,), padding_option="zero")
-
-        with AsyncTaskContext([FIRST_MMA]):
-            if ENABLE_TMA:  # feeds into gemm
-                k = tl.trans(k)
-            qk0 = tl.dot(q0, k)
-            qk1 = tl.dot(q1, k)
-        with AsyncTaskContext([FIRST_SOFTMAX]):
-            if STAGE == 2:
-                mask = offs_m0[:, None] >= (start_n + offs_n[None, :])
-                qk0 = qk0 * qk_scale + tl.where(mask, 0, -1.0e6)
-                m_ij0 = tl.maximum(m_i0, tl.max(qk0, 1))
-                qk0 -= m_ij0[:, None]
-            else:
-                m_ij0 = tl.maximum(m_i0, tl.max(qk0, 1) * qk_scale)
-                qk0 = qk0 * qk_scale - m_ij0[:, None]
-            p0 = tl.math.exp2(qk0)
-            l_ij0 = tl.sum(p0, 1)
-            # -- update m_i and l_i
-            alpha0 = tl.math.exp2(m_i0 - m_ij0)
-            l_i0 = l_i0 * alpha0 + l_ij0
-        with AsyncTaskContext([FIRST_CORRECTION]):
-            if ALPHA_REMAT:
-                alpha0_re = tl.math.exp2(m_i0 - m_ij0)
-                # -- update output accumulator --
-                acc0 = acc0 * alpha0_re[:, None]
-            else:
-                acc0 = acc0 * alpha0[:, None]
-        with AsyncTaskContext([FIRST_SOFTMAX]):
-            # update acc
-            if fp8_v:
-                p0 = p0.to(tl.float8e5)
-            else:
-                p0 = p0.to(tl.bfloat16)
-            # update m_i and l_i
-            m_i0 = m_ij0
-        with AsyncTaskContext([LAST_SOFTMAX]):
-            if STAGE == 2:
-                mask = offs_m1[:, None] >= (start_n + offs_n[None, :])
-                qk1 = qk1 * qk_scale + tl.where(mask, 0, -1.0e6)
-                m_ij1 = tl.maximum(m_i1, tl.max(qk1, 1))
-                qk1 -= m_ij1[:, None]
-            else:
-                m_ij1 = tl.maximum(m_i1, tl.max(qk1, 1) * qk_scale)
-                qk1 = qk1 * qk_scale - m_ij1[:, None]
-            p1 = tl.math.exp2(qk1)
-            l_ij1 = tl.sum(p1, 1)
-            # -- update m_i and l_i
-            alpha1 = tl.math.exp2(m_i1 - m_ij1)
-            l_i1 = l_i1 * alpha1 + l_ij1
-        with AsyncTaskContext([LAST_CORRECTION]):
-            if ALPHA_REMAT:
-                alpha1_re = tl.math.exp2(m_i1 - m_ij1)
-                # -- update output accumulator --
-                acc1 = acc1 * alpha1_re[:, None]
-            else:
-                acc1 = acc1 * alpha1[:, None]
-        with AsyncTaskContext([LAST_SOFTMAX]):
-            # update acc
-            if fp8_v:
-                p1 = p1.to(tl.float8e5)
-            else:
-                p1 = p1.to(tl.bfloat16)
-            # update m_i and l_i
-            m_i1 = m_ij1
-        with AsyncTaskContext([LOAD_V]):
+                v = desc_v.load([(qvk_offset // stride_vk + start_n).to(tl.int32), 0])
+        else:
+            v = tl.load(V_block_ptr, boundary_check=(0,), padding_option="zero")
+        if fp8_v:
             if ENABLE_TMA:
-                if fp8_v:
-                    v = desc_v.load(
-                        [(qvk_offset // stride_vn).to(tl.int32), start_n.to(tl.int32)]
-                    )
-                else:
-                    v = desc_v.load(
-                        [(qvk_offset // stride_vk + start_n).to(tl.int32), 0]
-                    )
-            else:
-                v = tl.load(V_block_ptr, boundary_check=(0,), padding_option="zero")
-        with AsyncTaskContext([LAST_MMA]):
-            if fp8_v:
-                if ENABLE_TMA:
-                    v = tl.trans(v)
-            acc0 = tl.dot(p0, v, acc0)
-            acc1 = tl.dot(p1, v, acc1)
+                v = tl.trans(v)
+        acc0 = tl.dot(p0, v, acc0)
+        acc1 = tl.dot(p1, v, acc1)
         if not ENABLE_TMA:
             V_block_ptr = tl.advance(V_block_ptr, (BLOCK_N, 0))
             K_block_ptr = tl.advance(K_block_ptr, (0, BLOCK_N))
@@ -943,13 +923,10 @@ def _attn_fwd_compute_ws(
     qk_scale = sm_scale
     qk_scale *= 1.44269504  # 1/log(2)
     # load q: it will stay in SRAM throughout
-    with AsyncTaskContext([0]):
-        if ENABLE_TMA:
-            q = desc_q.load(
-                [(qvk_offset // stride_qm + start_m * BLOCK_M).to(tl.int32), 0]
-            )
-        else:
-            q = tl.load(Q_block_ptr)
+    if ENABLE_TMA:
+        q = desc_q.load([(qvk_offset // stride_qm + start_m * BLOCK_M).to(tl.int32), 0])
+    else:
+        q = tl.load(Q_block_ptr)
     # stage 1: off-band
     # For causal = True, STAGE = 3 and _attn_fwd_inner gets 1 as its STAGE
     # For causal = False, STAGE = 1, and _attn_fwd_inner gets 3 as its STAGE
@@ -1013,18 +990,17 @@ def _attn_fwd_compute_ws(
             LOOP_SCHEDULE,
         )
     # epilogue
-    with AsyncTaskContext([1, 2]):
-        m_i += tl.math.log2(l_i)
-        acc = acc / l_i[:, None]
-        m_ptrs = M + off_hz * N_CTX + offs_m
-        tl.store(m_ptrs, m_i)
-        if ENABLE_TMA:
-            desc_o.store(
-                [(qvk_offset // stride_om + start_m * BLOCK_M).to(tl.int32), 0],
-                acc.to(Out.type.element_ty),
-            )
-        else:
-            tl.store(O_block_ptr, acc.to(Out.type.element_ty))
+    m_i += tl.math.log2(l_i)
+    acc = acc / l_i[:, None]
+    m_ptrs = M + off_hz * N_CTX + offs_m
+    tl.store(m_ptrs, m_i)
+    if ENABLE_TMA:
+        desc_o.store(
+            [(qvk_offset // stride_om + start_m * BLOCK_M).to(tl.int32), 0],
+            acc.to(Out.type.element_ty),
+        )
+    else:
+        tl.store(O_block_ptr, acc.to(Out.type.element_ty))
 
 
 # only supports TMA, and explicit async_task
@@ -1106,25 +1082,23 @@ def _attn_fwd_compute_ws_with_dp(
     qk_scale *= 1.44269504  # 1/log(2)
     # load q: it will stay in SRAM throughout
     # q0 will be BLOCK_M, each kernel invocation will handle 2 * BLOCK_M
-    with AsyncTaskContext([FIRST_LOADQ]):
-        if ENABLE_TMA:
-            q0 = desc_q.load(
-                [(qvk_offset // stride_qm + start_m * BLOCK_M).to(tl.int32), 0]
-            )
-        else:
-            q0 = tl.load(Q_block_ptr)
-    with AsyncTaskContext([LAST_LOADQ]):
-        if ENABLE_TMA:
-            q1 = desc_q.load(
-                [
-                    (qvk_offset // stride_qm + start_m * BLOCK_M + BLOCK_M_HALF).to(
-                        tl.int32
-                    ),
-                    0,
-                ]
-            )
-        else:
-            q1 = tl.load(Q_block_ptr)
+    if ENABLE_TMA:
+        q0 = desc_q.load(
+            [(qvk_offset // stride_qm + start_m * BLOCK_M).to(tl.int32), 0]
+        )
+    else:
+        q0 = tl.load(Q_block_ptr)
+    if ENABLE_TMA:
+        q1 = desc_q.load(
+            [
+                (qvk_offset // stride_qm + start_m * BLOCK_M + BLOCK_M_HALF).to(
+                    tl.int32
+                ),
+                0,
+            ]
+        )
+    else:
+        q1 = tl.load(Q_block_ptr)
     # stage 1: off-band
     # For causal = True, STAGE = 3 and _attn_fwd_inner gets 1 as its STAGE
     # For causal = False, STAGE = 1, and _attn_fwd_inner gets 3 as its STAGE
@@ -1216,35 +1190,33 @@ def _attn_fwd_compute_ws_with_dp(
             ALPHA_REMAT,
         )
     # epilogue
-    with AsyncTaskContext([FIRST_SOFTMAX]):
-        m_i0 += tl.math.log2(l_i0)
-        acc0 = acc0 / l_i0[:, None]
-        m_ptrs0 = M + off_hz * N_CTX + offs_m0
-        tl.store(m_ptrs0, m_i0)
-        if ENABLE_TMA:
-            desc_o.store(
-                [(qvk_offset // stride_om + start_m * BLOCK_M).to(tl.int32), 0],
-                acc0.to(Out.type.element_ty),
-            )
-        else:
-            tl.store(O_block_ptr, acc.to(Out.type.element_ty))
-    with AsyncTaskContext([LAST_SOFTMAX]):
-        m_i1 += tl.math.log2(l_i1)
-        acc1 = acc1 / l_i1[:, None]
-        m_ptrs1 = M + off_hz * N_CTX + offs_m1
-        tl.store(m_ptrs1, m_i1)
-        if ENABLE_TMA:
-            desc_o.store(
-                [
-                    (qvk_offset // stride_om + start_m * BLOCK_M + BLOCK_M_HALF).to(
-                        tl.int32
-                    ),
-                    0,
-                ],
-                acc1.to(Out.type.element_ty),
-            )
-        else:
-            tl.store(O_block_ptr, acc.to(Out.type.element_ty))
+    m_i0 += tl.math.log2(l_i0)
+    acc0 = acc0 / l_i0[:, None]
+    m_ptrs0 = M + off_hz * N_CTX + offs_m0
+    tl.store(m_ptrs0, m_i0)
+    if ENABLE_TMA:
+        desc_o.store(
+            [(qvk_offset // stride_om + start_m * BLOCK_M).to(tl.int32), 0],
+            acc0.to(Out.type.element_ty),
+        )
+    else:
+        tl.store(O_block_ptr, acc.to(Out.type.element_ty))
+    m_i1 += tl.math.log2(l_i1)
+    acc1 = acc1 / l_i1[:, None]
+    m_ptrs1 = M + off_hz * N_CTX + offs_m1
+    tl.store(m_ptrs1, m_i1)
+    if ENABLE_TMA:
+        desc_o.store(
+            [
+                (qvk_offset // stride_om + start_m * BLOCK_M + BLOCK_M_HALF).to(
+                    tl.int32
+                ),
+                0,
+            ],
+            acc1.to(Out.type.element_ty),
+        )
+    else:
+        tl.store(O_block_ptr, acc.to(Out.type.element_ty))
 
 
 @triton.autotune(list(filter(keep, configsWS)), key=["N_CTX"])
