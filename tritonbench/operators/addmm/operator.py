@@ -112,7 +112,7 @@ class Operator(BenchmarkOperator):
 
     @register_benchmark(enabled=HAS_STREAMK)
     def streamk_addmm(self, a, mat1, mat2) -> Callable:
-        return lambda: streamk_cuda_matmul(mat1, mat2, bias=a)
+        return lambda: streamk_cuda_matmul(mat1, mat2)
 
     @register_benchmark(baseline=True)
     def aten_addmm(self, a, mat1, mat2) -> Callable:
