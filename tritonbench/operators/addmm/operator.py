@@ -6,16 +6,15 @@ import torch
 import torch._inductor.config as inductor_config
 import triton
 from tritonbench.utils.env_utils import is_fbcode
+from tritonbench.utils.python_utils import try_import
 
 try:
-    from hammer.ops.triton.triton_hstu_linear import triton_addmm
+    from hammer.ops.triton.triton_hstu_linear import triton_addmm as hstu_triton_addmm
 except ModuleNotFoundError:
-    from .hstu import triton_addmm
+    from .hstu import triton_addmm as hstu_triton_addmm
 
-try:
-    from tritonbench.operators.gemm.stream_k import streamk_matmul
-except ImportError:
-    streamk_matmul = None
+with try_import("HAS_STREAMK"):
+    from tritonbench.operators.gemm.stream_k import streamk_cuda_matmul
 
 from tritonbench.utils.triton_op import (
     BenchmarkOperator,
@@ -109,11 +108,11 @@ class Operator(BenchmarkOperator):
 
     @register_benchmark()
     def triton_addmm(self, a, mat1, mat2) -> Callable:
-        return lambda: triton_addmm(a, mat1, mat2)
+        return lambda: hstu_triton_addmm(a, mat1, mat2)
 
-    @register_benchmark(enabled=bool(streamk_matmul))
+    @register_benchmark(enabled=HAS_STREAMK)
     def streamk_addmm(self, a, mat1, mat2) -> Callable:
-        return lambda: streamk_matmul(mat1, mat2, bias=a)
+        return lambda: streamk_cuda_matmul(mat1, mat2, bias=a)
 
     @register_benchmark(baseline=True)
     def aten_addmm(self, a, mat1, mat2) -> Callable:
