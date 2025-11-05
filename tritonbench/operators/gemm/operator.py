@@ -33,6 +33,7 @@ with try_import("HAS_TILELANG"):
     from .tilelang import tilelang_matmul_func
 
 
+from tritonbench.data.llama import llama_shapes
 from tritonbench.utils.data_utils import get_production_shapes
 from tritonbench.utils.env_utils import (
     is_b200,
@@ -47,7 +48,6 @@ from tritonbench.utils.path_utils import REPO_PATH
 from tritonbench.utils.triton_op import (
     BenchmarkOperator,
     BenchmarkOperatorMetrics,
-    llama_shapes,
     register_benchmark,
     register_metric,
     register_x_val,

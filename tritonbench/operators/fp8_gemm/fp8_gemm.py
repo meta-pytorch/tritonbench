@@ -10,13 +10,13 @@ import triton
 
 from torch._inductor.kernel.mm import scaling_pairs, ScalingType
 
+from tritonbench.data.llama import llama_shapes
 from tritonbench.operators.fp8_gemm.persistent import blackwell_persistent_tma
 from tritonbench.utils.env_utils import get_nvidia_gpu_model, is_cuda
 
 from tritonbench.utils.triton_op import (
     BenchmarkOperator,
     BenchmarkOperatorMetrics,
-    llama_shapes,
     register_benchmark,
     register_metric,
 )

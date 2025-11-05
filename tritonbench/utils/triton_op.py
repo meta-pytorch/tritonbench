@@ -19,7 +19,6 @@ import types
 from collections import defaultdict, OrderedDict
 from dataclasses import asdict, dataclass, fields
 from enum import Enum
-from itertools import product
 from numbers import Number
 from pathlib import Path
 from typing import Any, Callable, Dict, Generator, List, Optional, Tuple, Union
@@ -188,27 +187,6 @@ def gemm_shapes(prefill: bool = False):
     from .fb.fp8_gemm_rowwise_shapes import read_shapes_for_fp8_gemm_rowwise
 
     return read_shapes_for_fp8_gemm_rowwise(prefill)
-
-
-def llama_shapes():
-    # batch sizes * seq lengths
-    BS = [2**i for i in range(0, 17)]
-    # attn: wqkv, wo; ffn: w13, w2
-    KN = [
-        (4096, 12288),
-        (4096, 4096),
-        (4096, 22016),
-        (11008, 4096),
-        (8192, 1280),
-        (1024, 8192),
-        (8192, 7168),
-        (3584, 8192),
-        (16384, 2304),
-        (2048, 16384),
-        (16384, 13312),
-        (6656, 16384),
-    ]
-    return [(bs, n, k, None) for bs, (k, n) in product(BS, KN)]
 
 
 def _split_params_by_comma(params: Optional[str]) -> List[str]:
