@@ -106,4 +106,4 @@ def get_test_inputs(
     q = q.requires_grad_(requires_grad)
     k = k.requires_grad_(requires_grad)
     v = v.requires_grad_(requires_grad)
-    return q, k, v, seq_offsets, num_targets, seq_len
+    return q, k, v, seq_offsets, num_targets, seq_len, seq_sparsity

@@ -788,7 +788,7 @@ class BenchmarkOperator(metaclass=PostInitProcessor):
         if self.tb_args.input_loader:
             self.get_input_iter = get_input_loader(self, self.tb_args.input_loader)
         # Count total available inputs directly
-        self._available_num_inputs = sum(1 for _ in self.get_input_iter())
+        self._available_num_inputs = self.get_available_num_inputs()
 
         # Check if multiple IDs are specified explicitly
         if len(self._input_ids) > 1:
@@ -937,7 +937,7 @@ class BenchmarkOperator(metaclass=PostInitProcessor):
             self, BenchmarkOperator
         )
         self.input_iter = input_iter
-        self._available_num_inputs = sum(1 for _ in self.get_input_iter())
+        self._available_num_inputs = self.get_available_num_inputs()
         self._num_inputs = self._available_num_inputs - len(self._input_ids)
         self._input_ids = [i for i in range(0, self._num_inputs)]
 
@@ -1221,6 +1221,10 @@ class BenchmarkOperator(metaclass=PostInitProcessor):
         """Return the dynamic input iterator for the model."""
         logger.warning("Each operator must implement its own input iterator.")
         return []
+
+    def get_available_num_inputs(self) -> int:
+        """Return the number of inputs for the model."""
+        return sum(1 for _ in self.get_input_iter())
 
     def get_grad_to_none(self, args):
         return None

@@ -31,6 +31,11 @@ except (FileNotFoundError, AttributeError):
 if HAS_CUDA:
     from .fb.hstu import cuda_hstu_mha
 
+if is_fbcode():
+    from tritonbench.utils.fb.hstu_prod import get_prod_config
+else:
+    get_prod_config = lambda x: None
+
 
 def parse_op_args(args: List[str]):
     parser = argparse.ArgumentParser()
@@ -51,6 +56,12 @@ def parse_op_args(args: List[str]):
     parser.add_argument("--sampling-alpha", type=float, default=1.7)
     parser.add_argument("--causal", action="store_true")
     parser.add_argument("--attn-mask-type", type=str, default="lower_triangular")
+    parser.add_argument(
+        "--config",
+        type=str,
+        default=None,
+        help="Config specifies a preset config. Most other args will be ignored.",
+    )
     return parser.parse_args(args)
 
 
@@ -62,27 +73,52 @@ class Operator(BenchmarkOperator):
     ):
         super().__init__(tb_args, extra_args=extra_args)
         args = parse_op_args(self.extra_args)
-        self.batch_size = args.batch_size
-        self.num_heads = args.heads
-        self.attn_dim = args.attn_dim
-        self.hidden_dim = args.hidden_dim
-        self.min_seq_len_log2 = args.min_seq_len_log2
-        self.max_seq_len_log2 = args.max_seq_len_log2
-        self.sparsity = args.seq_sparsity
-        self.has_delta_q = args.has_delta_q
-        self.delta_size = args.delta_size
-        self.target_size = args.target_size
-        self.max_attn_len = args.max_attn_len
-        self.min_full_attn_seq_len = args.min_full_attn_seq_len
-        self.contextual_seq_len = args.contextual_seq_len
-        self.sampling_alpha = args.sampling_alpha
+        prod_config = get_prod_config(args.config)
+        if prod_config:
+            self.batch_size = prod_config.batch_size
+            self.num_heads = prod_config.num_heads
+            self.attn_dim = prod_config.attn_dim
+            self.hidden_dim = prod_config.hidden_dim
+            self.min_seq_len_log2 = prod_config.seq_len_log2
+            self.max_seq_len_log2 = prod_config.seq_len_log2
+            self.sparsity_seq = prod_config.sparsity_seq
+            # TODO: support delta_q in prod config
+            self.has_delta_q = False
+            self.delta_size = 0
+            self.target_size = prod_config.target_size
+            self.max_attn_len = prod_config.max_attn_len
+            # TODO: support min_full_attn_seq_len in prod config
+            self.min_full_attn_seq_len = 0
+            # TODO: support contextual_seq_len in prod config
+            self.contextual_seq_len = 0
+            self.alpha = (
+                prod_config.alpha
+                if prod_config.alpha is not None
+                else 1.0 / self.attn_dim
+            )
+            self.attn_mask_type = prod_config.attn_mask_type
+        else:
+            self.batch_size = args.batch_size
+            self.num_heads = args.heads
+            self.attn_dim = args.attn_dim
+            self.hidden_dim = args.hidden_dim
+            self.min_seq_len_log2 = args.min_seq_len_log2
+            self.max_seq_len_log2 = args.max_seq_len_log2
+            self.sparsity_seq = [args.seq_sparsity]
+            self.has_delta_q = args.has_delta_q
+            self.delta_size = args.delta_size
+            self.target_size = args.target_size
+            self.max_attn_len = args.max_attn_len
+            self.min_full_attn_seq_len = args.min_full_attn_seq_len
+            self.contextual_seq_len = args.contextual_seq_len
+            self.alpha = 1.0 / self.attn_dim
+            self.attn_mask_type = args.attn_mask_type
         self.causal = args.causal
-        self.alpha = 1.0 / self.attn_dim
+        self.sampling_alpha = args.sampling_alpha
         self.requires_grad = not (self.mode == Mode.FWD_NO_GRAD)
-        self.attn_mask_type = args.attn_mask_type
 
     @register_benchmark(baseline=True)
-    def hstu(self, q, k, v, seq_offsets, num_targets, max_seq_len):
+    def hstu(self, q, k, v, seq_offsets, num_targets, max_seq_len, sparsity):
         return lambda: triton_hstu_mha(
             max_seq_len,
             alpha=self.alpha,
@@ -98,7 +134,7 @@ class Operator(BenchmarkOperator):
         )
 
     @register_benchmark(enabled=HAS_HAMMER)
-    def hammer_hstu(self, q, k, v, seq_offsets, num_targets, max_seq_len):
+    def hammer_hstu(self, q, k, v, seq_offsets, num_targets, max_seq_len, sparsity):
         return lambda: triton_ragged_attention_fwd(
             max_seq_len,
             alpha=self.alpha,
@@ -118,7 +154,7 @@ class Operator(BenchmarkOperator):
 
     # TODO: remove B200 hacks like these.
     @register_benchmark(enabled=(HAS_CUDA))
-    def hstu_cuda(self, q, k, v, seq_offsets, num_targets, max_seq_len):
+    def hstu_cuda(self, q, k, v, seq_offsets, num_targets, max_seq_len, sparsity):
         return lambda: cuda_hstu_mha(
             max_seq_len,
             alpha=self.alpha,
@@ -135,36 +171,43 @@ class Operator(BenchmarkOperator):
         )
 
     def get_x_val(self, example_inputs):
-        seq_len = example_inputs[-1]
+        seq_len = example_inputs[-2]
+        sparsity = example_inputs[-1]
         return (
             self.batch_size,
             self.num_heads,
             seq_len,
             self.attn_dim,
             self.hidden_dim,
-            self.sparsity,
+            sparsity,
             self.target_size,
             self.max_attn_len,
         )
 
+    def get_available_num_inputs(self) -> int:
+        return ((self.max_seq_len_log2 + 1) - self.min_seq_len_log2) * len(
+            self.sparsity_seq
+        )
+
     def get_input_iter(self):
-        for seq_len in [
-            2**i for i in range(self.min_seq_len_log2, self.max_seq_len_log2 + 1)
-        ]:
-            yield get_test_inputs(
-                self.batch_size,
-                self.num_heads,
-                seq_len,
-                self.attn_dim,
-                self.hidden_dim,
-                self.sparsity,
-                self.has_delta_q,
-                self.delta_size,
-                self.target_size,
-                self.max_attn_len,
-                self.dtype,
-                requires_grad=self.requires_grad,
-            )
+        for sparsity in self.sparsity_seq:
+            for seq_len in [
+                2**i for i in range(self.min_seq_len_log2, self.max_seq_len_log2 + 1)
+            ]:
+                yield get_test_inputs(
+                    self.batch_size,
+                    self.num_heads,
+                    seq_len,
+                    self.attn_dim,
+                    self.hidden_dim,
+                    sparsity,
+                    self.has_delta_q,
+                    self.delta_size,
+                    self.target_size,
+                    self.max_attn_len,
+                    self.dtype,
+                    requires_grad=self.requires_grad,
+                )
 
     def _flops(
         self,
@@ -197,7 +240,7 @@ class Operator(BenchmarkOperator):
     def flops(
         self, fn_name, example_inputs, metrics: BenchmarkOperatorMetrics
     ) -> float:
-        q, k, v, seq_offsets, num_targets, max_seq_len = example_inputs
+        q, k, v, seq_offsets, num_targets, max_seq_len, _ = example_inputs
         flops = self._flops(
             self.batch_size,
             max_seq_len,
