@@ -11,6 +11,11 @@ def parse_args(args: List[str]) -> argparse.Namespace:
     parser.add_argument("--col-major", type=bool, default=False)
     parser.add_argument("--large-k-shapes", type=bool, default=False)
     parser.add_argument("--bias-1D-y", type=bool, default=False)
-    parser.add_argument("--config", type=str, default=None)
+    parser.add_argument(
+        "--config",
+        type=str,
+        default=None,
+        help="config to use. Multiple can be passed in comma separated"
+    )
     args = parser.parse_args(args)
     return args
