@@ -15,7 +15,12 @@ from tritonbench.utils.triton_op import (
     register_metric,
 )
 
-from .hstu import get_test_inputs, triton_hstu_mha
+from .hstu import (
+    get_test_inputs,
+    HAS_HAMMER,
+    triton_hstu_mha,
+    triton_ragged_attention_fwd,
+)
 
 HAS_CUDA = False
 try:
@@ -45,6 +50,7 @@ def parse_op_args(args: List[str]):
     parser.add_argument("--contextual-seq-len", type=int, default=0)
     parser.add_argument("--sampling-alpha", type=float, default=1.7)
     parser.add_argument("--causal", action="store_true")
+    parser.add_argument("--attn-mask-type", type=str, default="lower_triangular")
     return parser.parse_args(args)
 
 
@@ -73,6 +79,7 @@ class Operator(BenchmarkOperator):
         self.causal = args.causal
         self.alpha = 1.0 / self.attn_dim
         self.requires_grad = not (self.mode == Mode.FWD_NO_GRAD)
+        self.attn_mask_type = args.attn_mask_type
 
     @register_benchmark(baseline=True)
     def hstu(self, q, k, v, seq_offsets, num_targets, max_seq_len):
@@ -88,6 +95,25 @@ class Operator(BenchmarkOperator):
             contextual_seq_len=self.contextual_seq_len,
             sort_by_length=True,
             enable_tma=True,
+        )
+
+    @register_benchmark(enabled=HAS_HAMMER)
+    def hammer_hstu(self, q, k, v, seq_offsets, num_targets, max_seq_len):
+        return lambda: triton_ragged_attention_fwd(
+            max_seq_len,
+            alpha=self.alpha,
+            q=q,
+            k=k,
+            v=v,
+            invalid_attn_mask_type=self.attn_mask_type,
+            seq_offsets=seq_offsets,
+            num_targets=num_targets,
+            max_attn_len=self.max_attn_len,
+            attn_scale=None,
+            attn_bias=None,
+            seq2_offsets=None,
+            contextual_seq_len=self.contextual_seq_len,
+            full_attn_size=0,
         )
 
     # TODO: remove B200 hacks like these.

@@ -12,6 +12,11 @@ if is_fbcode():
         set_use_runtime_max_seq_len,
     )
     from generative_recommenders.ops.triton.triton_hstu_attention import triton_hstu_mha
+    from hammer.ops.triton.triton_ragged_hstu_attention import (
+        triton_ragged_attention_fwd,
+    )
+
+    HAS_HAMMER = True
 else:
     # OSS Import
     with add_path(str(SUBMODULE_PATH.joinpath("generative-recommenders"))):
@@ -24,9 +29,14 @@ else:
             triton_hstu_mha,
         )
 
+        HAS_HAMMER = False
+        triton_ragged_attention_fwd = None
+
 from typing import Tuple
 
 triton_hstu_mha = triton_hstu_mha
+triton_ragged_attention_fwd = triton_ragged_attention_fwd
+HAS_HAMMER = HAS_HAMMER
 
 # Always autotune based on the actual max_seq_len
 set_use_runtime_max_seq_len(True)
