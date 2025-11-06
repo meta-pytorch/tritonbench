@@ -57,11 +57,42 @@ try:
     torch.ops.load_library(
         "//deeplearning/fbgemm/fbgemm_gpu/experimental:gen_ai_attention_ops"
     )
-
     HAS_FB_IMPORT = True
 except ImportError:
     HAS_FB_IMPORT = False
 
+# Load FlashInfer FMHA Gen library (includes TRTLLM kernels)
+torch.ops.load_library("//deeplearning/flashinfer:fmha_gen")
+
+# Initialize FlashInfer cubin loader
+try:
+    from flashinfer.jit.cubin_loader import setup_cubin_loader
+    
+    # Find the loaded library from the dlopen handle
+    # The torch.ops.load_library should have loaded it already
+    lib_name = "libdeeplearning_flashinfer_fmha_gen.so"
+    
+    # Try to find it in /proc/self/maps
+    found = False
+    with open('/proc/self/maps', 'r') as f:
+        for line in f:
+            if lib_name in line:
+                # Extract the path from the line
+                parts = line.strip().split()
+                if len(parts) >= 6:
+                    lib_path = ' '.join(parts[5:])
+                    setup_cubin_loader(lib_path)
+                    found = True
+                    break
+    
+    if not found:
+        print(f"Warning: Could not find {lib_name} in loaded libraries")
+except Exception as e:
+    print(f"Warning: Could not initialize FlashInfer cubin loader: {e}")
+    import traceback
+    traceback.print_exc()
+
+from .trtllm_utils import trtllm_paged_attention_decode_func
 
 from tritonbench.utils.triton_op import (
     BenchmarkOperator,
@@ -663,3 +694,14 @@ class Operator(BenchmarkOperator):
             k_scale_asm,
             v_scale_asm,
         )
+
+    @register_benchmark()
+    def trtllm_decode_fmha(
+        self,
+        q: torch.Tensor,
+        k_cache: torch.Tensor,
+        v_cache: torch.Tensor,
+        cache_seqlens: torch.Tensor,
+    ) -> Callable:
+        args = trtllm_paged_attention_decode_func(q, k_cache, v_cache, cache_seqlens)
+        return lambda: torch.ops.fmha_gen.trtllm_paged_attention_decode(*args)
