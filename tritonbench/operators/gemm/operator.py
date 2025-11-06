@@ -10,7 +10,9 @@ import torch._inductor.config as inductor_config
 import triton
 
 from tritonbench.operators.gemm.kernels import matmul as kernels
-from tritonbench.operators.gemm.partition_k import matmul_partition_k as matmul_partition_k_kernel
+from tritonbench.operators.gemm.partition_k import (
+    matmul_partition_k as matmul_partition_k_kernel,
+)
 from tritonbench.operators.gemm.stream_k import streamk_amd_matmul, streamk_cuda_matmul
 from tritonbench.operators.gemm.warp_spec_persistent_matmul import (
     blackwell_matmul_descriptor_persistent,
@@ -64,7 +66,9 @@ try:
 except ModuleNotFoundError:
     HAS_PERSISTENT = False
 
-from tritonbench.operators.gemm.triton_matmul import matmul as triton_tutorial_matmul_kernel
+from tritonbench.operators.gemm.triton_matmul import (
+    matmul as triton_tutorial_matmul_kernel,
+)
 
 if is_fbcode():
     import generative_recommenders.ops.triton.triton_addmm as hstu_triton_addmm

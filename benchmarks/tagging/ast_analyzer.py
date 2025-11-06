@@ -4,15 +4,17 @@ Traces code on AST level.
 Assume all dependent sources are import-able but do not require them to run.
 Assume kernels are tracable through function calls (no class methods involved).
 """
+
 import ast
-import inspect
 import importlib
 import importlib.util
-from dataclasses import dataclass
+import inspect
 import os
 import sys
+from dataclasses import dataclass
 from os.path import abspath, exists
-from typing import Dict, List, Optional, Set, Tuple, Optional, Any
+from typing import Any, Dict, List, Optional, Optional, Set, Tuple
+
 
 def setup_tritonbench_cwd():
     original_dir = abspath(os.getcwd())
@@ -30,15 +32,18 @@ def setup_tritonbench_cwd():
         sys.path.append(tritonbench_dir)
     return original_dir
 
+
 setup_tritonbench_cwd()
 
 from tritonbench.utils.env_utils import is_fbcode
+
 
 @dataclass(frozen=True)
 class Site:
     filename: str
     lineno: int
     col: int
+
 
 @dataclass
 class FuncDescriptor:
@@ -57,7 +62,13 @@ class Edge:
 
 
 class CallGraph(ast.NodeVisitor):
-    def __init__(self, filename: str = "<string>", module_name: str = "<module>", include_decorators: bool = False, backends: Optional[List[str]] = None):
+    def __init__(
+        self,
+        filename: str = "<string>",
+        module_name: str = "<module>",
+        include_decorators: bool = False,
+        backends: Optional[List[str]] = None,
+    ):
         self.filename = filename
         self.include_decorators = include_decorators
 
@@ -91,18 +102,22 @@ class CallGraph(ast.NodeVisitor):
 
     def _bind(self, name: str, target: str):
         self.bindings_stack[-1][name] = target
-    
+
     def _bind_func_descriptor(self, node, decorators: List[str]):
         name = node.name
-        site = Site(self.filename, getattr(node, "lineno", -1), getattr(node, "col_offset", -1))
-        self.bindings_stack[-1][f"__{name}_descriptor__"] = FuncDescriptor(name, decorators, site)
+        site = Site(
+            self.filename, getattr(node, "lineno", -1), getattr(node, "col_offset", -1)
+        )
+        self.bindings_stack[-1][f"__{name}_descriptor__"] = FuncDescriptor(
+            name, decorators, site
+        )
 
     def _resolve_name(self, id_: str) -> str:
         for env in reversed(self.bindings_stack):
             if id_ in env:
                 return env[id_]
         return id_
-    
+
     def _resolve_func_descriptor(self, id_: str) -> List[str]:
         for env in reversed(self.bindings_stack):
             decorator_constant = f"__{id_}_descriptor__"
@@ -131,26 +146,47 @@ class CallGraph(ast.NodeVisitor):
         return lid
 
     def _record_assignment(self, target, rhs, node: ast.AST):
-        site = Site(self.filename, getattr(node, "lineno", -1), getattr(node, "col_offset", -1))
-        self.edges.append(Edge(target, rhs, site=site, callee_descriptor=None, call_type="assignment"))
+        site = Site(
+            self.filename, getattr(node, "lineno", -1), getattr(node, "col_offset", -1)
+        )
+        self.edges.append(
+            Edge(target, rhs, site=site, callee_descriptor=None, call_type="assignment")
+        )
 
-    def _record_call(self, callee: str, node: ast.AST, maybe_triton: bool=False, caller = None):
+    def _record_call(
+        self, callee: str, node: ast.AST, maybe_triton: bool = False, caller=None
+    ):
         if caller is None:
             caller = self._cur_scope() or "<module>"
-        site = Site(self.filename, getattr(node, "lineno", -1), getattr(node, "col_offset", -1))
+        site = Site(
+            self.filename, getattr(node, "lineno", -1), getattr(node, "col_offset", -1)
+        )
         # trace the backend call in tritonbench
-        if "tritonbench.operators." in caller and \
-            any([f"Operator.{backend}" in caller for backend in self.backends]) and \
-            not callee == "tritonbench.utils.triton_op.register_benchmark":
+        if (
+            "tritonbench.operators." in caller
+            and any([f"Operator.{backend}" in caller for backend in self.backends])
+            and not callee == "tritonbench.utils.triton_op.register_benchmark"
+        ):
             if callee.startswith("self."):
                 return
             if is_fbcode() and callee.startswith("liger_kernel."):
                 return
             # identify this call belongs to which backend
             for backend in self.backends:
-                if caller.endswith(f"Operator.{backend}") or f"Operator.{backend}." in caller:
+                if (
+                    caller.endswith(f"Operator.{backend}")
+                    or f"Operator.{backend}." in caller
+                ):
                     self.backends[backend].append(self._resolve_name(callee))
-            self.edges.append(Edge(caller, callee, callee_descriptor=self._resolve_func_descriptor(callee), site=site, call_type="regular"))
+            self.edges.append(
+                Edge(
+                    caller,
+                    callee,
+                    callee_descriptor=self._resolve_func_descriptor(callee),
+                    site=site,
+                    call_type="regular",
+                )
+            )
         elif any([backend in caller for backend in self.backends]):
             # "torch.ops" is a binary custom ops
             if callee.startswith("self."):
@@ -164,13 +200,35 @@ class CallGraph(ast.NodeVisitor):
             # heuristic that this maybe a triton kernel call
             # TODO: this is not a good heuristic, but we couldn't find a better way to identify triton kernel calls
             if maybe_triton and callee_descriptor == None:
-                callee_descriptor = FuncDescriptor(callee, ["triton.jit"], Site(self.filename, getattr(node, "lineno", -1), getattr(node, "col_offset", -1))) 
-            self.edges.append(Edge(caller, callee, callee_descriptor=callee_descriptor, site=site, call_type="regular"))
+                callee_descriptor = FuncDescriptor(
+                    callee,
+                    ["triton.jit"],
+                    Site(
+                        self.filename,
+                        getattr(node, "lineno", -1),
+                        getattr(node, "col_offset", -1),
+                    ),
+                )
+            self.edges.append(
+                Edge(
+                    caller,
+                    callee,
+                    callee_descriptor=callee_descriptor,
+                    site=site,
+                    call_type="regular",
+                )
+            )
 
     def _record_decorator_edge(self, callee: str, node: ast.AST):
         caller = self._cur_scope() or "<module>"
-        site = Site(self.filename, getattr(node, "lineno", -1), getattr(node, "col_offset", -1))
-        self.decorator_edges.append(Edge(caller, callee, callee_descriptor=None, site=site, call_type="decorator"))
+        site = Site(
+            self.filename, getattr(node, "lineno", -1), getattr(node, "col_offset", -1)
+        )
+        self.decorator_edges.append(
+            Edge(
+                caller, callee, callee_descriptor=None, site=site, call_type="decorator"
+            )
+        )
 
     # ---------- imports / aliases ----------
     def visit_Import(self, node: ast.Import):
@@ -269,7 +327,9 @@ class CallGraph(ast.NodeVisitor):
                 if isinstance(t, ast.Name):
                     self._bind(t.id, sym)
                     if any([t.id == backend for backend in self.backends.keys()]):
-                        print(f"recording assignment for backend: {self.backends}, tid: {t.id}")
+                        print(
+                            f"recording assignment for backend: {self.backends}, tid: {t.id}"
+                        )
                         self._record_assignment(t.id, sym, node)
         self.generic_visit(node)
 
@@ -295,7 +355,9 @@ class CallGraph(ast.NodeVisitor):
             callee = self._resolve_attr(fn)
         elif isinstance(fn, ast.Lambda):
             callee = self._lambda_id(fn)  # inline IIFE-style lambda
-        elif isinstance(fn, ast.Subscript):  # highly likely to be triton - met a function call with subscript
+        elif isinstance(
+            fn, ast.Subscript
+        ):  # highly likely to be triton - met a function call with subscript
             if isinstance(fn.value, ast.Name):
                 callee = fn.value.id
             elif isinstance(fn.value, ast.Attribute):
@@ -316,8 +378,8 @@ def validate_edges(edges) -> Dict[str, str]:
     result_tags["kernels"] = []
     for edge in edges:
         if edge.callee_descriptor and (
-            "triton.jit" in edge.callee_descriptor.decorators or \
-            "<dynamic_decorator_triton.jit>" in edge.callee_descriptor.decorators
+            "triton.jit" in edge.callee_descriptor.decorators
+            or "<dynamic_decorator_triton.jit>" in edge.callee_descriptor.decorators
         ):
             result_tags["tags"].append("triton")
             result_tags["kernels"].append(edge.callee)
@@ -342,15 +404,20 @@ def validate_edges(edges) -> Dict[str, str]:
         return None
     return result_tags
 
+
 def gen_static_extension_tags(callee: str) -> Dict[str, str]:
     result_tags = {}
     result_tags["tags"] = {"native_extension"}
     result_tags["kernels"] = [callee]
     return result_tags
 
+
 def trace_callees(callees_with_module: List[Tuple[str, str]], depth=8):
     """Bread-first search, maximum depth 10"""
-    queue = [{"callee": callee[0], "module": callee[1] ,"depth": 1} for callee in callees_with_module]
+    queue = [
+        {"callee": callee[0], "module": callee[1], "depth": 1}
+        for callee in callees_with_module
+    ]
     seen = set()
     while len(queue):
         cur = queue.pop(0)
@@ -364,12 +431,20 @@ def trace_callees(callees_with_module: List[Tuple[str, str]], depth=8):
             seen.add((callee, module_name))
         # hack: change .apply to .forward function for Autograd
         if callee.endswith(".apply"):
-            callee = callee[:callee.rfind(".apply")] + ".forward"
+            callee = callee[: callee.rfind(".apply")] + ".forward"
 
-        callee_module = callee[:callee.rfind('.')] if "." in callee else None
-        callee_name = callee[callee.rfind('.')+1:] if "." in callee else callee
-        maybe_callee_module = callee_module[:callee_module.rfind('.')] if callee_module and "." in callee_module else None
-        maybe_callee_class = callee_module[callee_module.rfind('.')+1:] if callee_module and "." in callee_module else None
+        callee_module = callee[: callee.rfind(".")] if "." in callee else None
+        callee_name = callee[callee.rfind(".") + 1 :] if "." in callee else callee
+        maybe_callee_module = (
+            callee_module[: callee_module.rfind(".")]
+            if callee_module and "." in callee_module
+            else None
+        )
+        maybe_callee_class = (
+            callee_module[callee_module.rfind(".") + 1 :]
+            if callee_module and "." in callee_module
+            else None
+        )
         # best effort to find and import the module
         # print(f"callee: {callee}")
         # print(f"callee module: {callee_module}")
@@ -396,17 +471,23 @@ def trace_callees(callees_with_module: List[Tuple[str, str]], depth=8):
                     callee_name = f"{maybe_callee_class}.{callee_name}"
                 except (ModuleNotFoundError, TypeError):
                     try:
-                        module = importlib.import_module(f"{module_name}.{maybe_callee_module}")
+                        module = importlib.import_module(
+                            f"{module_name}.{maybe_callee_module}"
+                        )
                         source_file = inspect.getfile(module)
                         callee_name = f"{maybe_callee_class}.{callee_name}"
                     except Exception:
                         # give up
-                        print(f"Failed to load module {maybe_callee_module} from entity {callee}")
+                        print(
+                            f"Failed to load module {maybe_callee_module} from entity {callee}"
+                        )
                         continue
         if not module:
             print(f"Failed to find {callee} at module {callee_module} ")
             continue
-        print(f"Found entity {callee} at module {module.__name__}. Searching callee {callee_name}")
+        print(
+            f"Found entity {callee} at module {module.__name__}. Searching callee {callee_name}"
+        )
         if source_file == "static-extension":
             return gen_static_extension_tags(callee)
         if source_file.endswith(".so"):
@@ -416,7 +497,12 @@ def trace_callees(callees_with_module: List[Tuple[str, str]], depth=8):
         with open(source_file, "r") as fp:
             source = fp.read()
         tree = ast.parse(source, filename=source_file, mode="exec")
-        cg = CallGraph(filename=os.path.basename(source_file), module_name=real_module_name, include_decorators=True, backends=[callee_name])
+        cg = CallGraph(
+            filename=os.path.basename(source_file),
+            module_name=real_module_name,
+            include_decorators=True,
+            backends=[callee_name],
+        )
         cg.visit(tree)
         # get next level callees
         print(cg.edges)
@@ -426,18 +512,30 @@ def trace_callees(callees_with_module: List[Tuple[str, str]], depth=8):
             return tags
         next_level_callees = [edge.callee for edge in cg.edges]
         for next_level_callee in next_level_callees:
-            queue.append({"callee": next_level_callee, "module": real_module_name ,"depth": cur["depth"] + 1})
+            queue.append(
+                {
+                    "callee": next_level_callee,
+                    "module": real_module_name,
+                    "depth": cur["depth"] + 1,
+                }
+            )
     # No valid tags are found, return None
     return None
 
 
-def build_backend_callees(source: str,
-                     filename: str = "<string>",
-                     module_name: str = "",
-                     backends: Optional[List[str]] = None,
-                     ) -> Tuple[Dict[str, Set[str]], List[Edge]]:
+def build_backend_callees(
+    source: str,
+    filename: str = "<string>",
+    module_name: str = "",
+    backends: Optional[List[str]] = None,
+) -> Tuple[Dict[str, Set[str]], List[Edge]]:
     tree = ast.parse(source, filename=filename, mode="exec")
-    cg = CallGraph(filename=filename, module_name=module_name, include_decorators=True, backends=backends)
+    cg = CallGraph(
+        filename=filename,
+        module_name=module_name,
+        include_decorators=True,
+        backends=backends,
+    )
     cg.visit(tree)
     print(cg.backends)
     return cg.backends
