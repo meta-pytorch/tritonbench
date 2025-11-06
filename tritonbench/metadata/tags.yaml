@@ -109,6 +109,7 @@ cross_entropy:
   liger_cross_entropy_loss:
     tags:
     - liger
+    - triton
   torch_compile_cross_entropy_loss:
     tags:
     - pt2
@@ -328,6 +329,7 @@ fused_linear_cross_entropy:
   liger_lm_head_ce:
     tags:
     - liger
+    - triton
   torch_compile_fused_linear_cross_entropy:
     tags:
     - pt2
@@ -336,6 +338,7 @@ fused_linear_jsd:
   liger_lm_head_jsd:
     tags:
     - liger
+    - triton
   torch_compile_lm_head_jsd:
     tags:
     - pt2
@@ -352,8 +355,8 @@ gather_gemv:
     - triton_red_fused_mv_0
     - torch.ops.inductor._reinterpret_tensor
     tags:
-    - native_custom_ops
     - triton
+    - native_custom_ops
 gdpa:
   eager_gdpa:
     tags:
@@ -369,6 +372,7 @@ geglu:
   liger_geglu:
     tags:
     - liger
+    - triton
   torch_compile_geglu:
     tags:
     - pt2
@@ -563,6 +567,7 @@ jsd:
   liger_jsd:
     tags:
     - liger
+    - triton
   torch_compile_jsd:
     tags:
     - pt2
@@ -571,6 +576,7 @@ kl_div:
   liger_kl_div:
     tags:
     - liger
+    - triton
   torch_compile_kl_div:
     tags:
     - pt2
@@ -688,6 +694,7 @@ rope:
   liger_rotary_pos_emb:
     tags:
     - liger
+    - triton
   torch_compile_rotary_pos_emb_full_op:
     tags:
     - pt2
@@ -723,6 +730,7 @@ swiglu:
   liger_swiglu:
     tags:
     - liger
+    - triton
   torch_compile_swiglu:
     tags:
     - pt2
@@ -761,8 +769,8 @@ welford:
     - torch.ops.inductor._reinterpret_tensor
     - triton_red_fused_native_layer_norm_no_welford
     tags:
-    - native_custom_ops
     - triton
+    - native_custom_ops
   torch_compile_welford:
     tags:
     - pt2
