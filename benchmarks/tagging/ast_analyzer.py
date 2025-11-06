@@ -292,6 +292,8 @@ class CallGraph(ast.NodeVisitor):
                 callee = fn.value.id
             elif isinstance(fn.value, ast.Attribute):
                 callee = fn.value.value.id
+            else:
+                callee = "<dynamic_call>"
             maybe_triton = True  # FIXME: this could also be cute, see blackwell_attentions cute dsl
         else:
             callee = "<dynamic_call>"
@@ -318,12 +320,14 @@ def validate_edges(edges) -> Dict[str, str]:
             result_tags["tags"].append("native_custom_ops")
             # definition is in cpp, so we don't have the definition site
             result_tags["kernels"].append(edge.callee)
+        if edge.callee.startswith("triton.experimental.gluon"):
+            result_tags["tags"].append("gluon")
         if edge.callee.startswith("torch.nn."):
             result_tags["tags"].append("aten")
             result_tags["kernels"].append(edge.callee)
     # remove duplicates
     result_tags["tags"] = list(set(result_tags["tags"]))
-    if not result_tags["kernels"]:
+    if not result_tags["kernels"] and not result_tags["tags"]:
         return None
     return result_tags
 
@@ -356,8 +360,8 @@ def trace_callees(callees_with_module: List[Tuple[str, str]], depth=8):
         maybe_callee_module = callee_module[:callee_module.rfind('.')] if callee_module and "." in callee_module else None
         maybe_callee_class = callee_module[callee_module.rfind('.')+1:] if callee_module and "." in callee_module else None
         # best effort to find and import the module
-        # print(f"callee: {callee}")
-        # print(f"callee module: {callee_module}")
+        print(f"callee: {callee}")
+        print(f"callee module: {callee_module}")
         # print(f"callee name: {callee_name}")
         # print(f"module name: {module_name}")
         # print(f"maybe callee module: {maybe_callee_module}")
@@ -374,7 +378,6 @@ def trace_callees(callees_with_module: List[Tuple[str, str]], depth=8):
                 source_file = inspect.getfile(module)
             except (ModuleNotFoundError, TypeError):
                 if maybe_callee_module == None:
-                    print(f"Failed to load module {maybe_callee_module} from entity {callee}")
                     continue
                 try:
                     module = importlib.import_module(maybe_callee_module)
@@ -390,7 +393,10 @@ def trace_callees(callees_with_module: List[Tuple[str, str]], depth=8):
         print(f"Found entity {callee} at module {module.__name__}. Searching callee {callee_name}")
         if source_file == "static-extension":
             return gen_static_extension_tags(callee)
+        if source_file.endswith(".so"):
+            continue
         real_module_name = module.__name__
+        print(f"=============== SEARCHING FILE {source_file} ===============")
         with open(source_file, "r") as fp:
             source = fp.read()
         tree = ast.parse(source, filename=source_file, mode="exec")

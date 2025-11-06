@@ -6,6 +6,7 @@ import argparse
 import logging
 import os
 import sys
+import yaml
 from os.path import abspath, exists
 from pathlib import Path
 
@@ -37,7 +38,11 @@ from tritonbench.operators import list_operators
 from tritonbench.utils.run_utils import load_operator_by_args
 from tritonbench.utils.operator_utils import get_backends_for_operator
 import inspect
-from .ast_analyzer import build_backend_callees, trace_callees
+
+try:
+    from ast_analyzer import build_backend_callees, trace_callees
+except ImportError:
+    from .ast_analyzer import build_backend_callees, trace_callees
 
 def get_parser():
     parser = argparse.ArgumentParser(
@@ -52,7 +57,7 @@ def get_parser():
         "--output",
         type=str,
         default="",
-        help="Output file path.",
+        help="Output file path. If none, print to stdout.",
     )
     return parser
 
@@ -66,6 +71,11 @@ def prevalidate_backends(backend_edges):
             op_with_tags[backend] = {"tags": ["aten"]}
         elif any(["xformers" in callee for callee in callees]):
             op_with_tags[backend] = {"tags": ["xformers"]}
+        elif any([callee.startswith("torch.ops.") for callee in callees]):
+            custom_op_category = [ callee[callee.rfind(".") + 1:] \
+                for callee in callees if callee.startswith("torch.ops.")]
+            op_with_tags[backend] = {"tags": custom_op_category + ["native_custom_ops"]}
+
     return op_with_tags
 
 
@@ -106,6 +116,7 @@ def trace_op(op):
             op_with_tags[op][backend]["tags"].append("aten")
     return op_with_tags
 
+UNSUPPORTED_OPS = ["fp8_fused_quant_gemm_rowwise", "fp32_to_mx4", "flex_attention", "mx4_to_fp32"]
 
 if __name__ == "__main__":
     parser = get_parser()
@@ -114,7 +125,16 @@ if __name__ == "__main__":
         ops = list_operators()
     else:
         ops = [args.op]
+    print(f"Running tagging test on ops: {ops}...")
     results = {}
     for op in ops:
+        # deadloop on flex_attention
+        if op in UNSUPPORTED_OPS:
+            continue
         results.update(trace_op(op))
-    print(results)
+    if not args.output:
+        print(results)
+    else:
+        with open(args.output, "w") as f:
+            f.write(yaml.safe_dump(results))
+        print("success!")
