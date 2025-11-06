@@ -112,6 +112,10 @@ def trace_op(op):
             op_with_tags[op][backend]["tags"].extend(["liger"])
             if "triton" not in op_with_tags[op][backend]["tags"]:
                 op_with_tags[op][backend]["tags"].append("triton")
+        if "tlx_" in backend:
+            if not op_with_tags[op][backend]:
+                op_with_tags[op][backend] = {"tags": []}
+            op_with_tags[op][backend]["tags"].extend(["tlx"])
         if "eager" in backend or "aten" in backend:
             if not op_with_tags[op][backend]:
                 op_with_tags[op][backend] = {"tags": []}

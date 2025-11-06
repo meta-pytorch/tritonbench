@@ -64,8 +64,12 @@ blackwell_attentions:
   sdpa:
     tags:
     - pt2
-  tlx_blackwell_ws_pipelined_fwd: null
-  tlx_blackwell_ws_pipelined_persistent_fwd: null
+  tlx_blackwell_ws_pipelined_fwd:
+    tags:
+    - tlx
+  tlx_blackwell_ws_pipelined_persistent_fwd:
+    tags:
+    - tlx
   triton_tutorial_flash_dp_blackwell:
     kernels:
     - _attn_fwd_persist
@@ -364,7 +368,9 @@ gdpa:
   gdpa: null
   gdpa_opt: null
   gdpa_opt_sorted: null
-  tlx_gdpa: null
+  tlx_gdpa:
+    tags:
+    - tlx
   torch_compile_gdpa:
     tags:
     - pt2
