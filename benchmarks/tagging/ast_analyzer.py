@@ -371,8 +371,8 @@ def trace_callees(callees_with_module: List[Tuple[str, str]], depth=8):
         maybe_callee_module = callee_module[:callee_module.rfind('.')] if callee_module and "." in callee_module else None
         maybe_callee_class = callee_module[callee_module.rfind('.')+1:] if callee_module and "." in callee_module else None
         # best effort to find and import the module
-        print(f"callee: {callee}")
-        print(f"callee module: {callee_module}")
+        # print(f"callee: {callee}")
+        # print(f"callee module: {callee_module}")
         # print(f"callee name: {callee_name}")
         # print(f"module name: {module_name}")
         # print(f"maybe callee module: {maybe_callee_module}")
@@ -393,11 +393,16 @@ def trace_callees(callees_with_module: List[Tuple[str, str]], depth=8):
                 try:
                     module = importlib.import_module(maybe_callee_module)
                     source_file = inspect.getfile(module)
-                    callee_name = f"{maybe_callee_class}.{callee_name}" 
-                except Exception:
-                    # give up
-                    print(f"Failed to load module {maybe_callee_module} from entity {callee}")
-                    continue
+                    callee_name = f"{maybe_callee_class}.{callee_name}"
+                except (ModuleNotFoundError, TypeError):
+                    try:
+                        module = importlib.import_module(f"{module_name}.{maybe_callee_module}")
+                        source_file = inspect.getfile(module)
+                        callee_name = f"{maybe_callee_class}.{callee_name}"
+                    except Exception:
+                        # give up
+                        print(f"Failed to load module {maybe_callee_module} from entity {callee}")
+                        continue
         if not module:
             print(f"Failed to find {callee} at module {callee_module} ")
             continue

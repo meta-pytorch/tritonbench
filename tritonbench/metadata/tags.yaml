@@ -777,7 +777,11 @@ vector_exp:
     tags:
     - pt2
   torch_exp: null
-  triton_exp: null
+  triton_exp:
+    kernels:
+    - triton_exp_kernel
+    tags:
+    - triton
 welford:
   eager_layer_norm:
     tags:
