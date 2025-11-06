@@ -54,6 +54,11 @@ def get_parser():
         help="Op name to trace. If unspecified, trace all ops.",
     )
     parser.add_argument(
+        "--only",
+        type=str,
+        help="Only trace the specified backend. If unspecified, trace all backends."
+    )
+    parser.add_argument(
         "--output",
         type=str,
         default="",
@@ -87,7 +92,7 @@ def trace_op(op):
     module_name = opbench.__module__
     with open(opbench_file, "r") as f:
         source = f.read()
-    backends = get_backends_for_operator(opbench.name)
+    backends = get_backends_for_operator(opbench.name) if not args.only else args.only.split(",")
     backend_edges = build_backend_callees(
         source=source,
         filename=opbench_file_name,

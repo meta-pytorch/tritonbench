@@ -390,7 +390,12 @@ gemm:
   matmul_decompose_k:
     tags:
     - pt2
-  matmul_partition_k: null
+  matmul_partition_k:
+    kernels:
+    - _matmul_partition_k
+    - _reduce
+    tags:
+    - triton
   pt2_cutlass_matmul:
     tags:
     - pt2
@@ -413,7 +418,11 @@ gemm:
   triton_persistent_matmul: null
   triton_tma_persistent_cached_matmul: null
   triton_tma_persistent_matmul: null
-  triton_tutorial_matmul: null
+  triton_tutorial_matmul:
+    kernels:
+    - matmul_kernel
+    tags:
+    - triton
 grouped_gemm:
   aten_grouped_mm:
     tags:

@@ -10,7 +10,7 @@ import torch._inductor.config as inductor_config
 import triton
 
 from tritonbench.operators.gemm.kernels import matmul as kernels
-from tritonbench.operators.gemm.partition_k import matmul_partition_k
+from tritonbench.operators.gemm.partition_k import matmul_partition_k as matmul_partition_k_kernel
 from tritonbench.operators.gemm.stream_k import streamk_amd_matmul, streamk_cuda_matmul
 from tritonbench.operators.gemm.warp_spec_persistent_matmul import (
     blackwell_matmul_descriptor_persistent,
@@ -64,7 +64,7 @@ try:
 except ModuleNotFoundError:
     HAS_PERSISTENT = False
 
-from tritonbench.operators.gemm.triton_matmul import matmul as triton_tutorial_matmul
+from tritonbench.operators.gemm.triton_matmul import matmul as triton_tutorial_matmul_kernel
 
 if is_fbcode():
     import generative_recommenders.ops.triton.triton_addmm as hstu_triton_addmm
@@ -241,17 +241,17 @@ class Operator(BenchmarkOperator):
     @register_benchmark()
     def triton_tutorial_matmul(self, a, b, bias) -> Callable:
         if bias is not None:
-            return lambda: triton_tutorial_matmul(a, b) + bias
+            return lambda: triton_tutorial_matmul_kernel(a, b) + bias
         else:
-            return lambda: triton_tutorial_matmul(a, b)
+            return lambda: triton_tutorial_matmul_kernel(a, b)
 
     @register_benchmark()
     def matmul_partition_k(self, a, b, bias) -> Callable:
         bt = b.contiguous()
         if bias is not None:
-            return lambda: matmul_partition_k(a, bt) + bias
+            return lambda: matmul_partition_k_kernel(a, bt) + bias
         else:
-            return lambda: matmul_partition_k(a, bt)
+            return lambda: matmul_partition_k_kernel(a, bt)
 
     @register_benchmark(enabled=HAS_PERSISTENT, fwd_only=True)
     def triton_persistent_matmul(self, a, b, bias) -> Callable:
