@@ -110,7 +110,8 @@ class Operator(BenchmarkOperator):
     def triton_addmm(self, a, mat1, mat2) -> Callable:
         return lambda: hstu_triton_addmm(a, mat1, mat2)
 
-    @register_benchmark(enabled=HAS_STREAMK)
+    # FIXME: bwd has some problem, need to re-enable it
+    @register_benchmark(enabled=False)
     def streamk_addmm(self, a, mat1, mat2) -> Callable:
         return lambda: streamk_cuda_matmul(mat1, mat2)
 
