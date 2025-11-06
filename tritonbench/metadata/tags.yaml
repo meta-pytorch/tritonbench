@@ -170,9 +170,9 @@ flash_attention:
     - pt2
   tile:
     kernels:
-    - ns
+    - tritonbench.operators.flash_attention.tilelang_mha
     tags:
-    - triton
+    - tilelang
   tk: null
   triton_tutorial_flash_v2:
     kernels:
@@ -355,8 +355,8 @@ gather_gemv:
     - triton_red_fused_mv_0
     - torch.ops.inductor._reinterpret_tensor
     tags:
-    - triton
     - native_custom_ops
+    - triton
 gdpa:
   eager_gdpa:
     tags:
@@ -589,7 +589,11 @@ launch_latency:
   nop_triton_compiled_kernel_run:
     tags:
     - pt2
-  nop_triton_kernel: null
+  nop_triton_kernel:
+    kernels:
+    - nop_kernel
+    tags:
+    - triton
 layer_norm:
   liger_layer_norm:
     kernels:
@@ -621,11 +625,19 @@ low_mem_dropout:
   eager_dropout:
     tags:
     - aten
-  seeded_dropout: null
+  seeded_dropout:
+    kernels:
+    - _seeded_triton_dropout
+    tags:
+    - triton
   torch_compile_dropout:
     tags:
     - pt2
-  triton_dropout: null
+  triton_dropout:
+    kernels:
+    - _triton_dropout
+    tags:
+    - triton
 mamba2_chunk_scan:
   compile:
     tags:
@@ -755,7 +767,11 @@ vector_add:
   torch_compile_add:
     tags:
     - pt2
-  triton_add: null
+  triton_add:
+    kernels:
+    - triton_add_kernel
+    tags:
+    - triton
 vector_exp:
   torch_compile_exp:
     tags:
@@ -771,9 +787,17 @@ welford:
     - torch.ops.inductor._reinterpret_tensor
     - triton_red_fused_native_layer_norm_no_welford
     tags:
-    - triton
     - native_custom_ops
+    - triton
   torch_compile_welford:
     tags:
     - pt2
-  triton_welford: null
+  triton_welford:
+    kernels:
+    - torch.ops.inductor._reinterpret_tensor
+    - triton_red_fused_native_layer_norm_no_welford
+    - torch.ops.inductor._reinterpret_tensor
+    - triton_red_fused_native_layer_norm_0
+    tags:
+    - native_custom_ops
+    - triton

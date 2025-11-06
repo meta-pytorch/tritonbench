@@ -11,8 +11,8 @@ from tritonbench.utils.triton_op import (
 )
 
 from .triton_welford import (
-    fused_native_layer_norm as triton_welford,
-    fused_native_layer_norm_no_welford as triton_no_welford,
+    fused_native_layer_norm as triton_welford_kernel,
+    fused_native_layer_norm_no_welford as triton_no_welford_kernel,
 )
 
 
@@ -42,11 +42,11 @@ class Operator(BenchmarkOperator):
 
     @register_benchmark()
     def triton_welford(self, p1, p2, p3) -> Callable:
-        return lambda: triton_welford(p1, p2, p3)
+        return lambda: triton_welford_kernel(p1, p2, p3)
 
     @register_benchmark()
     def test_no_welford(self, p1, p2, p3) -> Callable:
-        return lambda: triton_no_welford(p1, p2, p3)
+        return lambda: triton_no_welford_kernel(p1, p2, p3)
 
     @register_benchmark(baseline=True)
     def eager_layer_norm(self, p1, p2, p3) -> Callable:

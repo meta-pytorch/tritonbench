@@ -103,7 +103,7 @@ def trace_op(op):
         # special case for torch.compile
         callees = backend_edges[backend]
         base_module_name = module_name[:module_name.rfind(".")]
-        callees_with_module = [(callee, base_module_name) for callee in callees]
+        callees_with_module: list[tuple[Unknown, Unknown]] = [(callee, base_module_name) for callee in callees]
         op_with_tags[op][backend] = trace_callees(callees_with_module)
         # postprocess: add human heuristics
         if "liger" in backend:

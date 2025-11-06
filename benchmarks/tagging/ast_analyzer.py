@@ -134,8 +134,9 @@ class CallGraph(ast.NodeVisitor):
         site = Site(self.filename, getattr(node, "lineno", -1), getattr(node, "col_offset", -1))
         self.edges.append(Edge(target, rhs, site=site, callee_descriptor=None, call_type="assignment"))
 
-    def _record_call(self, callee: str, node: ast.AST, maybe_triton: bool=False):
-        caller = self._cur_scope() or "<module>"
+    def _record_call(self, callee: str, node: ast.AST, maybe_triton: bool=False, caller = None):
+        if caller is None:
+            caller = self._cur_scope() or "<module>"
         site = Site(self.filename, getattr(node, "lineno", -1), getattr(node, "col_offset", -1))
         # trace the backend call in tritonbench
         if "tritonbench.operators." in caller and \
@@ -148,7 +149,7 @@ class CallGraph(ast.NodeVisitor):
             # identify this call belongs to which backend
             for backend in self.backends:
                 if caller.endswith(f"Operator.{backend}") or f"Operator.{backend}." in caller:
-                    self.backends[backend].append(callee)
+                    self.backends[backend].append(self._resolve_name(callee))
             self.edges.append(Edge(caller, callee, callee_descriptor=self._resolve_func_descriptor(callee), site=site, call_type="regular"))
         elif any([backend in caller for backend in self.backends]):
             # "torch.ops" is a binary custom ops
@@ -221,9 +222,12 @@ class CallGraph(ast.NodeVisitor):
                 else:
                     callee = "<dynamic_decorator>"
                 decorators.append(callee)
+
         self._bind_func_descriptor(node, decorators)
 
         self._push_scope(node.name)
+        if node.name in self.backends:
+            self._record_call(node.name, node, maybe_triton=False, caller=node.name)
         self.generic_visit(node)
         self._pop_scope()
 
