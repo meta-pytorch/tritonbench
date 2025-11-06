@@ -19,7 +19,7 @@ from .hstu import (
     get_test_inputs,
     HAS_HAMMER,
     triton_hstu_mha,
-    triton_ragged_attention_fwd,
+    triton_ragged_hstu_mha,
 )
 
 HAS_CUDA = False
@@ -135,20 +135,21 @@ class Operator(BenchmarkOperator):
 
     @register_benchmark(enabled=HAS_HAMMER)
     def hammer_hstu(self, q, k, v, seq_offsets, num_targets, max_seq_len, sparsity):
-        return lambda: triton_ragged_attention_fwd(
-            max_seq_len,
+        return lambda: triton_ragged_hstu_mha(
+            N=max_seq_len,
             alpha=self.alpha,
             q=q,
             k=k,
             v=v,
-            invalid_attn_mask_type=self.attn_mask_type,
             seq_offsets=seq_offsets,
+            invalid_attn_mask_type=self.attn_mask_type,
             num_targets=num_targets,
-            max_attn_len=self.max_attn_len,
             attn_scale=None,
             attn_bias=None,
             seq2_offsets=None,
+            max_attn_len=self.max_attn_len,
             contextual_seq_len=self.contextual_seq_len,
+            sort_by_length=False,
             full_attn_size=0,
         )
 
