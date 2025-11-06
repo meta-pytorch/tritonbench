@@ -15,7 +15,7 @@ def parse_args(args: List[str]) -> argparse.Namespace:
         "--config",
         type=str,
         default=None,
-        help="config to use. Multiple can be passed in comma separated"
+        help="config to use. Multiple can be passed in comma separated",
     )
     args = parser.parse_args(args)
     return args
