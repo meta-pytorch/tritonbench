@@ -167,7 +167,11 @@ flash_attention:
   sdpa:
     tags:
     - pt2
-  tile: null
+  tile:
+    kernels:
+    - ns
+    tags:
+    - triton
   tk: null
   triton_tutorial_flash_v2:
     kernels:
@@ -348,8 +352,8 @@ gather_gemv:
     - triton_red_fused_mv_0
     - torch.ops.inductor._reinterpret_tensor
     tags:
-    - triton
     - native_custom_ops
+    - triton
 gdpa:
   eager_gdpa:
     tags:
@@ -408,10 +412,22 @@ grouped_gemm:
   aten_grouped_mm:
     tags:
     - aten
-  cutedsl_grouped_mm: null
+  cutedsl_grouped_mm:
+    kernels:
+    - tritonbench.operators.grouped_gemm.cutedsl.kernels.compile_cutedsl_grouped_gemm
+    tags:
+    - cutedsl
   naive: null
-  precompiled_cutedsl_grouped_mm: null
-  precompiled_cutedsl_grouped_mm_tuned: null
+  precompiled_cutedsl_grouped_mm:
+    kernels:
+    - tritonbench.operators.grouped_gemm.cutedsl.kernels.compile_cutedsl_grouped_gemm
+    tags:
+    - cutedsl
+  precompiled_cutedsl_grouped_mm_tuned:
+    kernels:
+    - tritonbench.operators.grouped_gemm.cutedsl.kernels.compile_cutedsl_grouped_gemm
+    tags:
+    - cutedsl
   preprocessed_aten_grouped_mm:
     tags:
     - aten
@@ -679,7 +695,12 @@ softmax:
   naive_softmax:
     tags:
     - aten
-  quack: null
+  quack:
+    kernels:
+    - quack.softmax._softmax_fwd
+    - quack.softmax._softmax_backward
+    tags:
+    - cutedsl
   torch_compile_softmax:
     tags:
     - pt2
@@ -740,8 +761,8 @@ welford:
     - torch.ops.inductor._reinterpret_tensor
     - triton_red_fused_native_layer_norm_no_welford
     tags:
-    - triton
     - native_custom_ops
+    - triton
   torch_compile_welford:
     tags:
     - pt2
