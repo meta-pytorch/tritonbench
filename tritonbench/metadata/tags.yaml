@@ -132,11 +132,7 @@ decoding_attention:
     tags:
     - gqa_attn_splitk
     - native_custom_ops
-  flash_cute_dsl:
-    kernels:
-    - <dynamic_call>
-    tags:
-    - triton
+  flash_cute_dsl: null
   triton_splitk:
     tags:
     - xformers

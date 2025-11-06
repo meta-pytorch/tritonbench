@@ -156,8 +156,12 @@ class CallGraph(ast.NodeVisitor):
                 return
             if callee.startswith("torch.") and not callee.startswith("torch.ops."):
                 return
+            # we are sure there is no kernel defined in this package ;-)
+            if callee.startswith("tritonbench.utils."):
+                return
             callee_descriptor = self._resolve_func_descriptor(callee)
             # heuristic that this maybe a triton kernel call
+            # TODO: this is not a good heuristic, but we couldn't find a better way to identify triton kernel calls
             if maybe_triton and callee_descriptor == None:
                 callee_descriptor = FuncDescriptor(callee, ["triton.jit"], Site(self.filename, getattr(node, "lineno", -1), getattr(node, "col_offset", -1))) 
             self.edges.append(Edge(caller, callee, callee_descriptor=callee_descriptor, site=site, call_type="regular"))
@@ -325,6 +329,9 @@ def validate_edges(edges) -> Dict[str, str]:
         if edge.callee.startswith("torch.nn."):
             result_tags["tags"].append("aten")
             result_tags["kernels"].append(edge.callee)
+        if edge.callee.startswith("tilelang.compile"):
+            result_tags["tags"].append("tilelang")
+            result_tags["kernels"].append(edge.caller)
     # remove duplicates
     result_tags["tags"] = list(set(result_tags["tags"]))
     if not result_tags["kernels"] and not result_tags["tags"]:
