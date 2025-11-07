@@ -88,10 +88,28 @@ def get_run_env(
             run_env[f"{repo}_commit_time"] = "unknown"
     return run_env
 
+def _env_get_str(var_name: str, default: str) -> str:
+    value = os.environ.get(var_name)
+    if value is None:
+        return default
+    return value.strip() or default
+
 
 def run_in_helion(op_args: Dict[str, str], extra_envs: Dict[str, str]):
-    HELION_PATH = REPO_PATH.joinpath(".install", "helion")
-    assert HELION_PATH.exists(), f"Helion path {HELION_PATH} must exist. Run python install.py --helion to install Helion."
+    # Allow override via TRITONBENCH_HELION_PATH; fallback to the current default.
+    default_helion = REPO_PATH.joinpath(".install", "helion")
+    helion_root = (
+        Path(_env_get_str("TRITONBENCH_HELION_PATH", str(default_helion)))
+        .expanduser()
+        .resolve()
+    )
+    helion_entry = helion_root / "benchmarks"
+    if not helion_entry.exists():
+        raise FileNotFoundError(
+            f"Invalid TRITONBENCH_HELION_PATH: {helion_root}\n"
+            "Expected to find 'benchmarks/run.py'. "
+            "Set TRITONBENCH_HELION_PATH to a Helion checkout or run 'python install.py --helion'."
+        )
     environ = os.environ.copy()
     environ.update(extra_envs)
     cmd = [sys.executable, "benchmarks/run.py"] + op_args
@@ -101,10 +119,9 @@ def run_in_helion(op_args: Dict[str, str], extra_envs: Dict[str, str]):
     )
     subprocess.check_call(
         cmd,
-        cwd=HELION_PATH,
+        cwd=helion_root,
         env=environ,
     )
-
 
 def tritonbench_run(args: Optional[List[str]] = None):
     if args == None or args == []:
