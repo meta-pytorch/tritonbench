@@ -8,11 +8,12 @@ import triton.language as tl
 @triton.autotune(
     configs=[
         triton.Config(
-            {"M_INCREMENT": M_INCREMENT},
+            {"M_INCREMENT": M_INCREMENT, "NUM_STAGES": NUM_STAGES},
             num_warps=w,
         )
-        for M_INCREMENT in [1, 2, 4, 8, 16]
-        for w in [2, 4, 8]
+        for M_INCREMENT in [2, 4, 8]
+        for NUM_STAGES in [1, 2, 3, 4, 5, 6]
+        for w in [2, 4, 8, 16]
     ],
     key=["M", "N"],
 )
@@ -31,6 +32,7 @@ def _rms_norm_bwd_fused(
     BLOCK_SIZE_M: tl.constexpr,
     M_INCREMENT: tl.constexpr,
     N_POW_2: tl.constexpr,
+    NUM_STAGES: tl.constexpr,
 ):
     # Map the program id to the elements of X, DX, and DY it should compute.
     pid = tl.program_id(0)
@@ -44,7 +46,7 @@ def _rms_norm_bwd_fused(
 
     w = tl.load(W + cols, mask=col_mask).to(tl.float32)[None, :]
 
-    for cur_row in tl.range(0, BLOCK_SIZE_M, M_INCREMENT):
+    for cur_row in tl.range(0, BLOCK_SIZE_M, M_INCREMENT, num_stages=NUM_STAGES):
         rows = start_row + cur_row + tl.arange(0, M_INCREMENT)
         row_indices = rows * stride
         row_mask = rows < M
@@ -84,11 +86,12 @@ class RMSNorm(torch.autograd.Function):
         y = torch.empty_like(x)
         # reshape input data into 2D tensor
 
-        def rmsnorm_ref(inp, w, eps=1e-6):
-            rms = 1.0 / torch.sqrt(torch.mean(inp.square(), dim=-1, keepdim=True) + eps)
-            return (inp * rms * w).to(inp.dtype), rms
+        def rmsnorm_ref(inp, w, eps):
+            rms = 1.0 / (inp.square().mean(dim=-1, keepdim=True).sqrt_() + eps)
+            output = torch.nn.functional.rms_norm(inp, (x.shape[-1],), w, eps=eps)
+            return output, rms
 
-        y, rms = rmsnorm_ref(x, weight, eps)
+        y, rms = rmsnorm_ref(x, weight, eps if eps else 1e-6)
         ctx.save_for_backward(x, weight, rms)
         ctx.eps = eps
         return y
