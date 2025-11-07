@@ -1,6 +1,14 @@
 import argparse
 
-from tritonbench.utils.constants import DEFAULT_REP, DEFAULT_WARMUP
+from tritonbench.utils.constants import (
+    DEFAULT_ENTROPY_CRITERION,
+    DEFAULT_ENTROPY_MAX_ANGLE,
+    DEFAULT_ENTROPY_MAX_SAMPLES,
+    DEFAULT_ENTROPY_MIN_R2,
+    DEFAULT_ENTROPY_WINDOW_SIZE,
+    DEFAULT_REP,
+    DEFAULT_WARMUP,
+)
 
 from tritonbench.utils.env_utils import AVAILABLE_PRECISIONS, is_fbcode
 
@@ -66,6 +74,36 @@ def get_parser(args=None):
         type=float,
         default=0.0,
         help="The amount of time (in seconds) to sleep between benchmark runs.",
+    )
+    parser.add_argument(
+        "--entropy-criterion",
+        action="store_true",
+        default=DEFAULT_ENTROPY_CRITERION,
+        help="Use entropy-based adaptive stopping criterion instead of fixed iterations.",
+    )
+    parser.add_argument(
+        "--entropy-max-angle",
+        type=float,
+        default=DEFAULT_ENTROPY_MAX_ANGLE,
+        help="Maximum entropy slope angle (degrees) for convergence (default: 0.048).",
+    )
+    parser.add_argument(
+        "--entropy-min-r2",
+        type=float,
+        default=DEFAULT_ENTROPY_MIN_R2,
+        help="Minimum R² for entropy linear regression fit (default: 0.36).",
+    )
+    parser.add_argument(
+        "--entropy-window-size",
+        type=int,
+        default=DEFAULT_ENTROPY_WINDOW_SIZE,
+        help="Size of rolling window for entropy tracking (default: 299).",
+    )
+    parser.add_argument(
+        "--entropy-max-samples",
+        type=int,
+        default=DEFAULT_ENTROPY_MAX_SAMPLES,
+        help="Maximum samples before stopping even if not converged (default: 10000).",
     )
     parser.add_argument(
         "--csv",
@@ -349,6 +387,8 @@ def get_parser(args=None):
     args, extra_args = parser.parse_known_args(args)
     if args.op and args.ci:
         parser.error("cannot specify operator when in CI mode")
+    if args.cudagraph and args.entropy_criterion:
+        parser.error("cannot use cudagraph with entropy-criterion")
     if not args.op and not args.op_collection:
         print(
             "Neither operator nor operator collection is specified. Running all operators in the default collection."

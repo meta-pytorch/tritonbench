@@ -7,6 +7,7 @@ from typing import List, Optional
 import torch
 import triton
 from torch._inductor.runtime.benchmarking import benchmarker
+from tritonbench.components.do_bench.entropy.entropy_criterion import EntropyCriterion
 from tritonbench.utils.constants import DEFAULT_N_REP, DEFAULT_N_WARMUP
 
 from .power import do_bench_power
@@ -35,7 +36,7 @@ class Latency:
             data: A list of floats.
 
         Returns:
-            A new list with outliers removed.
+            A new list with outliers removed, preserving original order.
         """
         starting_length = len(data)
         if starting_length <= 3:
@@ -43,8 +44,9 @@ class Latency:
         if not data:
             return []
 
-        data.sort()
-        quantiles = statistics.quantiles(data, n=100)
+        # create a copy to calculate quantiles, preserving original order
+        sorted_data = sorted(data)
+        quantiles = statistics.quantiles(sorted_data, n=100)
         q1 = quantiles[25]
         q3 = quantiles[75]
         iqr = q3 - q1
@@ -52,6 +54,7 @@ class Latency:
         lower_bound = q1 - (1.5 * iqr)
         upper_bound = q3 + (1.5 * iqr)
 
+        # Filter while preserving original temporal order
         filtered_data = [x for x in data if lower_bound <= x and x <= upper_bound]
         end_len = len(filtered_data)
         if end_len != starting_length:
@@ -459,6 +462,140 @@ def _do_bench_cpu(
     return _summarize_statistics(times, quantiles, return_mode)
 
 
+def _do_bench_entropy(
+    fn,
+    warmup=25,
+    rep=100,
+    grad_to_none=None,
+    quantiles=None,
+    return_mode="mean",
+    max_angle=0.048,
+    min_r2=0.36,
+    window_size=299,
+    max_samples=10000,
+    min_warmup_samples=20,
+    repcnt=None,
+):
+    """
+    Benchmark function using entropy-based adaptive warmup followed by fixed measurement window.
+
+    This function uses entropy criterion for adaptive GPU warmup, then runs a traditional
+    fixed-time measurement window for final benchmark results.
+
+    Args:
+        fn: Function to benchmark
+        warmup: Unused (for API compatibility)
+        rep: Target measurement time in ms for final benchmark (default: 100ms)
+        grad_to_none: Gradients to reset between measurements
+        quantiles: Quantiles to compute (e.g., [0.5, 0.95])
+        return_mode: "min", "max", "mean", "median", or "all"
+        max_angle: Maximum entropy slope angle for convergence (degrees)
+        min_r2: Minimum R² for convergence
+        window_size: Size of rolling window for entropy tracking
+        max_samples: Maximum samples before stopping warmup (safety limit)
+        min_warmup_samples: Minimum samples before checking convergence (ensures GPU warmup)
+        repcnt: If provided, use this many iterations (skips calibration)
+
+    Returns:
+        Measurement statistic based on return_mode
+    """
+    assert return_mode in ["min", "max", "mean", "median", "all"]
+
+    # ENTROPY-BASED WARMUP
+    criterion = EntropyCriterion(
+        max_angle=max_angle,
+        min_r2=min_r2,
+        window_size=window_size,
+        min_warmup_samples=min_warmup_samples,
+    )
+    criterion.reset()
+
+    BATCH_SIZE = 20
+    warmup_times = []
+    converged = False
+
+    cache = triton.runtime.driver.active.get_empty_cache_for_benchmark()
+
+    # Adaptive warmup loop with batched synchronization
+    while not criterion.is_finished():
+        remaining = max_samples - len(warmup_times)
+        batch_size = min(BATCH_SIZE, remaining) if remaining > 0 else BATCH_SIZE
+
+        batch_start_events = [torch.cuda.Event(enable_timing=True) for _ in range(batch_size)]
+        batch_end_events = [torch.cuda.Event(enable_timing=True) for _ in range(batch_size)]
+
+        for i in range(batch_size):
+            if grad_to_none is not None:
+                for x in grad_to_none:
+                    x.grad = None
+            triton.runtime.driver.active.clear_cache(cache)
+            batch_start_events[i].record()
+            fn()
+            batch_end_events[i].record()
+
+        torch.cuda.synchronize()
+
+        batch_times = [
+            round(s.elapsed_time(e), 3)
+            for s, e in zip(batch_start_events, batch_end_events)
+        ]
+
+        warmup_times.extend(batch_times)
+        for elapsed_ms in batch_times:
+            criterion.add_measurement(elapsed_ms)
+
+        if len(warmup_times) >= max_samples:
+            break
+    else:
+        converged = True
+
+    # Log if warmup didn't converge
+    if not converged:
+        logger.warning(
+            f"Entropy warmup did not converge after {len(warmup_times)} samples "
+            f"(max_samples={max_samples})"
+        )
+
+    # DETERMINE ITERATION COUNT
+    if repcnt is not None:
+        # Use fixed iteration count (skip calibration)
+        n_iterations = repcnt
+    else:
+        # CALIBRATION: Reuse mean of last 5 warmup samples
+        CALIBRATION_SAMPLES = 5
+
+        if len(warmup_times) >= CALIBRATION_SAMPLES:
+            last_samples = warmup_times[-CALIBRATION_SAMPLES:]
+            avg_kernel_time_ms = statistics.mean(last_samples)
+        else:
+            avg_kernel_time_ms = statistics.mean(warmup_times) if warmup_times else 0
+
+        if avg_kernel_time_ms > 0:
+            n_iterations = max(10, int(rep / avg_kernel_time_ms))
+        else:
+            n_iterations = 100
+
+    # BENCHMARK PHASE
+    start_events = [torch.cuda.Event(enable_timing=True) for _ in range(n_iterations)]
+    end_events = [torch.cuda.Event(enable_timing=True) for _ in range(n_iterations)]
+
+    for i in range(n_iterations):
+        if grad_to_none is not None:
+            for x in grad_to_none:
+                x.grad = None
+        triton.runtime.driver.active.clear_cache(cache)
+        start_events[i].record()
+        fn()
+        end_events[i].record()
+
+    torch.cuda.synchronize()
+
+    benchmark_times = [s.elapsed_time(e) for s, e in zip(start_events, end_events)]
+
+    times = torch.tensor(benchmark_times, dtype=torch.float)
+    return _summarize_statistics(times, quantiles, return_mode)
+
+
 def do_bench_wrapper(
     fn,
     warmup,
@@ -470,11 +607,22 @@ def do_bench_wrapper(
     bypass_fail: bool = False,
     latency_measure_mode: str = "triton_do_bench",
     skip_cache_clearing: bool = False,
+    entropy_criterion: bool = False,
+    entropy_max_angle: float = 0.048,
+    entropy_min_r2: float = 0.36,
+    entropy_window_size: int = 299,
+    entropy_max_samples: int = 10000,
+    entropy_min_warmup_samples: int = 20,
 ) -> Optional[Latency]:
     """Wrapper to triton's do_bench to gain latency.
 
     Args:
         latency_measure_mode: Either "triton_do_bench" (default) or "inductor_benchmarker" or "profiler"
+        entropy_criterion: Use entropy-based adaptive warmup + fixed measurement window
+        entropy_max_angle: Maximum entropy slope angle for convergence (degrees)
+        entropy_min_r2: Minimum R² for linear regression fit
+        entropy_window_size: Size of rolling window for entropy tracking
+        entropy_max_samples: Maximum samples before stopping warmup (safety limit)
     """
     try:
         if device == "cpu":
@@ -485,6 +633,22 @@ def do_bench_wrapper(
                     rep=rep,
                     return_mode="all",
                     grad_to_none=grad_to_none,
+                )
+            )
+        elif entropy_criterion and not use_cuda_graphs:
+            return Latency(
+                times=_do_bench_entropy(
+                    fn=fn,
+                    warmup=warmup,
+                    rep=rep,
+                    grad_to_none=grad_to_none,
+                    return_mode="all",
+                    max_angle=entropy_max_angle,
+                    min_r2=entropy_min_r2,
+                    window_size=entropy_window_size,
+                    max_samples=entropy_max_samples,
+                    min_warmup_samples=entropy_min_warmup_samples,
+                    repcnt=repcnt,
                 )
             )
         elif use_cuda_graphs:
