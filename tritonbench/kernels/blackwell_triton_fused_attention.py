@@ -161,7 +161,7 @@ def _attn_fwd_inner_oss_dp(
         hi,
         BLOCK_N,
         warp_specialize=warp_specialize,
-        disallow_acc_multi_buffer=True,
+        # disallow_acc_multi_buffer=True,
     ):
         start_n = tl.multiple_of(start_n, BLOCK_N)
 
@@ -210,9 +210,9 @@ def _host_descriptor_pre_hook(nargs):
 if is_hip():
     NUM_STAGES_OPTIONS = [1]
 elif supports_host_descriptor():
-    NUM_STAGES_OPTIONS = [3]
+    NUM_STAGES_OPTIONS = [2, 3]
 else:
-    NUM_STAGES_OPTIONS = [3]
+    NUM_STAGES_OPTIONS = [2, 3]
 
 if is_tile_enabled():
     # Helper to build config with optional minRegAutoWS/maxRegAutoWS
@@ -269,12 +269,12 @@ else:
 
     configs = [
         make_standard_config(BM, BN, s, w, subtile, vectmul, add2reduce, maxreg)
-        for BM in [256]
+        for BM in [128, 256]
         for BN in [64, 128]
         for s in NUM_STAGES_OPTIONS
         for w in [4]
         for subtile in [True]
-        for vectmul in [1]
+        for vectmul in [0, 1]
         for add2reduce in [False]
         for maxreg in [152, 192]
     ]
@@ -479,6 +479,14 @@ def _attn_fwd_tma_dp(
     desc_o.store([qo_offset_y, 0], acc0.to(dtype))
 
 
+@triton.jit
+def _maybe_make_tensor_desc(desc_or_ptr, shape, strides, block_shape):
+    if isinstance(desc_or_ptr, tl.tensor_descriptor):
+        return desc_or_ptr
+    else:
+        return tl.make_tensor_descriptor(desc_or_ptr, shape, strides, block_shape)
+
+
 @triton.autotune(
     configs=list(filter(keep, configs)),
     key=["N_CTX", "HEAD_DIM", "FP8_OUTPUT", "warp_specialize"],
@@ -505,9 +513,20 @@ def _attn_fwd(
     SUBTILING: tl.constexpr,
     VECT_MUL: tl.constexpr,
     FADD2_REDUCE: tl.constexpr,
+    DP_FACTOR: tl.constexpr,
 ):
     pid = tl.program_id(0)
     off_hz = tl.program_id(1)
+    y_dim = Z * H * N_CTX
+    desc_q = _maybe_make_tensor_desc(desc_q, shape=[y_dim, HEAD_DIM], strides=[HEAD_DIM, 1],
+                                     block_shape=[BLOCK_M, HEAD_DIM])
+    desc_v = _maybe_make_tensor_desc(desc_v, shape=[y_dim, HEAD_DIM], strides=[HEAD_DIM, 1],
+                                     block_shape=[BLOCK_N, HEAD_DIM])
+    desc_k = _maybe_make_tensor_desc(desc_k, shape=[y_dim, HEAD_DIM], strides=[HEAD_DIM, 1],
+                                     block_shape=[BLOCK_N, HEAD_DIM])
+    desc_o = _maybe_make_tensor_desc(desc_o, shape=[y_dim, HEAD_DIM], strides=[HEAD_DIM, 1],
+                                     block_shape=[BLOCK_M, HEAD_DIM])
+
     _attn_fwd_tma_dp(
         sm_scale,
         M,
@@ -687,6 +706,7 @@ def _attn_bwd_dkdv(
     num_steps,  #
     MASK: tl.constexpr,
     dtype: tl.constexpr,
+    warp_specialize: tl.constexpr,  #
 ):
     offs_m = start_m + tl.arange(0, BLOCK_M1)
     offs_n = start_n + tl.arange(0, BLOCK_N1)
@@ -697,7 +717,11 @@ def _attn_bwd_dkdv(
     tl.static_assert(BLOCK_N1 % BLOCK_M1 == 0)
     curr_m = start_m
     step_m = BLOCK_M1
-    for blk_idx in range(num_steps):
+    for blk_idx in tl.range(
+        0,
+        num_steps,
+        warp_specialize=warp_specialize
+    ):
         q = desc_q.load([(off_bh + curr_m).to(tl.int32), 0])
         qT = tl.trans(q)
         # Load m before computing qk to reduce pipeline stall.
@@ -785,6 +809,7 @@ def _attn_bwd(
     BLK_SLICE_FACTOR: tl.constexpr,  #
     HEAD_DIM: tl.constexpr,
     dtype: tl.constexpr,
+    warp_specialize: tl.constexpr,  #
 ):
     bhid = tl.program_id(2)
     off_chz = (bhid * N_CTX).to(tl.int64)
@@ -832,6 +857,7 @@ def _attn_bwd(
         num_steps,  #
         MASK=False,  #
         dtype=dtype,
+        warp_specialize=warp_specialize,
     )
 
     desc_dv.store(
@@ -911,9 +937,9 @@ class _attention_opt(torch.autograd.Function):
             if HEAD_DIM_K == 128 and (
                 q.dtype == torch.float16 or q.dtype == torch.bfloat16
             ):
-                extra_kern_args["maxnreg"] = 128
+                extra_kern_args["maxnreg"] = 168
             else:
-                extra_kern_args["maxnreg"] = 128
+                extra_kern_args["maxnreg"] = 80
         if persistent:
             _attn_fwd_persist[grid_persist](
                 sm_scale,
@@ -987,6 +1013,7 @@ class _attention_opt(torch.autograd.Function):
             BLOCK_M=PRE_BLOCK,
             HEAD_DIM=ctx.HEAD_DIM,  #
         )
+        warp_specialize = True
 
         dummy_block = [1, 1]
         HEAD_DIM = ctx.HEAD_DIM
@@ -1065,6 +1092,7 @@ class _attention_opt(torch.autograd.Function):
             BLK_SLICE_FACTOR=BLK_SLICE_FACTOR,  #
             HEAD_DIM=ctx.HEAD_DIM,  #
             dtype=torch_dtype_to_triton(q.dtype),
+            warp_specialize=warp_specialize,
         )
 
         return dq, dk, dv, None, None, None, None
