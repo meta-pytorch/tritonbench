@@ -5,7 +5,6 @@ from typing import Any, Generator, List, Tuple
 import torch
 from torch._inductor import config as inductor_config
 from tritonbench.utils.env_utils import get_nvidia_gpu_model, is_cuda
-
 from tritonbench.utils.triton_op import (
     BenchmarkOperator,
     BenchmarkOperatorMetrics,
@@ -30,6 +29,21 @@ except (ImportError, AttributeError) as e:
 
 
 from .kernels import triton_group_gemm_fn
+
+try:
+    # @manual=//triton:triton
+    import triton.language.extra.tlx as tlx  # type: ignore
+
+    HAS_TLX = True
+except ImportError:
+    # suppress type checking errors
+    tlx = None
+
+    HAS_TLX = False
+
+if HAS_TLX:
+    from .kernels import tlx_group_gemm_fn
+
 
 IS_B200 = is_cuda() and get_nvidia_gpu_model() == "NVIDIA B200"
 
@@ -148,6 +162,26 @@ class Operator(BenchmarkOperator):
                 self.list_input_to_triton_input(group_A, group_B)
             )
             outs = triton_group_gemm_fn(
+                d_a_ptrs,
+                d_b_ptrs,
+                d_c_ptrs,
+                d_g_sizes,
+                d_g_lds,
+                group_C,
+                len(group_A),
+                group_A[0].dtype,
+            )
+            return torch.cat(outs, dim=0)
+
+        return _inner
+
+    @register_benchmark(enabled=HAS_TLX and IS_B200)
+    def tlx_grouped_gemm(self, group_A, group_B):
+        def _inner():
+            (d_a_ptrs, d_b_ptrs, d_c_ptrs, d_g_sizes, d_g_lds, group_C) = (
+                self.list_input_to_triton_input(group_A, group_B)
+            )
+            outs = tlx_group_gemm_fn(
                 d_a_ptrs,
                 d_b_ptrs,
                 d_c_ptrs,
