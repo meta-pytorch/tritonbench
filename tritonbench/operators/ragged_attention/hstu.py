@@ -11,9 +11,7 @@ if is_fbcode():
         set_use_runtime_max_seq_len,
     )
     from generative_recommenders.ops.triton.triton_hstu_attention import triton_hstu_mha
-    from hammer.ops.triton.triton_ragged_attn_interface import (
-        triton_ragged_hstu_mha,
-    )
+    from hammer.ops.triton.triton_ragged_attn_interface import triton_ragged_hstu_mha
 
     HAS_HAMMER = True
 else:

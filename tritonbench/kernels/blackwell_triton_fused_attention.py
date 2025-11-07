@@ -634,17 +634,26 @@ def _attn_fwd_persist(
 
 
 @triton.jit
-def _attn_bwd_preprocess(O, DO,  #
-                         Delta,  #
-                         Z, H, N_CTX,  #
-                         BLOCK_M: tl.constexpr, HEAD_DIM: tl.constexpr,  #
-                         ):
+def _attn_bwd_preprocess(
+    O,
+    DO,  #
+    Delta,  #
+    Z,
+    H,
+    N_CTX,  #
+    BLOCK_M: tl.constexpr,
+    HEAD_DIM: tl.constexpr,  #
+):
     off_m = tl.program_id(0) * BLOCK_M + tl.arange(0, BLOCK_M)
     off_hz = tl.program_id(1)
     off_n = tl.arange(0, HEAD_DIM)
     # load
-    o = tl.load(O + off_hz * HEAD_DIM * N_CTX + off_m[:, None] * HEAD_DIM + off_n[None, :])
-    do = tl.load(DO + off_hz * HEAD_DIM * N_CTX + off_m[:, None] * HEAD_DIM + off_n[None, :]).to(tl.float32)
+    o = tl.load(
+        O + off_hz * HEAD_DIM * N_CTX + off_m[:, None] * HEAD_DIM + off_n[None, :]
+    )
+    do = tl.load(
+        DO + off_hz * HEAD_DIM * N_CTX + off_m[:, None] * HEAD_DIM + off_n[None, :]
+    ).to(tl.float32)
     delta = tl.sum(o * do, axis=1)
     # write-back
     tl.store(Delta + off_hz * N_CTX + off_m, delta)
@@ -777,10 +786,11 @@ def _attn_bwd(
     HEAD_DIM: tl.constexpr,
     dtype: tl.constexpr,
 ):
-
     bhid = tl.program_id(2)
     off_chz = (bhid * N_CTX).to(tl.int64)
-    off_bh = ((stride_h * (bhid % H) + stride_z * (bhid // H)).to(tl.int64)) // stride_tok
+    off_bh = (
+        (stride_h * (bhid % H) + stride_z * (bhid // H)).to(tl.int64)
+    ) // stride_tok
     pid = tl.program_id(0)
 
     # offset pointers for batch/head
@@ -799,14 +809,27 @@ def _attn_bwd(
     # Compute dK and dV for non-masked blocks.
     num_steps = (N_CTX - start_m) // BLOCK_M1
     dk, dv = _attn_bwd_dkdv(  #
-        dk, dv,  #
-        desc_q, k, v, sm_scale,  #
+        dk,
+        dv,  #
+        desc_q,
+        k,
+        v,
+        sm_scale,  #
         desc_do,  #
-        desc_dq, M, D,  #
-        stride_tok, stride_d,  #
-        off_bh, H, N_CTX,  #
-        BLOCK_M1, BLOCK_N1, HEAD_DIM,  #
-        start_n, start_m, num_steps,  #
+        desc_dq,
+        M,
+        D,  #
+        stride_tok,
+        stride_d,  #
+        off_bh,
+        H,
+        N_CTX,  #
+        BLOCK_M1,
+        BLOCK_N1,
+        HEAD_DIM,  #
+        start_n,
+        start_m,
+        num_steps,  #
         MASK=False,  #
         dtype=dtype,
     )
@@ -955,28 +978,60 @@ class _attention_opt(torch.autograd.Function):
         pre_grid = (N_CTX // PRE_BLOCK, BATCH * N_HEAD)
         delta = torch.empty_like(M)
         _attn_bwd_preprocess[pre_grid](
-            o, do,  #
+            o,
+            do,  #
             delta,  #
-            BATCH, N_HEAD, N_CTX,  #
-            BLOCK_M=PRE_BLOCK, HEAD_DIM=ctx.HEAD_DIM,  #
+            BATCH,
+            N_HEAD,
+            N_CTX,  #
+            BLOCK_M=PRE_BLOCK,
+            HEAD_DIM=ctx.HEAD_DIM,  #
         )
 
         dummy_block = [1, 1]
         HEAD_DIM = ctx.HEAD_DIM
-        desc_k = TensorDescriptor(arg_k, shape=[BATCH * N_HEAD * N_CTX, HEAD_DIM], strides=[HEAD_DIM, 1],
-                                  block_shape=dummy_block)
-        desc_v = TensorDescriptor(v, shape=[BATCH * N_HEAD * N_CTX, HEAD_DIM], strides=[HEAD_DIM, 1],
-                                  block_shape=dummy_block)
-        desc_q = TensorDescriptor(q, shape=[BATCH * N_HEAD * N_CTX, HEAD_DIM], strides=[HEAD_DIM, 1],
-                                  block_shape=dummy_block)
-        desc_do = TensorDescriptor(do, shape=[BATCH * N_HEAD * N_CTX, HEAD_DIM], strides=[HEAD_DIM, 1],
-                                   block_shape=dummy_block)
-        desc_dq = TensorDescriptor(dq, shape=[BATCH * N_HEAD * N_CTX, HEAD_DIM], strides=[HEAD_DIM, 1],
-                                   block_shape=dummy_block)
-        desc_dk = TensorDescriptor(dk, shape=[BATCH * N_HEAD * N_CTX, HEAD_DIM], strides=[HEAD_DIM, 1],
-                                   block_shape=dummy_block)
-        desc_dv = TensorDescriptor(dv, shape=[BATCH * N_HEAD * N_CTX, HEAD_DIM], strides=[HEAD_DIM, 1],
-                                   block_shape=dummy_block)
+        desc_k = TensorDescriptor(
+            arg_k,
+            shape=[BATCH * N_HEAD * N_CTX, HEAD_DIM],
+            strides=[HEAD_DIM, 1],
+            block_shape=dummy_block,
+        )
+        desc_v = TensorDescriptor(
+            v,
+            shape=[BATCH * N_HEAD * N_CTX, HEAD_DIM],
+            strides=[HEAD_DIM, 1],
+            block_shape=dummy_block,
+        )
+        desc_q = TensorDescriptor(
+            q,
+            shape=[BATCH * N_HEAD * N_CTX, HEAD_DIM],
+            strides=[HEAD_DIM, 1],
+            block_shape=dummy_block,
+        )
+        desc_do = TensorDescriptor(
+            do,
+            shape=[BATCH * N_HEAD * N_CTX, HEAD_DIM],
+            strides=[HEAD_DIM, 1],
+            block_shape=dummy_block,
+        )
+        desc_dq = TensorDescriptor(
+            dq,
+            shape=[BATCH * N_HEAD * N_CTX, HEAD_DIM],
+            strides=[HEAD_DIM, 1],
+            block_shape=dummy_block,
+        )
+        desc_dk = TensorDescriptor(
+            dk,
+            shape=[BATCH * N_HEAD * N_CTX, HEAD_DIM],
+            strides=[HEAD_DIM, 1],
+            block_shape=dummy_block,
+        )
+        desc_dv = TensorDescriptor(
+            dv,
+            shape=[BATCH * N_HEAD * N_CTX, HEAD_DIM],
+            strides=[HEAD_DIM, 1],
+            block_shape=dummy_block,
+        )
 
         def alloc_fn(size: int, align: int, _):
             return torch.empty(size, dtype=torch.int8, device="cuda")
@@ -984,15 +1039,29 @@ class _attention_opt(torch.autograd.Function):
         triton.set_allocator(alloc_fn)
 
         def grid(meta):
-            return (triton.cdiv(N_CTX, meta['BLOCK_N1']),  # tiles along N (K/V)
-                    1,  # (or cdiv over M if you need)
-                    BATCH * N_HEAD)  # batch*heads
+            return (
+                triton.cdiv(N_CTX, meta["BLOCK_N1"]),  # tiles along N (K/V)
+                1,  # (or cdiv over M if you need)
+                BATCH * N_HEAD,
+            )  # batch*heads
 
         _attn_bwd[grid](
-            desc_q, desc_k, desc_v, ctx.sm_scale, desc_do, desc_dq, desc_dk, desc_dv,  #
-            M, delta,  #
-            q.stride(0), q.stride(1), q.stride(2), q.stride(3),  #
-            N_HEAD, N_CTX,  #
+            desc_q,
+            desc_k,
+            desc_v,
+            ctx.sm_scale,
+            desc_do,
+            desc_dq,
+            desc_dk,
+            desc_dv,  #
+            M,
+            delta,  #
+            q.stride(0),
+            q.stride(1),
+            q.stride(2),
+            q.stride(3),  #
+            N_HEAD,
+            N_CTX,  #
             BLK_SLICE_FACTOR=BLK_SLICE_FACTOR,  #
             HEAD_DIM=ctx.HEAD_DIM,  #
             dtype=torch_dtype_to_triton(q.dtype),

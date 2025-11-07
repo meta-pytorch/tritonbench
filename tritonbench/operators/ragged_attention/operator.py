@@ -15,12 +15,7 @@ from tritonbench.utils.triton_op import (
     register_metric,
 )
 
-from .hstu import (
-    get_test_inputs,
-    HAS_HAMMER,
-    triton_hstu_mha,
-    triton_ragged_hstu_mha,
-)
+from .hstu import get_test_inputs, HAS_HAMMER, triton_hstu_mha, triton_ragged_hstu_mha
 
 HAS_CUDA = False
 try:
