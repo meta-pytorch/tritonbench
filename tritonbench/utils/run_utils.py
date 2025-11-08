@@ -88,6 +88,7 @@ def get_run_env(
             run_env[f"{repo}_commit_time"] = "unknown"
     return run_env
 
+
 def _env_get_str(var_name: str, default: str) -> str:
     value = os.environ.get(var_name)
     if value is None:
@@ -122,6 +123,7 @@ def run_in_helion(op_args: Dict[str, str], extra_envs: Dict[str, str]):
         cwd=helion_root,
         env=environ,
     )
+
 
 def tritonbench_run(args: Optional[List[str]] = None):
     if args == None or args == []:
