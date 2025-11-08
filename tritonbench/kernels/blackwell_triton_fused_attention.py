@@ -521,14 +521,30 @@ def _attn_fwd(
     pid = tl.program_id(0)
     off_hz = tl.program_id(1)
     y_dim = Z * H * N_CTX
-    desc_q = _maybe_make_tensor_desc(desc_q, shape=[y_dim, HEAD_DIM], strides=[HEAD_DIM, 1],
-                                     block_shape=[BLOCK_M, HEAD_DIM])
-    desc_v = _maybe_make_tensor_desc(desc_v, shape=[y_dim, HEAD_DIM], strides=[HEAD_DIM, 1],
-                                     block_shape=[BLOCK_N, HEAD_DIM])
-    desc_k = _maybe_make_tensor_desc(desc_k, shape=[y_dim, HEAD_DIM], strides=[HEAD_DIM, 1],
-                                     block_shape=[BLOCK_N, HEAD_DIM])
-    desc_o = _maybe_make_tensor_desc(desc_o, shape=[y_dim, HEAD_DIM], strides=[HEAD_DIM, 1],
-                                     block_shape=[BLOCK_M, HEAD_DIM])
+    desc_q = _maybe_make_tensor_desc(
+        desc_q,
+        shape=[y_dim, HEAD_DIM],
+        strides=[HEAD_DIM, 1],
+        block_shape=[BLOCK_M, HEAD_DIM],
+    )
+    desc_v = _maybe_make_tensor_desc(
+        desc_v,
+        shape=[y_dim, HEAD_DIM],
+        strides=[HEAD_DIM, 1],
+        block_shape=[BLOCK_N, HEAD_DIM],
+    )
+    desc_k = _maybe_make_tensor_desc(
+        desc_k,
+        shape=[y_dim, HEAD_DIM],
+        strides=[HEAD_DIM, 1],
+        block_shape=[BLOCK_N, HEAD_DIM],
+    )
+    desc_o = _maybe_make_tensor_desc(
+        desc_o,
+        shape=[y_dim, HEAD_DIM],
+        strides=[HEAD_DIM, 1],
+        block_shape=[BLOCK_M, HEAD_DIM],
+    )
 
     _attn_fwd_tma_dp(
         sm_scale,
@@ -720,11 +736,7 @@ def _attn_bwd_dkdv(
     tl.static_assert(BLOCK_N1 % BLOCK_M1 == 0)
     curr_m = start_m
     step_m = BLOCK_M1
-    for blk_idx in tl.range(
-        0,
-        num_steps,
-        warp_specialize=warp_specialize
-    ):
+    for blk_idx in tl.range(0, num_steps, warp_specialize=warp_specialize):
         q = desc_q.load([(off_bh + curr_m).to(tl.int32), 0])
         qT = tl.trans(q)
         # Load m before computing qk to reduce pipeline stall.

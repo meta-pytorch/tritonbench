@@ -521,8 +521,12 @@ def _do_bench_entropy(
         remaining = max_samples - len(warmup_times)
         batch_size = min(BATCH_SIZE, remaining) if remaining > 0 else BATCH_SIZE
 
-        batch_start_events = [torch.cuda.Event(enable_timing=True) for _ in range(batch_size)]
-        batch_end_events = [torch.cuda.Event(enable_timing=True) for _ in range(batch_size)]
+        batch_start_events = [
+            torch.cuda.Event(enable_timing=True) for _ in range(batch_size)
+        ]
+        batch_end_events = [
+            torch.cuda.Event(enable_timing=True) for _ in range(batch_size)
+        ]
 
         for i in range(batch_size):
             if grad_to_none is not None:

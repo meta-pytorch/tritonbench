@@ -274,8 +274,8 @@ class EntropyCriterion:
             "total_samples": self.total_samples,
             "total_time_ms": self.total_time,
             "avg_time_ms": float(self.total_time / self.total_samples)
-                if self.total_samples > 0
-                else 0,
+            if self.total_samples > 0
+            else 0,
             "current_entropy": self.entropy_tracker[-1] if self.entropy_tracker else 0,
             "entropy_samples": len(self.entropy_tracker),
             "unique_measurements": len(self.freq_tracker),

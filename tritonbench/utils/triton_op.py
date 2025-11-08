@@ -1707,8 +1707,12 @@ class BenchmarkOperator(metaclass=PostInitProcessor):
                     entropy_criterion=getattr(self.tb_args, "entropy_criterion", False),
                     entropy_max_angle=getattr(self.tb_args, "entropy_max_angle", 0.048),
                     entropy_min_r2=getattr(self.tb_args, "entropy_min_r2", 0.36),
-                    entropy_window_size=getattr(self.tb_args, "entropy_window_size", 299),
-                    entropy_max_samples=getattr(self.tb_args, "entropy_max_samples", 10000),
+                    entropy_window_size=getattr(
+                        self.tb_args, "entropy_window_size", 299
+                    ),
+                    entropy_max_samples=getattr(
+                        self.tb_args, "entropy_max_samples", 10000
+                    ),
                 )
             if {
                 "gpu_peak_mem",
