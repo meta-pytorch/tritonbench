@@ -18,6 +18,7 @@ WITH_TMA = os.getenv("WITH_TMA")
 HAS_EXPLICIT_WS = os.getenv("ENABLE_EXPLICIT_WS")
 SUPPORT_GLUON = os.getenv("WITH_GLUON") == "1"
 WITH_MAXNREG = os.getenv("WITH_MAXNREG")
+WITH_OSS_WARPSPEC = os.getenv("WITH_OSS_WARPSPEC")
 
 
 class TmaAutoTuneHelper:

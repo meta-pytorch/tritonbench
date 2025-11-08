@@ -18,7 +18,7 @@ import triton.language as tl
 from triton.tools.tensor_descriptor import TensorDescriptor
 from tritonbench.utils.env_utils import is_tile_enabled
 
-from .attention_utils import WITH_MAXNREG
+from .attention_utils import WITH_MAXNREG, WITH_OSS_WARPSPEC
 
 from .blackwell_attention_utils import (
     is_blackwell,
@@ -252,7 +252,7 @@ else:
             "SUBTILING": subtile,
             "VECT_MUL": vectmul,
             "FADD2_REDUCE": add2reduce,
-            "DP_FACTOR": 2,
+            "DP_FACTOR": 1 if WITH_OSS_WARPSPEC else 2,
         }
         extra_kwargs = {
             "num_stages": s,
@@ -283,6 +283,9 @@ else:
 def keep(conf):
     BLOCK_M = conf.kwargs["BLOCK_M"]
     BLOCK_N = conf.kwargs["BLOCK_N"]
+    DP_FACTOR = conf.kwargs["DP_FACTOR"]
+    if DP_FACTOR >= 2 and BLOCK_M < 256:
+        return False
     return not (
         is_cuda()
         and torch.cuda.get_device_capability()[0] == 9
