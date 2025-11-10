@@ -1,9 +1,12 @@
 import logging
+
+from importlib.metadata import PackageNotFoundError, version
 from itertools import accumulate
 from typing import Any, Generator, List, Tuple
 
 import torch
 from torch._inductor import config as inductor_config
+from torch._inductor.utils import ensure_cute_available
 from tritonbench.utils.env_utils import get_nvidia_gpu_model, is_cuda
 from tritonbench.utils.triton_op import (
     BenchmarkOperator,
@@ -14,18 +17,23 @@ from tritonbench.utils.triton_op import (
 
 logger = logging.getLogger(__name__)
 
-# Try to import Cutlass and CuteDSL
-try:
+
+if ensure_cute_available():
     import cutlass
-    import cutlass.utils as utils
 
     from .cutedsl.kernels import compile_cutedsl_grouped_gemm, grouped_gemm_sm100_tuned
 
     # Set HAS_CUTEDSL to True if import succeeds
     HAS_CUTEDSL = True
-except (ImportError, AttributeError) as e:
-    logger.warning(f"Failed to import CuteDSL and/or Cutlass: {e}")
+else:
+    logger.warning("Failed to import CuteDSL and/or Cutlass")
     HAS_CUTEDSL = False
+
+if HAS_CUTEDSL:
+    try:
+        CUTLASS_VERSION = version("nvidia-cutlass-dsl")
+    except PackageNotFoundError:
+        CUTLASS_VERSION = "0.0.0"
 
 
 from .kernels import triton_group_gemm_fn
@@ -138,7 +146,10 @@ class Operator(BenchmarkOperator):
 
         return _inner
 
-    @register_benchmark(enabled=False)
+    @register_benchmark(
+        enabled=HAS_CUTEDSL and IS_B200,
+        label=f"preprocessed_pt2_cute_grouped_mm-{CUTLASS_VERSION}",
+    )
     def preprocessed_pt2_cute_grouped_mm(self, group_A, group_B):
         torch._dynamo.reset()
 
@@ -150,6 +161,9 @@ class Operator(BenchmarkOperator):
                 max_autotune=True,
                 max_autotune_gemm_backends="CUTEDSL",
                 autotune_fallback_to_aten=False,
+                cutedsl_enable_autotuning=False,
+                autotune_num_choices_displayed=None,
+                max_autotune_gemm_search_space="DEFAULT",
             ):
                 return compiled(A_packed, B_shared, offs=offs, bias=None)
 
@@ -224,10 +238,10 @@ class Operator(BenchmarkOperator):
             a_major="m",
             b_major="n",
             c_major="m",
-            mma_tiler_mn=(128, 128),
-            cluster_shape_mn=(1, 1),
+            mma_tiler_mn=(128, 256),
+            cluster_shape_mn=(2, 1),
             use_2cta_instrs=False,
-            tensormap_update_mode=utils.TensorMapUpdateMode.SMEM,
+            tensormap_update_mode=cutlass.utils.TensorMapUpdateMode.SMEM,
             tolerance=0.5,
             warmup_iterations=0,
             iterations=1,
@@ -276,16 +290,15 @@ class Operator(BenchmarkOperator):
                 a_major="m",
                 b_major="n",
                 c_major="m",
-                mma_tiler_mn=(128, 128),
-                cluster_shape_mn=(1, 1),
+                mma_tiler_mn=(128, 256),
+                cluster_shape_mn=(2, 1),
                 use_2cta_instrs=False,
-                tensormap_update_mode=utils.TensorMapUpdateMode.SMEM,
+                tensormap_update_mode=cutlass.utils.TensorMapUpdateMode.SMEM,
                 tolerance=0.5,
                 warmup_iterations=0,
                 iterations=1,
                 skip_ref_check=True,
             )
-
             compiled_grouped_gemm(
                 initial_cute_tensors_abc[0],
                 initial_cute_tensors_abc[1],
