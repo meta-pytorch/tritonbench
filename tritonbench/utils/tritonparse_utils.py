@@ -68,7 +68,7 @@ def tritonparse_parse(tritonparse_log_path):
             if is_fbcode():
                 out = None
             else:
-                out = (f"{tritonparse_log_path}/parsed_logs",)
+                out = f"{tritonparse_log_path}/parsed_logs"
             unified_parse(
                 f"{tritonparse_log_path}/raw_logs",
                 out=out,
