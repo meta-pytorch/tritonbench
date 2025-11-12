@@ -8,8 +8,8 @@ from pathlib import Path
 REPO_PATH = Path(os.path.abspath(__file__)).parent.parent.parent
 CURRENT_DIR = Path(os.path.abspath(__file__)).parent
 HELION_INSTALL_PATH = REPO_PATH.joinpath(".install")
-HELION_REPO = "https://github.com/xuzhao9/helion.git"
-HEION_COMMIT = "xz9/ptxas-knobs"
+HELION_REPO = "https://github.com/pytorch/helion.git"
+HEION_COMMIT = "51580b43bd65978a28b6e5bcd6f625485f02cba1"
 
 
 def install_helion():
