@@ -509,16 +509,16 @@ def _do_bench_entropy(
         min_warmup_samples=min_warmup_samples,
     )
     criterion.reset()
-
     BATCH_SIZE = 20
-    warmup_times = []
+    last_batch = [-1.00] * BATCH_SIZE
+    counter = 0
     converged = False
 
     cache = triton.runtime.driver.active.get_empty_cache_for_benchmark()
 
     # Adaptive warmup loop with batched synchronization
     while not criterion.is_finished():
-        remaining = max_samples - len(warmup_times)
+        remaining = max_samples - counter
         batch_size = min(BATCH_SIZE, remaining) if remaining > 0 else BATCH_SIZE
 
         batch_start_events = [
@@ -539,16 +539,13 @@ def _do_bench_entropy(
 
         torch.cuda.synchronize()
 
-        batch_times = [
-            round(s.elapsed_time(e), 3)
-            for s, e in zip(batch_start_events, batch_end_events)
-        ]
+        for i in range(batch_size):
+            v = round(batch_start_events[i].elapsed_time(batch_end_events[i]), 3)
+            criterion.add_measurement(v)
+            last_batch[i] = v
+        counter += batch_size
 
-        warmup_times.extend(batch_times)
-        for elapsed_ms in batch_times:
-            criterion.add_measurement(elapsed_ms)
-
-        if len(warmup_times) >= max_samples:
+        if counter >= max_samples:
             break
     else:
         converged = True
@@ -556,7 +553,7 @@ def _do_bench_entropy(
     # Log if warmup didn't converge
     if not converged:
         logger.warning(
-            f"Entropy warmup did not converge after {len(warmup_times)} samples "
+            f"Entropy warmup did not converge after {counter} samples "
             f"(max_samples={max_samples})"
         )
 
@@ -568,11 +565,10 @@ def _do_bench_entropy(
         # CALIBRATION: Reuse mean of last 5 warmup samples
         CALIBRATION_SAMPLES = 5
 
-        if len(warmup_times) >= CALIBRATION_SAMPLES:
-            last_samples = warmup_times[-CALIBRATION_SAMPLES:]
-            avg_kernel_time_ms = statistics.mean(last_samples)
+        if counter >= CALIBRATION_SAMPLES:
+            avg_kernel_time_ms = statistics.mean(last_batch)
         else:
-            avg_kernel_time_ms = statistics.mean(warmup_times) if warmup_times else 0
+            avg_kernel_time_ms = statistics.mean(last_batch) if last_batch else 0
 
         if avg_kernel_time_ms > 0:
             n_iterations = max(10, int(rep / avg_kernel_time_ms))
