@@ -560,7 +560,7 @@ def _do_bench_entropy(
     # DETERMINE ITERATION COUNT
     if repcnt is not None:
         # Use fixed iteration count (skip calibration)
-        n_iterations = repcnt
+        n_iterations = int(repcnt)
     else:
         # CALIBRATION: Reuse mean of last 5 warmup samples
         CALIBRATION_SAMPLES = 5
