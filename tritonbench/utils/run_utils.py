@@ -27,6 +27,7 @@ from tritonbench.utils.path_utils import (
     add_cmd_parameter,
     get_cmd_parameter,
     remove_cmd_parameter,
+    get_cmd_parameter,
     REPO_PATH,
 )
 from tritonbench.utils.triton_op import BenchmarkOperatorResult
@@ -305,7 +306,7 @@ def run_config(config_file: str, args: List[str]):
         if runner == "helion":
             run_in_helion(op_args, extra_envs)
         else:
-            op_name = benchmark_config["op"]
+            op_name = get_cmd_parameter(op_args, "--op")
             run_in_task(
                 op=op_name,
                 op_args=op_args,
