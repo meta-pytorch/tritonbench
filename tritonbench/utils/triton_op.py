@@ -1135,6 +1135,9 @@ class BenchmarkOperator(metaclass=PostInitProcessor):
                     _reduce_benchmarks, benchmarks, {}
                 )
                 metrics.append((x_val, y_vals))
+                logger.warning(
+                    f"Completed input ID {input_id}:\n{table}",
+                )
                 self._cur_backend_name = None
                 del self.example_inputs  # save some memory
                 if "proton" in self.required_metrics:
