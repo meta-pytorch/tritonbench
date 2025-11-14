@@ -29,11 +29,10 @@ else:
     logger.warning("Failed to import CuteDSL and/or Cutlass")
     HAS_CUTEDSL = False
 
-if HAS_CUTEDSL:
-    try:
-        CUTLASS_VERSION = version("nvidia-cutlass-dsl")
-    except PackageNotFoundError:
-        CUTLASS_VERSION = "0.0.0"
+try:
+    CUTLASS_VERSION = version("nvidia-cutlass-dsl")
+except PackageNotFoundError:
+    CUTLASS_VERSION = "0.0.0"
 
 
 from .kernels import triton_group_gemm_fn
