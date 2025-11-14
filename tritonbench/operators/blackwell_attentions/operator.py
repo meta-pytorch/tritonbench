@@ -70,6 +70,12 @@ try:
     HAS_FLASH_CUTE = True
 except (ImportError, IOError, AttributeError):
     HAS_FLASH_CUTE = False
+except SystemError as e:
+    HAS_FLASH_CUTE = False
+    import traceback
+
+    print(f"SystemError resulted from importing FA4: {e.__class__.__name__}: {e}")
+    traceback.print_exc()
 
 # [Optional] xformers backend
 try:
