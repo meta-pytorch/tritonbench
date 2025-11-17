@@ -69,6 +69,48 @@ def get_parser():
     return parser
 
 
+def apply_name_based_heuristics(backend_name, tags_dict):
+    """
+    Apply name-based heuristics to add tags based on backend name.
+
+    Args:
+        backend_name: The name of the backend
+        tags_dict: Dictionary with 'tags' key, e.g., {"tags": ["pt2"]}
+                   If None, will be created.
+
+    Returns:
+        Updated tags_dict
+    """
+    if not tags_dict:
+        tags_dict = {"tags": []}
+    if "tags" not in tags_dict:
+        tags_dict["tags"] = []
+
+    # Liger backends are based on Triton
+    if "liger" in backend_name:
+        if "liger" not in tags_dict["tags"]:
+            tags_dict["tags"].append("liger")
+        if "triton" not in tags_dict["tags"]:
+            tags_dict["tags"].append("triton")
+
+    # CUTLASS backends
+    if "cutlass" in backend_name.lower():
+        if "cutlass" not in tags_dict["tags"]:
+            tags_dict["tags"].append("cutlass")
+
+    # TLX backends
+    if "tlx_" in backend_name:
+        if "tlx" not in tags_dict["tags"]:
+            tags_dict["tags"].append("tlx")
+
+    # Eager/Aten backends
+    if "eager" in backend_name or "aten" in backend_name:
+        if "aten" not in tags_dict["tags"]:
+            tags_dict["tags"].append("aten")
+
+    return tags_dict
+
+
 def prevalidate_backends(backend_edges):
     op_with_tags = {}
     # heuristic: do not search torch.nn, torch.compile, and xformers backends
@@ -88,6 +130,10 @@ def prevalidate_backends(backend_edges):
                 if callee.startswith("torch.ops.")
             ]
             op_with_tags[backend] = {"tags": custom_op_category + ["native_custom_ops"]}
+
+    # Apply name-based heuristics for all prevalidated backends
+    for backend in op_with_tags.keys():
+        op_with_tags[backend] = apply_name_based_heuristics(backend, op_with_tags[backend])
 
     return op_with_tags
 
@@ -126,21 +172,10 @@ def trace_op(op):
             (callee, base_module_name) for callee in callees
         ]
         op_with_tags[op][backend] = trace_callees(callees_with_module)
-        # postprocess: add human heuristics
-        if "liger" in backend:
-            if not op_with_tags[op][backend]:
-                op_with_tags[op][backend] = {"tags": []}
-            op_with_tags[op][backend]["tags"].extend(["liger"])
-            if "triton" not in op_with_tags[op][backend]["tags"]:
-                op_with_tags[op][backend]["tags"].append("triton")
-        if "tlx_" in backend:
-            if not op_with_tags[op][backend]:
-                op_with_tags[op][backend] = {"tags": []}
-            op_with_tags[op][backend]["tags"].extend(["tlx"])
-        if "eager" in backend or "aten" in backend:
-            if not op_with_tags[op][backend]:
-                op_with_tags[op][backend] = {"tags": []}
-            op_with_tags[op][backend]["tags"].append("aten")
+        # Apply name-based heuristics
+        op_with_tags[op][backend] = apply_name_based_heuristics(
+            backend, op_with_tags[op][backend]
+        )
     return op_with_tags
 
 
