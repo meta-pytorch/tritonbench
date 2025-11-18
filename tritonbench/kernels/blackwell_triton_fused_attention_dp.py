@@ -49,6 +49,22 @@ def _supports_reg_auto_ws():
 HAS_REG_AUTO_WS = _supports_reg_auto_ws()
 
 
+# Check if Triton version supports pingpongAutoWS
+# These parameters are only available in triton/tree/ws-3.5
+def _supports_pingpong_auto_ws():
+    """Check if the current Triton version supports pingpongAutoWS"""
+    try:
+        # Try to create a Config with minRegAutoWS to test support
+        test_config = triton.Config({}, pingpongAutoWS=True)
+        return True
+    except (TypeError, AttributeError):
+        # Parameter not supported in this Triton version
+        return False
+
+
+HAS_PINGPONG_AUTO_WS = _supports_pingpong_auto_ws()
+
+
 @triton.jit
 def _attn_fwd_subtile(
     q,
@@ -65,6 +81,7 @@ def _attn_fwd_subtile(
     dtype: tl.constexpr,
     STAGE: tl.constexpr,
     SUBTILING: tl.constexpr,
+    SUBTILING_P: tl.constexpr,
     VECT_MUL: tl.constexpr,
     FADD2_REDUCE: tl.constexpr,
 ):
@@ -80,7 +97,23 @@ def _attn_fwd_subtile(
             qk = _fma_f32x2(qk, qk_scale, -m_ij[:, None])
         else:
             qk = qk * qk_scale - m_ij[:, None]
-    p = tl.math.exp2(qk)
+
+    PM: tl.constexpr = qk.shape[0]
+    PN: tl.constexpr = qk.shape[1]
+
+    if SUBTILING_P:
+        qk0, qk1 = qk.reshape([PM, 2, PN // 2]).permute(0, 2, 1).split()
+
+        p0 = tl.math.exp2(qk0)
+        p0_bf16 = p0.to(dtype)
+        p1 = tl.math.exp2(qk1)
+        p1_bf16 = p1.to(dtype)
+
+        p = tl.join(p0, p1).permute(0, 2, 1).reshape([PM, PN])
+        p_bf16 = tl.join(p0_bf16, p1_bf16).permute(0, 2, 1).reshape([PM, PN])
+    else:
+        p = tl.math.exp2(qk)
+
     # -- compute correction factor
     alpha = tl.math.exp2(m_i - m_ij)
     if not FADD2_REDUCE:
@@ -104,8 +137,6 @@ def _attn_fwd_subtile(
 
     # update m_i and l_i
     # place this at the end of the loop to reduce register pressure
-    PM: tl.constexpr = p.shape[0]
-    PN: tl.constexpr = p.shape[1]
     if FADD2_REDUCE:
         p0, p1 = p.reshape([PM, 2, PN // 2]).permute(0, 2, 1).split()
         l_ij0, l_ij1 = tl.reduce((p0, p1), axis=1, combine_fn=_reduce_fadd2)
@@ -115,9 +146,10 @@ def _attn_fwd_subtile(
     # We can potentially move these to be before updating l_ij, so the dot
     # is not blocked.
     # prepare p and v for the dot
-    p = p.to(dtype)
+    if not SUBTILING_P:
+        p_bf16 = p.to(dtype)
     # note that this non transposed v for FP8 is only supported on Blackwell
-    acc = tl.dot(p, v, acc)
+    acc = tl.dot(p_bf16, v, acc)
     if not FADD2_REDUCE:
         l_i0 = l_i0 * alpha + l_ij
     m_i = m_ij
@@ -153,6 +185,7 @@ def _attn_fwd_inner_oss_dp(
     N_CTX: tl.constexpr,
     warp_specialize: tl.constexpr,
     SUBTILING: tl.constexpr,
+    SUBTILING_P: tl.constexpr,
     VECT_MUL: tl.constexpr,
     FADD2_REDUCE: tl.constexpr,
 ):
@@ -191,6 +224,7 @@ def _attn_fwd_inner_oss_dp(
             dtype,
             STAGE,
             SUBTILING,
+            SUBTILING_P,
             VECT_MUL,
             FADD2_REDUCE,
         )
@@ -209,6 +243,7 @@ def _attn_fwd_inner_oss_dp(
             dtype,
             STAGE,
             SUBTILING,
+            SUBTILING_P,
             VECT_MUL,
             FADD2_REDUCE,
         )
@@ -242,12 +277,13 @@ else:
 
 if is_tile_enabled():
     # Helper to build config with optional minRegAutoWS/maxRegAutoWS
-    def make_tile_config(BM, BN, occ, subtile, vectmul, add2reduce):
+    def make_tile_config(BM, BN, occ, subtile, subtile_p, vectmul, add2reduce):
         config_kwargs = {
             "BLOCK_M": BM,
             "BLOCK_N": BN,
             "occupancy": occ,
             "SUBTILING": subtile,
+            "SUBTILING_P": subtile_p,
             "VECT_MUL": vectmul,
             "FADD2_REDUCE": add2reduce,
         }
@@ -258,24 +294,31 @@ if is_tile_enabled():
             extra_kwargs["minRegAutoWS"] = 24
             extra_kwargs["maxRegAutoWS"] = 152
 
+        if HAS_PINGPONG_AUTO_WS:
+            extra_kwargs["pingpongAutoWS"] = True
+
         return triton.Config(config_kwargs, **extra_kwargs)
 
     configs = [
-        make_tile_config(BM, BN, occ, subtile, vectmul, add2reduce)
+        make_tile_config(BM, BN, occ, subtile, subtile_p, vectmul, add2reduce)
         for BM in [64, 128, 256]
         for BN in [64, 128]
         for occ in [1, 2]
         for subtile in [True]
+        for subtile_p in [True]
         for vectmul in [0]
         for add2reduce in [False]
     ]
 else:
     # Helper to build config with optional minRegAutoWS/maxRegAutoWS
-    def make_standard_config(BM, BN, s, w, subtile, vectmul, add2reduce, maxreg):
+    def make_standard_config(
+        BM, BN, s, w, subtile, subtile_p, vectmul, add2reduce, maxreg
+    ):
         config_kwargs = {
             "BLOCK_M": BM,
             "BLOCK_N": BN,
             "SUBTILING": subtile,
+            "SUBTILING_P": subtile_p,
             "VECT_MUL": vectmul,
             "FADD2_REDUCE": add2reduce,
         }
@@ -290,15 +333,21 @@ else:
             extra_kwargs["minRegAutoWS"] = 24
             extra_kwargs["maxRegAutoWS"] = maxreg
 
+        if HAS_PINGPONG_AUTO_WS:
+            extra_kwargs["pingpongAutoWS"] = True
+
         return triton.Config(config_kwargs, **extra_kwargs)
 
     configs = [
-        make_standard_config(BM, BN, s, w, subtile, vectmul, add2reduce, maxreg)
+        make_standard_config(
+            BM, BN, s, w, subtile, subtile_p, vectmul, add2reduce, maxreg
+        )
         for BM in [256]
         for BN in [64, 128]
         for s in NUM_STAGES_OPTIONS
         for w in [4]
         for subtile in [True]
+        for subtile_p in [True]
         for vectmul in [1]
         for add2reduce in [False]
         for maxreg in [152, 192]
@@ -420,6 +469,7 @@ def _attn_fwd_tma_dp(
     warp_specialize: tl.constexpr,  #
     dtype: tl.constexpr,
     SUBTILING: tl.constexpr,
+    SUBTILING_P: tl.constexpr,
     VECT_MUL: tl.constexpr,
     FADD2_REDUCE: tl.constexpr,
 ):
@@ -485,6 +535,7 @@ def _attn_fwd_tma_dp(
             N_CTX,  #
             warp_specialize,
             SUBTILING,
+            SUBTILING_P,
             VECT_MUL,
             FADD2_REDUCE,
         )
@@ -516,6 +567,7 @@ def _attn_fwd_tma_dp(
             N_CTX,  #
             warp_specialize,
             SUBTILING,
+            SUBTILING_P,
             VECT_MUL,
             FADD2_REDUCE,
         )
@@ -564,6 +616,7 @@ def _attn_fwd(
     warp_specialize: tl.constexpr,  #
     dtype: tl.constexpr,
     SUBTILING: tl.constexpr,
+    SUBTILING_P: tl.constexpr,
     VECT_MUL: tl.constexpr,
     FADD2_REDUCE: tl.constexpr,
 ):
@@ -589,6 +642,7 @@ def _attn_fwd(
         warp_specialize,
         dtype,
         SUBTILING,
+        SUBTILING_P,
         VECT_MUL,
         FADD2_REDUCE,
     )
@@ -619,6 +673,7 @@ def _attn_fwd_persist(
     OUTER_LOOP: tl.constexpr,
     dtype: tl.constexpr,
     SUBTILING: tl.constexpr,
+    SUBTILING_P: tl.constexpr,
     VECT_MUL: tl.constexpr,
     FADD2_REDUCE: tl.constexpr,
 ):
@@ -682,6 +737,7 @@ def _attn_fwd_persist(
             warp_specialize and not OUTER_LOOP,
             dtype,
             SUBTILING,
+            SUBTILING_P,
             VECT_MUL,
             FADD2_REDUCE,
         )
