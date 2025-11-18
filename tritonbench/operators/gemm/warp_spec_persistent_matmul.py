@@ -85,6 +85,9 @@ def matmul_get_configs(pre_hook=None):
                 triton.Config(
                     new_kwargs,
                     pre_hook=pre_hook,
+                    num_stages=config.num_stages,
+                    num_ctas=config.num_ctas,
+                    num_warps=config.num_warps,
                 )
             )
         return configs
@@ -283,6 +286,9 @@ def matmul_tma_persistent_get_configs(pre_hook=None):
                             **new_kwargs,
                         },
                         pre_hook=pre_hook,
+                        num_stages=config.num_stages,
+                        num_ctas=config.num_ctas,
+                        num_warps=config.num_warps,
                     )
                 )
         return configs
