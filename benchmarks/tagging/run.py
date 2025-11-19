@@ -133,7 +133,9 @@ def prevalidate_backends(backend_edges):
 
     # Apply name-based heuristics for all prevalidated backends
     for backend in op_with_tags.keys():
-        op_with_tags[backend] = apply_name_based_heuristics(backend, op_with_tags[backend])
+        op_with_tags[backend] = apply_name_based_heuristics(
+            backend, op_with_tags[backend]
+        )
 
     return op_with_tags
 

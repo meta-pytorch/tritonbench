@@ -1,4 +1,3 @@
-from tritonbench.utils.path_utils import get_cmd_parameter
 import argparse
 import copy
 import logging
@@ -26,6 +25,7 @@ from tritonbench.utils.list_operator_details import list_operator_details
 from tritonbench.utils.parser import get_parser
 from tritonbench.utils.path_utils import (
     add_cmd_parameter,
+    get_cmd_parameter,
     remove_cmd_parameter,
     REPO_PATH,
 )

@@ -22,8 +22,11 @@ def get_triton_ops(metadata: Dict[str, Any]) -> Dict[str, List[str]]:
     triton_ops = {}
     for op in metadata:
         for backend in metadata[op]:
-            if metadata[op][backend] and metadata[op][backend]["tags"] and \
-                "triton" in metadata[op][backend]["tags"]:
+            if (
+                metadata[op][backend]
+                and metadata[op][backend]["tags"]
+                and "triton" in metadata[op][backend]["tags"]
+            ):
                 if op not in triton_ops:
                     triton_ops[op] = []
                 triton_ops[op].append(backend)
@@ -31,9 +34,7 @@ def get_triton_ops(metadata: Dict[str, Any]) -> Dict[str, List[str]]:
     return triton_ops
 
 
-TRITON_OPS: dict[str, list[str]] = get_triton_ops(
-    get_metadata("oss_cuda_kernels")
-)
+TRITON_OPS: dict[str, list[str]] = get_triton_ops(get_metadata("oss_cuda_kernels"))
 DTYPE_OPS: Dict[str, str] = get_metadata("dtype_operators")
 TFLOPS_OPS: List[str] = get_metadata("tflops_operators")
 BASELINE_OPS: Dict[str, str] = get_metadata("baseline_operators")

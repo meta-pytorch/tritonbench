@@ -6,6 +6,7 @@ Analyzes which operators have tags and which don't, and shows statistics.
 """
 
 import argparse
+
 import yaml
 
 
@@ -13,7 +14,7 @@ def analyze_coverage(yaml_file, verbose=False):
     """Analyze tagging coverage from YAML metadata file"""
 
     # Load metadata
-    with open(yaml_file, 'r') as f:
+    with open(yaml_file, "r") as f:
         data = yaml.safe_load(f) or {}
 
     # Statistics
@@ -46,17 +47,17 @@ def analyze_coverage(yaml_file, verbose=False):
                 null_backends += 1
                 op_null += 1
                 untagged.append(f"{op_name}.{backend_name}")
-            elif 'tags' in info and info['tags']:
+            elif "tags" in info and info["tags"]:
                 tagged_backends += 1
                 op_tagged += 1
             else:
                 untagged.append(f"{op_name}.{backend_name}")
 
         op_stats[op_name] = {
-            'total': op_total,
-            'tagged': op_tagged,
-            'null': op_null,
-            'coverage': (op_tagged / op_total * 100) if op_total > 0 else 0
+            "total": op_total,
+            "tagged": op_tagged,
+            "null": op_null,
+            "coverage": (op_tagged / op_total * 100) if op_total > 0 else 0,
         }
 
     # Print results
@@ -66,7 +67,9 @@ def analyze_coverage(yaml_file, verbose=False):
     print()
 
     # Overall stats
-    overall_coverage = (tagged_backends / total_backends * 100) if total_backends > 0 else 0
+    overall_coverage = (
+        (tagged_backends / total_backends * 100) if total_backends > 0 else 0
+    )
 
     print(f"Total Operators:     {total_ops}")
     print(f"Total Backends:      {total_backends}")
@@ -82,10 +85,12 @@ def analyze_coverage(yaml_file, verbose=False):
     print("-" * 70)
 
     # Sort by coverage (ascending)
-    for op_name in sorted(op_stats.keys(), key=lambda x: op_stats[x]['coverage']):
+    for op_name in sorted(op_stats.keys(), key=lambda x: op_stats[x]["coverage"]):
         stats = op_stats[op_name]
         coverage_str = f"{stats['coverage']:.1f}%"
-        print(f"{op_name:<30} {stats['total']:>8} {stats['tagged']:>8} {coverage_str:>10}")
+        print(
+            f"{op_name:<30} {stats['total']:>8} {stats['tagged']:>8} {coverage_str:>10}"
+        )
 
     print()
 
@@ -109,11 +114,11 @@ def analyze_coverage(yaml_file, verbose=False):
     print("=" * 70)
 
     return {
-        'total_ops': total_ops,
-        'total_backends': total_backends,
-        'tagged_backends': tagged_backends,
-        'coverage': overall_coverage,
-        'untagged': untagged
+        "total_ops": total_ops,
+        "total_backends": total_backends,
+        "tagged_backends": tagged_backends,
+        "coverage": overall_coverage,
+        "untagged": untagged,
     }
 
 
@@ -122,9 +127,10 @@ if __name__ == "__main__":
     # example: tritonbench/metadata/oss_cuda_kernels.yaml
     parser.add_argument("yaml_file", help="Path to tagging metadata YAML file")
     parser.add_argument(
-        "-v", "--verbose",
+        "-v",
+        "--verbose",
         action="store_true",
-        help="Show all untagged backends (default: show first 20)"
+        help="Show all untagged backends (default: show first 20)",
     )
     args = parser.parse_args()
 

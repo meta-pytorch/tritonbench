@@ -32,8 +32,8 @@ def setup_tritonbench_cwd():
 
 setup_tritonbench_cwd()
 
-from tritonbench.utils.path_utils import REPO_PATH
 from tritonbench.operators import list_operators, load_opbench_by_name
+from tritonbench.utils.path_utils import REPO_PATH
 
 # operators that are not supported by tritonbench-oss
 SKIP_OPERATORS = ["decoding_attention"]
