@@ -69,6 +69,8 @@ def gen_run(operators: Dict[str, List[str]]) -> Dict[str, Any]:
         cmd.extend(["--metrics", ",".join(metrics)])
         # add backends
         run_backends = TRITON_OPS[op]
+        if _has_meaningful_baseline(op) and BASELINE_OPS[op] not in run_backends:
+            run_backends.append(BASELINE_OPS[op])
         cmd.extend(["--only", ",".join(run_backends)])
         out[run_name] = {}
         out[run_name]["args"] = " ".join(cmd)
