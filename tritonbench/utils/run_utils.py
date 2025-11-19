@@ -356,6 +356,7 @@ def run_in_task(
     if benchmark_name:
         op_args.extend(["--benchmark-name", benchmark_name])
     else:
+        assert op, "If benchmark_name is none, op must not be None."
         benchmark_name = op
 
     # In OSS, we assume always using the run.py benchmark driver

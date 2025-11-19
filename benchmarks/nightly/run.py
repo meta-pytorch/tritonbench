@@ -49,10 +49,7 @@ def get_operator_benchmarks() -> Dict[str, Any]:
             # bypass disabled benchmarks
             if obj[benchmark_name].get("disabled", False):
                 continue
-            out[benchmark_name] = (
-                obj[benchmark_name]["op"],
-                obj[benchmark_name]["args"].split(" "),
-            )
+            out[benchmark_name] = obj[benchmark_name]["args"].split(" ")
         return out
 
     out = _load_benchmarks(os.path.join(CURRENT_DIR, "autogen.yaml"))
@@ -78,10 +75,10 @@ def run():
     output_files = []
     operator_benchmarks = get_operator_benchmarks()
     for op_bench in operator_benchmarks:
-        op_name, op_args = operator_benchmarks[op_bench]
+        op_args = operator_benchmarks[op_bench]
         output_file = output_dir.joinpath(f"{op_bench}.json")
         op_args.extend(["--output-json", str(output_file.absolute())])
-        run_in_task(op=op_name, op_args=op_args, benchmark_name=op_bench)
+        run_in_task(op_args=op_args, benchmark_name=op_bench)
         # write pass or fail to result json
         # todo: check every input shape has passed
         output_file_name = Path(output_file).stem
