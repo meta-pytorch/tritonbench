@@ -1,4 +1,4 @@
-# Generate the nightly benchmark config to autogen.yaml
+# Generate the TRITONBENCH_CONFIG autogen.yaml for nightly benchmark
 import os
 from pathlib import Path
 from typing import Any, Dict, List
@@ -18,12 +18,26 @@ def get_metadata(name: str, path: Path = METADATA_PATH) -> Any:
         return yaml.safe_load(f)
 
 
-TRITON_OPS = get_metadata("oss_triton_operators")["triton_ops"]
-TRITON_OPS.update(get_metadata("oss_triton_operators")["oss_only"])
-DTYPE_OPS = get_metadata("dtype_operators")
-TFLOPS_OPS = get_metadata("tflops_operators")
-BASELINE_OPS = get_metadata("baseline_operators")
-BWD_OPS = get_metadata("backward_operators")
+def get_triton_ops(metadata: Dict[str, Any]) -> Dict[str, List[str]]:
+    triton_ops = {}
+    for op in metadata:
+        for backend in metadata[op]:
+            if metadata[op][backend] and metadata[op][backend]["tags"] and \
+                "triton" in metadata[op][backend]["tags"]:
+                if op not in triton_ops:
+                    triton_ops[op] = []
+                triton_ops[op].append(backend)
+    print(triton_ops)
+    return triton_ops
+
+
+TRITON_OPS: dict[str, list[str]] = get_triton_ops(
+    get_metadata("oss_cuda_kernels")
+)
+DTYPE_OPS: Dict[str, str] = get_metadata("dtype_operators")
+TFLOPS_OPS: List[str] = get_metadata("tflops_operators")
+BASELINE_OPS: Dict[str, str] = get_metadata("baseline_operators")
+BWD_OPS: List[str] = get_metadata("backward_operators")
 
 # Manually overridden options
 MANUAL_OPTIONS = get_metadata("manual", path=CURRENT_PATH)
@@ -35,7 +49,7 @@ def _has_meaningful_baseline(op: str):
     )
 
 
-def gen_run(operators: List[str], bwd: bool = False) -> Dict[str, Any]:
+def gen_run(operators: Dict[str, List[str]]) -> Dict[str, Any]:
     out = {}
     for op in operators:
         dtype = (
@@ -43,32 +57,29 @@ def gen_run(operators: List[str], bwd: bool = False) -> Dict[str, Any]:
             if not DTYPE_OPS[op] == "fp8" and not DTYPE_OPS[op] == "bypass"
             else ""
         )
-        mode = "fwd" if not bwd else "bwd"
-        run_name = f"{dtype}_{op}_{mode}" if dtype else f"{op}_{mode}"
+        run_name = f"{dtype}_{op}_fwd" if dtype else f"{op}_fwd"
         cmd = ["--op", op]
         # add metrics
-        metrics = []
+        metrics = ["latency"]
         if op in TFLOPS_OPS:
             metrics.append("tflops")
         if _has_meaningful_baseline(op):
             cmd.extend(["--baseline", BASELINE_OPS[op]])
             metrics.append("speedup")
         cmd.extend(["--metrics", ",".join(metrics)])
-        # add mode
-        if bwd:
-            cmd.append("--bwd")
         # add backends
-        run_backends = list(TRITON_OPS[op].keys())
-        if _has_meaningful_baseline(op) and not BASELINE_OPS[op] in run_backends:
-            run_backends.append(BASELINE_OPS[op])
+        run_backends = TRITON_OPS[op]
         cmd.extend(["--only", ",".join(run_backends)])
         out[run_name] = {}
-        out[run_name]["op"] = op
         out[run_name]["args"] = " ".join(cmd)
+        # add backward run if applicable
+        if op in BWD_OPS:
+            bwd_run_name = f"{dtype}_{op}_bwd" if dtype else f"{op}_bwd"
+            out[bwd_run_name]["args"] = " ".join(cmd) + " --bwd"
     return out
 
 
-def process_manual_options(
+def add_manual_benchmarks(
     run_configs: Dict[str, Any], options: Dict[str, Any]
 ) -> Dict[str, Any]:
     disabled = options.get("disabled", [])
@@ -83,19 +94,9 @@ def process_manual_options(
 
 
 def run():
-    # generate forward runs
-    forward_ops = [
-        op for op in TRITON_OPS if op in TFLOPS_OPS or _has_meaningful_baseline(op)
-    ]
-    runs = gen_run(forward_ops)
-    # generate backward runs
-    backward_ops = [
-        op
-        for op in BWD_OPS
-        if op in TRITON_OPS and (op in TFLOPS_OPS or _has_meaningful_baseline(op))
-    ]
-    runs.update(gen_run(backward_ops, bwd=True))
-    process_manual_options(runs, MANUAL_OPTIONS)
+    runs = gen_run(TRITON_OPS)
+    # add manual benchmarks and configs
+    add_manual_benchmarks(runs, MANUAL_OPTIONS)
     with open(OUTPUT_PATH, "w") as f:
         yaml.safe_dump(runs, f, sort_keys=False)
 
