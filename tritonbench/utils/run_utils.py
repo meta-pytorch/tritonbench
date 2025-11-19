@@ -1,3 +1,4 @@
+from tritonbench.utils.path_utils import get_cmd_parameter
 import argparse
 import copy
 import logging
@@ -335,7 +336,7 @@ def run_one_operator(task_args: List[str], with_bwd: bool = False):
 
 
 def run_in_task(
-    op: Optional[str],
+    op: Optional[str] = None,
     op_args: Optional[List[str]] = None,
     benchmark_name: Optional[str] = None,
     extra_envs: Optional[Dict[str, str]] = None,
@@ -353,6 +354,8 @@ def run_in_task(
         if is_fbcode():
             op_task_cmd.append(sys.argv[0])
         op_task_cmd.extend(op_args)
+    if not op and op_args:
+        op = get_cmd_parameter(op_args, "--op")
     if benchmark_name:
         op_args.extend(["--benchmark-name", benchmark_name])
     else:
