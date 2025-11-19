@@ -44,7 +44,7 @@ from tritonbench.utils.triton_utils import has_tlx
 if has_tlx():
     from tritonbench.operators.gdpa.gdpa_blackwell_tlx import gdpa_forward_tlx
 
-from .gdpa import gdpa
+from .gdpa import gdpa as gdpa_kernel
 from .gdpa_utils import generate_jagged_data
 
 
@@ -220,7 +220,7 @@ class Operator(BenchmarkOperator):
         activation,
     ):
         def _inner():
-            real_output = gdpa(
+            real_output = gdpa_kernel(
                 query=jagged_q,
                 key=jagged_k,
                 value=jagged_v,
@@ -368,7 +368,7 @@ class Operator(BenchmarkOperator):
         activation,
     ):
         def _inner():
-            real_output = gdpa(
+            real_output = gdpa_kernel(
                 query=jagged_q,
                 key=jagged_k,
                 value=jagged_v,
@@ -406,7 +406,7 @@ class Operator(BenchmarkOperator):
         activation,
     ):
         def _inner():
-            real_output = gdpa(
+            real_output = gdpa_kernel(
                 query=jagged_q,
                 key=jagged_k,
                 value=jagged_v,

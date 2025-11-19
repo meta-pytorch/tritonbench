@@ -7,6 +7,18 @@ import yaml
 
 OPBENCH_DIR = "operators"
 INTERNAL_OPBENCH_DIR = "fb"
+LIGER_OPERATORS = [
+    "embedding",
+    "rms_norm",
+    "rope",
+    "jsd",
+    "fused_linear_jsd",
+    "cross_entropy",
+    "fused_linear_cross_entropy",
+    "geglu",
+    "kl_div",
+    "swiglu",
+]
 
 
 def _dir_contains_file(dir, file_name) -> bool:
@@ -42,14 +54,17 @@ def _list_opbench_paths() -> List[str]:
             if child.is_dir() and _dir_contains_file(child, "__init__.py")
         )
         opbench.extend(o)
+        opbench = [
+            op
+            for op in opbench
+            if os.path.basename(op) not in LIGER_OPERATORS
+            and not os.path.basename(op) == INTERNAL_OPBENCH_DIR
+        ]
     return opbench
 
 
 def list_operators() -> List[str]:
-    operators = list(map(lambda y: os.path.basename(y), _list_opbench_paths()))
-    if INTERNAL_OPBENCH_DIR in operators:
-        operators.remove(INTERNAL_OPBENCH_DIR)
-    return operators
+    return [os.path.basename(y) for y in _list_opbench_paths()]
 
 
 def list_custom_triton_operators(

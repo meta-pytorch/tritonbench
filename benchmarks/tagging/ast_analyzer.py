@@ -60,6 +60,11 @@ class Edge:
     call_type: str
     callee_descriptor: FuncDescriptor
 
+def split_by_the_last_dot(s: str) -> Optional[Tuple[str, str]]:
+    if "." in s:
+        return s.rsplit(".", 1)
+    else:
+        return None, s
 
 class CallGraph(ast.NodeVisitor):
     def __init__(
@@ -158,6 +163,12 @@ class CallGraph(ast.NodeVisitor):
     ):
         if caller is None:
             caller = self._cur_scope() or "<module>"
+        # replace callee with caller class name if it is "self." call
+        if "." in caller and callee.startswith("self."):
+            caller_prefix, _ = split_by_the_last_dot(caller)
+            # remove the "self." prefix
+            callee_name = callee[5 :]
+            callee = caller_prefix + "." + callee_name
         site = Site(
             self.filename, getattr(node, "lineno", -1), getattr(node, "col_offset", -1)
         )
@@ -167,8 +178,6 @@ class CallGraph(ast.NodeVisitor):
             and any([f"Operator.{backend}" in caller for backend in self.backends])
             and not callee == "tritonbench.utils.triton_op.register_benchmark"
         ):
-            if callee.startswith("self."):
-                return
             if is_fbcode() and callee.startswith("liger_kernel."):
                 return
             # identify this call belongs to which backend
@@ -188,9 +197,7 @@ class CallGraph(ast.NodeVisitor):
                 )
             )
         elif any([backend in caller for backend in self.backends]):
-            # "torch.ops" is a binary custom ops
-            if callee.startswith("self."):
-                return
+            # skip aten calls
             if callee.startswith("torch.") and not callee.startswith("torch.ops."):
                 return
             # we are sure there is no kernel defined in this package ;-)
@@ -202,7 +209,7 @@ class CallGraph(ast.NodeVisitor):
             if maybe_triton and callee_descriptor == None:
                 callee_descriptor = FuncDescriptor(
                     callee,
-                    ["triton.jit"],
+                    ["maybe.triton.jit"],
                     Site(
                         self.filename,
                         getattr(node, "lineno", -1),
@@ -362,6 +369,27 @@ class CallGraph(ast.NodeVisitor):
                 callee = fn.value.id
             elif isinstance(fn.value, ast.Attribute):
                 callee = fn.value.value.id
+                if hasattr(fn.value, "attr"):
+                    callee = callee + "." + fn.value.attr
+            elif isinstance(fn.value, ast.Call):
+                # add hack to handle torch._library.capture_triton
+                if (
+                    isinstance(fn.value.func, ast.Name)
+                    and fn.value.func.id == "capture_triton"
+                ) or (
+                    isinstance(fn.value.func.value, ast.Attribute)
+                    and fn.value.func.value.attr == "_library"
+                    and fn.value.func.attr == "capture_triton"
+                ):
+                    if isinstance(fn.value.args[0], ast.Call):
+                        callee_func = fn.value.args[0].func.id
+                    elif isinstance(fn.value.args[0], ast.Name):
+                        callee_func = fn.value.args[0].id
+                    elif isinstance(fn.value.args[0], ast.Attribute):
+                        callee_func = fn.value.args[0].value.id
+                    else:
+                        callee_func = "unknown"
+                    callee = f"<torch._library.capture_triton({callee_func})>"
             else:
                 callee = "<dynamic_call>"
             maybe_triton = True  # FIXME: this could also be cute, see blackwell_attentions cute dsl
@@ -377,16 +405,22 @@ def validate_edges(edges) -> Dict[str, str]:
     result_tags["tags"] = []
     result_tags["kernels"] = []
     for edge in edges:
+        if edge.callee == "cutlass.cute.compile":
+            result_tags["tags"].append("cutedsl")
+            result_tags["kernels"].append(edge.caller)
         if edge.callee_descriptor and (
             "triton.jit" in edge.callee_descriptor.decorators
             or "<dynamic_decorator_triton.jit>" in edge.callee_descriptor.decorators
         ):
             result_tags["tags"].append("triton")
             result_tags["kernels"].append(edge.callee)
-        if edge.callee == "cutlass.cute.compile":
-            result_tags["tags"].append("cutedsl")
-            result_tags["kernels"].append(edge.caller)
-        if edge.callee.startswith("torch.ops."):
+        if edge.callee.startswith("<torch._library.capture_triton"):
+            result_tags["tags"].append("triton")
+            result_tags["kernels"].append(edge.callee)
+        if (
+            edge.callee.startswith("torch.ops.")
+            and not "cutedsl" in result_tags["tags"]
+        ):
             result_tags["tags"].append("native_custom_ops")
             # definition is in cpp, so we don't have the definition site
             result_tags["kernels"].append(edge.callee)
@@ -398,8 +432,19 @@ def validate_edges(edges) -> Dict[str, str]:
         if edge.callee.startswith("tilelang.compile"):
             result_tags["tags"].append("tilelang")
             result_tags["kernels"].append(edge.caller)
+        if "torch.ops.fbgemm" in edge.callee:
+            result_tags["tags"].append("fbgemm")
+        # heuristic: if no tag is found and maybe triton, apply triton tag
+        if (
+            not result_tags["tags"]
+            and edge.callee_descriptor
+            and "maybe.triton.jit" in edge.callee_descriptor.decorators
+        ):
+            result_tags["tags"].append("triton")
+            result_tags["kernels"].append(edge.callee)
     # remove duplicates
     result_tags["tags"] = list(set(result_tags["tags"]))
+    result_tags["kernels"] = list(set(result_tags["kernels"]))
     if not result_tags["kernels"] and not result_tags["tags"]:
         return None
     return result_tags
@@ -407,7 +452,7 @@ def validate_edges(edges) -> Dict[str, str]:
 
 def gen_static_extension_tags(callee: str) -> Dict[str, str]:
     result_tags = {}
-    result_tags["tags"] = {"native_extension"}
+    result_tags["tags"] = ["native_extension"]
     result_tags["kernels"] = [callee]
     return result_tags
 
@@ -433,18 +478,10 @@ def trace_callees(callees_with_module: List[Tuple[str, str]], depth=8):
         if callee.endswith(".apply"):
             callee = callee[: callee.rfind(".apply")] + ".forward"
 
-        callee_module = callee[: callee.rfind(".")] if "." in callee else None
-        callee_name = callee[callee.rfind(".") + 1 :] if "." in callee else callee
-        maybe_callee_module = (
-            callee_module[: callee_module.rfind(".")]
-            if callee_module and "." in callee_module
-            else None
-        )
-        maybe_callee_class = (
-            callee_module[callee_module.rfind(".") + 1 :]
-            if callee_module and "." in callee_module
-            else None
-        )
+        callee_module, callee_name = split_by_the_last_dot(callee)
+        maybe_callee_module, maybe_callee_class =  split_by_the_last_dot(callee_module)
+        parent_module_name, _child_module_name = split_by_the_last_dot(module_name)
+
         # best effort to find and import the module
         # print(f"callee: {callee}")
         # print(f"callee module: {callee_module}")
@@ -452,15 +489,21 @@ def trace_callees(callees_with_module: List[Tuple[str, str]], depth=8):
         # print(f"module name: {module_name}")
         # print(f"maybe callee module: {maybe_callee_module}")
         # print(f"maybe callee class: {maybe_callee_class}")
-        if not callee_module and not maybe_callee_module:
+        if callee_module == None and maybe_callee_module == None:
             continue
         try:
             module = importlib.import_module(callee_module)
             source_file = inspect.getfile(module)
+            if not hasattr(module, callee_name):
+                raise ModuleNotFoundError(f"Not found {callee_name} in {module}")
         except (ModuleNotFoundError, TypeError):
             try:
                 # try with relative import
-                module = importlib.import_module(f"{module_name}.{callee_module}")
+                if parent_module_name is None:
+                    parent_module_name = module_name
+                module = importlib.import_module(
+                    f"{parent_module_name}.{callee_module}"
+                )
                 source_file = inspect.getfile(module)
             except (ModuleNotFoundError, TypeError):
                 if maybe_callee_module == None:
@@ -468,20 +511,31 @@ def trace_callees(callees_with_module: List[Tuple[str, str]], depth=8):
                 try:
                     module = importlib.import_module(maybe_callee_module)
                     source_file = inspect.getfile(module)
+                    if not hasattr(module, maybe_callee_class):
+                        raise ModuleNotFoundError(
+                            f"Not found {maybe_callee_class} in {module}"
+                        )
                     callee_name = f"{maybe_callee_class}.{callee_name}"
                 except (ModuleNotFoundError, TypeError):
                     try:
+                        # try with relative import
+                        if parent_module_name is None:
+                            parent_module_name = module_name
                         module = importlib.import_module(
-                            f"{module_name}.{maybe_callee_module}"
+                            f"{parent_module_name}.{maybe_callee_module}"
                         )
                         source_file = inspect.getfile(module)
                         callee_name = f"{maybe_callee_class}.{callee_name}"
-                    except Exception:
+                    except Exception as e:
                         # give up
                         print(
-                            f"Failed to load module {maybe_callee_module} from entity {callee}"
+                            f"Failed to load module {maybe_callee_module} from entity {callee}: {e}"
                         )
                         continue
+        except Exception:
+            # give up
+            print(f"Failed to load module {callee_module} from entity {callee}")
+            continue
         if not module:
             print(f"Failed to find {callee} at module {callee_module} ")
             continue

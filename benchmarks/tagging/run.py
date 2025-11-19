@@ -8,6 +8,7 @@ import os
 import sys
 from os.path import abspath, exists
 from pathlib import Path
+from typing import Any
 
 import yaml
 
@@ -125,11 +126,14 @@ def prevalidate_backends(backend_edges):
             op_with_tags[backend] = {"tags": ["xformers"]}
         elif any([callee.startswith("torch.ops.") for callee in callees]):
             custom_op_category = [
-                callee[callee.rfind(".") + 1 :]
-                for callee in callees
-                if callee.startswith("torch.ops.")
+                callee for callee in callees if callee.startswith("torch.ops.")
             ]
-            op_with_tags[backend] = {"tags": custom_op_category + ["native_custom_ops"]}
+            op_with_tags[backend] = {
+                "tags": ["native_custom_ops"],
+                "kernels": custom_op_category,
+            }
+            if any(["fbgemm" in callee for callee in callees]):
+                op_with_tags[backend]["tags"].append("fbgemm")
 
     # Apply name-based heuristics for all prevalidated backends
     for backend in op_with_tags.keys():
@@ -167,9 +171,8 @@ def trace_op(op):
     for backend in remaining_backends:
         # special case for torch.compile
         callees = backend_edges[backend]
-        base_module_name = module_name[: module_name.rfind(".")]
-        callees_with_module: list[tuple[Unknown, Unknown]] = [
-            (callee, base_module_name) for callee in callees
+        callees_with_module: list[tuple[Any, Any]] = [
+            (callee, module_name) for callee in callees
         ]
         op_with_tags[op][backend] = trace_callees(callees_with_module)
         # Apply name-based heuristics
