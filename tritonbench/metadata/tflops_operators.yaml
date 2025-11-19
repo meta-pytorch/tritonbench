@@ -4,6 +4,7 @@
 # =================================================================
 - addmm
 - bf16xint16_gemm
+- blackwell_attentions
 - flash_attention
 - flex_attention
 - fp8_attention
@@ -12,6 +13,9 @@
 - fp8_gemm_blockwise
 - fp8_gemm_rowwise
 - fp8_gemm_rowwise_grouped
-- int4_gemm
-- ragged_attention
+- gdn_fwd_h
 - grouped_gemm
+- int4_gemm
+- mamba2_chunk_scan
+- mamba2_chunk_state
+- ragged_attention

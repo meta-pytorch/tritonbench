@@ -75,6 +75,7 @@ def gen_run(operators: Dict[str, List[str]]) -> Dict[str, Any]:
         # add backward run if applicable
         if op in BWD_OPS:
             bwd_run_name = f"{dtype}_{op}_bwd" if dtype else f"{op}_bwd"
+            out[bwd_run_name] = {}
             out[bwd_run_name]["args"] = " ".join(cmd) + " --bwd"
     return out
 
@@ -85,7 +86,8 @@ def add_manual_benchmarks(
     disabled = options.get("disabled", [])
     extra_args = options.get("extra_args", {})
     for benchmark in disabled:
-        run_configs[benchmark]["disabled"] = True
+        if benchmark in run_configs:
+            run_configs[benchmark]["disabled"] = True
     for benchmark in extra_args:
         run_configs[benchmark]["args"] = extra_args[benchmark]["args"]
     for benchmark, benchmark_config in options.get("enabled", {}).items():
