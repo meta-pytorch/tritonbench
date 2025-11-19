@@ -12,8 +12,6 @@ logging.basicConfig(level=logging.INFO)
 
 from os.path import abspath, exists
 
-CURRENT_DIR = os.path.dirname(os.path.abspath(__file__))
-
 
 def setup_tritonbench_cwd():
     original_dir = abspath(os.getcwd())
@@ -34,6 +32,7 @@ def setup_tritonbench_cwd():
 
 setup_tritonbench_cwd()
 
+from tritonbench.utils.path_utils import REPO_PATH
 from tritonbench.operators import list_operators, load_opbench_by_name
 
 # operators that are not supported by tritonbench-oss
@@ -105,7 +104,7 @@ def main() -> None:
     parser.add_argument(
         "--output",
         type=str,
-        default=os.path.join(CURRENT_DIR, "metadata"),
+        default=os.path.join(REPO_PATH.joinpath("tritonbench"), "metadata"),
         help="generate metadata yaml files to the specific directory",
     )
     args = parser.parse_args()
