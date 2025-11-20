@@ -366,8 +366,9 @@ def run_in_task(
     if not is_fbcode() and not op_task_cmd[1] == "run.py":
         op_task_cmd.insert(1, "run.py")
     try:
+        start_time = time.perf_counter()
         print(
-            f"[tritonbench] Running {benchmark_name}: " + " ".join(op_task_cmd),
+            f"[tritonbench] Start {benchmark_name}: " + " ".join(op_task_cmd),
             flush=True,
         )
         subprocess_env = os.environ.copy()
@@ -378,6 +379,11 @@ def run_in_task(
             stderr=sys.stderr,
             cwd=REPO_PATH,
             env=subprocess_env,
+        )
+        benchmark_time = time.perf_counter() - start_time
+        print(
+            f"[tritonbench] Finish {benchmark_name} in {benchmark_time:.3f} seconds.",
+            flush=True,
         )
     except subprocess.CalledProcessError:
         # By default, we will continue on the failed operators
