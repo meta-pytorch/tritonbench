@@ -6,6 +6,7 @@ from tritonbench.operators_collection.default import (
     get_operators as get_default_operators,
 )
 from tritonbench.operators_collection.liger import get_liger_operators
+from tritonbench.operators_collection.triton import get_triton_operators
 from tritonbench.utils.env_utils import is_fbcode
 
 
@@ -16,7 +17,9 @@ OP_COLLECTIONS = {
     "aten": get_aten_operators,
     "liger": get_liger_operators,
     "default": get_default_operators,
+    "triton": get_triton_operators,
 }
+
 if is_fbcode():
     from tritonbench.operators_collection.fb.buck import (
         get_operators as get_buck_operators,
