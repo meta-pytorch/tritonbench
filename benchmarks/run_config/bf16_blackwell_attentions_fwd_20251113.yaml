@@ -1,0 +1,11 @@
+# Local run result
+# ----------------------------------------------------  --------------------------------------------------
+#   (Batch, Heads, Heads_KV, SeqLen, SeqLen_KV, Dhead)    tlx_blackwell_ws_pipelined_persistent_fwd-tflops
+# ----------------------------------------------------  --------------------------------------------------
+#                         (4, 32, 32, 8192, 8192, 128)                                             822.781
+#                                    822.7808081744499
+bf16_blackwell_attention_fwd_tlx_20251113:
+  args:
+    --op blackwell_attentions --seq-len 8192 --batch 4 --n-heads 32 --d-head 128 --metrics tflops --rep 3000 --sleep 1.0 --only tlx_blackwell_ws_pipelined_persistent_fwd --simple-output --force
+  envs:
+    TRITON_ALWAYS_COMPILE=1

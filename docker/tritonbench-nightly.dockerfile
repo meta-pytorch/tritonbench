@@ -103,7 +103,7 @@ RUN cd /workspace/tritonbench && \
 # Build meta-triton conda env
 RUN cd /workspace/tritonbench && \
     bash .ci/triton/install.sh --conda-env "${CONDA_ENV_META_TRITON}" \
-        --repo facebookexperimental/triton --commit ws-3.5 --side single \
+        --repo facebookexperimental/triton --commit b939601a9a376342985ab27bc649e02d4288afc6 --side single \
         --install-dir /workspace/meta-triton
 # Install Helion in the meta-triton conda env
 RUN cd /workspace/tritonbench && \
