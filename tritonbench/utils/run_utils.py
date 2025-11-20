@@ -27,7 +27,6 @@ from tritonbench.utils.path_utils import (
     add_cmd_parameter,
     get_cmd_parameter,
     remove_cmd_parameter,
-    get_cmd_parameter,
     REPO_PATH,
 )
 from tritonbench.utils.triton_op import BenchmarkOperatorResult
