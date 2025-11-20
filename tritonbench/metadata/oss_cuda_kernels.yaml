@@ -44,12 +44,16 @@ blackwell_attentions:
   aten:
     tags:
     - aten
-  cudnn_sdpa: null
-  cutedsl_blackwell: null
+  cudnn_sdpa:
+    tags: []
+  cutedsl_blackwell:
+    tags: []
   cutlass_blackwell:
     tags:
     - xformers
-  flash_v2: null
+    - cutlass
+  flash_v2:
+    tags: []
   flex_attention:
     tags:
     - pt2
@@ -72,44 +76,49 @@ blackwell_attentions:
     - tlx
   triton_tutorial_flash_dp_blackwell:
     kernels:
-    - _attn_fwd_persist
     - _attn_fwd
+    - _attn_fwd_persist
     tags:
     - triton
   triton_tutorial_flash_dp_persistent_blackwell:
     kernels:
-    - _attn_fwd_persist
     - _attn_fwd
+    - _attn_fwd_persist
     tags:
     - triton
   triton_tutorial_flash_v2_blackwell:
     kernels:
-    - _attn_fwd_persist
     - _attn_fwd
+    - _attn_fwd_persist
+    - _attn_bwd_preprocess
+    - _attn_bwd
     tags:
     - triton
   triton_tutorial_flash_v2_persistent_blackwell:
     kernels:
-    - _attn_fwd_persist
     - _attn_fwd
+    - _attn_fwd_persist
+    - _attn_bwd_preprocess
+    - _attn_bwd
     tags:
     - triton
   triton_tutorial_flash_v2_tma_ws_persistent_blackwell:
     kernels:
-    - _attn_fwd_base_opt
-    - _attn_fwd_ws
-    - _attn_fwd_tma_unified
     - _attn_fwd_tma_ws_persistent
     - _attn_fwd_tma_ws_persistent_with_dp
-    - _attn_bwd_preprocess
     - _attn_bwd
+    - _attn_fwd_base_opt
+    - _attn_bwd_preprocess
+    - _attn_fwd_ws
+    - _attn_fwd_tma_unified
     tags:
     - triton
   xformers_splitk:
     tags:
     - xformers
 cross_entropy:
-  cross_entropy_loss: null
+  cross_entropy_loss:
+    tags: []
   liger_cross_entropy_loss:
     tags:
     - liger
@@ -118,21 +127,28 @@ cross_entropy:
     tags:
     - pt2
 decoding_attention:
-  aiter_paged_fp8kv: null
-  fa2_kvcache: null
+  aiter_paged_fp8kv:
+    tags: []
+  fa2_kvcache:
+    tags: []
   fa2_mha_varlen_fwd:
     tags:
     - xformers
-  fa3_kvcache_fp8qkv: null
-  fa3_kvcache_gqa_heuristic: null
+  fa3_kvcache_fp8qkv:
+    tags: []
+  fa3_kvcache_gqa_heuristic:
+    tags: []
   fa3_mha_varlen_fwd:
     tags:
     - xformers
   fbgemm_gqa_fp8kv:
+    kernels:
+    - torch.ops.fbgemm.gqa_attn_splitk
     tags:
-    - gqa_attn_splitk
     - native_custom_ops
-  flash_cute_dsl: null
+    - fbgemm
+  flash_cute_dsl:
+    tags: []
   triton_splitk:
     tags:
     - xformers
@@ -159,12 +175,15 @@ flash_attention:
   cudnn:
     tags:
     - aten
-  flash_v2: null
-  flash_v3: null
+  flash_v2:
+    tags: []
+  flash_v3:
+    tags: []
   flex_attention:
     tags:
     - pt2
-  pallas: null
+  pallas:
+    tags: []
   sdpa:
     tags:
     - pt2
@@ -173,60 +192,61 @@ flash_attention:
     - tritonbench.operators.flash_attention.tilelang_mha
     tags:
     - tilelang
-  tk: null
+  tk:
+    tags: []
   triton_tutorial_flash_v2:
     kernels:
-    - _attn_fwd_base_opt
-    - _attn_fwd_ws
-    - _attn_fwd_tma_unified
     - _attn_fwd_tma_ws_persistent
     - _attn_fwd_tma_ws_persistent_with_dp
-    - _attn_bwd_preprocess
     - _attn_bwd
+    - _attn_fwd_base_opt
+    - _attn_bwd_preprocess
+    - _attn_fwd_ws
+    - _attn_fwd_tma_unified
     tags:
     - triton
   triton_tutorial_flash_v2_tma:
     kernels:
-    - _attn_fwd_base_opt
-    - _attn_fwd_ws
-    - _attn_fwd_tma_unified
     - _attn_fwd_tma_ws_persistent
     - _attn_fwd_tma_ws_persistent_with_dp
-    - _attn_bwd_preprocess
     - _attn_bwd
+    - _attn_fwd_base_opt
+    - _attn_bwd_preprocess
+    - _attn_fwd_ws
+    - _attn_fwd_tma_unified
     tags:
     - triton
   triton_tutorial_flash_v2_tma_ws:
     kernels:
-    - _attn_fwd_base_opt
-    - _attn_fwd_ws
-    - _attn_fwd_tma_unified
     - _attn_fwd_tma_ws_persistent
     - _attn_fwd_tma_ws_persistent_with_dp
-    - _attn_bwd_preprocess
     - _attn_bwd
+    - _attn_fwd_base_opt
+    - _attn_bwd_preprocess
+    - _attn_fwd_ws
+    - _attn_fwd_tma_unified
     tags:
     - triton
   triton_tutorial_flash_v2_tma_ws_persistent:
     kernels:
-    - _attn_fwd_base_opt
-    - _attn_fwd_ws
-    - _attn_fwd_tma_unified
     - _attn_fwd_tma_ws_persistent
     - _attn_fwd_tma_ws_persistent_with_dp
-    - _attn_bwd_preprocess
     - _attn_bwd
+    - _attn_fwd_base_opt
+    - _attn_bwd_preprocess
+    - _attn_fwd_ws
+    - _attn_fwd_tma_unified
     tags:
     - triton
   triton_tutorial_flash_v2_ws:
     kernels:
-    - _attn_fwd_base_opt
-    - _attn_fwd_ws
-    - _attn_fwd_tma_unified
     - _attn_fwd_tma_ws_persistent
     - _attn_fwd_tma_ws_persistent_with_dp
-    - _attn_bwd_preprocess
     - _attn_bwd
+    - _attn_fwd_base_opt
+    - _attn_bwd_preprocess
+    - _attn_fwd_ws
+    - _attn_fwd_tma_unified
     tags:
     - triton
   xformers:
@@ -237,47 +257,49 @@ flash_attention:
     - xformers
 fp8_attention:
   colfax_fmha:
+    kernels:
+    - torch.ops.cutlass.fmha_forward_pipeline
     tags:
-    - fmha_forward_pipeline
     - native_custom_ops
   triton_flash_v2:
     kernels:
-    - _attn_fwd_base_opt
-    - _attn_fwd_ws
-    - _attn_fwd_tma_unified
     - _attn_fwd_tma_ws_persistent
     - _attn_fwd_tma_ws_persistent_with_dp
-    - _attn_bwd_preprocess
     - _attn_bwd
+    - _attn_fwd_base_opt
+    - _attn_bwd_preprocess
+    - _attn_fwd_ws
+    - _attn_fwd_tma_unified
     tags:
     - triton
   triton_flash_v2_tma:
     kernels:
-    - _attn_fwd_base_opt
-    - _attn_fwd_ws
-    - _attn_fwd_tma_unified
     - _attn_fwd_tma_ws_persistent
     - _attn_fwd_tma_ws_persistent_with_dp
-    - _attn_bwd_preprocess
     - _attn_bwd
+    - _attn_fwd_base_opt
+    - _attn_bwd_preprocess
+    - _attn_fwd_ws
+    - _attn_fwd_tma_unified
     tags:
     - triton
   triton_flash_v2_ws:
     kernels:
-    - _attn_fwd_base_opt
-    - _attn_fwd_ws
-    - _attn_fwd_tma_unified
     - _attn_fwd_tma_ws_persistent
     - _attn_fwd_tma_ws_persistent_with_dp
-    - _attn_bwd_preprocess
     - _attn_bwd
+    - _attn_fwd_base_opt
+    - _attn_bwd_preprocess
+    - _attn_fwd_ws
+    - _attn_fwd_tma_unified
     tags:
     - triton
 fp8_gemm:
   pt2_fp8_gemm:
     tags:
     - pt2
-  torch_fp8_gemm: null
+  torch_fp8_gemm:
+    tags: []
   triton_fp8_gemm:
     kernels:
     - matmul_kernel
@@ -295,10 +317,18 @@ fp8_gemm:
     - triton
 fp8_gemm_blockwise:
   _cutlass:
+    kernels:
+    - torch.ops.fbgemm.f8f8bf16_blockwise
     tags:
-    - f8f8bf16_blockwise
     - native_custom_ops
-  _triton: null
+    - fbgemm
+    - cutlass
+  _triton:
+    kernels:
+    - _kernel_matmul_fp8_block_slowacc
+    - _kernel_matmul_fp8_block_fastacc
+    tags:
+    - triton
 fp8_gemm_rowwise:
   _aoti_fp8_triton_mm:
     kernels:
@@ -306,22 +336,43 @@ fp8_gemm_rowwise:
     tags:
     - triton
   _cublas:
+    kernels:
+    - torch.ops.fbgemm.f8f8bf16_cublas
+    - torch.ops.fbgemm.f8f8bf16_cublas
     tags:
-    - f8f8bf16_cublas
-    - f8f8bf16_cublas
     - native_custom_ops
+    - fbgemm
   _cutlass_or_ck:
+    kernels:
+    - torch.ops.fbgemm.f8f8bf16_rowwise
+    - torch.ops.fbgemm.f8f8bf16_rowwise
     tags:
-    - f8f8bf16_rowwise
-    - f8f8bf16_rowwise
     - native_custom_ops
-  _triton: null
+    - fbgemm
+    - cutlass
+  _triton:
+    kernels:
+    - <torch._library.capture_triton(_kernel_matmul_fp8_row_tma_persistent_ws_cooperative)>
+    - <torch._library.capture_triton(_kernel_matmul_fp8_row_imprecise_acc)>
+    - <torch._library.capture_triton(_kernel_matmul_fp8_row_tma_persistent)>
+    - <torch._library.capture_triton(_kernel_matmul_fp8_row_no_fast_acc)>
+    - <torch._library.capture_triton(_kernel_matmul_fp8_row)>
+    - <torch._library.capture_triton(_kernel_matmul_fp8_row_non_persistent)>
+    tags:
+    - triton
 fp8_gemm_rowwise_grouped:
   _cutlass_or_ck:
+    kernels:
+    - torch.ops.fbgemm.f8f8bf16_rowwise_grouped_stacked
     tags:
-    - f8f8bf16_rowwise_grouped_stacked
     - native_custom_ops
-  _triton: null
+    - fbgemm
+    - cutlass
+  _triton:
+    kernels:
+    - fn
+    tags:
+    - triton
   eager_fp8_gemm_rowwise_grouped:
     tags:
     - aten
@@ -333,7 +384,8 @@ fused_linear_cross_entropy:
   torch_compile_fused_linear_cross_entropy:
     tags:
     - pt2
-  torch_lm_head_ce: null
+  torch_lm_head_ce:
+    tags: []
 fused_linear_jsd:
   liger_lm_head_jsd:
     tags:
@@ -342,7 +394,8 @@ fused_linear_jsd:
   torch_compile_lm_head_jsd:
     tags:
     - pt2
-  torch_lm_head_jsd: null
+  torch_lm_head_jsd:
+    tags: []
 gather_gemv:
   eager_gather_gemv:
     tags:
@@ -352,18 +405,41 @@ gather_gemv:
     - pt2
   triton_gather_gemv:
     kernels:
-    - triton_red_fused_mv_0
     - torch.ops.inductor._reinterpret_tensor
+    - triton_red_fused_mv_0
     tags:
     - native_custom_ops
     - triton
+gdn_fwd_h:
+  compile:
+    tags:
+    - pt2
+  eager:
+    tags:
+    - aten
+  fla:
+    tags: []
+  tilelang:
+    tags: []
 gdpa:
   eager_gdpa:
     tags:
     - aten
-  gdpa: null
-  gdpa_opt: null
-  gdpa_opt_sorted: null
+  gdpa:
+    kernels:
+    - <torch._library.capture_triton(kernel_fn)>
+    tags:
+    - triton
+  gdpa_opt:
+    kernels:
+    - <torch._library.capture_triton(kernel_fn)>
+    tags:
+    - triton
+  gdpa_opt_sorted:
+    kernels:
+    - <torch._library.capture_triton(kernel_fn)>
+    tags:
+    - triton
   tlx_gdpa:
     tags:
     - tlx
@@ -378,7 +454,8 @@ geglu:
   torch_compile_geglu:
     tags:
     - pt2
-  torch_geglu: null
+  torch_geglu:
+    tags: []
 gemm:
   aten_matmul:
     tags:
@@ -386,19 +463,21 @@ gemm:
   aten_tunableop_matmul:
     tags:
     - aten
-  hstu_triton_matmul: null
+  hstu_triton_matmul:
+    tags: []
   matmul_decompose_k:
     tags:
     - pt2
   matmul_partition_k:
     kernels:
-    - _matmul_partition_k
     - _reduce
+    - _matmul_partition_k
     tags:
     - triton
   pt2_cutlass_matmul:
     tags:
     - pt2
+    - cutlass
   pt2_matmul_maxautotune:
     tags:
     - pt2
@@ -415,9 +494,12 @@ gemm:
     - _splitk_kernel
     tags:
     - triton
-  triton_persistent_matmul: null
-  triton_tma_persistent_cached_matmul: null
-  triton_tma_persistent_matmul: null
+  triton_persistent_matmul:
+    tags: []
+  triton_tma_persistent_cached_matmul:
+    tags: []
+  triton_tma_persistent_matmul:
+    tags: []
   triton_tutorial_matmul:
     kernels:
     - matmul_kernel
@@ -432,7 +514,8 @@ grouped_gemm:
     - tritonbench.operators.grouped_gemm.cutedsl.kernels.compile_cutedsl_grouped_gemm
     tags:
     - cutedsl
-  naive: null
+  naive:
+    tags: []
   precompiled_cutedsl_grouped_mm:
     kernels:
     - tritonbench.operators.grouped_gemm.cutedsl.kernels.compile_cutedsl_grouped_gemm
@@ -440,9 +523,9 @@ grouped_gemm:
     - cutedsl
   precompiled_cutedsl_grouped_mm_tuned:
     kernels:
-    - tritonbench.operators.grouped_gemm.cutedsl.kernels.compile_cutedsl_grouped_gemm
+    - ns
     tags:
-    - cutedsl
+    - triton
   preprocessed_aten_grouped_mm:
     tags:
     - aten
@@ -452,6 +535,12 @@ grouped_gemm:
   preprocessed_pt2_triton_grouped_mm:
     tags:
     - pt2
+  tlx_grouped_gemm:
+    kernels:
+    - grouped_matmul_tlx_kernel
+    tags:
+    - triton
+    - tlx
   torch_compile_grouped_gemm:
     tags:
     - pt2
@@ -488,10 +577,11 @@ jagged_layer_norm:
     tags:
     - pt2
   torch_jagged_layer_norm_torch_sum:
+    kernels:
+    - torch.ops.aten._jagged_to_padded_dense_forward
+    - torch.ops.aten._jagged_to_padded_dense_forward
+    - torch.ops.aten._padded_dense_to_jagged_forward
     tags:
-    - _jagged_to_padded_dense_forward
-    - _jagged_to_padded_dense_forward
-    - _padded_dense_to_jagged_forward
     - native_custom_ops
   torch_jagged_layer_norm_unbind_torch_layer_norm:
     tags:
@@ -510,24 +600,25 @@ jagged_mean:
     tags:
     - pt2
   torch_jagged_mean_torch_nanmean:
+    kernels:
+    - torch.ops.aten._jagged_to_padded_dense_forward
     tags:
-    - _jagged_to_padded_dense_forward
     - native_custom_ops
   torch_jagged_mean_torch_sum:
+    kernels:
+    - torch.ops.aten._jagged_to_padded_dense_forward
     tags:
-    - _jagged_to_padded_dense_forward
     - native_custom_ops
-  torch_jagged_mean_unbind_torch_mean: null
+  torch_jagged_mean_unbind_torch_mean:
+    tags: []
   triton_jagged_mean_simple_fused:
     kernels:
     - triton_jagged_mean_kernel_simple_fused_sum_then_buffer
-    - triton_jagged_mean_kernel_simple_fused_buffer_then_sum
     tags:
     - triton
   triton_jagged_mean_variable_length_loop:
     kernels:
     - triton_jagged_mean_kernel_variable_length_loop_sum_then_buffer
-    - triton_jagged_mean_kernel_variable_length_loop_buffer_then_sum
     tags:
     - triton
 jagged_softmax:
@@ -538,11 +629,13 @@ jagged_softmax:
     tags:
     - pt2
   torch_jagged_softmax_torch_sum:
+    kernels:
+    - torch.ops.aten._jagged_to_padded_dense_forward
+    - torch.ops.aten._padded_dense_to_jagged_forward
     tags:
-    - _jagged_to_padded_dense_forward
-    - _padded_dense_to_jagged_forward
     - native_custom_ops
-  torch_jagged_softmax_unbind_torch_softmax: null
+  torch_jagged_softmax_unbind_torch_softmax:
+    tags: []
   triton_jagged_softmax_simple_fused:
     kernels:
     - triton_jagged_softmax_kernel_simple_fused_buffer_then_sum
@@ -557,21 +650,21 @@ jagged_sum:
   torch_compile_nested_tensor_integration:
     tags:
     - pt2
-  torch_jagged_sum_no_pad: null
+  torch_jagged_sum_no_pad:
+    tags: []
   torch_jagged_sum_pad:
+    kernels:
+    - torch.ops.aten._jagged_to_padded_dense_forward
     tags:
-    - _jagged_to_padded_dense_forward
     - native_custom_ops
   triton_jagged_sum_no_pad_simple_fused:
     kernels:
     - triton_jagged_sum_kernel_simple_fused_sum_then_buffer
-    - triton_jagged_sum_kernel_simple_fused_buffer_then_sum
     tags:
     - triton
   triton_jagged_sum_no_pad_variable_length_loop:
     kernels:
     - triton_jagged_sum_kernel_variable_length_loop_sum_then_buffer
-    - triton_jagged_sum_kernel_variable_length_loop_buffer_then_sum
     tags:
     - triton
 jsd:
@@ -582,7 +675,8 @@ jsd:
   torch_compile_jsd:
     tags:
     - pt2
-  torch_jsd: null
+  torch_jsd:
+    tags: []
 kl_div:
   liger_kl_div:
     tags:
@@ -591,10 +685,13 @@ kl_div:
   torch_compile_kl_div:
     tags:
     - pt2
-  torch_kl_div: null
+  torch_kl_div:
+    tags: []
 launch_latency:
-  nop_inductor_kernel: null
-  nop_python_function: null
+  nop_inductor_kernel:
+    tags: []
+  nop_python_function:
+    tags: []
   nop_triton_compiled_kernel_run:
     tags:
     - pt2
@@ -610,7 +707,8 @@ layer_norm:
     tags:
     - triton
     - liger
-  quack_layer_norm: null
+  quack_layer_norm:
+    tags: []
   torch_compile_layer_norm:
     tags:
     - pt2
@@ -625,9 +723,9 @@ layer_norm:
     - triton
   triton_layer_norm:
     kernels:
+    - _layer_norm_bwd_dwdb
     - _layer_norm_fwd_fused
     - _layer_norm_bwd_dx_fused
-    - _layer_norm_bwd_dwdb
     tags:
     - triton
 low_mem_dropout:
@@ -654,8 +752,10 @@ mamba2_chunk_scan:
   eager:
     tags:
     - aten
-  mamba_ssm: null
-  tilelang: null
+  mamba_ssm:
+    tags: []
+  tilelang:
+    tags: []
 mamba2_chunk_state:
   compile:
     tags:
@@ -663,37 +763,48 @@ mamba2_chunk_state:
   eager:
     tags:
     - aten
-  mamba_ssm: null
-  mamba_ssm_ref: null
-  tilelang: null
+  mamba_ssm:
+    tags: []
+  mamba_ssm_ref:
+    tags: []
+  tilelang:
+    tags: []
 mixed_gemm:
   aten_bf16_bf16:
     tags:
     - aten
   cutlass_w2a16:
+    kernels:
+    - torch.ops.mixed_gemm.w2a16_gemm
     tags:
-    - w2a16_gemm
     - native_custom_ops
-  machete_w4a16: null
+    - cutlass
+  machete_w4a16:
+    tags: []
   marlin_w4a16:
+    kernels:
+    - torch.ops.marlin.marlin_gemm
     tags:
-    - marlin_gemm
     - native_custom_ops
   tinny_w4a16:
+    kernels:
+    - torch.ops.tinygemm.convert_matrix_to_m16n8k16_Aint4_layout
+    - torch.ops.tinygemm.tinygemm_y_f16RM_x_f16RM_w_int4TC
     tags:
-    - convert_matrix_to_m16n8k16_Aint4_layout
-    - tinygemm_y_f16RM_x_f16RM_w_int4TC
     - native_custom_ops
 ragged_attention:
-  hammer_hstu: null
+  hammer_hstu:
+    tags: []
   hstu:
     kernels:
     - _hstu_attn_fwd
     tags:
     - triton
-  hstu_cuda: null
+  hstu_cuda:
+    tags: []
 rms_norm:
-  aiter: null
+  aiter:
+    tags: []
   liger_rms:
     kernels:
     - _rms_norm_forward_kernel
@@ -701,9 +812,15 @@ rms_norm:
     tags:
     - triton
     - liger
-  llama_rms: null
-  quack_rms: null
-  tilelang: null
+  llama_rms:
+    tags: []
+  quack_rms:
+    tags: []
+  tilelang:
+    kernels:
+    - tritonbench.operators.rms_norm.tilelang.TileLangRMSNorm.forward
+    tags:
+    - tilelang
   torch_compile_rms:
     tags:
     - pt2
@@ -713,7 +830,8 @@ rms_norm:
     tags:
     - triton
 rope:
-  apply_rotary_pos_emb: null
+  apply_rotary_pos_emb:
+    tags: []
   liger_rotary_pos_emb:
     tags:
     - liger
@@ -736,14 +854,15 @@ softmax:
     - pt2
   triton_softmax:
     kernels:
-    - Operator
+    - Operator.softmax_kernel
     tags:
     - triton
 sum:
   torch_compile_sum:
     tags:
     - pt2
-  torch_sum: null
+  torch_sum:
+    tags: []
   triton_sum:
     kernels:
     - triton_sum_kernel_scalar_result
@@ -757,7 +876,8 @@ swiglu:
   torch_compile_swiglu:
     tags:
     - pt2
-  torch_swiglu: null
+  torch_swiglu:
+    tags: []
 template_attention:
   test_no_exp2:
     kernels:
@@ -770,9 +890,11 @@ template_attention:
     tags:
     - triton
 test_op:
-  test_op: null
+  test_op:
+    tags: []
 vector_add:
-  torch_add: null
+  torch_add:
+    tags: []
   torch_compile_add:
     tags:
     - pt2
@@ -785,7 +907,8 @@ vector_exp:
   torch_compile_exp:
     tags:
     - pt2
-  torch_exp: null
+  torch_exp:
+    tags: []
   triton_exp:
     kernels:
     - triton_exp_kernel
@@ -808,9 +931,8 @@ welford:
   triton_welford:
     kernels:
     - torch.ops.inductor._reinterpret_tensor
-    - triton_red_fused_native_layer_norm_no_welford
-    - torch.ops.inductor._reinterpret_tensor
     - triton_red_fused_native_layer_norm_0
+    - triton_red_fused_native_layer_norm_no_welford
     tags:
     - native_custom_ops
     - triton

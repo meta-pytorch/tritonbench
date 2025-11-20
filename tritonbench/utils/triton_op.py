@@ -384,12 +384,17 @@ class BenchmarkOperatorResult:
                     row.append(metric_val)
                     if len(avg_row) <= col_num:
                         avg_row.append(
-                            metric_val if isinstance(metric_val, Number) or isinstance(metric_val, Latency) else None
+                            metric_val
+                            if isinstance(metric_val, Number)
+                            or isinstance(metric_val, Latency)
+                            else None
                         )
                     else:
                         if avg_row[col_num] is None:
                             avg_row[col_num] = metric_val
-                        elif isinstance(metric_val, Number) or isinstance(metric_val, Latency):
+                        elif isinstance(metric_val, Number) or isinstance(
+                            metric_val, Latency
+                        ):
                             avg_row[col_num] = avg_row[col_num] + metric_val
                     col_num += 1
             table.append(row)
