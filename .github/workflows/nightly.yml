@@ -35,7 +35,7 @@ jobs:
   h100-triton-main-nightly-benchmark:
     uses: ./.github/workflows/_linux-benchmark-h100.yml
     with:
-      test_type: ${{ inputs.test_type }}
+      test_type: ${{ inputs.test_type || 'periodic' }}
       benchmark_name: "nightly"
       side_a_triton: ${{ inputs.side_a_triton }}
       side_a_commit: ${{ inputs.side_a_commit }}
@@ -46,7 +46,7 @@ jobs:
   mi350-triton-main-nightly-benchmark:
     uses: ./.github/workflows/_linux-benchmark-mi350.yml
     with:
-      test_type: ${{ inputs.test_type }}
+      test_type: ${{ inputs.test_type || 'periodic' }}
       benchmark_name: "nightly"
       side_a_triton: ${{ inputs.side_a_triton }}
       side_a_commit: ${{ inputs.side_a_commit }}
