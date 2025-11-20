@@ -38,9 +38,16 @@ fp8_gemm_fwd:
   args: --op fp8_gemm --baseline torch_fp8_gemm --metrics latency,tflops,speedup --only
     triton_fp8_gemm,triton_persistent_fp8_gemm,triton_tma_persistent_fp8_gemm,torch_fp8_gemm
   disabled: true
+fp8_gemm_blockwise_fwd:
+  args: --op fp8_gemm_blockwise --baseline _cutlass --metrics latency,tflops,speedup
+    --only _triton,_cutlass
 fp8_gemm_rowwise_fwd:
   args: --op fp8_gemm_rowwise --baseline _cutlass_or_ck --metrics latency,tflops,speedup
-    --only _aoti_fp8_triton_mm,_cutlass_or_ck
+    --only _aoti_fp8_triton_mm,_triton,_cutlass_or_ck
+  disabled: true
+fp8_gemm_rowwise_grouped_fwd:
+  args: --op fp8_gemm_rowwise_grouped --baseline eager_fp8_gemm_rowwise_grouped --metrics
+    latency,tflops,speedup --only _triton,eager_fp8_gemm_rowwise_grouped
   disabled: true
 fused_linear_cross_entropy_fwd:
   args: --op fused_linear_cross_entropy --baseline torch_lm_head_ce --metrics latency,speedup
@@ -57,6 +64,11 @@ fused_linear_jsd_bwd:
 gather_gemv_fwd:
   args: --op gather_gemv --baseline eager_gather_gemv --metrics latency,speedup --only
     triton_gather_gemv,eager_gather_gemv
+bf16_gdpa_fwd:
+  args: --op gdpa --baseline eager_gdpa --metrics latency,speedup --only gdpa,gdpa_opt,gdpa_opt_sorted,eager_gdpa
+bf16_gdpa_bwd:
+  args: --op gdpa --baseline eager_gdpa --metrics latency,speedup --only gdpa,gdpa_opt,gdpa_opt_sorted,eager_gdpa
+    --bwd
 geglu_fwd:
   args: --op geglu --baseline torch_geglu --metrics latency,speedup --only liger_geglu,torch_geglu
 geglu_bwd:
@@ -69,7 +81,7 @@ fp16_gemm_bwd:
     --bwd
 bf16_grouped_gemm_fwd:
   args: --op grouped_gemm --baseline aten_grouped_mm --metrics latency,tflops,speedup
-    --only triton_grouped_gemm,aten_grouped_mm
+    --only precompiled_cutedsl_grouped_mm_tuned,tlx_grouped_gemm,triton_grouped_gemm,aten_grouped_mm
 int4_gemm_fwd:
   args: --op int4_gemm --baseline eager_int4_gemm --metrics latency,tflops,speedup
     --only preprocessed_triton_int4_gemm,triton_int4_gemm,eager_int4_gemm
