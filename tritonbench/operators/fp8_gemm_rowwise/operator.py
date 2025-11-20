@@ -49,6 +49,14 @@ def parse_args(args: List[str]) -> argparse.Namespace:
         action="store_true",
     )
     parser.add_argument("--warp_specialization", action="store_true")
+
+    # Validate that both --use_persistent and --no_use_persistent are not specified together
+    if "--use_persistent" in args and "--no_use_persistent" in args:
+        parser.error(
+            "Cannot specify both '--use_persistent' and '--no_use_persistent' at the same time. "
+            "These options are mutually exclusive. Please use only one."
+        )
+
     parsed_args = parser.parse_args(args)
     if parsed_args.use_tma is None:
         # Default to True for CUDA, False for ROCm
