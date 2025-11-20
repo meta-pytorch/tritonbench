@@ -60,11 +60,13 @@ class Edge:
     call_type: str
     callee_descriptor: FuncDescriptor
 
+
 def split_by_the_last_dot(s: str) -> Optional[Tuple[str, str]]:
     if "." in s:
         return s.rsplit(".", 1)
     else:
         return None, s
+
 
 class CallGraph(ast.NodeVisitor):
     def __init__(
@@ -167,7 +169,7 @@ class CallGraph(ast.NodeVisitor):
         if "." in caller and callee.startswith("self."):
             caller_prefix, _ = split_by_the_last_dot(caller)
             # remove the "self." prefix
-            callee_name = callee[5 :]
+            callee_name = callee[5:]
             callee = caller_prefix + "." + callee_name
         site = Site(
             self.filename, getattr(node, "lineno", -1), getattr(node, "col_offset", -1)
@@ -479,7 +481,7 @@ def trace_callees(callees_with_module: List[Tuple[str, str]], depth=8):
             callee = callee[: callee.rfind(".apply")] + ".forward"
 
         callee_module, callee_name = split_by_the_last_dot(callee)
-        maybe_callee_module, maybe_callee_class =  split_by_the_last_dot(callee_module)
+        maybe_callee_module, maybe_callee_class = split_by_the_last_dot(callee_module)
         parent_module_name, _child_module_name = split_by_the_last_dot(module_name)
 
         # best effort to find and import the module
