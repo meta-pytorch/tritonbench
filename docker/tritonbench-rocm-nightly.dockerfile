@@ -59,7 +59,7 @@ RUN cd /workspace/tritonbench && \
 # Build triton-main conda env
 RUN cd /workspace/tritonbench && \
     bash .ci/triton/install.sh --conda-env "${CONDA_ENV_TRITON_MAIN}" \
-        --repo triton-lang/triton --commit main --side single \
+        --repo triton-lang/triton --commit main --side single --nightly \
         --install-dir /workspace/triton-main
 
 

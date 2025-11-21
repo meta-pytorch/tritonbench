@@ -23,12 +23,17 @@ checkout_triton() {
     REPO=$1
     COMMIT=$2
     TRITON_INSTALL_DIR=$3
+    NIGHTLY=$4
     TRITON_INSTALL_DIRNAME=$(basename "${TRITON_INSTALL_DIR}")
     TRITON_INSTALL_BASEDIR=$(dirname "${TRITON_INSTALL_DIR}")
     cd "${TRITON_INSTALL_BASEDIR}"
     git clone "https://github.com/${REPO}.git" "${TRITON_INSTALL_DIRNAME}"
     cd "${TRITON_INSTALL_DIR}"
     git checkout "${COMMIT}"
+    if [ "${NIGHTLY}" == "1" ]; then
+        # truncate the branch to the earliest commit of the current day
+        git checkout $(git rev-list --reverse --since=midnight HEAD | head -n 1)
+    fi
 }
 
 install_triton() {
@@ -47,6 +52,11 @@ install_triton() {
     popd
 }
 
+# "NIGHTLY" option controls whether to truncate the branch
+# to the earliest commit of the current day.
+# This is useful for nightly runs across multiple devices.
+NIGHTLY="0"
+
 # Parse arguments
 while [[ "$#" -gt 0 ]]; do
     case $1 in
@@ -54,6 +64,7 @@ while [[ "$#" -gt 0 ]]; do
         --repo) REPO="$2"; shift ;;
         --commit) COMMIT="$2"; shift ;;
         --side) SIDE="$2"; shift ;;
+        --nightly) NIGHTLY="1"; ;;
         --install-dir) TRITON_INSTALL_DIR="$2"; shift ;;
         *) echo "Unknown parameter passed: $1"; usage ;;
     esac
@@ -95,7 +106,7 @@ conda create --name "${CONDA_ENV}" -y --clone pytorch
 
 remove_triton
 
-checkout_triton "${REPO}" "${COMMIT}" "${TRITON_INSTALL_DIR}"
+checkout_triton "${REPO}" "${COMMIT}" "${TRITON_INSTALL_DIR}" "${NIGHTLY}"
 install_triton "${TRITON_INSTALL_DIR}"
 
 # export Triton repo related envs
