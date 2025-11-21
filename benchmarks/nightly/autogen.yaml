@@ -26,9 +26,9 @@ embedding_bwd:
   args: --op embedding --baseline torch_embedding --metrics latency,speedup --only
     liger_embedding,torch_embedding --bwd
 bf16_flash_attention_fwd:
-  args: --op flash_attention --baseline flash_v3 --metrics tflops,speedup --only triton_tutorial_flash_v2,flash_v3
+  args: --op flash_attention --baseline flash_v3 --metrics latency,tflops,speedup --only triton_tutorial_flash_v2,flash_v3
 bf16_flash_attention_bwd:
-  args: --op flash_attention --baseline flash_v3 --metrics tflops,speedup --bwd --only
+  args: --op flash_attention --baseline flash_v3 --metrics latency,tflops,speedup --bwd --only
     triton_tutorial_flash_v2,flash_v3 --causal
 fp8_attention_fwd:
   args: --op fp8_attention --baseline triton_flash_v2 --metrics latency,tflops,speedup

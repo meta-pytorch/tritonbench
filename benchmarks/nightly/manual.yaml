@@ -18,7 +18,7 @@ enabled:
 extra_args:
   # triton_tutorial_flash_v2_opt does not work on Triton main branch
   bf16_flash_attention_fwd:
-    args: --op flash_attention --baseline flash_v3 --metrics tflops,speedup --only triton_tutorial_flash_v2,flash_v3
+    args: --op flash_attention --baseline flash_v3 --metrics latency,tflops,speedup --only triton_tutorial_flash_v2,flash_v3
   # flash_attention triton_tutorial_flash_v2 impl only supports causal in backward
   bf16_flash_attention_bwd:
-    args: --op flash_attention --baseline flash_v3 --metrics tflops,speedup --bwd --only triton_tutorial_flash_v2,flash_v3 --causal
+    args: --op flash_attention --baseline flash_v3 --metrics latency,tflops,speedup --bwd --only triton_tutorial_flash_v2,flash_v3 --causal
