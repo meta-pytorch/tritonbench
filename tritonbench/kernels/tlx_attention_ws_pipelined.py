@@ -66,16 +66,37 @@ def _get_bufidx_phase(accum_cnt, NUM_BUFFERS_KV):
     phase = (accum_cnt // NUM_BUFFERS_KV) & 1
     return bufIdx, phase
 
+@triton.jit
+def _get_unfused_loop_bounds(start_m, N_CTX, BLOCK_M, STAGE: tl.constexpr):
+    if STAGE == 1:
+        # First part of STAGE == 3 in _get_fused_loop_bounds
+        lo, hi = 0, start_m * BLOCK_M
+    elif STAGE == 2:
+        # Second part of STAGE == 3 in _get_fused_loop_bounds
+        lo, hi = start_m * BLOCK_M, (start_m + 1) * BLOCK_M
+    else:
+        tl.static_assert(STAGE == 3)
+        # Maps to STAGE=1 in _get_fused_loop_bounds
+        lo, hi = 0, N_CTX
+    return lo, hi
 
 @triton.jit
-def _compute_offsets(H, N_CTX, BLOCK_M):
+def _get_fused_loop_bounds(start_m, N_CTX, BLOCK_M, STAGE: tl.constexpr):
+    if STAGE == 1:
+        return 0, N_CTX
+    else:
+        tl.static_assert(STAGE == 3)
+        return 0, (start_m + 1) * BLOCK_M
+
+@triton.jit
+def _compute_offsets(H, N_CTX, BLOCK_M, STAGE: tl.constexpr):
     start_m = tl.program_id(0)
     off_hz = tl.program_id(1)
     off_z = off_hz // H
     off_h = off_hz % H
     offset_y = off_z * (N_CTX * H) + off_h * N_CTX
     qo_offset_y = offset_y + start_m * BLOCK_M
-    lo, hi = 0, N_CTX
+    lo, hi = _get_fused_loop_bounds(start_m, N_CTX, BLOCK_M, STAGE)
     kv_offset_y = offset_y + lo
     return start_m, off_hz, lo, hi, qo_offset_y, kv_offset_y
 
@@ -120,8 +141,98 @@ def _mul_f32x2(a, b):
         pack=2,
     )
 
+@triton.jit
+def _mask_scalar(qk, col_limit_right, s, i):
+    col_lim_right_s = col_limit_right - s
+    col_lim_right_cur = max(col_lim_right_s, 0)
+    mask = -1 << col_lim_right_cur
+    mask_i_bit = (mask & (1 << i)) == 0
+    return tl.where(mask_i_bit, qk, -float("inf"))
 
-@triton.autotune(configs=configs, key=["N_CTX", "HEAD_DIM", "FP8_OUTPUT"])
+@triton.jit
+def _apply_causal_mask(qk, col_limit_right, HEAD_DIM: tl.constexpr):
+    # Apply causal mask via a bitmask calculated for each block of 16 elements.
+    # This allows the efficient R2P (register to predicate) instruction to be used at the SASS level.
+    # Credit to Tri Dao,
+    # https://github.com/Dao-AILab/flash-attention/commit/bac1001e4f6caa09d70537495d6746a685a2fa78
+    #
+    # NOTE: We use map_elementiwse here in order to generate an interleaved sequence of instructions
+    # that processes one element of qk at a time. This improves ptxas's resulting SASS.
+    offs_n = tl.arange(0, HEAD_DIM)[None, :]
+    s = offs_n & ~0xF
+    i = offs_n & 0xF
+    return tl.map_elementwise(_mask_scalar, qk, col_limit_right, s, i)
+
+
+@triton.jit
+def _softmax_inner_loop(
+    qk_fulls,
+    qk_tiles,
+    p_fulls,
+    p_tiles,
+    alpha_empties,
+    alpha_fulls,
+    alpha_tiles,
+    cid,
+    accum_cnt_qk,
+    qk_scale,
+    offs_m,
+    m_i,
+    l_i,
+    start_m,
+    N_CTX,
+    out_dtype,
+    BLOCK_M: tl.constexpr,
+    BLOCK_N: tl.constexpr,
+    HEAD_DIM: tl.constexpr,
+    NUM_BUFFERS_QK: tl.constexpr,
+    NUM_MMA_GROUPS: tl.constexpr,
+    STAGE: tl.constexpr
+):
+    lo, hi = _get_unfused_loop_bounds(start_m, N_CTX, BLOCK_M, STAGE)
+
+    for start_n in tl.range(lo, hi, BLOCK_N):
+        qk_bufIdx, qk_phase = _get_bufidx_phase(accum_cnt_qk, NUM_BUFFERS_QK)
+        qk_bufIdx += cid * NUM_BUFFERS_QK
+
+        tlx.barrier_wait(tlx.local_view(qk_fulls, qk_bufIdx), qk_phase)
+        qk = tlx.local_load(tlx.local_view(qk_tiles, qk_bufIdx))
+
+        if STAGE == 2:
+            col_limit_right = (offs_m - start_n + 1)[:, None]
+            qk = _apply_causal_mask(qk, col_limit_right, HEAD_DIM)
+
+        # compute m_i, p in registers
+        m_ij = tl.maximum(m_i, tl.max(qk, 1) * qk_scale)
+
+        # -- compute correction factor
+        alpha = tl.math.exp2(m_i - m_ij)
+        tlx.barrier_wait(tlx.local_view(alpha_empties, qk_bufIdx), qk_phase ^ 1)
+        # Use alpha[0] for cid=0, and alpha[HEAD_DIM * NUM_BUFFERS_QK] for cid=1
+        tlx.local_store(
+            tlx.local_view(alpha_tiles, cid * HEAD_DIM * NUM_BUFFERS_QK), alpha[:, None]
+        )
+        tlx.barrier_arrive(tlx.local_view(alpha_fulls, qk_bufIdx))
+
+        qk = qk * qk_scale - m_ij[:, None]
+        p = tl.math.exp2(qk)
+        l_ij = tl.sum(p, 1)
+        p = p.to(out_dtype)
+
+        # prepare p for the v dot
+        # Use p[1] for cid=0, and p[3] for cid=1
+        p_bufIdx = 1 + cid * NUM_MMA_GROUPS * NUM_BUFFERS_QK
+        tlx.local_store(tlx.local_view(p_tiles, p_bufIdx), p)
+        tlx.barrier_arrive(tlx.local_view(p_fulls, qk_bufIdx))
+
+        l_i = l_i * alpha + l_ij
+        m_i = m_ij
+        accum_cnt_qk += 1
+
+    return m_i, l_i, accum_cnt_qk
+
+
+@triton.autotune(configs=configs, key=["N_CTX", "HEAD_DIM", "FP8_OUTPUT", "STAGE"])
 @triton.jit
 def _attn_fwd_ws(
     sm_scale,
@@ -137,6 +248,7 @@ def _attn_fwd_ws(
     BLOCK_M: tl.constexpr,  #
     BLOCK_N: tl.constexpr,  #
     FP8_OUTPUT: tl.constexpr,  #
+    STAGE: tl.constexpr,  #
     NUM_BUFFERS_Q: tl.constexpr,  #
     NUM_BUFFERS_KV: tl.constexpr,  #
     NUM_BUFFERS_QK: tl.constexpr,  #
@@ -219,7 +331,7 @@ def _attn_fwd_ws(
         with tlx.async_task("default"):
             # initialize offsets
             start_m, off_hz, lo, hi, qo_offset_y, kv_offset_y = _compute_offsets(
-                H, N_CTX, BLOCK_M
+                H, N_CTX, BLOCK_M, STAGE,
             )
             accum_cnt = 0
             buf_idx = 0
@@ -272,50 +384,72 @@ def _attn_fwd_ws(
         with tlx.async_task(num_warps=4, registers=152, replicate=NUM_MMA_GROUPS):
             # initialize offsets
             start_m, off_hz, lo, hi, qo_offset_y, kv_offset_y = _compute_offsets(
-                H, N_CTX, BLOCK_M
+                H, N_CTX, BLOCK_M, STAGE,
             )
             # initialize pointer to m and l
             m_i = tl.zeros([BLOCK_M_SPLIT], dtype=tl.float32) - float("inf")
             l_i = tl.zeros([BLOCK_M_SPLIT], dtype=tl.float32) + 1.0
-            acc = tl.zeros([BLOCK_M_SPLIT, HEAD_DIM], dtype=tl.float32)
             qk_scale = sm_scale
             qk_scale *= 1.44269504  # 1/log(2)
 
             accum_cnt_qk = 0
+            out_dtype = tlx.dtype_of(desc_v)
+
             cid = tlx.async_task_replica_id()
-            for _ in tl.range(lo, hi, BLOCK_N):
-                qk_bufIdx, qk_phase = _get_bufidx_phase(accum_cnt_qk, NUM_BUFFERS_QK)
-                qk_bufIdx += cid * NUM_BUFFERS_QK
+            offs_m = start_m * BLOCK_M + ((cid * BLOCK_M_SPLIT) + tl.arange(0, BLOCK_M_SPLIT))
 
-                tlx.barrier_wait(qk_fulls[qk_bufIdx], qk_phase)
-                qk = tlx.local_load(qk_tiles[qk_bufIdx])
-
-                # compute m_i, p in registers
-                m_ij = tl.maximum(m_i, tl.max(qk, 1) * qk_scale)
-
-                # -- compute correction factor
-                alpha = tl.math.exp2(m_i - m_ij)
-                tlx.barrier_wait(alpha_empties[qk_bufIdx], qk_phase ^ 1)
-                # Use alpha[0] for cid=0, and alpha[HEAD_DIM * NUM_BUFFERS_QK] for cid=1
-                tlx.local_store(
-                    alpha_tiles[cid * HEAD_DIM * NUM_BUFFERS_QK], alpha[:, None]
+            if STAGE & 1:
+                m_i, l_i, accum_cnt_qk = _softmax_inner_loop(
+                    qk_fulls,
+                    qk_tiles,
+                    p_fulls,
+                    p_tiles,
+                    alpha_empties,
+                    alpha_fulls,
+                    alpha_tiles,
+                    cid,
+                    accum_cnt_qk,
+                    qk_scale,
+                    offs_m,
+                    m_i,
+                    l_i,
+                    start_m,
+                    N_CTX,
+                    out_dtype,
+                    BLOCK_M,
+                    BLOCK_N,
+                    HEAD_DIM,
+                    NUM_BUFFERS_QK,
+                    NUM_MMA_GROUPS,
+                    STAGE=4 - STAGE,
                 )
-                tlx.barrier_arrive(alpha_fulls[qk_bufIdx])
 
-                qk = qk * qk_scale - m_ij[:, None]
-                p = tl.math.exp2(qk)
-                l_ij = tl.sum(p, 1)
-                p = p.to(tlx.dtype_of(desc_v))
+            if STAGE & 2:
+                m_i, l_i, accum_cnt_qk = _softmax_inner_loop(
+                    qk_fulls,
+                    qk_tiles,
+                    p_fulls,
+                    p_tiles,
+                    alpha_empties,
+                    alpha_fulls,
+                    alpha_tiles,
+                    cid,
+                    accum_cnt_qk,
+                    qk_scale,
+                    offs_m,
+                    m_i,
+                    l_i,
+                    start_m,
+                    N_CTX,
+                    out_dtype,
+                    BLOCK_M,
+                    BLOCK_N,
+                    HEAD_DIM,
+                    NUM_BUFFERS_QK,
+                    NUM_MMA_GROUPS,
+                    STAGE=2,
+                )
 
-                # prepare p for the v dot
-                # Use p[1] for cid=0, and p[3] for cid=1
-                p_bufIdx = 1 + cid * NUM_MMA_GROUPS * NUM_BUFFERS_QK
-                tlx.local_store(p_tiles[p_bufIdx], p)
-                tlx.barrier_arrive(p_fulls[qk_bufIdx])
-
-                l_i = l_i * alpha + l_ij
-                m_i = m_ij
-                accum_cnt_qk += 1
 
             # prepare l_i for the epilog
             # Use l[1]/l[1+HEAD_DIM * NUM_BUFFERS_QK] and m[2][2 + HEAD_DIM * NUM_BUFFERS_QK]
@@ -326,7 +460,7 @@ def _attn_fwd_ws(
 
         # mma group
         with tlx.async_task(num_warps=1, registers=24):
-            _, _, lo, hi, _, _ = _compute_offsets(H, N_CTX, BLOCK_M)
+            _, _, lo, hi, _, _ = _compute_offsets(H, N_CTX, BLOCK_M, STAGE)
 
             # loop over k, v and update accumulator
             accum_cnt_kv = 0
@@ -445,7 +579,7 @@ def _attn_fwd_ws(
         with tlx.async_task(num_warps=1, registers=24):
             # initialize offsets
             start_m, off_hz, lo, hi, qo_offset_y, kv_offset_y = _compute_offsets(
-                H, N_CTX, BLOCK_M
+                H, N_CTX, BLOCK_M, STAGE,
             )
 
             # load q0
@@ -517,15 +651,16 @@ def _attn_fwd_ws(
                 accum_cnt_kv += 2
 
 
+
 @triton.jit
-def _compute_offsets_persistent(tile_idx, n_tile_num, H, N_CTX, BLOCK_M):
+def _compute_offsets_persistent(tile_idx, n_tile_num, H, N_CTX, BLOCK_M, STAGE):
     start_m = tile_idx % n_tile_num
     off_hz = tile_idx // n_tile_num
     off_z = off_hz // H
     off_h = off_hz % H
     offset_y = off_z * (N_CTX * H) + off_h * N_CTX
     qo_offset_y = offset_y + start_m * BLOCK_M
-    lo, hi = 0, N_CTX
+    lo, hi = _get_fused_loop_bounds(start_m, N_CTX, BLOCK_M, STAGE)
     kv_offset_y = offset_y + lo
     return start_m, off_hz, lo, hi, qo_offset_y, kv_offset_y
 
@@ -549,8 +684,79 @@ def _join_n(xs):
         x = tl.join(x0, x1).permute(0, 2, 1).reshape([x0.shape[0], x0.shape[1] * 2])
         return x
 
+@triton.jit
+def _pipelined_softmax_inner_loop(
+    qk_fulls,
+    qk_tiles,
+    p_fulls,
+    p_tiles,
+    alpha_empties,
+    alpha_fulls,
+    alpha_tiles,
+    cid,
+    accum_cnt_qk,
+    qk_scale,
+    offs_m,
+    m_i,
+    l_i,
+    start_m,
+    N_CTX,
+    out_dtype,
+    BLOCK_M: tl.constexpr,
+    BLOCK_N: tl.constexpr,
+    HEAD_DIM: tl.constexpr,
+    NUM_MMA_SLICES: tl.constexpr,
+    NUM_MMA_GROUPS: tl.constexpr,
+    STAGE: tl.constexpr
+):
+    lo, hi = _get_unfused_loop_bounds(start_m, N_CTX, BLOCK_M, STAGE)
 
-@triton.autotune(configs=configs_persistent, key=["N_CTX", "HEAD_DIM", "FP8_OUTPUT"])
+    for start_n in tl.range(lo, hi, BLOCK_N):
+        _, qk_phase = _get_bufidx_phase(accum_cnt_qk, 1)
+        tlx.barrier_wait(tlx.local_view(qk_fulls, cid), qk_phase)
+        qk = tlx.local_load(tlx.local_view(qk_tiles, cid))
+
+        if STAGE == 2:
+            col_limit_right = (offs_m - start_n + 1)[:, None]
+            qk = _apply_causal_mask(qk, col_limit_right, HEAD_DIM)
+
+
+        # compute m_i, p in registers
+        m_ij = tl.maximum(m_i, tl.max(qk, 1) * qk_scale)
+
+        # -- compute correction factor
+        alpha = tl.math.exp2(m_i - m_ij)
+        tlx.barrier_wait(tlx.local_view(alpha_empties, cid), qk_phase ^ 1)
+        # Use alpha[0] for cid=0, and alpha[HEAD_DIM] for cid=1
+        tlx.local_store(tlx.local_view(alpha_tiles, cid * HEAD_DIM), alpha[:, None])
+        tlx.barrier_arrive(tlx.local_view(alpha_fulls, cid))
+
+        qk = _fma_f32x2(qk, qk_scale, -m_ij[:, None])
+        qks = _split_n(qk, NUM_MMA_SLICES)
+        ps = ()
+        for slice_id in tl.static_range(0, NUM_MMA_SLICES):
+            # prepare p for the v dot
+            # Use p[NUM_MMA_SLICES + slice_id] for cid=0, and
+            # p[NUM_MMA_GROUPS * NUM_MMA_SLICES + NUM_MMA_SLICES + slice_id] for cid=1
+            p_bufIdx = (
+                cid * NUM_MMA_GROUPS * NUM_MMA_SLICES
+                + NUM_MMA_SLICES
+                + slice_id
+            )
+            p_i = tl.math.exp2(qks[slice_id])
+            tlx.local_store(tlx.local_view(p_tiles, p_bufIdx), p_i.to(out_dtype))
+            tlx.barrier_arrive(tlx.local_view(p_fulls, slice_id + cid * NUM_MMA_SLICES))
+            ps = ps + (p_i,)
+
+        p = _join_n(ps)
+        l_ij = tl.sum(p, 1)
+        l_i = l_i * alpha + l_ij
+        m_i = m_ij
+        accum_cnt_qk += 1
+
+    return m_i, l_i, accum_cnt_qk
+
+@triton.autotune(configs=configs_persistent, key=["N_CTX", "HEAD_DIM", "FP8_OUTPUT", "STAGE"])
 @triton.jit
 def _attn_fwd_ws_persistent(
     sm_scale,
@@ -566,6 +772,7 @@ def _attn_fwd_ws_persistent(
     BLOCK_M: tl.constexpr,  #
     BLOCK_N: tl.constexpr,  #
     FP8_OUTPUT: tl.constexpr,  #
+    STAGE: tl.constexpr,  #
     NUM_BUFFERS_Q: tl.constexpr,  #
     NUM_BUFFERS_KV: tl.constexpr,  #
     NUM_BUFFERS_QK: tl.constexpr,  #
@@ -675,7 +882,7 @@ def _attn_fwd_ws_persistent(
             for i in range(0, tiles_per_sm):
                 # initialize offsets
                 start_m, off_hz, lo, hi, qo_offset_y, kv_offset_y = (
-                    _compute_offsets_persistent(tile_idx, n_tile_num, H, N_CTX, BLOCK_M)
+                    _compute_offsets_persistent(tile_idx, n_tile_num, H, N_CTX, BLOCK_M, STAGE)
                 )
                 for _ in tl.range(lo, hi, BLOCK_N):
                     _, phase = _get_bufidx_phase(accum_cnt, 1)
@@ -743,54 +950,70 @@ def _attn_fwd_ws_persistent(
             accum_cnt_qk = 0
             for i in range(0, tiles_per_sm):
                 # initialize offsets
-                start_m, off_hz, lo, hi, qo_offset_y, kv_offset_y = (
-                    _compute_offsets_persistent(tile_idx, n_tile_num, H, N_CTX, BLOCK_M)
+                start_m, off_hz, _, _, qo_offset_y, kv_offset_y = (
+                    _compute_offsets_persistent(tile_idx, n_tile_num, H, N_CTX, BLOCK_M, STAGE)
                 )
                 # initialize pointer to m and l
                 m_i = tl.zeros([BLOCK_M_SPLIT], dtype=tl.float32) - float("inf")
                 l_i = tl.zeros([BLOCK_M_SPLIT], dtype=tl.float32) + 1.0
-                acc = tl.zeros([BLOCK_M_SPLIT, HEAD_DIM], dtype=tl.float32)
                 qk_scale = sm_scale
                 qk_scale *= 1.44269504  # 1/log(2)
+                out_dtype = tlx.dtype_of(desc_v)
 
                 cid = tlx.async_task_replica_id()
-                for _ in tl.range(lo, hi, BLOCK_N):
-                    _, qk_phase = _get_bufidx_phase(accum_cnt_qk, 1)
-                    tlx.barrier_wait(qk_fulls[cid], qk_phase)
-                    qk = tlx.local_load(qk_tiles[cid])
+                offs_m = (start_m * BLOCK_M) + ((cid * BLOCK_M_SPLIT) + tl.arange(0, BLOCK_M_SPLIT))
 
-                    # compute m_i, p in registers
-                    m_ij = tl.maximum(m_i, tl.max(qk, 1) * qk_scale)
+                if STAGE & 1:
+                    m_i, l_i, accum_cnt_qk = _pipelined_softmax_inner_loop(
+                        qk_fulls,
+                        qk_tiles,
+                        p_fulls,
+                        p_tiles,
+                        alpha_empties,
+                        alpha_fulls,
+                        alpha_tiles,
+                        cid,
+                        accum_cnt_qk,
+                        qk_scale,
+                        offs_m,
+                        m_i,
+                        l_i,
+                        start_m,
+                        N_CTX,
+                        out_dtype,
+                        BLOCK_M,
+                        BLOCK_N,
+                        HEAD_DIM,
+                        NUM_MMA_SLICES,
+                        NUM_MMA_GROUPS,
+                        STAGE=4 - STAGE,
+                    )
 
-                    # -- compute correction factor
-                    alpha = tl.math.exp2(m_i - m_ij)
-                    tlx.barrier_wait(alpha_empties[cid], qk_phase ^ 1)
-                    # Use alpha[0] for cid=0, and alpha[HEAD_DIM] for cid=1
-                    tlx.local_store(alpha_tiles[cid * HEAD_DIM], alpha[:, None])
-                    tlx.barrier_arrive(alpha_fulls[cid])
-
-                    qk = _fma_f32x2(qk, qk_scale, -m_ij[:, None])
-                    qks = _split_n(qk, NUM_MMA_SLICES)
-                    ps = ()
-                    for slice_id in tl.static_range(0, NUM_MMA_SLICES):
-                        # prepare p for the v dot
-                        # Use p[NUM_MMA_SLICES + slice_id] for cid=0, and
-                        # p[NUM_MMA_GROUPS * NUM_MMA_SLICES + NUM_MMA_SLICES + slice_id] for cid=1
-                        p_bufIdx = (
-                            cid * NUM_MMA_GROUPS * NUM_MMA_SLICES
-                            + NUM_MMA_SLICES
-                            + slice_id
-                        )
-                        p_i = tl.math.exp2(qks[slice_id])
-                        tlx.local_store(p_tiles[p_bufIdx], p_i.to(tlx.dtype_of(desc_v)))
-                        tlx.barrier_arrive(p_fulls[slice_id + cid * NUM_MMA_SLICES])
-                        ps = ps + (p_i,)
-
-                    p = _join_n(ps)
-                    l_ij = tl.sum(p, 1)
-                    l_i = l_i * alpha + l_ij
-                    m_i = m_ij
-                    accum_cnt_qk += 1
+                if STAGE & 2:
+                    m_i, l_i, accum_cnt_qk = _pipelined_softmax_inner_loop(
+                        qk_fulls,
+                        qk_tiles,
+                        p_fulls,
+                        p_tiles,
+                        alpha_empties,
+                        alpha_fulls,
+                        alpha_tiles,
+                        cid,
+                        accum_cnt_qk,
+                        qk_scale,
+                        offs_m,
+                        m_i,
+                        l_i,
+                        start_m,
+                        N_CTX,
+                        out_dtype,
+                        BLOCK_M,
+                        BLOCK_N,
+                        HEAD_DIM,
+                        NUM_MMA_SLICES,
+                        NUM_MMA_GROUPS,
+                        STAGE=2,
+                    )
 
                 # prepare l_i for the epilog
                 # Use l[1]/l[1+HEAD_DIM] and m[2][2 + HEAD_DIM]
@@ -808,7 +1031,7 @@ def _attn_fwd_ws_persistent(
             for j in range(0, tiles_per_sm):
                 # initialize offsets
                 _, _, lo, hi, _, _ = _compute_offsets_persistent(
-                    tile_idx, n_tile_num, H, N_CTX, BLOCK_M
+                    tile_idx, n_tile_num, H, N_CTX, BLOCK_M, STAGE
                 )
 
                 q_bufIdx, q_phase = _get_bufidx_phase(j, NUM_BUFFERS_Q)
@@ -998,7 +1221,7 @@ def _attn_fwd_ws_persistent(
             for i in range(0, tiles_per_sm):
                 # initialize offsets
                 _, _, lo, hi, qo_offset_y, kv_offset_y = _compute_offsets_persistent(
-                    tile_idx, n_tile_num, H, N_CTX, BLOCK_M
+                    tile_idx, n_tile_num, H, N_CTX, BLOCK_M, STAGE
                 )
 
                 # load q0
@@ -1082,7 +1305,7 @@ def _attn_fwd_ws_persistent(
             for i in range(0, tiles_per_sm):
                 # initialize offsets
                 _, _, _, _, qo_offset_y, kv_offset_y = _compute_offsets_persistent(
-                    tile_idx, n_tile_num, H, N_CTX, BLOCK_M
+                    tile_idx, n_tile_num, H, N_CTX, BLOCK_M, STAGE
                 )
                 _, phase = _get_bufidx_phase(i, 1)
                 for cid in tl.static_range(0, NUM_MMA_GROUPS):
@@ -1100,13 +1323,17 @@ def _attn_fwd_ws_persistent(
 
 class _attention(torch.autograd.Function):
     @staticmethod
-    def forward(ctx, q, k, v, sm_scale, use_persistent=False):
+    def forward(ctx, q, k, v, causal, sm_scale, use_persistent=False):
         # shape constraints
         HEAD_DIM_Q, HEAD_DIM_K = q.shape[-1], k.shape[-1]
         # when v is in float8_e5m2 it is transposed.
         HEAD_DIM_V = v.shape[-1]
         assert HEAD_DIM_Q == HEAD_DIM_K and HEAD_DIM_K == HEAD_DIM_V
         assert HEAD_DIM_K in {16, 32, 64, 128, 256}
+
+        stage = 3 if causal else 1
+
+
         o = torch.empty_like(q)
         extra_kern_args = {}
 
@@ -1189,6 +1416,7 @@ class _attention(torch.autograd.Function):
                 N_CTX=q.shape[2],  #
                 HEAD_DIM=HEAD_DIM_K,  #
                 FP8_OUTPUT=q.dtype == torch.float8_e5m2,  #
+                STAGE=stage,  #
                 **extra_kern_args,
             )
         else:
@@ -1205,6 +1433,7 @@ class _attention(torch.autograd.Function):
                 N_CTX=q.shape[2],  #
                 HEAD_DIM=HEAD_DIM_K,  #
                 FP8_OUTPUT=q.dtype == torch.float8_e5m2,  #
+                STAGE=stage,  #
                 **extra_kern_args,
             )
 

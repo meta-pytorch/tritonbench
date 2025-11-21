@@ -543,7 +543,7 @@ class Operator(BenchmarkOperator):
         k: torch.Tensor,
         v: torch.Tensor,
     ) -> Callable:
-        return lambda: tlx_blackwell_fwd(q, k, v, self.sm_scale, False)
+        return lambda: tlx_blackwell_fwd(q, k, v, self.causal, self.sm_scale, False)
 
     # Only works with triton beta, forward only.
     @register_benchmark(enabled=HAS_TLX)
@@ -553,7 +553,7 @@ class Operator(BenchmarkOperator):
         k: torch.Tensor,
         v: torch.Tensor,
     ) -> Callable:
-        return lambda: tlx_blackwell_fwd(q, k, v, self.sm_scale, True)
+        return lambda: tlx_blackwell_fwd(q, k, v, self.causal, self.sm_scale, True)
 
     @register_metric(x_only=True)
     def flops(
