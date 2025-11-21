@@ -35,5 +35,10 @@ def setup_tritonbench_cwd():
         sys.path.append(tritonbench_dir)
     return original_dir
 
+setup_tritonbench_cwd()
+
+from tritonbench.operators_collection import list_operators_by_collection
+
 if __name__ == "__main__":
-    pass
+    triton_workloads = list_operators_by_collection("triton")
+    print(triton_workloads)
