@@ -92,7 +92,7 @@ def find_reproducer_script(repro_dir):
         for name in files:
             if name.endswith(".py"):
                 py_srcs.append(os.path.abspath(os.path.join(root, name)))
-    return py_srcs
+    return py_srcs[0]
 
 
 def run_repro_script(repro_script):
@@ -109,8 +109,10 @@ if __name__ == "__main__":
         directory = args.reproduce
         tritonparse_dir = os.path.dirname(os.path.dirname(tritonparse.__file__))
         ndjson_files = find_ndjson_files(args.reproduce)
+        result = {}
         print("Found", len(ndjson_files), "ndjson files in", args.reproduce)
-        for ndjson_file in ndjson_files:
+        for ndjson_id, ndjson_file in enumerate(ndjson_files):
+            result[ndjson_file] = "success"
             ndjson_dir = os.path.dirname(ndjson_file)
             repro_dir = os.path.join(ndjson_dir, "repro_tritonbench")
             if os.path.exists(repro_dir):
@@ -129,13 +131,21 @@ if __name__ == "__main__":
                 "copy",
                 ndjson_file,
             ]
-            subprocess.check_call(
-                reproduce_cmd,
-                cwd=tritonparse_dir,
-            )
+            try:
+                subprocess.check_call(
+                    reproduce_cmd,
+                    cwd=tritonparse_dir,
+                )
+            except subprocess.CalledProcessError as e:
+                result[ndjson_file] = "fail-gen-repro"
+                continue
             if args.test_run:
                 repro_script = find_reproducer_script(repro_dir)
-                run_repro_script(repro_script)
+                try:
+                    run_repro_script(repro_script)
+                except subprocess.CalledProcessError as e:
+                    result[ndjson_file] = "fail-run-repro"
+                    continue
             # reproduce without tritonbench
             repro_dir = os.path.join(ndjson_dir, "repro_kernel")
             if os.path.exists(repro_dir):
@@ -158,7 +168,12 @@ if __name__ == "__main__":
             )
             if args.test_run:
                 repro_script = find_reproducer_script(repro_dir)
-                run_repro_script(repro_script)
+                try:
+                    run_repro_script(repro_script)
+                except subprocess.CalledProcessError as e:
+                    result[ndjson_file] = "fail-run-repro"
+                    continue
+        print(result)
         sys.exit(0)
     # Run the tracing mode
     if args.op:
