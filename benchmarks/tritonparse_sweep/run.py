@@ -59,7 +59,7 @@ def run_tritonparse(op: str, backend: str, output_dir: str):
 
 def get_parser():
     parser = argparse.ArgumentParser()
-    parser.add_argument("--op", type=str, required=True, help="Operator to benchmark and parse.")
+    parser.add_argument("--op", type=str, help="Operator to benchmark and apply tritonparse.")
     parser.add_argument(
         "--reproduce",
         type=str,
@@ -68,8 +68,13 @@ def get_parser():
     )
     return parser
 
-def get_ndjson_files(log_dir):
-    pass
+def find_ndjson_files(log_dir):
+    ndjson_files = []
+    for root, dirs, files in os.walk(log_dir):
+        for name in files:
+            if name.endswith(".ndjson"):
+                ndjson_files.append(os.path.abspath(os.path.join(root, name)))
+    return ndjson_files
 
 if __name__ == "__main__":
     args = get_parser().parse_args()
@@ -78,14 +83,17 @@ if __name__ == "__main__":
     # Run the reproducer mode
     if args.reproduce:
         directory = args.reproduce
-        tritonparse_dir = os.path.dirname(tritonparse.__file__)
-        ndjson_files = get_ndjson_files(args.reproduce)
+        tritonparse_dir = os.path.dirname(os.path.dirname(tritonparse.__file__))
+        ndjson_files = find_ndjson_files(args.reproduce)
+        print("Found", len(ndjson_files), "ndjson files in", args.reproduce)
         for ndjson_file in ndjson_files:
             ndjson_dir = os.path.dirname(ndjson_file)
             reproduce_cmd = [
+                sys.executable,
                 "run.py",
+                "reproduce",
                 "--out-dir",
-                os.path.join(ndjson_dir, "tritonbench_repro"),
+                os.path.join(ndjson_dir, "repro_tritonbench"),
                 "--line",
                 "2",
                 "--template",
@@ -101,9 +109,11 @@ if __name__ == "__main__":
             )
             # reproduce without tritonbench
             reproduce_cmd = [
+                sys.executable,
                 "run.py",
+                "reproduce",
                 "--out-dir",
-                os.path.join(ndjson_dir, "repro"),
+                os.path.join(ndjson_dir, "repro_kernel"),
                 "--line",
                 "2",
                 "--kernel-import",
