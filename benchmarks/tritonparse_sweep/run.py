@@ -6,6 +6,7 @@ import argparse
 import json
 import logging
 import os
+import shutil
 import subprocess
 import sys
 from os.path import abspath, exists
@@ -42,6 +43,8 @@ import tritonparse
 from tritonbench.operators_collection import list_operators_by_collection
 from tritonbench.utils.run_utils import run_in_task, setup_output_dir
 
+NOT_WORKING_OPS = ["tritonparse_softmax_triton_softmax"]
+
 def run_tritonparse(op: str, backend: str, output_dir: str):
     tritonparse_log_dir = os.path.join(output_dir, f"tritonparse_{op}_{backend}")
     run_args = [
@@ -66,6 +69,11 @@ def get_parser():
         default=None,
         help="Reproduce the results from a previous run.",
     )
+    parser.add_argument(
+        "--test-run",
+        action="store_true",
+        help="Test run the tritonparse reproducing script."
+    )
     return parser
 
 def find_ndjson_files(log_dir):
@@ -75,6 +83,12 @@ def find_ndjson_files(log_dir):
             if name.endswith(".ndjson"):
                 ndjson_files.append(os.path.abspath(os.path.join(root, name)))
     return ndjson_files
+
+def find_reproducer_script(repro_dir):
+    pass
+
+def run_repro_script(repro_script):
+    pass
 
 if __name__ == "__main__":
     args = get_parser().parse_args()
@@ -88,12 +102,15 @@ if __name__ == "__main__":
         print("Found", len(ndjson_files), "ndjson files in", args.reproduce)
         for ndjson_file in ndjson_files:
             ndjson_dir = os.path.dirname(ndjson_file)
+            repro_dir = os.path.join(ndjson_dir, "repro_tritonbench")
+            if os.path.exists(repro_dir):
+                shutil.rmtree(repro_dir)
             reproduce_cmd = [
                 sys.executable,
                 "run.py",
                 "reproduce",
                 "--out-dir",
-                os.path.join(ndjson_dir, "repro_tritonbench"),
+                repro_dir,
                 "--line",
                 "2",
                 "--template",
@@ -101,13 +118,18 @@ if __name__ == "__main__":
                 "--kernel-import",
                 "copy",
                 ndjson_file,
-
             ]
             subprocess.check_call(
                 reproduce_cmd,
                 cwd=tritonparse_dir,
             )
+            if args.test_run:
+                repro_script = find_reproducer_script(repro_dir)
+                run_repro_script(repro_script)
             # reproduce without tritonbench
+            repro_dir = os.path.join(ndjson_dir, "repro_kernel")
+            if os.path.exists(repro_dir):
+                shutil.rmtree(repro_dir)
             reproduce_cmd = [
                 sys.executable,
                 "run.py",
@@ -124,6 +146,9 @@ if __name__ == "__main__":
                 reproduce_cmd,
                 cwd=tritonparse_dir,
             )
+            if args.test_run:
+                repro_script = find_reproducer_script(repro_dir)
+                run_repro_script(repro_script)
     # Run the tracing mode
     if args.op:
         triton_workloads = {args.op: triton_workloads[args.op]}
