@@ -2,6 +2,7 @@
 Validate TritonParse across all Triton kernels in TritonBench.
 """
 
+import sys
 import argparse
 import json
 import logging
@@ -84,11 +85,20 @@ def find_ndjson_files(log_dir):
                 ndjson_files.append(os.path.abspath(os.path.join(root, name)))
     return ndjson_files
 
+
 def find_reproducer_script(repro_dir):
-    pass
+    py_srcs = []
+    for root, dirs, files in os.walk(repro_dir):
+        for name in files:
+            if name.endswith(".py"):
+                py_srcs.append(os.path.abspath(os.path.join(root, name)))
+    return py_srcs
+
 
 def run_repro_script(repro_script):
-    pass
+    cmd = [sys.executable, repro_script]
+    subprocess.check_call(cmd)
+
 
 if __name__ == "__main__":
     args = get_parser().parse_args()
@@ -149,6 +159,7 @@ if __name__ == "__main__":
             if args.test_run:
                 repro_script = find_reproducer_script(repro_dir)
                 run_repro_script(repro_script)
+        sys.exit(0)
     # Run the tracing mode
     if args.op:
         triton_workloads = {args.op: triton_workloads[args.op]}
