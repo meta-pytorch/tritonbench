@@ -2,7 +2,6 @@
 Validate TritonParse across all Triton kernels in TritonBench.
 """
 
-import sys
 import argparse
 import json
 import logging
@@ -38,6 +37,7 @@ def setup_tritonbench_cwd():
         sys.path.append(tritonbench_dir)
     return original_dir
 
+
 setup_tritonbench_cwd()
 
 import tritonparse
@@ -45,6 +45,7 @@ from tritonbench.operators_collection import list_operators_by_collection
 from tritonbench.utils.run_utils import run_in_task, setup_output_dir
 
 NOT_WORKING_OPS = ["tritonparse_softmax_triton_softmax"]
+
 
 def run_tritonparse(op: str, backend: str, output_dir: str):
     tritonparse_log_dir = os.path.join(output_dir, f"tritonparse_{op}_{backend}")
@@ -63,7 +64,9 @@ def run_tritonparse(op: str, backend: str, output_dir: str):
 
 def get_parser():
     parser = argparse.ArgumentParser()
-    parser.add_argument("--op", type=str, help="Operator to benchmark and apply tritonparse.")
+    parser.add_argument(
+        "--op", type=str, help="Operator to benchmark and apply tritonparse."
+    )
     parser.add_argument(
         "--reproduce",
         type=str,
@@ -73,9 +76,10 @@ def get_parser():
     parser.add_argument(
         "--test-run",
         action="store_true",
-        help="Test run the tritonparse reproducing script."
+        help="Test run the tritonparse reproducing script.",
     )
     return parser
+
 
 def find_ndjson_files(log_dir):
     ndjson_files = []

@@ -12,6 +12,7 @@ METADATA_NAME_MAPPING = {
     "tflops": "tflops_operators.yaml",
 }
 
+
 def get_metadata(name: str):
     assert name in METADATA_NAME_MAPPING, f"Unknown metadata name: {name}"
     with open(METADATA_PATH.joinpath(METADATA_NAME_MAPPING[name])) as f:
