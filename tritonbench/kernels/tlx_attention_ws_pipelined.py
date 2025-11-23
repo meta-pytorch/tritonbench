@@ -66,6 +66,7 @@ def _get_bufidx_phase(accum_cnt, NUM_BUFFERS_KV):
     phase = (accum_cnt // NUM_BUFFERS_KV) & 1
     return bufIdx, phase
 
+
 @triton.jit
 def _get_unfused_loop_bounds(start_m, N_CTX, BLOCK_M, STAGE: tl.constexpr):
     if STAGE == 1:
@@ -80,6 +81,7 @@ def _get_unfused_loop_bounds(start_m, N_CTX, BLOCK_M, STAGE: tl.constexpr):
         lo, hi = 0, N_CTX
     return lo, hi
 
+
 @triton.jit
 def _get_fused_loop_bounds(start_m, N_CTX, BLOCK_M, STAGE: tl.constexpr):
     if STAGE == 1:
@@ -87,6 +89,7 @@ def _get_fused_loop_bounds(start_m, N_CTX, BLOCK_M, STAGE: tl.constexpr):
     else:
         tl.static_assert(STAGE == 3)
         return 0, (start_m + 1) * BLOCK_M
+
 
 @triton.jit
 def _compute_offsets(H, N_CTX, BLOCK_M, STAGE: tl.constexpr):
@@ -141,6 +144,7 @@ def _mul_f32x2(a, b):
         pack=2,
     )
 
+
 @triton.jit
 def _mask_scalar(qk, col_limit_right, s, i):
     col_lim_right_s = col_limit_right - s
@@ -148,6 +152,7 @@ def _mask_scalar(qk, col_limit_right, s, i):
     mask = -1 << col_lim_right_cur
     mask_i_bit = (mask & (1 << i)) == 0
     return tl.where(mask_i_bit, qk, -float("inf"))
+
 
 @triton.jit
 def _apply_causal_mask(qk, col_limit_right, HEAD_DIM: tl.constexpr):
@@ -187,7 +192,7 @@ def _softmax_inner_loop(
     HEAD_DIM: tl.constexpr,
     NUM_BUFFERS_QK: tl.constexpr,
     NUM_MMA_GROUPS: tl.constexpr,
-    STAGE: tl.constexpr
+    STAGE: tl.constexpr,
 ):
     lo, hi = _get_unfused_loop_bounds(start_m, N_CTX, BLOCK_M, STAGE)
 
@@ -331,7 +336,10 @@ def _attn_fwd_ws(
         with tlx.async_task("default"):
             # initialize offsets
             start_m, off_hz, lo, hi, qo_offset_y, kv_offset_y = _compute_offsets(
-                H, N_CTX, BLOCK_M, STAGE,
+                H,
+                N_CTX,
+                BLOCK_M,
+                STAGE,
             )
             accum_cnt = 0
             buf_idx = 0
@@ -384,7 +392,10 @@ def _attn_fwd_ws(
         with tlx.async_task(num_warps=4, registers=152, replicate=NUM_MMA_GROUPS):
             # initialize offsets
             start_m, off_hz, lo, hi, qo_offset_y, kv_offset_y = _compute_offsets(
-                H, N_CTX, BLOCK_M, STAGE,
+                H,
+                N_CTX,
+                BLOCK_M,
+                STAGE,
             )
             # initialize pointer to m and l
             m_i = tl.zeros([BLOCK_M_SPLIT], dtype=tl.float32) - float("inf")
@@ -396,7 +407,9 @@ def _attn_fwd_ws(
             out_dtype = tlx.dtype_of(desc_v)
 
             cid = tlx.async_task_replica_id()
-            offs_m = start_m * BLOCK_M + ((cid * BLOCK_M_SPLIT) + tl.arange(0, BLOCK_M_SPLIT))
+            offs_m = start_m * BLOCK_M + (
+                (cid * BLOCK_M_SPLIT) + tl.arange(0, BLOCK_M_SPLIT)
+            )
 
             if STAGE & 1:
                 m_i, l_i, accum_cnt_qk = _softmax_inner_loop(
@@ -449,7 +462,6 @@ def _attn_fwd_ws(
                     NUM_MMA_GROUPS,
                     STAGE=2,
                 )
-
 
             # prepare l_i for the epilog
             # Use l[1]/l[1+HEAD_DIM * NUM_BUFFERS_QK] and m[2][2 + HEAD_DIM * NUM_BUFFERS_QK]
@@ -579,7 +591,10 @@ def _attn_fwd_ws(
         with tlx.async_task(num_warps=1, registers=24):
             # initialize offsets
             start_m, off_hz, lo, hi, qo_offset_y, kv_offset_y = _compute_offsets(
-                H, N_CTX, BLOCK_M, STAGE,
+                H,
+                N_CTX,
+                BLOCK_M,
+                STAGE,
             )
 
             # load q0
@@ -651,7 +666,6 @@ def _attn_fwd_ws(
                 accum_cnt_kv += 2
 
 
-
 @triton.jit
 def _compute_offsets_persistent(tile_idx, n_tile_num, H, N_CTX, BLOCK_M, STAGE):
     start_m = tile_idx % n_tile_num
@@ -684,6 +698,7 @@ def _join_n(xs):
         x = tl.join(x0, x1).permute(0, 2, 1).reshape([x0.shape[0], x0.shape[1] * 2])
         return x
 
+
 @triton.jit
 def _pipelined_softmax_inner_loop(
     qk_fulls,
@@ -707,7 +722,7 @@ def _pipelined_softmax_inner_loop(
     HEAD_DIM: tl.constexpr,
     NUM_MMA_SLICES: tl.constexpr,
     NUM_MMA_GROUPS: tl.constexpr,
-    STAGE: tl.constexpr
+    STAGE: tl.constexpr,
 ):
     lo, hi = _get_unfused_loop_bounds(start_m, N_CTX, BLOCK_M, STAGE)
 
@@ -719,7 +734,6 @@ def _pipelined_softmax_inner_loop(
         if STAGE == 2:
             col_limit_right = (offs_m - start_n + 1)[:, None]
             qk = _apply_causal_mask(qk, col_limit_right, HEAD_DIM)
-
 
         # compute m_i, p in registers
         m_ij = tl.maximum(m_i, tl.max(qk, 1) * qk_scale)
@@ -738,11 +752,7 @@ def _pipelined_softmax_inner_loop(
             # prepare p for the v dot
             # Use p[NUM_MMA_SLICES + slice_id] for cid=0, and
             # p[NUM_MMA_GROUPS * NUM_MMA_SLICES + NUM_MMA_SLICES + slice_id] for cid=1
-            p_bufIdx = (
-                cid * NUM_MMA_GROUPS * NUM_MMA_SLICES
-                + NUM_MMA_SLICES
-                + slice_id
-            )
+            p_bufIdx = cid * NUM_MMA_GROUPS * NUM_MMA_SLICES + NUM_MMA_SLICES + slice_id
             p_i = tl.math.exp2(qks[slice_id])
             tlx.local_store(tlx.local_view(p_tiles, p_bufIdx), p_i.to(out_dtype))
             tlx.barrier_arrive(tlx.local_view(p_fulls, slice_id + cid * NUM_MMA_SLICES))
@@ -756,7 +766,10 @@ def _pipelined_softmax_inner_loop(
 
     return m_i, l_i, accum_cnt_qk
 
-@triton.autotune(configs=configs_persistent, key=["N_CTX", "HEAD_DIM", "FP8_OUTPUT", "STAGE"])
+
+@triton.autotune(
+    configs=configs_persistent, key=["N_CTX", "HEAD_DIM", "FP8_OUTPUT", "STAGE"]
+)
 @triton.jit
 def _attn_fwd_ws_persistent(
     sm_scale,
@@ -882,7 +895,9 @@ def _attn_fwd_ws_persistent(
             for i in range(0, tiles_per_sm):
                 # initialize offsets
                 start_m, off_hz, lo, hi, qo_offset_y, kv_offset_y = (
-                    _compute_offsets_persistent(tile_idx, n_tile_num, H, N_CTX, BLOCK_M, STAGE)
+                    _compute_offsets_persistent(
+                        tile_idx, n_tile_num, H, N_CTX, BLOCK_M, STAGE
+                    )
                 )
                 for _ in tl.range(lo, hi, BLOCK_N):
                     _, phase = _get_bufidx_phase(accum_cnt, 1)
@@ -951,7 +966,9 @@ def _attn_fwd_ws_persistent(
             for i in range(0, tiles_per_sm):
                 # initialize offsets
                 start_m, off_hz, _, _, qo_offset_y, kv_offset_y = (
-                    _compute_offsets_persistent(tile_idx, n_tile_num, H, N_CTX, BLOCK_M, STAGE)
+                    _compute_offsets_persistent(
+                        tile_idx, n_tile_num, H, N_CTX, BLOCK_M, STAGE
+                    )
                 )
                 # initialize pointer to m and l
                 m_i = tl.zeros([BLOCK_M_SPLIT], dtype=tl.float32) - float("inf")
@@ -961,7 +978,9 @@ def _attn_fwd_ws_persistent(
                 out_dtype = tlx.dtype_of(desc_v)
 
                 cid = tlx.async_task_replica_id()
-                offs_m = (start_m * BLOCK_M) + ((cid * BLOCK_M_SPLIT) + tl.arange(0, BLOCK_M_SPLIT))
+                offs_m = (start_m * BLOCK_M) + (
+                    (cid * BLOCK_M_SPLIT) + tl.arange(0, BLOCK_M_SPLIT)
+                )
 
                 if STAGE & 1:
                     m_i, l_i, accum_cnt_qk = _pipelined_softmax_inner_loop(
@@ -1332,7 +1351,6 @@ class _attention(torch.autograd.Function):
         assert HEAD_DIM_K in {16, 32, 64, 128, 256}
 
         stage = 3 if causal else 1
-
 
         o = torch.empty_like(q)
         extra_kern_args = {}
