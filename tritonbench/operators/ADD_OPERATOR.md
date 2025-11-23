@@ -30,7 +30,12 @@ The `operator.py` file needs to implement the following:
 2. `get_input_iter`: This method should return an iterator of input examples for the
    operator.
 3. `@register_benchmark`: This decorator should be used to register the benchmarks for
-   the operator.
+   the operator. It supports the following parameters:
+   - `baseline` (bool): Mark this as the baseline implementation
+   - `enabled` (bool): Whether this backend is enabled
+   - `fwd_only` (bool): Whether this backend only supports forward pass
+   - `label` (str): Display label for this backend
+   - `tags` (List[str]): Tags for categorizing the backend (e.g., `['triton', 'custom']`)
 4. `get_bwd_fn`: This method should return a callable that performs the backward pass
    for the operator when needed.
 5. `get_grad_to_none`: This method should be overridden to set the gradients to your argument for
@@ -79,7 +84,12 @@ class Operator(BenchmarkOperator):
     def my_operator(self, input) -> Callable:
         return lambda: self.model(input)
 
-    @register_benchmark()
-    def my_operator2(self, input) -> Callable:
+    @register_benchmark(tags=['triton'])
+    def my_operator_triton(self, input) -> Callable:
+        return lambda: kernel_wrapper(input)
+
+    @register_benchmark(tags=['custom', 'experimental'])
+    def my_operator_custom(self, input) -> Callable:
+        # Your custom implementation
         return lambda: kernel_wrapper(input)
 ```

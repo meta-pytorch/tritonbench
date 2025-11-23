@@ -84,6 +84,8 @@ class BenchmarkOperatorBackend:
     # need to be tested in ci
     # ci = False implies enabled = False
     ci: bool = True
+    # tags for categorizing the backend (e.g., ['triton', 'pt2'])
+    tags: Optional[List[str]] = None
 
 
 REGISTERED_BENCHMARKS: Dict[str, OrderedDict[str, BenchmarkOperatorBackend]] = {}
@@ -91,6 +93,9 @@ REGISTERED_METRICS: defaultdict[str, List[str]] = defaultdict(list)
 OVERRIDDEN_METRICS: defaultdict[str, List[str]] = defaultdict(list)
 REGISTERED_X_VALS: Dict[str, str] = {}
 BASELINE_BENCHMARKS: Dict[str, str] = {}
+# Store tags defined in @register_benchmark decorator
+# Format: {operator_name: {backend_name: [tag1, tag2, ...]}}
+REGISTERED_BACKEND_TAGS: Dict[str, Dict[str, List[str]]] = {}
 BASELINE_SKIP_METRICS = {
     "speedup",
     "accuracy",
@@ -602,6 +607,7 @@ def register_benchmark(
     enabled: bool = True,
     fwd_only: bool = False,
     label: Optional[str] = None,
+    tags: Optional[List[str]] = None,
 ):
     def decorator(function):
         op_name = (
@@ -616,12 +622,19 @@ def register_benchmark(
             baseline=baseline,
             enabled=enabled,
             fwd_only=fwd_only,
+            tags=tags,
         )
         if op_name not in REGISTERED_BENCHMARKS:
             REGISTERED_BENCHMARKS[op_name] = OrderedDict()
         REGISTERED_BENCHMARKS[op_name][fn_name] = backend_config
         if backend_config.baseline:
             BASELINE_BENCHMARKS[op_name] = fn_name
+
+        # Store tags in the global REGISTERED_BACKEND_TAGS dict
+        if tags:
+            if op_name not in REGISTERED_BACKEND_TAGS:
+                REGISTERED_BACKEND_TAGS[op_name] = {}
+            REGISTERED_BACKEND_TAGS[op_name][fn_name] = tags
 
         def _inner(self, *args, **kwargs):
             return function(self, *args, **kwargs)

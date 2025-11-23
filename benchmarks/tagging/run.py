@@ -42,6 +42,7 @@ import inspect
 from tritonbench.operators import list_operators
 from tritonbench.utils.operator_utils import get_backends_for_operator
 from tritonbench.utils.run_utils import load_operator_by_args
+from tritonbench.utils.triton_op import REGISTERED_BACKEND_TAGS
 
 try:
     from ast_analyzer import build_backend_callees, trace_callees
@@ -112,7 +113,35 @@ def apply_name_based_heuristics(backend_name, tags_dict):
     return tags_dict
 
 
-def prevalidate_backends(backend_edges):
+def merge_decorator_tags(op_name, backend_name, tags_dict):
+    """
+    Merge tags from @register_benchmark decorator with auto-detected tags.
+
+    Args:
+        op_name: The operator name
+        backend_name: The backend name
+        tags_dict: Dictionary with auto-detected tags, e.g., {"tags": ["pt2"]}
+                   If None, will be created.
+
+    Returns:
+        Updated tags_dict with decorator tags merged
+    """
+    if not tags_dict:
+        tags_dict = {"tags": []}
+    if "tags" not in tags_dict:
+        tags_dict["tags"] = []
+
+    # Get decorator tags if they exist
+    decorator_tags = REGISTERED_BACKEND_TAGS.get(op_name, {}).get(backend_name, [])
+    if decorator_tags:
+        # Merge decorator tags with auto-detected tags (remove duplicates)
+        all_tags = list(set(decorator_tags + tags_dict["tags"]))
+        tags_dict["tags"] = all_tags
+
+    return tags_dict
+
+
+def prevalidate_backends(backend_edges, op_name=None):
     op_with_tags = {}
     # heuristic: do not search torch.nn, torch.compile, and xformers backends
     for backend, callees in backend_edges.items():
@@ -140,6 +169,11 @@ def prevalidate_backends(backend_edges):
         op_with_tags[backend] = apply_name_based_heuristics(
             backend, op_with_tags[backend]
         )
+        # Merge with decorator tags if available
+        if op_name:
+            op_with_tags[backend] = merge_decorator_tags(
+                op_name, backend, op_with_tags[backend]
+            )
 
     return op_with_tags
 
@@ -164,7 +198,7 @@ def trace_op(op):
         backends=backends,
     )
     assert len(backend_edges) == len(backends)
-    op_with_tags[op] = prevalidate_backends(backend_edges)
+    op_with_tags[op] = prevalidate_backends(backend_edges, op_name=op)
     remaining_backends = [
         backend for backend in backends if backend not in op_with_tags[op]
     ]
@@ -180,6 +214,10 @@ def trace_op(op):
         # Apply name-based heuristics
         op_with_tags[op][backend] = apply_name_based_heuristics(
             backend, op_with_tags[op][backend]
+        )
+        # Merge with decorator tags
+        op_with_tags[op][backend] = merge_decorator_tags(
+            op, backend, op_with_tags[op][backend]
         )
     return op_with_tags
 
