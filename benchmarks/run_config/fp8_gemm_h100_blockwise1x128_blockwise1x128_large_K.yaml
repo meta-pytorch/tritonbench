@@ -1,0 +1,4 @@
+fp8_gemm_h100_blockwise1x128_blockwise1x128_large_K:
+  op: fp8_gemm
+  args: --op fp8_gemm --only pt2_fp8_gemm --metrics tflops --scaling-pair=BlockWise1x128,BlockWise1x128 --m 2048 --n 4096 --k 12800 --simple-output
+  envs: TORCHINDUCTOR_AUTOTUNE_IN_SUBPROC=1 TRITON_PRINT_AUTOTUNING=1 TRITON_ALWAYS_COMPILE=1 ENABLE_PERSISTENT_TMA_MATMUL=1 TORCHINDUCTOR_MAX_AUTOTUNE_GEMM=1 TORCH_LOGS=+inductor TORCHINDUCTOR_FORCE_DISABLE_CACHES=1
