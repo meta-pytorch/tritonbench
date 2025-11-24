@@ -56,7 +56,7 @@ def install_jax(cuda_version=DEFAULT_CUDA_VERSION):
 def install_fbgemm(genai=True):
     cmd = ["pip", "install", "-r", "requirements.txt"]
     subprocess.check_call(cmd, cwd=str(FBGEMM_PATH.resolve()))
-    # Build target H100(9.0, 9.0a) and B200(10.0, 10.0a)
+    # Build target H100(9.0, 9.0a) and blackwell (10.0, 12.0)
     extra_envs = os.environ.copy()
     if genai:
         if not is_hip():
