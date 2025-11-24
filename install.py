@@ -56,24 +56,39 @@ def install_jax(cuda_version=DEFAULT_CUDA_VERSION):
 def install_fbgemm(genai=True):
     cmd = ["pip", "install", "-r", "requirements.txt"]
     subprocess.check_call(cmd, cwd=str(FBGEMM_PATH.resolve()))
-    # Build target A100(8.0) or H100(9.0, 9.0a)
+    # Build target H100(9.0, 9.0a) and B200(10.0, 10.0a)
+    extra_envs = os.environ.copy()
     if genai:
-        cmd = [
-            sys.executable,
-            "setup.py",
-            "install",
-            "--build-target=genai",
-            "-DTORCH_CUDA_ARCH_LIST=8.0;9.0;9.0a",
-        ]
+        if not is_hip():
+            cmd = [
+                sys.executable,
+                "setup.py",
+                "install",
+                "--build-target=genai",
+                "-DTORCH_CUDA_ARCH_LIST=8.0;9.0;9.0a;10.0;10.0a",
+            ]
+        elif is_hip():
+            # build for MI300 and MI350
+            cmd = [
+                sys.executable,
+                "setup.py",
+                "install",
+                "--build-target=genai",
+                "--build-variant=rocm",
+                "-DAMDGPU_TARGETS='gfx950;gfx942'",
+                "-DCMAKE_C_FLAGS='-DTORCH_USE_HIP_DSA'",
+                "-DCMAKE_CXX_FLAGS='-DTORCH_USE_HIP_DSA'",
+            ]
+            extra_envs["BUILD_ROCM_VERSION"] = "7.0"
     else:
         cmd = [
             sys.executable,
             "setup.py",
             "install",
             "--build-target=cuda",
-            "-DTORCH_CUDA_ARCH_LIST=8.0;9.0;9.0a",
+            "-DTORCH_CUDA_ARCH_LIST=8.0;9.0;9.0a;10.0;10.0a",
         ]
-    subprocess.check_call(cmd, cwd=str(FBGEMM_PATH.resolve()))
+    subprocess.check_call(cmd, cwd=str(FBGEMM_PATH.resolve()), env=extra_envs)
 
 
 def test_fbgemm():
@@ -118,6 +133,8 @@ def setup_hip(args: argparse.Namespace):
     # We have to disable all third-parties that donot support hip/rocm
     args.all = False
     args.liger = True
+    args.aiter = True
+    args.fbgemm = True
 
 
 if __name__ == "__main__":
