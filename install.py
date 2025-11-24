@@ -134,7 +134,8 @@ def setup_hip(args: argparse.Namespace):
     args.all = False
     args.liger = True
     args.aiter = True
-    args.fbgemm = True
+    # TODO: fix fbgemm build on AMD
+    args.fbgemm = False
 
 
 if __name__ == "__main__":
