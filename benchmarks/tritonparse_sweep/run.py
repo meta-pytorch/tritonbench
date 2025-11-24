@@ -90,13 +90,13 @@ def find_ndjson_files(log_dir):
     return ndjson_files
 
 
-def find_reproducer_script(repro_dir):
-    py_srcs = []
-    for root, dirs, files in os.walk(repro_dir):
-        for name in files:
-            if name.endswith(".py"):
-                py_srcs.append(os.path.abspath(os.path.join(root, name)))
-    return py_srcs[0]
+def find_reproducer_script(output: str):
+    output_line: list[str] = list(filter(lambda x: "REPRODUCER_OUTPUT" x for x in output.splitlines()))
+    if len(output_line) == 0:
+        return None
+    output_line = output_line[0][output_line[0].find("{"):].strip()
+    output_dict = json.loads(output_line)
+    return output_dict['repro_script']
 
 
 def run_repro_script(repro_script):
@@ -136,7 +136,7 @@ if __name__ == "__main__":
                 ndjson_file,
             ]
             try:
-                subprocess.check_call(
+                output = subprocess.check_output(
                     reproduce_cmd,
                     cwd=tritonparse_dir,
                 )
@@ -144,7 +144,7 @@ if __name__ == "__main__":
                 result[ndjson_file] = "fail-gen-repro"
                 continue
             if args.test_run:
-                repro_script = find_reproducer_script(repro_dir)
+                repro_script = find_reproducer_script(output.decode('utf-8'))
                 try:
                     run_repro_script(repro_script)
                 except subprocess.CalledProcessError as e:
@@ -166,12 +166,12 @@ if __name__ == "__main__":
                 "copy",
                 ndjson_file,
             ]
-            subprocess.check_call(
+            output = subprocess.check_output(
                 reproduce_cmd,
                 cwd=tritonparse_dir,
             )
             if args.test_run:
-                repro_script = find_reproducer_script(repro_dir)
+                repro_script = find_reproducer_script(output.decode('utf-8'))
                 try:
                     run_repro_script(repro_script)
                 except subprocess.CalledProcessError as e:
