@@ -401,11 +401,15 @@ class BenchmarkOperatorResult:
 
         if self.simple_mode:
             # do not print header if in simple output mode
-            avg_row = [
-                str(x / len(self.result)) if isinstance(x, Number) else None
-                for x in avg_row
-            ]
-            avg_row = [",".join(avg_row)]
+            new_avg_row = []
+            for x in avg_row:
+                if isinstance(x, Number):
+                    new_avg_row.append(str(x / len(self.result)))
+                elif isinstance(x, Latency):
+                    new_avg_row.append(str(x.to_float() / len(self.result)))
+                else:
+                    new_avg_row.append(None)
+            avg_row = [",".join(new_avg_row)]
         else:
             avg_row = ["average"] + [
                 x / len(self.result) if isinstance(x, Number) else None for x in avg_row

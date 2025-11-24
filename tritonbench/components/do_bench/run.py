@@ -124,6 +124,9 @@ class Latency:
         else:
             raise ValueError(f"Unsupported latency output mode: {mode}")
 
+    def to_float(self) -> float:
+        return float(self.to_str())
+
 
 def _summarize_statistics(times, quantiles, return_mode):
     if quantiles is not None:
