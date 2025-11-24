@@ -16,5 +16,5 @@ def pip_install_requirements():
 
 def install_aiter():
     pip_install_requirements()
-    cmd = ["python", "setup.py", "develop"]
+    cmd = ["pip", "install", "-e", "."]
     subprocess.check_call(cmd, cwd=AITER_PATH)
