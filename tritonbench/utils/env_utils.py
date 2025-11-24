@@ -3,7 +3,6 @@ Utils for checking and modifying the environment.
 Requires PyTorch
 """
 
-from attr import has
 import logging
 import os
 import shutil
