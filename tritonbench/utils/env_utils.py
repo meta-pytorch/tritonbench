@@ -3,6 +3,7 @@ Utils for checking and modifying the environment.
 Requires PyTorch
 """
 
+from attr import has
 import logging
 import os
 import shutil
@@ -109,11 +110,20 @@ def set_env():
     # by default we use the cutlass version built with pytorch
     import torch._inductor.config as inductor_config
 
-    current_cutlass_dir = inductor_config.cuda.cutlass_dir
+    if hasattr(inductor_config, "cutlass"):
+        cutlass_namespace = True
+        cutlass_dir = inductor_config.cutlass.cutlass_dir
+    else:
+        cutlass_namespace = False
+        cutlass_dir = inductor_config.cuda.cutlass_dir
+
     if not os.path.exists(current_cutlass_dir):
         tb_cutlass_dir = REPO_PATH.joinpath("submodules", "cutlass")
         if tb_cutlass_dir.is_dir():
-            inductor_config.cuda.cutlass_dir = str(tb_cutlass_dir)
+            if cutlass_namespace:
+                inductor_config.cutlass.cutlass_dir = str(tb_cutlass_dir)
+            else:
+                inductor_config.cuda.cutlass_dir = str(tb_cutlass_dir)
 
 
 def set_random_seed():
