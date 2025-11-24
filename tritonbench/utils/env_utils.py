@@ -111,10 +111,10 @@ def set_env():
 
     if hasattr(inductor_config, "cutlass"):
         cutlass_namespace = True
-        cutlass_dir = inductor_config.cutlass.cutlass_dir
+        current_cutlass_dir = inductor_config.cutlass.cutlass_dir
     else:
         cutlass_namespace = False
-        cutlass_dir = inductor_config.cuda.cutlass_dir
+        current_cutlass_dir = inductor_config.cuda.cutlass_dir
 
     if not os.path.exists(current_cutlass_dir):
         tb_cutlass_dir = REPO_PATH.joinpath("submodules", "cutlass")
