@@ -65,7 +65,7 @@ def install_fbgemm(genai=True):
                 "setup.py",
                 "install",
                 "--build-target=genai",
-                "-DTORCH_CUDA_ARCH_LIST=8.0;9.0;9.0a;10.0;10.0a",
+                "-DTORCH_CUDA_ARCH_LIST=9.0;9.0a;10.0;10.0a",
             ]
         elif is_hip():
             # build for MI300 and MI350
@@ -86,7 +86,7 @@ def install_fbgemm(genai=True):
             "setup.py",
             "install",
             "--build-target=cuda",
-            "-DTORCH_CUDA_ARCH_LIST=8.0;9.0;9.0a;10.0;10.0a",
+            "-DTORCH_CUDA_ARCH_LIST=9.0;9.0a;10.0;10.0a",
         ]
     subprocess.check_call(cmd, cwd=str(FBGEMM_PATH.resolve()), env=extra_envs)
 
