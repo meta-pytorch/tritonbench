@@ -41,6 +41,8 @@ def setup_tritonbench_cwd():
 setup_tritonbench_cwd()
 
 import tritonparse
+from tritonparse.reproducer.orchestrator import reproduce as tritonparse_reproduce
+from tritonparse.reproducer.types import KernelImportMode
 from tritonbench.operators_collection import list_operators_by_collection
 from tritonbench.utils.run_utils import run_in_task, setup_output_dir
 
@@ -91,11 +93,11 @@ def find_ndjson_files(log_dir):
 
 
 def find_reproducer_script(output: str):
-    output_line: list[str] = list(filter(lambda x: "REPRODUCER_OUTPUT" x for x in output.splitlines()))
+    output_line: list[str] = [ x for x in output.splitlines() if "repro_script" in x ]
     if len(output_line) == 0:
         return None
     output_line = output_line[0][output_line[0].find("{"):].strip()
-    output_dict = json.loads(output_line)
+    output_dict = eval(output_line)
     return output_dict['repro_script']
 
 
@@ -121,32 +123,20 @@ if __name__ == "__main__":
             repro_dir = os.path.join(ndjson_dir, "repro_tritonbench")
             if os.path.exists(repro_dir):
                 shutil.rmtree(repro_dir)
-            reproduce_cmd = [
-                sys.executable,
-                "run.py",
-                "reproduce",
-                "--out-dir",
-                repro_dir,
-                "--line",
-                "2",
-                "--template",
-                "tritonbench",
-                "--kernel-import",
-                "copy",
-                ndjson_file,
-            ]
             try:
-                output = subprocess.check_output(
-                    reproduce_cmd,
-                    cwd=tritonparse_dir,
+                reproducer_output = tritonparse_reproduce(
+                    input_path=ndjson_file,
+                    line_index=2,
+                    out_dir=repro_dir,
+                    template="tritonbench",
+                    kernel_import=KernelImportMode.COPY,
                 )
-            except subprocess.CalledProcessError as e:
+            except Exception as e:
                 result[ndjson_file] = "fail-gen-repro"
                 continue
             if args.test_run:
-                repro_script = find_reproducer_script(output.decode('utf-8'))
                 try:
-                    run_repro_script(repro_script)
+                    run_repro_script(reproducer_output["repro_script"])
                 except subprocess.CalledProcessError as e:
                     result[ndjson_file] = "fail-run-repro"
                     continue
@@ -154,26 +144,16 @@ if __name__ == "__main__":
             repro_dir = os.path.join(ndjson_dir, "repro_kernel")
             if os.path.exists(repro_dir):
                 shutil.rmtree(repro_dir)
-            reproduce_cmd = [
-                sys.executable,
-                "run.py",
-                "reproduce",
-                "--out-dir",
-                os.path.join(ndjson_dir, "repro_kernel"),
-                "--line",
-                "2",
-                "--kernel-import",
-                "copy",
-                ndjson_file,
-            ]
-            output = subprocess.check_output(
-                reproduce_cmd,
-                cwd=tritonparse_dir,
+            reproducer_output = tritonparse_reproduce(
+                input_path=ndjson_file,
+                line_index=2,
+                out_dir=repro_dir,
+                template="example",
+                kernel_import=KernelImportMode.COPY,
             )
             if args.test_run:
-                repro_script = find_reproducer_script(output.decode('utf-8'))
                 try:
-                    run_repro_script(repro_script)
+                    run_repro_script(reproducer_output["repro_script"])
                 except subprocess.CalledProcessError as e:
                     result[ndjson_file] = "fail-run-repro"
                     continue
