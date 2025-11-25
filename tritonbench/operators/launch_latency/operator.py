@@ -1,3 +1,4 @@
+import torch
 from torch import zeros
 
 from torch._inductor.utils import triton_version_uses_attrs_dict
@@ -14,6 +15,7 @@ with try_import("HAS_TILELANG"):
     from .tilelang import tilelang_nop_kernel, tilelang_nop_with_args_kernel
 
 with try_import("HAS_CUTEDSL"):
+    import cutlass.cute as cute
     from .cutedsl import cutedsl_nop_kernel, cutedsl_nop_with_args_kernel
 
 from .kernels import get_trivial_add_kernel, nop_kernel, nop_with_args_kernel
@@ -79,10 +81,18 @@ class Operator(BenchmarkOperator):
     @register_benchmark(enabled=HAS_CUTEDSL)
     def nop_cutedsl(self, *args):
         if len(args) == 0:
-            kernel = cutedsl_nop_kernel()
+            kernel = cute.compile(cutedsl_nop_kernel)
             return lambda: kernel()
-        kernel = cutedsl_nop_with_args_kernel()
-        return lambda: kernel(*args)
+        cute_args = []
+        for arg in args:
+            if isinstance(arg, torch.Tensor):
+                cute_args.append(cute.runtime.from_dlpack(arg))
+            else:
+                cute_args.append(arg)
+        kernel = cute.compile(cutedsl_nop_with_args_kernel, *cute_args)
+        # remove constexpr args
+        cute_args = cute_args[:-5]
+        return lambda: kernel(*cute_args)
 
     @register_benchmark(baseline=True)
     def nop_python_function(self, *args):
