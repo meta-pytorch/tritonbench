@@ -1,16 +1,17 @@
-import triton.language as tl
 from torch import zeros
-from torch._C import _cuda_getCurrentRawStream as get_raw_stream
 
 from torch._inductor.utils import triton_version_uses_attrs_dict
 from triton.compiler import CompiledKernel
 
 from tritonbench.utils.triton_op import (
     BenchmarkOperator,
-    BenchmarkOperatorMetrics,
     register_benchmark,
-    register_metric,
 )
+from tritonbench.utils.python_utils import try_import
+
+with try_import("HAS_TILELANG"):
+    import tilelang
+    from .tilelang import tilelang_nop_kernel, tilelang_nop_with_args_kernel
 
 from .kernels import get_trivial_add_kernel, nop_kernel, nop_with_args_kernel
 
@@ -63,6 +64,14 @@ class Operator(BenchmarkOperator):
     def nop_inductor_kernel(self, *args):
         trivial_add_kernel = get_trivial_add_kernel()
         return lambda: trivial_add_kernel(*args)
+    
+    @register_benchmark()
+    def nop_tilelang(self, *args):
+        if len(args) == 0:
+            kernel = tilelang_nop_kernel()
+            return lambda: kernel()
+        kernel = tilelang_nop_with_args_kernel()
+        return lambda: kernel(*args)
 
     @register_benchmark(baseline=True)
     def nop_python_function(self, *args):

@@ -1,4 +1,4 @@
-tilelang==0.1.3
+git+https://github.com/tile-ai/tilelang.git@e2b10c580b32cd31f384917d0ce31b7610f4e5e4
 Cython
 decorator
 cloudpickle
