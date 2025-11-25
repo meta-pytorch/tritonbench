@@ -183,14 +183,6 @@ def trace_op(op):
         )
     return op_with_tags
 
-
-UNSUPPORTED_OPS = [
-    "fp8_fused_quant_gemm_rowwise",
-    "fp32_to_mx4",
-    "flex_attention",
-    "mx4_to_fp32",
-]
-
 if __name__ == "__main__":
     parser = get_parser()
     args = parser.parse_args()
@@ -201,9 +193,6 @@ if __name__ == "__main__":
     print(f"Running tagging test on ops: {ops}...")
     results = {}
     for op in ops:
-        # deadloop on flex_attention
-        if op in UNSUPPORTED_OPS:
-            continue
         results.update(trace_op(op))
     if not args.output:
         print(results)
