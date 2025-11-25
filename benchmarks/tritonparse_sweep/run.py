@@ -41,10 +41,10 @@ def setup_tritonbench_cwd():
 setup_tritonbench_cwd()
 
 import tritonparse
-from tritonparse.reproducer.orchestrator import reproduce as tritonparse_reproduce
-from tritonparse.reproducer.types import KernelImportMode
 from tritonbench.operators_collection import list_operators_by_collection
 from tritonbench.utils.run_utils import run_in_task, setup_output_dir
+from tritonparse.reproducer.orchestrator import reproduce as tritonparse_reproduce
+from tritonparse.reproducer.types import KernelImportMode
 
 NOT_WORKING_OPS = ["tritonparse_softmax_triton_softmax"]
 
@@ -93,12 +93,12 @@ def find_ndjson_files(log_dir):
 
 
 def find_reproducer_script(output: str):
-    output_line: list[str] = [ x for x in output.splitlines() if "repro_script" in x ]
+    output_line: list[str] = [x for x in output.splitlines() if "repro_script" in x]
     if len(output_line) == 0:
         return None
-    output_line = output_line[0][output_line[0].find("{"):].strip()
+    output_line = output_line[0][output_line[0].find("{") :].strip()
     output_dict = eval(output_line)
-    return output_dict['repro_script']
+    return output_dict["repro_script"]
 
 
 def run_repro_script(repro_script):

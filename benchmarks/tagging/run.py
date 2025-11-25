@@ -183,6 +183,7 @@ def trace_op(op):
         )
     return op_with_tags
 
+
 if __name__ == "__main__":
     parser = get_parser()
     args = parser.parse_args()
