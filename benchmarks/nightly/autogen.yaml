@@ -155,3 +155,7 @@ vector_exp_bwd:
 welford_fwd:
   args: --op welford --baseline eager_layer_norm --metrics latency,speedup --only
     test_no_welford,triton_welford,eager_layer_norm
+bf16_flex_attention_fwd:
+  args: --op flex_attention --metrics latency,tflops --only compiled
+bf16_flex_attention_bwd:
+  args: --op flex_attention --metrics latency,tflops --only compiled
