@@ -13,6 +13,9 @@ with try_import("HAS_TILELANG"):
     import tilelang
     from .tilelang import tilelang_nop_kernel, tilelang_nop_with_args_kernel
 
+with try_import("HAS_CUTEDSL"):
+    from .cutedsl import cutedsl_nop_kernel, cutedsl_nop_with_args_kernel
+
 from .kernels import get_trivial_add_kernel, nop_kernel, nop_with_args_kernel
 
 
@@ -64,13 +67,21 @@ class Operator(BenchmarkOperator):
     def nop_inductor_kernel(self, *args):
         trivial_add_kernel = get_trivial_add_kernel()
         return lambda: trivial_add_kernel(*args)
-    
-    @register_benchmark()
+
+    @register_benchmark(enabled=HAS_TILELANG)
     def nop_tilelang(self, *args):
         if len(args) == 0:
             kernel = tilelang_nop_kernel()
             return lambda: kernel()
         kernel = tilelang_nop_with_args_kernel()
+        return lambda: kernel(*args)
+
+    @register_benchmark(enabled=HAS_CUTEDSL)
+    def nop_cutedsl(self, *args):
+        if len(args) == 0:
+            kernel = cutedsl_nop_kernel()
+            return lambda: kernel()
+        kernel = cutedsl_nop_with_args_kernel()
         return lambda: kernel(*args)
 
     @register_benchmark(baseline=True)
