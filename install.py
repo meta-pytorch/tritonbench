@@ -68,14 +68,16 @@ def install_fbgemm(genai=True):
                 "-DTORCH_CUDA_ARCH_LIST=9.0;9.0a;10.0;12.0",
             ]
         elif is_hip():
-            # build for MI300 and MI350
+            # build for MI300(gfx942) and MI350(gfx950)
+            ROCM_HOME = os.environ.get("ROCM_HOME", "/opt/rocm")
             cmd = [
                 sys.executable,
                 "setup.py",
                 "install",
                 "--build-target=genai",
                 "--build-variant=rocm",
-                "-DAMDGPU_TARGETS='gfx950;gfx942'",
+                f"-DHIP_ROOT_DIR={ROCM_HOME}",
+                "-DAMDGPU_TARGETS='gfx942;gfx950'",
                 "-DCMAKE_C_FLAGS='-DTORCH_USE_HIP_DSA'",
                 "-DCMAKE_CXX_FLAGS='-DTORCH_USE_HIP_DSA'",
             ]
