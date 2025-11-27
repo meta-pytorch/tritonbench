@@ -100,7 +100,7 @@ try:
     HAS_CUTLASS_OR_CK = is_hip() or (
         is_cuda() and get_nvidia_gpu_model() != "NVIDIA B200"
     )
-except (ImportError, AttributeError, FileNotFoundError):
+except (ImportError, AttributeError, FileNotFoundError, OSError):
     HAS_CUTLASS_OR_CK = False
 
 try:
@@ -111,7 +111,7 @@ try:
 
     # TODO: remove these b200 hacks.
     HAS_CUBLAS = is_cuda() and get_nvidia_gpu_model() != "NVIDIA B200"
-except (ImportError, IOError, AttributeError, FileNotFoundError):
+except (ImportError, IOError, AttributeError, FileNotFoundError, OSError):
     HAS_CUBLAS = False
 
 

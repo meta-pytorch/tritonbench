@@ -180,7 +180,7 @@ try:
     cutlass_or_ck_fp8_grouped_mm = torch.ops.fbgemm.f8f8bf16_rowwise_grouped_stacked
     # Set HAS_CUTLASS_OR_CK to True if import succeeds
     HAS_CUTLASS_OR_CK = True
-except (ImportError, AttributeError):
+except (ImportError, AttributeError, OSError):
     # Set HAS_CUTLASS_OR_CK to False if import fails
     HAS_CUTLASS_OR_CK = False
 
