@@ -7,18 +7,6 @@ import yaml
 
 OPBENCH_DIR = "operators"
 INTERNAL_OPBENCH_DIR = "fb"
-LIGER_OPERATORS = [
-    "embedding",
-    "rms_norm",
-    "rope",
-    "jsd",
-    "fused_linear_jsd",
-    "cross_entropy",
-    "fused_linear_cross_entropy",
-    "geglu",
-    "kl_div",
-    "swiglu",
-]
 
 
 def _dir_contains_file(dir, file_name) -> bool:
@@ -57,8 +45,7 @@ def _list_opbench_paths() -> List[str]:
         opbench = [
             op
             for op in opbench
-            if os.path.basename(op) not in LIGER_OPERATORS
-            and not os.path.basename(op) == INTERNAL_OPBENCH_DIR
+            if not os.path.basename(op) == INTERNAL_OPBENCH_DIR
         ]
     return opbench
 

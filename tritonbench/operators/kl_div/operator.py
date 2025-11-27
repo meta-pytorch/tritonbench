@@ -26,7 +26,8 @@ class Operator(BenchmarkOperator):
         self.B = 8
         self.T = 512
         self.baseline_op = torch.nn.KLDivLoss(reduction="batchmean").to(self.device)
-        self.liger_op = LigerKLDIVLoss(reduction="batchmean").to(self.device)
+        if LigerKLDIVLoss is not None:
+            self.liger_op = LigerKLDIVLoss(reduction="batchmean").to(self.device)
 
     def get_input_iter(self) -> Generator:
         for V in [2**i for i in range(12, 18)]:
@@ -40,7 +41,7 @@ class Operator(BenchmarkOperator):
     def torch_kl_div(self, input, target) -> Callable:
         return lambda: self.baseline_op(input, target)
 
-    @register_benchmark()
+    @register_benchmark(enabled=LigerKLDIVLoss is not None)
     def liger_kl_div(self, input, target) -> Callable:
         return lambda: self.liger_op(input, target)
 

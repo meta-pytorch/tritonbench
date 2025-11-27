@@ -44,7 +44,8 @@ class Operator(BenchmarkOperator):
         start, end = map(int, args.v_range.split(","))
         self.v_range = range(start, end)
         self.baseline_model = CrossEntropyLoss()
-        self.liger_model = LigerCrossEntropyLoss()
+        if LigerCrossEntropyLoss is not None:
+            self.liger_model = LigerCrossEntropyLoss()
 
     def get_input_iter(self) -> Generator:
         for V in [2**i for i in self.v_range]:
@@ -63,7 +64,7 @@ class Operator(BenchmarkOperator):
     def cross_entropy_loss(self, input, target) -> Callable:
         return lambda: self.baseline_model(input, target)
 
-    @register_benchmark()
+    @register_benchmark(enabled=LigerCrossEntropyLoss is not None)
     def liger_cross_entropy_loss(self, input, target) -> Callable:
         return lambda: self.liger_model(input, target)
 

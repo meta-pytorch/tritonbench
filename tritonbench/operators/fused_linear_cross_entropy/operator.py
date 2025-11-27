@@ -45,15 +45,16 @@ class TorchLMHeadCE(torch.nn.Module):
         return self.ce_loss(logits, target)
 
 
-class LigerLMHeadCE(torch.nn.Module):
-    def __init__(self, ignore_index: int = -100):
-        super().__init__()
-        self.ce_loss = LigerFusedLinearCrossEntropyLoss(
-            ignore_index=ignore_index, reduction="mean"
-        )
+if LigerFusedLinearCrossEntropyLoss is not None:
+    class LigerLMHeadCE(torch.nn.Module):
+        def __init__(self, ignore_index: int = -100):
+            super().__init__()
+            self.ce_loss = LigerFusedLinearCrossEntropyLoss(
+                ignore_index=ignore_index, reduction="mean"
+            )
 
-    def forward(self, input, weight, target):
-        return self.ce_loss(weight, input, target)
+        def forward(self, input, weight, target):
+            return self.ce_loss(weight, input, target)
 
 
 class Operator(BenchmarkOperator):
@@ -74,7 +75,8 @@ class Operator(BenchmarkOperator):
         )
 
         self.baseline_model = TorchLMHeadCE().to(self.device)
-        self.liger_model = LigerLMHeadCE().to(self.device)
+        if LigerFusedLinearCrossEntropyLoss is not None:
+            self.liger_model = LigerLMHeadCE().to(self.device)
 
     def get_input_iter(self) -> Generator:
         for BT in [2**i for i in range(12, 16)]:
@@ -94,7 +96,7 @@ class Operator(BenchmarkOperator):
     def torch_lm_head_ce(self, input, weight, target) -> Callable:
         return lambda: self.baseline_model(input, weight, target)
 
-    @register_benchmark()
+    @register_benchmark(enabled=LigerFusedLinearCrossEntropyLoss is not None)
     def liger_lm_head_ce(self, input, weight, target) -> Callable:
         return lambda: self.liger_model(input, weight, target)
 

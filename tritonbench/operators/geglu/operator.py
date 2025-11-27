@@ -38,21 +38,22 @@ class Operator(BenchmarkOperator):
             hidden_act=self.hidden_act,
         )
         self.baseline_model = LlamaMLP(self.llama_config).to(self.device).to(self.dtype)
-        self.liger_model = (
-            LigerGEGLUMLP(self.llama_config).to(self.device).to(self.dtype)
-        )
+        if LigerGEGLUMLP is not None:
+            self.liger_model = (
+                LigerGEGLUMLP(self.llama_config).to(self.device).to(self.dtype)
+            )
 
-        # Copy weights from baseline to liger model for fair accuracy comparison
-        with torch.no_grad():
-            self.liger_model.gate_proj.weight.data.copy_(
-                self.baseline_model.gate_proj.weight.data
-            )
-            self.liger_model.up_proj.weight.data.copy_(
-                self.baseline_model.up_proj.weight.data
-            )
-            self.liger_model.down_proj.weight.data.copy_(
-                self.baseline_model.down_proj.weight.data
-            )
+            # Copy weights from baseline to liger model for fair accuracy comparison
+            with torch.no_grad():
+                self.liger_model.gate_proj.weight.data.copy_(
+                    self.baseline_model.gate_proj.weight.data
+                )
+                self.liger_model.up_proj.weight.data.copy_(
+                    self.baseline_model.up_proj.weight.data
+                )
+                self.liger_model.down_proj.weight.data.copy_(
+                    self.baseline_model.down_proj.weight.data
+                )
 
     def get_input_iter(self) -> Generator:
         for T in [2**i for i in range(10, 14)]:
@@ -66,7 +67,7 @@ class Operator(BenchmarkOperator):
     def torch_geglu(self, input) -> Callable:
         return lambda: self.baseline_model(input)
 
-    @register_benchmark()
+    @register_benchmark(enabled=LigerGEGLUMLP is not None)
     def liger_geglu(self, input) -> Callable:
         return lambda: self.liger_model(input)
 
