@@ -136,8 +136,8 @@ def setup_hip(args: argparse.Namespace):
     args.all = False
     args.liger = True
     args.aiter = True
-    # TODO: fix fbgemm build on AMD
-    args.fbgemm = False
+    # fbgemm triton works but ck doesn't
+    args.fbgemm = True
 
 
 if __name__ == "__main__":
