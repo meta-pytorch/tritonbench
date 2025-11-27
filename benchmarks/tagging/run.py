@@ -42,7 +42,7 @@ import inspect
 from tritonbench.operators import list_operators
 from tritonbench.utils.operator_utils import get_backends_for_operator
 from tritonbench.utils.run_utils import load_operator_by_args
-from tritonbench.utils.triton_op import REGISTERED_BACKEND_TAGS
+from tritonbench.utils.triton_op import REGISTERED_BENCHMARKS
 
 try:
     from ast_analyzer import build_backend_callees, trace_callees
@@ -132,7 +132,8 @@ def merge_decorator_tags(op_name, backend_name, tags_dict):
         tags_dict["tags"] = []
 
     # Get decorator tags if they exist
-    decorator_tags = REGISTERED_BACKEND_TAGS.get(op_name, {}).get(backend_name, [])
+    backend_config = REGISTERED_BENCHMARKS.get(op_name, {}).get(backend_name)
+    decorator_tags = backend_config.tags if (backend_config and backend_config.tags) else []
     if decorator_tags:
         # Merge decorator tags with auto-detected tags (remove duplicates)
         all_tags = list(set(decorator_tags + tags_dict["tags"]))
