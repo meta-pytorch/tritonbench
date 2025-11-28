@@ -1,8 +1,9 @@
 import logging
+import os
+import shutil
 import subprocess
 import sys
 from pathlib import Path
-
 from typing import Dict, List, Optional
 
 DEFAULT_PYTHON_VERSION = "3.12"
@@ -34,6 +35,15 @@ def get_pkg_versions(packages: List[str]) -> Dict[str, str]:
         version = subprocess.check_output(cmd).decode().strip()
         versions[module] = version
     return versions
+
+
+def get_pip_cmd():
+    if env := os.getenv("PIP_MODULE"):
+        return env.split()
+    if shutil.which("uv"):
+        return ["uv", "pip"]
+    else:
+        return [sys.executable, "-m", "pip"]
 
 
 def has_pkg(pkg: str):
@@ -88,15 +98,14 @@ def pip_install_requirements(
     if extra_args and isinstance(extra_args, list):
         constraints_parameters.extend(extra_args)
     if not continue_on_fail:
+        install_cmd = get_pip_cmd()
         subprocess.check_call(
-            [sys.executable, "-m", "pip", "install", "-r", requirements_txt]
-            + constraints_parameters,
+            install_cmd + ["install", "-r", requirements_txt] + constraints_parameters,
         )
         return True, None
     try:
         subprocess.run(
-            [sys.executable, "-m", "pip", "install", "-r", requirements_txt]
-            + constraints_parameters,
+            install_cmd + ["install", "-r", requirements_txt] + constraints_parameters,
             check=True,
             stdout=subprocess.PIPE,
             stderr=subprocess.STDOUT,
