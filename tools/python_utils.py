@@ -40,8 +40,6 @@ def get_pkg_versions(packages: List[str]) -> Dict[str, str]:
 def get_pip_cmd():
     if env := os.getenv("PIP_MODULE"):
         return env.split()
-    if shutil.which("uv"):
-        return ["uv", "pip"]
     else:
         return [sys.executable, "-m", "pip"]
 
