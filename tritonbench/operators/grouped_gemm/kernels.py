@@ -383,6 +383,8 @@ def grouped_matmul_tlx_kernel(
                 num_m_tiles = tl.cdiv(gm, BLOCK_SIZE_M)
                 num_n_tiles = tl.cdiv(gn, BLOCK_SIZE_N)
                 num_tiles = num_m_tiles * num_n_tiles
+                num_k_tiles = tl.cdiv(gk, BLOCK_SIZE_K)
+
                 if (
                     tile_idx >= last_problem_end
                     and tile_idx < last_problem_end + num_tiles
@@ -413,7 +415,6 @@ def grouped_matmul_tlx_kernel(
                         tile_idx >= last_problem_end
                         and tile_idx < last_problem_end + num_tiles
                     ):
-                        k = gk
                         # figure out tile coordinates
                         tile_idx_in_gemm = tile_idx - last_problem_end
                         tile_m_idx = tile_idx_in_gemm // num_n_tiles
@@ -423,7 +424,7 @@ def grouped_matmul_tlx_kernel(
                         offs_am = tile_m_idx * BLOCK_SIZE_M
                         offs_bn = tile_n_idx * BLOCK_SIZE_N
 
-                        for kk in range(0, tl.cdiv(k, BLOCK_SIZE_K)):
+                        for kk in range(0, num_k_tiles):
                             buf, phase = _get_bufidx_phase(accum_cnt, NUM_SMEM_BUFFERS)
                             tlx.barrier_wait(smem_empty_bars[buf], phase ^ 1)
                             tlx.barrier_expect_bytes(
@@ -446,6 +447,12 @@ def grouped_matmul_tlx_kernel(
 
                         # go to the next tile by advancing NUM_SMS
                         tile_idx += NUM_SMS
+
+                # Wait for the last pair of TMA load to complete before doing
+                # the TMA desc update for the next gemm problem.
+                if num_k_tiles > 0:
+                    buf, phase = _get_bufidx_phase(accum_cnt - 1, NUM_SMEM_BUFFERS)
+                    tlx.barrier_wait(smem_full_bars[buf], phase)
 
                 # get ready to go to the next gemm problem
                 last_problem_end = last_problem_end + num_tiles
