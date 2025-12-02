@@ -73,10 +73,12 @@ def install_fbgemm(genai=True):
             cmd = [
                 "bash",
                 "-c",
-                f". .github/scripts/setup_env.bash; test_fbgemm_gpu_build_and_install {current_conda_env} genai/rocm"
+                f". .github/scripts/setup_env.bash; test_fbgemm_gpu_build_and_install {current_conda_env} genai/rocm",
             ]
             extra_envs["BUILD_ROCM_VERSION"] = "7.0"
-            subprocess.check_call(cmd, cwd=str(FBGEMM_PATH.parent.resolve()), env=extra_envs)
+            subprocess.check_call(
+                cmd, cwd=str(FBGEMM_PATH.parent.resolve()), env=extra_envs
+            )
             return
     else:
         cmd = [
@@ -92,7 +94,11 @@ def install_fbgemm(genai=True):
 def test_fbgemm():
     print("Checking fbgemm_gpu installation...", end="")
     # test triton
-    cmd = [sys.executable, "-c", "import fbgemm_gpu.experimental.gemm.triton_gemm.fp8_gemm"]
+    cmd = [
+        sys.executable,
+        "-c",
+        "import fbgemm_gpu.experimental.gemm.triton_gemm.fp8_gemm",
+    ]
     subprocess.check_call(cmd)
     # test genai (cutlass or ck)
     cmd = [sys.executable, "-c", "import fbgemm_gpu.experimental.gen_ai"]
@@ -136,7 +142,6 @@ def setup_hip(args: argparse.Namespace):
     args.all = False
     args.liger = True
     args.aiter = True
-    # fbgemm triton works but ck doesn't
     args.fbgemm = True
 
 
