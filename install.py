@@ -91,7 +91,11 @@ def install_fbgemm(genai=True):
 
 def test_fbgemm():
     print("Checking fbgemm_gpu installation...", end="")
+    # test triton
     cmd = [sys.executable, "-c", "import fbgemm_gpu.experimental.gemm.triton_gemm.fp8_gemm"]
+    subprocess.check_call(cmd)
+    # test genai (cutlass or ck)
+    cmd = [sys.executable, "-c", "import fbgemm_gpu.experimental.gen_ai"]
     subprocess.check_call(cmd)
     print("OK")
 
