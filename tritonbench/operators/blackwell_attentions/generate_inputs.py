@@ -72,11 +72,11 @@ def customized_inputs(shape, num_inputs, dtype, device) -> Generator:
 
 def fa3_paper_inputs(dtype, device) -> Generator:
     D_HEAD = 128
-    H = 2048 // D_HEAD
+    H = 32 # 2048 // D_HEAD
     for BATCH in [32, 16, 8, 4, 2, 1]:
         N_CTX = 16384 // BATCH
         yield _generated_qkv_inputs(
-            shape=(BATCH, H, H, N_CTX, N_CTX, D_HEAD), dtype=dtype, device=device
+            shape=(BATCH, H, H, 4069, 16384, D_HEAD), dtype=dtype, device=device
         )
 
 
