@@ -99,12 +99,17 @@ class EntropyCriterion:
             new_count: New count (0 if removing unique value)
         """
         # Remove old contribution: S -= old_count * log2(old_count)
-        if old_count > 0:
-            self._sum_count_log_count -= old_count * math.log2(old_count)
-
-        # Add new contribution: S += new_count * log2(new_count)
-        if new_count > 0:
-            self._sum_count_log_count += new_count * math.log2(new_count)
+        # Optimization: nlog(n) - olog(o) = nlog(1+(n-o)/o) + (n - o)log(o)
+        if old_count > 0 and new_count > 0:
+            delta = new_count - old_count
+            self._sum_count_log_count += (
+                new_count * math.log2(1 + delta / old_count) + delta * math.log2(old_count)
+            )
+        else:
+            if old_count > 0:
+                self._sum_count_log_count -= old_count * math.log2(old_count)
+            if new_count > 0:
+                self._sum_count_log_count += new_count * math.log2(new_count)
 
     def _compute_entropy(self) -> float:
         """
@@ -121,7 +126,7 @@ class EntropyCriterion:
 
         # Entropy formula: H = log2(n) - S/n
         entropy = math.log2(n) - (self._sum_count_log_count / n)
-        return entropy
+        return max(0.0, entropy)
 
     def add_measurement(self, measurement: float) -> None:
         """
@@ -157,24 +162,20 @@ class EntropyCriterion:
 
         # Update running statistics for linear regression
         # If entropy_tracker is full, remove oldest component from running stats
+        # removal index in the sliding window = 0
         if len(self.entropy_tracker) == self.window_size:
             old_entropy = self.entropy_tracker[0]
-            old_x = 0  # Oldest position in the sliding window
-            old_sum_x = self._sum_x
 
             # Remove old values from running sums
-            self._sum_x -= old_x
             self._sum_y -= old_entropy
-            self._sum_xy -= old_x * old_entropy
-            self._sum_x2 -= old_x * old_x
             self._sum_y2 -= old_entropy * old_entropy
-            self._n -= 1
 
             # Remove element's effect from sum of squares
-            n = self._n
-            self._sum_x2 -= 2 * old_sum_x + n  # Use saved old_sum_x
+            n = self._n - 1
             self._sum_x -= n
+            self._sum_x2 -= 2 * self._sum_x + n
             self._sum_xy -= self._sum_y
+            self._n -= 1
 
         # Add new entropy value to running stats
         x = self._n
@@ -214,10 +215,11 @@ class EntropyCriterion:
         mean_y = self._sum_y / n
 
         # Compute slope using cached statistics
-        numerator = self._sum_xy - n * mean_x * mean_y
-        denominator = self._sum_x2 - n * mean_x * mean_x
+        # scaled down by 1/n to avoid overflow
+        numerator = self._sum_xy / n - mean_x * mean_y
+        denominator = self._sum_x2 / n - mean_x * mean_x
 
-        if denominator == 0:
+        if abs(denominator) < 1e-12:
             return False
 
         slope = numerator / denominator
@@ -227,21 +229,22 @@ class EntropyCriterion:
         slope_degrees = math.degrees(math.atan(slope))
 
         # Compute total sum of squares (TSS)
-        ss_tot = self._sum_y2 - n * mean_y * mean_y
+        # ss_tot and ss_res scaled by 1/n to avoid overflow
+        ss_tot = (self._sum_y2 / n) - mean_y * mean_y
 
         # Calculate residual sum of squares (RSS) using the cached value
         # ss_res = Σ(y - (slope*x + intercept))² expanded
         ss_res = (
-            self._sum_y2
-            - 2 * slope * self._sum_xy
-            - 2 * intercept * self._sum_y
-            + slope * slope * self._sum_x2
-            + 2 * slope * intercept * self._sum_x
-            + n * intercept * intercept
+            (self._sum_y2 / n)
+            - 2 * slope * (self._sum_xy / n)
+            - 2 * intercept * (self._sum_y / n)
+            + slope * slope * (self._sum_x2 / n)
+            + 2 * slope * intercept * (self._sum_x / n)
+            + intercept * intercept
         )
 
-        # If ss_tot == 0, entropy values are identical => perfect stability
-        if ss_tot == 0:
+        # If ss_tot < epsilon, entropy values are identical => perfect stability
+        if abs(ss_tot) < 1e-12:
             r2 = 1.0
         else:
             r2 = max(0.0, min(1.0, 1 - (ss_res / ss_tot)))
@@ -262,6 +265,10 @@ class EntropyCriterion:
             return False
 
         return True
+
+    def get_convergence_info(self) -> dict:
+        """Get the last convergence check information."""
+        return getattr(self, "_last_convergence_check", {})
 
     def get_stats(self) -> dict:
         """

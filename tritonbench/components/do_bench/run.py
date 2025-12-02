@@ -505,22 +505,25 @@ def _do_bench_entropy(
     assert return_mode in ["min", "max", "mean", "median", "all"]
 
     # ENTROPY-BASED WARMUP
-    criterion = EntropyCriterion(
+    entropy_criterion = EntropyCriterion(
         max_angle=max_angle,
         min_r2=min_r2,
         window_size=window_size,
         min_warmup_samples=min_warmup_samples,
     )
-    criterion.reset()
-    BATCH_SIZE = 20
+    entropy_criterion.reset()
+
+    rounding_factor = 3
+    BATCH_SIZE = 50
     last_batch = [-1.00] * BATCH_SIZE
     counter = 0
     converged = False
+    precision_increase = False
 
     cache = triton.runtime.driver.active.get_empty_cache_for_benchmark()
 
     # Adaptive warmup loop with batched synchronization
-    while not criterion.is_finished():
+    while True:
         remaining = max_samples - counter
         batch_size = min(BATCH_SIZE, remaining) if remaining > 0 else BATCH_SIZE
 
@@ -543,20 +546,41 @@ def _do_bench_entropy(
         torch.cuda.synchronize()
 
         for i in range(batch_size):
-            v = round(batch_start_events[i].elapsed_time(batch_end_events[i]), 3)
-            criterion.add_measurement(v)
+            v = round(batch_start_events[i].elapsed_time(batch_end_events[i]), rounding_factor)
             last_batch[i] = v
+
+            entropy_criterion.add_measurement(v)
+
+            if entropy_criterion.is_finished():
+                converged = True
+                break
+
         counter += batch_size
+
+        if converged:
+            break
 
         if counter >= max_samples:
             break
-    else:
-        converged = True
+
+        if counter >= 200 and not precision_increase:
+            stats = entropy_criterion.get_stats()
+            unique_count = stats.get('unique_measurements', 0)
+
+            # If we have < 20 unique values, this indicates quantization, increase rounding precision
+            if unique_count < 20:
+                rounding_factor = 4
+                entropy_criterion.reset()
+                entropy_criterion.entropy_window_size = 1000
+
+                logger.info(f"Quantization detected: only {unique_count} unique measurements. ")
+                precision_increase = True
+
 
     # Log if warmup didn't converge
     if not converged:
         logger.warning(
-            f"Entropy warmup did not converge after {counter} samples "
+            f"Warmup did not converge after {counter} samples "
             f"(max_samples={max_samples})"
         )
 
