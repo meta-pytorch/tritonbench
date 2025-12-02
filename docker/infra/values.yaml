@@ -248,11 +248,11 @@ template:
     volumes:
     - name: nvidia-lib
       hostPath:
-        path: /opt/nvidia/lib64
+        path: /home/kubernetes/bin/nvidia/lib64
         type: Directory
     - name: nvidia-bin
       hostPath:
-        path: /opt/nvidia/bin
+        path: /home/kubernetes/bin/nvidia/bin
         type: Directory
     - name: nvidia-card
       hostPath:
