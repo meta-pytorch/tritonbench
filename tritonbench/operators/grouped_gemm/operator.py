@@ -52,7 +52,11 @@ if HAS_TLX:
     from .kernels import tlx_group_gemm_fn
 
 
-IS_B200 = is_cuda() and get_nvidia_gpu_model() in ("NVIDIA B200", "NVIDIA GB200", "NVIDIA GB300")
+IS_B200 = is_cuda() and get_nvidia_gpu_model() in (
+    "NVIDIA B200",
+    "NVIDIA GB200",
+    "NVIDIA GB300",
+)
 
 
 def get_default_shapes():
