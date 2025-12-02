@@ -562,23 +562,25 @@ class Operator(BenchmarkOperator):
         q, k, v = example_inputs
         BATCH, H, N_CTX, D_HEAD = q.shape
         _, _, N_CTX_KV, _ = k.shape
+        D_HEAD_V = v.shape[-1]
 
-        if not self.local:
-            flops_per_matmul = 2.0 * BATCH * H * N_CTX * N_CTX_KV * D_HEAD
-            flops = 2 * flops_per_matmul
-            if self.causal:
-                flops *= 0.5
+        if self.causal:
+            avg_seqlen = (max(0, N_CTX_KV - N_CTX) + N_CTX_KV) / 2
         else:
-            row_idx = torch.arange(N_CTX, device="cuda")
-            col_left = torch.maximum(
-                row_idx + N_CTX_KV - N_CTX - self.window_size[0], torch.tensor(0)
-            )
-            col_right = torch.minimum(
-                row_idx + N_CTX_KV - N_CTX + self.window_size[1],
-                torch.tensor(N_CTX_KV - 1),
-            )
-            avg_seqlen = (col_right - col_left + 1).float().mean().item()
-            flops = 2 * 2.0 * BATCH * H * N_CTX * avg_seqlen * D_HEAD
+            if self.window_size == (-1, -1):
+                avg_seqlen = N_CTX_KV
+            else:
+                row_idx = torch.arange(N_CTX, device="cuda")
+                col_left = torch.maximum(
+                    row_idx + N_CTX_KV - N_CTX - self.window_size[0], torch.tensor(0)
+                )
+                col_right = torch.minimum(
+                    row_idx + N_CTX_KV - N_CTX + self.window_size[1],
+                    torch.tensor(N_CTX_KV - 1),
+                )
+                avg_seqlen = (col_right - col_left + 1).float().mean().item()
+        
+        flops = BATCH * H * 2 * N_CTX * avg_seqlen * (D_HEAD + D_HEAD_V)
 
         if self.mode == BenchmarkMode.BWD:
             flops *= 2.5  # 2.0(bwd) + 0.5(recompute)
