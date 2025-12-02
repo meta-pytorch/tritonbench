@@ -69,19 +69,15 @@ def install_fbgemm(genai=True):
             ]
         elif is_hip():
             # build for MI300(gfx942) and MI350(gfx950)
-            ROCM_HOME = os.environ.get("ROCM_HOME", "/opt/rocm")
+            current_conda_env = os.environ.get("CONDA_DEFAULT_ENV")
             cmd = [
-                sys.executable,
-                "setup.py",
-                "install",
-                "--build-target=genai",
-                "--build-variant=rocm",
-                f"-DHIP_ROOT_DIR={ROCM_HOME}",
-                "-DAMDGPU_TARGETS='gfx942;gfx950'",
-                "-DCMAKE_C_FLAGS='-DTORCH_USE_HIP_DSA'",
-                "-DCMAKE_CXX_FLAGS='-DTORCH_USE_HIP_DSA'",
+                "bash",
+                "-c",
+                f". .github/scripts/setup_env.bash; test_fbgemm_gpu_build_and_install {current_conda_env} genai/rocm"
             ]
             extra_envs["BUILD_ROCM_VERSION"] = "7.0"
+            subprocess.check_call(cmd, cwd=str(FBGEMM_PATH.parent.resolve()), env=extra_envs)
+            return
     else:
         cmd = [
             sys.executable,
