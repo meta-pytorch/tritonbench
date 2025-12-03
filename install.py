@@ -7,10 +7,8 @@ import sys
 from pathlib import Path
 
 from tools.cuda_utils import (
-    CUDA_VERSION_MAP,
-    DEFAULT_CUDA_VERSION,
-    DEFAULT_HIP_VERSION,
-    HIP_VERSION_MAP,
+    DEFAULT_TOOLKIT_VERSION,
+    TOOLKIT_MAPPING,
 )
 from tools.git_utils import checkout_submodules
 from tools.python_utils import (
@@ -23,17 +21,12 @@ from tools.python_utils import (
 logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger(__name__)
 
-# Install the latest pytorch nightly with default cuda version
+# Install the latest pytorch nightly with default cuda/hip version
 # if torch does not exist
 if not has_pkg("torch"):
     from tools.torch_utils import install_pytorch_nightly
-
     env = os.environ
-    toolkit_version = (
-        CUDA_VERSION_MAP[DEFAULT_CUDA_VERSION]["pytorch_url"]
-        if shutil.which("nvidia-smi")
-        else HIP_VERSION_MAP[DEFAULT_HIP_VERSION]["pytorch_url"]
-    )
+    toolkit_version = TOOLKIT_MAPPING[DEFAULT_TOOLKIT_VERSION]["pytorch_url"]
     install_pytorch_nightly(toolkit_version, env)
 
 # requires torch
@@ -47,8 +40,8 @@ REPO_PATH = Path(os.path.abspath(__file__)).parent
 TRITONBENCH_DEPS = ["torch", "numpy"]
 
 
-def install_jax(cuda_version=DEFAULT_CUDA_VERSION):
-    jax_package_name = CUDA_VERSION_MAP[cuda_version]["jax"]
+def install_jax(toolkit_version=DEFAULT_TOOLKIT_VERSION):
+    jax_package_name = TOOLKIT_MAPPING[toolkit_version]["jax"]
     jax_nightly_html = (
         "https://storage.googleapis.com/jax-releases/jax_nightly_releases.html"
     )
