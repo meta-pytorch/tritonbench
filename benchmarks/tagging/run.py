@@ -133,7 +133,9 @@ def merge_decorator_tags(op_name, backend_name, tags_dict):
 
     # Get decorator tags if they exist
     backend_config = REGISTERED_BENCHMARKS.get(op_name, {}).get(backend_name)
-    decorator_tags = backend_config.tags if (backend_config and backend_config.tags) else []
+    decorator_tags = (
+        backend_config.tags if (backend_config and backend_config.tags) else []
+    )
     if decorator_tags:
         # Merge decorator tags with auto-detected tags (remove duplicates)
         all_tags = list(set(decorator_tags + tags_dict["tags"]))

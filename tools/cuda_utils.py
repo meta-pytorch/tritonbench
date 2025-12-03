@@ -102,8 +102,9 @@ def install_torch_deps():
     subprocess.check_call(cmd)
 
 
-def get_toolkit_version_from_torch(key="pytorch_url")  -> str:
+def get_toolkit_version_from_torch(key="pytorch_url") -> str:
     import torch
+
     if torch.version.cuda:
         return CUDA_VERSION_MAP[torch.version.cuda]["pytorch_url"]
     elif torch.version.hip:

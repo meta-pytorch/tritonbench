@@ -29,9 +29,11 @@ if not has_pkg("torch"):
     from tools.torch_utils import install_pytorch_nightly
 
     env = os.environ
-    toolkit_version = CUDA_VERSION_MAP[DEFAULT_CUDA_VERSION]["pytorch_url"] \
-        if shutil.which("nvidia-smi") \
+    toolkit_version = (
+        CUDA_VERSION_MAP[DEFAULT_CUDA_VERSION]["pytorch_url"]
+        if shutil.which("nvidia-smi")
         else HIP_VERSION_MAP[DEFAULT_HIP_VERSION]["pytorch_url"]
+    )
     install_pytorch_nightly(toolkit_version, env)
 
 # requires torch
@@ -106,10 +108,14 @@ if __name__ == "__main__":
         "--fbgemm", action="store_true", help="Install prebuilt FBGEMM GPU (genai only)"
     )
     parser.add_argument(
-        "--fbgemm-compile", action="store_true", help="Compile and install FBGEMM GPU (genai only)"
+        "--fbgemm-compile",
+        action="store_true",
+        help="Compile and install FBGEMM GPU (genai only)",
     )
     parser.add_argument(
-        "--fbgemm-all", action="store_true", help="Compoile and install all FBGEMM GPU kernels."
+        "--fbgemm-all",
+        action="store_true",
+        help="Compoile and install all FBGEMM GPU kernels.",
     )
     parser.add_argument(
         "--fa2", action="store_true", help="Install optional flash_attention 2 kernels"
@@ -162,11 +168,13 @@ if __name__ == "__main__":
     if args.fbgemm or args.all:
         logger.info("[tritonbench] installing prebuilt FBGEMM GenAI variant...")
         from tools.fbgemm.install import install_fbgemm, test_fbgemm
+
         install_fbgemm(genai=True, prebuilt=True)
         test_fbgemm()
     elif args.fbgemm_compile or args.fbgemm_all:
         logger.info("[tritonbench] compiling and installing FBGEMM...")
         from tools.fbgemm.install import install_fbgemm, test_fbgemm
+
         install_fbgemm(genai=(not args.fbgemm_all), prebuilt=False)
         test_fbgemm()
     if args.fa2:

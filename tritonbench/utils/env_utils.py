@@ -40,6 +40,7 @@ def is_fbcode() -> bool:
 def is_cuda() -> bool:
     return torch.version.cuda is not None
 
+
 def get_nvidia_gpu_model() -> str:
     """
     Retrieves the model of the NVIDIA GPU being used.

@@ -21,7 +21,14 @@ def install_fbgemm(genai=True, prebuilt=True):
 def install_prebuilt_fbgemm(genai=True):
     assert genai, "in prebuilt fbgemm package, we only support genai now"
     toolkit_version = get_toolkit_version_from_torch()
-    cmd = ["pip", "install", "--pre", "fbgemm-gpu-genai", "-i", f"https://download.pytorch.org/whl/nightly/{toolkit_version}"]
+    cmd = [
+        "pip",
+        "install",
+        "--pre",
+        "fbgemm-gpu-genai",
+        "-i",
+        f"https://download.pytorch.org/whl/nightly/{toolkit_version}",
+    ]
     subprocess.check_call(cmd)
 
 
@@ -46,12 +53,10 @@ def install_build_fbgemm(genai=True):
             cmd = [
                 "bash",
                 "-c",
-                f". .github/scripts/setup_env.bash; test_fbgemm_gpu_build_and_install {current_conda_env} genai/rocm \"{fbgemm_repo_path}\"",
+                f'. .github/scripts/setup_env.bash; test_fbgemm_gpu_build_and_install {current_conda_env} genai/rocm "{fbgemm_repo_path}"',
             ]
             extra_envs["BUILD_ROCM_VERSION"] = "7.0"
-            subprocess.check_call(
-                cmd, cwd=fbgemm_repo_path, env=extra_envs
-            )
+            subprocess.check_call(cmd, cwd=fbgemm_repo_path, env=extra_envs)
             return
     else:
         cmd = [
@@ -62,6 +67,7 @@ def install_build_fbgemm(genai=True):
             "-DTORCH_CUDA_ARCH_LIST=9.0;9.0a;10.0;12.0",
         ]
     subprocess.check_call(cmd, cwd=str(FBGEMM_PATH.resolve()), env=extra_envs)
+
 
 def test_fbgemm():
     print("Checking fbgemm_gpu installation...", end="")
