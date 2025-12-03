@@ -68,8 +68,8 @@ RUN cd /workspace/tritonbench && \
 # Install PyTorch nightly and verify the date is correct
 RUN cd /workspace/tritonbench && \
     . ${SETUP_SCRIPT} && \
-    python -m tools.cuda_utils --install-torch-deps --hip && \
-    python -m tools.cuda_utils --install-torch-nightly --hip
+    python -m tools.cuda_utils --install-torch-deps && \
+    python -m tools.cuda_utils --install-torch-nightly
 
 # Check the installed version of nightly if needed
 RUN cd /workspace/tritonbench && \
