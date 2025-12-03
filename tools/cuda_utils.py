@@ -25,6 +25,10 @@ HIP_VERSION_MAP = {
     }
 }
 
+IS_CUDA = shutil.which("nvidia-smi") is not None
+
+DEFAULT_TOOLKIT_VERSION = DEFAULT_CUDA_VERSION if IS_CUDA else DEFAULT_HIP_VERSION
+TOOLKIT_MAPPING = CUDA_VERSION_MAP if IS_CUDA else HIP_VERSION_MAP
 
 def detect_cuda_version_with_nvcc(env):
     test_nvcc = ["nvcc", "--version"]
@@ -106,13 +110,13 @@ def get_toolkit_version_from_torch(key="pytorch_url") -> str:
     import torch
 
     if torch.version.cuda:
-        return CUDA_VERSION_MAP[torch.version.cuda]["pytorch_url"]
+        return CUDA_VERSION_MAP[torch.version.cuda][key]
     elif torch.version.hip:
         hip_version_split = torch.version.hip.split(".")
-        if len(hip_version_split) <= 2:
+        if len(hip_version_split) < 2:
             raise RuntimeError(f"Unexpected hip version {torch.version.hip}")
         hip_version_truncated = hip_version_split[0] + "." + hip_version_split[1]
-        return HIP_VERSION_MAP[hip_version_truncated]["pytorch_url"]
+        return HIP_VERSION_MAP[hip_version_truncated][key]
     else:
         raise RuntimeError("No CUDA or ROCm version found in torch version.")
 
@@ -121,9 +125,9 @@ if __name__ == "__main__":
     parser = argparse.ArgumentParser()
     parser.add_argument(
         "--toolkit-version",
+        default=DEFAULT_TOOLKIT_VERSION,
         help="Specify the default CUDA/HIP version",
     )
-    parser.add_argument("--hip", action="store_true", help="Setup ROCm environment")
     parser.add_argument(
         "--setup-cuda-softlink",
         action="store_true",
@@ -155,12 +159,8 @@ if __name__ == "__main__":
     )
     args = parser.parse_args()
     if args.setup_cuda_softlink:
-        setup_cuda_softlink(cuda_version=args.cudaver)
-    if not args.toolkit_version:
-        if args.hip:
-            args.toolkit_version = DEFAULT_HIP_VERSION
-        else:
-            args.toolkit_version = DEFAULT_CUDA_VERSION
+        assert IS_CUDA, "Error: CUDA is not available on this machine."
+        setup_cuda_softlink(cuda_version=args.toolkit_version)
     if args.install_torch_deps:
         install_torch_deps()
     if args.install_torch_build_deps:
@@ -169,10 +169,7 @@ if __name__ == "__main__":
         install_torch_deps()
         install_torch_build_deps()
     if args.install_torch_nightly:
-        if args.hip:
-            toolkit_version = HIP_VERSION_MAP[args.tookit_version]["pytorch_url"]
-        else:
-            toolkit_version = CUDA_VERSION_MAP[args.tookit_version]["pytorch_url"]
+        toolkit_version = TOOLKIT_MAPPING[args.toolkit_version]["pytorch_url"]
         install_pytorch_nightly(toolkit_version=toolkit_version, env=os.environ)
     if args.check_torch_nightly_version:
         from .torch_utils import check_torch_nightly_version
