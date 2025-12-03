@@ -158,7 +158,6 @@ def _gdpa_fwd_inner_ws(
             p = qk
 
         p *= qk_scale
-        p = p.to(v_dtype)
 
         if enable_tma:
             v = desc_v.load(
@@ -308,6 +307,7 @@ def _gdpa_fwd_compute(
     start_m = pid
     q_offset = off_h.to(tl.int64) * stride_qh
     kv_offset = off_h_kv.to(tl.int64) * stride_kh
+    o_offset = off_h.to(tl.int64) * stride_oh
 
     begin_q = tl.load(Q_offsets + off_q_z)
     end_q = tl.load(Q_offsets + off_q_z + 1)
@@ -341,10 +341,16 @@ def _gdpa_fwd_compute(
         Q_block_ptr = None
         K_block_ptr = None
         V_block_ptr = None
+        O_block_ptr = None
         desc_q = None
+        desc_out = None
         # can not reuse desc_k. jit error
         desc_k_tmp = None
         desc_v_tmp = None
+        # initialize offsets
+        offs_m = start_m * BLOCK_M + tl.arange(0, BLOCK_M)
+        offs_n = tl.arange(0, BLOCK_N)
+        offs_d = tl.arange(0, BLOCK_D)
         if not enable_tma:
             Q_block_ptr = tl.make_block_ptr(
                 base=Q + q_offset + begin_q * stride_qm,
@@ -373,12 +379,24 @@ def _gdpa_fwd_compute(
                 block_shape=(BLOCK_D, BLOCK_N),
                 order=(0, 1),
             )
+            O_block_ptr = (
+                Out
+                + off_h.to(tl.int64) * stride_oh
+                + begin_o * stride_om
+                + (offs_m[:, None] * stride_om + offs_d[None, :] * stride_ok)
+            )
         else:
             desc_q = tl.make_tensor_descriptor(
                 Q,
                 block_shape=[BLOCK_M // NUM_CONSUMER_GROUPS, BLOCK_D],
                 shape=[end_q.to(tl.int32), HEAD_DIM * H],
                 strides=[stride_qm, stride_qk],
+            )
+            desc_out = tl.make_tensor_descriptor(
+                Out,
+                block_shape=[BLOCK_M // NUM_CONSUMER_GROUPS, BLOCK_D],
+                shape=[end_q.to(tl.int32), HEAD_DIM * H],
+                strides=[stride_om, stride_ok],
             )
             if not IS_DENSE_KV:
                 desc_k_tmp = tl.make_tensor_descriptor(
@@ -393,18 +411,6 @@ def _gdpa_fwd_compute(
                     shape=[end_k.to(tl.int32), HEAD_DIM * H // G],
                     strides=[stride_kn, stride_kk],
                 )
-
-        # initialize offsets
-        offs_m = start_m * BLOCK_M + tl.arange(0, BLOCK_M)
-        offs_n = tl.arange(0, BLOCK_N)
-        offs_d = tl.arange(0, BLOCK_D)
-
-        o_ptrs = (
-            Out
-            + off_h.to(tl.int64) * stride_oh
-            + begin_o * stride_om
-            + (offs_m[:, None] * stride_om + offs_d[None, :] * stride_ok)
-        )
 
         acc = tl.zeros([BLOCK_M, BLOCK_D], dtype=tl.float32)
 
@@ -454,11 +460,19 @@ def _gdpa_fwd_compute(
         )
 
         # epilogue
-        o_mask = (offs_m[:, None] < qlen) & (offs_d[None, :] < HEAD_DIM)
         if WINDOW_SIZE is not None:
             acc = tl.where(offs_m[:, None] < (klen + WINDOW_SIZE), acc, 0.0)
 
-        tl.store(o_ptrs, acc.to(Out.type.element_ty), mask=o_mask)
+        if enable_tma:
+            desc_out.store(
+                [
+                    (begin_q + start_m * BLOCK_M).to(tl.int32),
+                    (o_offset).to(tl.int32),
+                ], acc.to(Out.type.element_ty),
+            )
+        else:
+            o_mask = (offs_m[:, None] < qlen) & (offs_d[None, :] < HEAD_DIM)
+            tl.store(O_block_ptr, acc.to(Out.type.element_ty), mask=o_mask)
 
 
 @triton.jit
