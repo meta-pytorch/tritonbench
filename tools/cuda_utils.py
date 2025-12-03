@@ -8,7 +8,7 @@ from .torch_utils import install_pytorch_nightly
 
 # defines the default CUDA version to compile against
 DEFAULT_CUDA_VERSION = "12.8"
-DEFAULT_HIP_VERSION = "7.0.2"
+DEFAULT_HIP_VERSION = "7.0"
 
 # the key is the value of `torch.version.cuda`
 CUDA_VERSION_MAP = {
@@ -120,10 +120,10 @@ def get_toolkit_version_from_torch(key="pytorch_url") -> str:
 if __name__ == "__main__":
     parser = argparse.ArgumentParser()
     parser.add_argument(
-        "--cudaver",
-        default=DEFAULT_CUDA_VERSION,
-        help="Specify the default CUDA version",
+        "--toolkit-version",
+        help="Specify the default CUDA/HIP version",
     )
+    parser.add_argument("--hip", action="store_true", help="Setup ROCm environment")
     parser.add_argument(
         "--setup-cuda-softlink",
         action="store_true",
@@ -156,6 +156,11 @@ if __name__ == "__main__":
     args = parser.parse_args()
     if args.setup_cuda_softlink:
         setup_cuda_softlink(cuda_version=args.cudaver)
+    if not args.toolkit_version:
+        if args.hip:
+            args.toolkit_version = DEFAULT_HIP_VERSION
+        else:
+            args.toolkit_version = DEFAULT_CUDA_VERSION
     if args.install_torch_deps:
         install_torch_deps()
     if args.install_torch_build_deps:
@@ -164,8 +169,11 @@ if __name__ == "__main__":
         install_torch_deps()
         install_torch_build_deps()
     if args.install_torch_nightly:
-        pytorch_cuda_version = CUDA_VERSION_MAP[args.cudaver]["pytorch_url"]
-        install_pytorch_nightly(cuda_version=pytorch_cuda_version, env=os.environ)
+        if args.hip:
+            toolkit_version = HIP_VERSION_MAP[args.tookit_version]["pytorch_url"]
+        else:
+            toolkit_version = CUDA_VERSION_MAP[args.tookit_version]["pytorch_url"]
+        install_pytorch_nightly(toolkit_version=toolkit_version, env=os.environ)
     if args.check_torch_nightly_version:
         from .torch_utils import check_torch_nightly_version
 
