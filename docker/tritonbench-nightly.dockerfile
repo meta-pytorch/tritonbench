@@ -61,9 +61,10 @@ RUN cd /workspace/tritonbench && \
     echo "if [ -z \${CONDA_ENV} ]; then export CONDA_ENV=${CONDA_ENV}; fi" >> /workspace/setup_instance.sh && \
     echo "conda activate \${CONDA_ENV}" >> /workspace/setup_instance.sh
 
+# Preserve env in sudo
 RUN cd /workspace/tritonbench && \
     . ${SETUP_SCRIPT} && \
-    sudo python -m tools.cuda_utils --setup-cuda-softlink
+    sudo -E python -m tools.cuda_utils --setup-cuda-softlink
 
 # Install PyTorch nightly and verify the date is correct
 RUN cd /workspace/tritonbench && \
