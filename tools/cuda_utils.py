@@ -20,7 +20,7 @@ CUDA_VERSION_MAP = {
 
 # the key is the value of `torch.version.hip`
 HIP_VERSION_MAP = {
-    "7.0.2": {
+    "7.0": {
         "pytorch_url": "rocm7.0",
     }
 }
@@ -108,7 +108,11 @@ def get_toolkit_version_from_torch(key="pytorch_url") -> str:
     if torch.version.cuda:
         return CUDA_VERSION_MAP[torch.version.cuda]["pytorch_url"]
     elif torch.version.hip:
-        return HIP_VERSION_MAP[torch.version.hip]["pytorch_url"]
+        hip_version_split = torch.version.hip.split(".")
+        if len(hip_version_split) <= 2:
+            raise RuntimeError(f"Unexpected hip version {torch.version.hip}")
+        hip_version_truncated = hip_version_split[0] + "." + hip_version_split[1]
+        return HIP_VERSION_MAP[hip_version_truncated]["pytorch_url"]
     else:
         raise RuntimeError("No CUDA or ROCm version found in torch version.")
 
