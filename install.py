@@ -70,14 +70,15 @@ def install_fbgemm(genai=True):
         elif is_hip():
             # build for MI300(gfx942) and MI350(gfx950)
             current_conda_env = os.environ.get("CONDA_DEFAULT_ENV")
+            fbgemm_repo_path = str(FBGEMM_PATH.parent.resolve())
             cmd = [
                 "bash",
                 "-c",
-                f". .github/scripts/setup_env.bash; test_fbgemm_gpu_build_and_install {current_conda_env} genai/rocm",
+                f". .github/scripts/setup_env.bash; test_fbgemm_gpu_build_and_install {current_conda_env} genai/rocm \"{fbgemm_repo_path}\"",
             ]
             extra_envs["BUILD_ROCM_VERSION"] = "7.0"
             subprocess.check_call(
-                cmd, cwd=str(FBGEMM_PATH.parent.resolve()), env=extra_envs
+                cmd, cwd=fbgemm_repo_path, env=extra_envs
             )
             return
     else:
