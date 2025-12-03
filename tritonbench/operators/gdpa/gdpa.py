@@ -20,10 +20,8 @@ from typing import Tuple
 
 import torch
 import torch.nn.functional as F
-
 import triton  # @manual=//triton:triton
 import triton.language as tl  # @manual=//triton:triton
-
 from torch._library.triton import capture_triton
 from triton.tools.tensor_descriptor import TensorDescriptor
 
@@ -468,7 +466,8 @@ def _gdpa_fwd_compute(
                 [
                     (begin_q + start_m * BLOCK_M).to(tl.int32),
                     (o_offset).to(tl.int32),
-                ], acc.to(Out.type.element_ty),
+                ],
+                acc.to(Out.type.element_ty),
             )
         else:
             o_mask = (offs_m[:, None] < qlen) & (offs_d[None, :] < HEAD_DIM)
