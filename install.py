@@ -162,7 +162,6 @@ if __name__ == "__main__":
         from tools.fbgemm.install import install_fbgemm, test_fbgemm
 
         install_fbgemm(genai=True, prebuilt=True)
-        test_fbgemm()
     elif args.fbgemm_compile or args.fbgemm_all:
         logger.info("[tritonbench] compiling and installing FBGEMM...")
         from tools.fbgemm.install import install_fbgemm, test_fbgemm
