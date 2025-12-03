@@ -8,12 +8,21 @@ from .torch_utils import install_pytorch_nightly
 
 # defines the default CUDA version to compile against
 DEFAULT_CUDA_VERSION = "12.8"
+DEFAULT_HIP_VERSION = "7.0.2"
 
+# the key is the value of `torch.version.cuda`
 CUDA_VERSION_MAP = {
     "12.8": {
         "pytorch_url": "cu128",
         "jax": "jax[cuda12]",
     },
+}
+
+# the key is the value of `torch.version.hip`
+HIP_VERSION_MAP = {
+    "7.0.2": {
+        "pytorch_url": "rocm7.0",
+    }
 }
 
 
@@ -91,6 +100,16 @@ def install_torch_deps():
     conda_deps = ["libstdcxx-ng=12.3.0"]
     cmd = ["conda", "install", "-y", "-c", "conda-forge"] + conda_deps
     subprocess.check_call(cmd)
+
+
+def get_toolkit_version_from_torch(key="pytorch_url")  -> str:
+    import torch
+    if torch.version.cuda:
+        return CUDA_VERSION_MAP[torch.version.cuda]["pytorch_url"]
+    elif torch.version.hip:
+        return HIP_VERSION_MAP[torch.version.hip]["pytorch_url"]
+    else:
+        raise RuntimeError("No CUDA or ROCm version found in torch version.")
 
 
 if __name__ == "__main__":

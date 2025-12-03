@@ -5,7 +5,7 @@ import sys
 from pathlib import Path
 
 # requires torch
-from tritonbench.utils.env_utils import is_hip
+from ..cuda_utils import get_toolkit_version_from_torch
 
 REPO_PATH = Path(os.path.abspath(__file__)).parent.parent.parent
 FBGEMM_PATH = REPO_PATH.joinpath("submodules", "FBGEMM", "fbgemm_gpu")
@@ -20,7 +20,8 @@ def install_fbgemm(genai=True, prebuilt=True):
 
 def install_prebuilt_fbgemm(genai=True):
     assert genai, "in prebuilt fbgemm package, we only support genai now"
-    cmd = ["pip", "install", "--pre", "fbgemm-gpu-genai", "-i", "https://download.pytorch.org/whl/nightly/fbgemm-gpu-genai/"]
+    toolkit_version = get_toolkit_version_from_torch()
+    cmd = ["pip", "install", "--pre", "fbgemm-gpu-genai", "-i", f"https://download.pytorch.org/whl/nightly/{toolkit_version}"]
     subprocess.check_call(cmd)
 
 

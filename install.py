@@ -1,11 +1,17 @@
 import argparse
 import logging
 import os
+import shutil
 import subprocess
 import sys
 from pathlib import Path
 
-from tools.cuda_utils import CUDA_VERSION_MAP, DEFAULT_CUDA_VERSION
+from tools.cuda_utils import (
+    CUDA_VERSION_MAP,
+    DEFAULT_CUDA_VERSION,
+    DEFAULT_HIP_VERSION,
+    HIP_VERSION_MAP,
+)
 from tools.git_utils import checkout_submodules
 from tools.python_utils import (
     generate_build_constraints,
@@ -23,8 +29,10 @@ if not has_pkg("torch"):
     from tools.torch_utils import install_pytorch_nightly
 
     env = os.environ
-    cuda_version = CUDA_VERSION_MAP[DEFAULT_CUDA_VERSION]["pytorch_url"]
-    install_pytorch_nightly(cuda_version, env)
+    toolkit_version = CUDA_VERSION_MAP[DEFAULT_CUDA_VERSION]["pytorch_url"] \
+        if shutil.which("nvidia-smi") \
+        else HIP_VERSION_MAP[DEFAULT_HIP_VERSION]["pytorch_url"]
+    install_pytorch_nightly(toolkit_version, env)
 
 # requires torch
 from tritonbench.utils.env_utils import is_hip
