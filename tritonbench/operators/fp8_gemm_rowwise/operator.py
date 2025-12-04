@@ -6,7 +6,7 @@ import triton
 
 from tritonbench.utils.data_utils import get_production_shapes
 
-from tritonbench.utils.env_utils import get_nvidia_gpu_model, is_cuda, is_hip
+from tritonbench.utils.env_utils import get_nvidia_gpu_model, is_cuda, is_hip, is_fbcode
 
 from tritonbench.utils.triton_op import (
     BenchmarkOperator,
@@ -223,7 +223,7 @@ class Operator(BenchmarkOperator):
         )
 
     @register_benchmark(
-        enabled=HAS_CUTLASS_OR_CK,
+        enabled=HAS_CUTLASS_OR_CK and is_fbcode(),
         label="ck" if torch.version.hip else "cutlass",
         baseline=True,
     )

@@ -54,6 +54,7 @@ from typing import Any, Callable, Generator, List, Optional, Tuple
 import torch
 import triton
 
+from tritonbench.utils.env_utils import is_fbcode
 from tritonbench.utils.data_utils import get_production_shapes
 
 from tritonbench.utils.triton_op import (
@@ -418,7 +419,7 @@ class Operator(BenchmarkOperator):
         )
 
     @register_benchmark(
-        enabled=HAS_CUTLASS_OR_CK,
+        enabled=HAS_CUTLASS_OR_CK and is_fbcode(),
         label="ck" if torch.version.hip else "cutlass",
     )
     def _cutlass_or_ck(self, group_A, group_B, m_sizes, a_scale, b_scale) -> Callable:
