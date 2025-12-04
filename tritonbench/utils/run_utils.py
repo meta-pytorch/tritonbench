@@ -52,8 +52,8 @@ BWD_ARGS_OPS = {
     ],
 }
 
+logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger(__name__)
-logger.setLevel(logging.DEBUG)
 
 
 def get_run_env(
@@ -115,7 +115,7 @@ def run_in_helion(op_args: Dict[str, str], extra_envs: Dict[str, str]):
     environ = os.environ.copy()
     environ.update(extra_envs)
     cmd = [sys.executable, "benchmarks/run.py"] + op_args
-    print(
+    logger.info(
         f"[tritonbench] Running helion benchmark: " + " ".join(cmd),
         flush=True,
     )
@@ -255,12 +255,12 @@ def _run(args: argparse.Namespace, extra_args: List[str]) -> BenchmarkOperatorRe
             try:
                 opbench.plot()
             except NotImplementedError:
-                print(f"Plotting is not implemented for {args.op}")
+                logger.error(f"Plotting is not implemented for {args.op}")
 
         if args.output:
             with open(args.output, "w") as f:
                 metrics.write_csv_to_file(f)
-            print(f"[tritonbench] Output result csv to {args.output}")
+            logger.info(f"[tritonbench] Output result csv to {args.output}")
         if args.output_json:
             with open(args.output_json, "w") as f:
                 metrics.write_json_to_file(f)
@@ -366,11 +366,11 @@ def run_in_task(
     if not is_fbcode() and not op_task_cmd[1] == "run.py":
         op_task_cmd.insert(1, "run.py")
     try:
+        # if simple output, disable all the logs
+        if "--simple-output" in op_task_cmd:
+            logger.setLevel(logging.ERROR)
         start_time = time.perf_counter()
-        print(
-            f"[tritonbench] Start {benchmark_name}: " + " ".join(op_task_cmd),
-            flush=True,
-        )
+        logger.info(f"[tritonbench] Start {benchmark_name}: " + " ".join(op_task_cmd))
         subprocess_env = os.environ.copy()
         subprocess_env.update(extra_envs or {})
         subprocess.check_call(
@@ -381,10 +381,8 @@ def run_in_task(
             env=subprocess_env,
         )
         benchmark_time = time.perf_counter() - start_time
-        print(
-            f"[tritonbench] Finish {benchmark_name} in {benchmark_time:.3f} seconds.",
-            flush=True,
-        )
+        logger.info(
+            f"[tritonbench] Finish {benchmark_name} in {benchmark_time:.3f} seconds.")
     except subprocess.CalledProcessError:
         # By default, we will continue on the failed operators
         pass
