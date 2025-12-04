@@ -1730,6 +1730,7 @@ class BenchmarkOperator(metaclass=PostInitProcessor):
                         self.tb_args, "entropy_max_samples", 10000
                     ),
                 )
+                metrics.latency.scale(self.get_latency_scale(self.example_inputs))
             if {
                 "gpu_peak_mem",
                 "gpu_mem_footprint_compression_ratio",
@@ -2433,3 +2434,6 @@ class BenchmarkOperator(metaclass=PostInitProcessor):
     def has_baseline(cls) -> Optional[str]:
         operator_name = cls.name
         return BASELINE_BENCHMARKS.get(operator_name, None)
+
+    def get_latency_scale(self, example_inputs):
+        return 1

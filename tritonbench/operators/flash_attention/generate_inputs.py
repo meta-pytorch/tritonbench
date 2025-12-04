@@ -1,7 +1,12 @@
+import math
 from itertools import chain
 from typing import Generator, Tuple
 
 import torch
+
+
+def get_bytes(x):
+    return x.numel() * x.element_size()
 
 
 def _get_standard_shapes(shape, num_inputs, dtype, device) -> Generator:
@@ -24,7 +29,7 @@ def _get_standard_shapes(shape, num_inputs, dtype, device) -> Generator:
 
 
 def _generated_qkv_inputs(
-    shape, dtype, device
+    shape, dtype, device, gen_cache_size_inputs
 ) -> Tuple[torch.Tensor, torch.Tensor, torch.Tensor]:
     requires_grad = True
 
@@ -51,12 +56,28 @@ def _generated_qkv_inputs(
         device=device,
         requires_grad=requires_grad,
     )
-    return (q, k, v)
+    inputs = [q, k, v]
+    if gen_cache_size_inputs:
+        q_bytes = get_bytes(q)
+        k_bytes = get_bytes(k)
+        v_bytes = get_bytes(v)
+        total_bytes = q_bytes + k_bytes + v_bytes
+        # Fix to 128 MB for now
+        min_bytes = 128 * 1024 * 1024
+        num_inputs = math.ceil(min_bytes / total_bytes)
+        for _ in range(num_inputs - 1):
+            inputs.append(q.clone().detach())
+            inputs.append(k.clone().detach())
+            inputs.append(v.clone().detach())
+    assert len(inputs) % 3 == 0
+    return tuple(inputs)
 
 
-def standard_inputs(shape, num_inputs, dtype, device) -> Generator:
+def standard_inputs(
+    shape, num_inputs, dtype, device, gen_cache_size_inputs
+) -> Generator:
     for shape in _get_standard_shapes(shape, num_inputs, dtype, device):  # noqa
-        yield _generated_qkv_inputs(shape, dtype, device)
+        yield _generated_qkv_inputs(shape, dtype, device, gen_cache_size_inputs)
 
 
 def additional_inputs(
@@ -67,6 +88,7 @@ def additional_inputs(
     add_production_shapes,
     name,
     shuffle_shapes,
+    gen_cache_size_inputs,
 ) -> Generator:
     standard_shapes = _get_standard_shapes(shape, num_inputs, dtype, device)
     llama_shapes = [
@@ -87,10 +109,10 @@ def additional_inputs(
             ),
         )
     for shape in shapes:
-        yield _generated_qkv_inputs(shape, dtype, device)
+        yield _generated_qkv_inputs(shape, dtype, device, gen_cache_size_inputs)
 
 
-def ragged_inputs(dtype, device) -> Generator:
+def ragged_inputs(dtype, device, gen_cache_size_inputs) -> Generator:
     additional_shapes = [
         (1024, 4, 1024, 128),
         (256, 4, 256, 128),
@@ -102,10 +124,10 @@ def ragged_inputs(dtype, device) -> Generator:
         (256, 4, 16384, 128),
     ]
     for shape in chain(additional_shapes):
-        yield _generated_qkv_inputs(shape, dtype, device)
+        yield _generated_qkv_inputs(shape, dtype, device, gen_cache_size_inputs)
 
 
-def sweep_inputs(dtype, device) -> Generator:
+def sweep_inputs(dtype, device, gen_cache_size_inputs) -> Generator:
     D = 128
     batch_sizes = [2**i for i in range(6)]
     num_heads = [1, 4, 8, 16]
@@ -114,5 +136,8 @@ def sweep_inputs(dtype, device) -> Generator:
         for H in num_heads:
             for S in seqlen:
                 yield _generated_qkv_inputs(
-                    shape=(B, H, S, D), dtype=dtype, device=device
+                    shape=(B, H, S, D),
+                    dtype=dtype,
+                    device=device,
+                    gen_cache_size_inputs=gen_cache_size_inputs,
                 )

@@ -127,6 +127,10 @@ class Latency:
     def to_float(self) -> float:
         return float(self.to_str())
 
+    def scale(self, scale):
+        for i in range(len(self.times)):
+            self.times[i] /= scale
+
 
 def _summarize_statistics(times, quantiles, return_mode):
     if quantiles is not None:

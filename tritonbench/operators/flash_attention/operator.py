@@ -35,6 +35,7 @@ import argparse
 import logging
 import os
 from contextlib import nullcontext
+from functools import partial
 
 from typing import Callable, Optional
 
@@ -118,7 +119,7 @@ with try_import("HAS_XFORMERS"):
 
     from .test_fmha_utils import permute_qkv
 
-from typing import Any, Generator, List
+from typing import Any, Generator, List, Tuple
 
 from tritonbench.utils.input import input_filter
 
@@ -168,7 +169,39 @@ def parse_op_args(args: List[str]):
     parser.add_argument(
         "--deterministic", action="store_true", help="Run with deterministic mode."
     )
+    parser.add_argument(
+        "--gen-cache-size-inputs",
+        action="store_true",
+        help="Generate inputs as large as the GPU L2 cache size",
+    )
     return parser.parse_args(args)
+
+
+def multi_input_wrapper(fn):
+    def wrapper(self, *args):
+        preproc_fn, benchmark_fn = fn(self, *args)
+        arg_len = len(args)
+        assert arg_len % 3 == 0
+        inputs = []
+        for i in range(0, arg_len, 3):
+            q, k, v = args[i : i + 3]
+            inp = preproc_fn(q, k, v)
+            inputs.append(inp)
+
+        def multi_input_fn():
+            outputs = []
+            for i in inputs:
+                outputs.append(benchmark_fn(*i))
+            return outputs
+
+        return multi_input_fn
+
+    wrapper.__name__ = fn.__name__
+    return wrapper
+
+
+def preproc_noop(*args):
+    return args
 
 
 class Operator(BenchmarkOperator):
@@ -201,15 +234,12 @@ class Operator(BenchmarkOperator):
                 "v3 support this mode)"
             )
             torch.use_deterministic_algorithms(True)
+        self.gen_cache_size_inputs = args.gen_cache_size_inputs
 
     @register_benchmark(baseline=True)
-    def aten(
-        self,
-        q: torch.Tensor,
-        k: torch.Tensor,
-        v: torch.Tensor,
-    ) -> Callable:
-        def _inner():
+    @multi_input_wrapper
+    def aten(self, *args) -> Tuple[Callable, Callable]:
+        def _inner(q, k, v):
             seq_len = q.shape[2]
             M = torch.tril(torch.ones((seq_len, seq_len), device=self.device))
             p = torch.matmul(q, k.transpose(2, 3)) * self.sm_scale
@@ -220,15 +250,11 @@ class Operator(BenchmarkOperator):
             ref_out = torch.matmul(p, v)
             return ref_out
 
-        return _inner
+        return preproc_noop, _inner
 
     @register_benchmark()
-    def sdpa(
-        self,
-        q: torch.Tensor,
-        k: torch.Tensor,
-        v: torch.Tensor,
-    ) -> Callable:
+    @multi_input_wrapper
+    def sdpa(self, *args) -> Tuple[Callable, Callable]:
         def sdpa_flash_attention(q, k, v):
             cxt = (
                 nullcontext()
@@ -254,58 +280,43 @@ class Operator(BenchmarkOperator):
                     scale=self.sm_scale,
                 )
 
-        return lambda: sdpa_flash_attention(
-            q,
-            k,
-            v,
-        )
+        return preproc_noop, sdpa_flash_attention
 
     @register_benchmark(enabled=HAS_FLASH_V2)  # noqa
-    def flash_v2(
-        self,
-        q: torch.Tensor,
-        k: torch.Tensor,
-        v: torch.Tensor,
-    ) -> Callable:
-        qkv = make_packed_qkv(q, k, v)
-        fn = lambda: flash_attn_func(
-            qkv,
+    @multi_input_wrapper
+    def flash_v2(self, *args) -> Tuple[Callable, Callable]:
+        def preproc(q, k, v):
+            return (make_packed_qkv(q, k, v),)
+
+        fn = partial(
+            flash_attn_func,
             softmax_scale=self.sm_scale,
             causal=self.causal,
             deterministic=self.deterministic,
         )
-        return fn
+        return preproc, fn
 
     @register_benchmark()
-    def triton_tutorial_flash_v2(
-        self,
-        q: torch.Tensor,
-        k: torch.Tensor,
-        v: torch.Tensor,
-    ) -> Callable:
-        # includes base (default scheduling) + opt (optimized loop scheduling based on heuristics)
-        return lambda: triton_tutorial_FA2_opt(
-            q, k, v, self.causal, self.sm_scale, "base_opt"
-        )
+    @multi_input_wrapper
+    def triton_tutorial_flash_v2(self, *args) -> Tuple[Callable, Callable]:
+        def fn(q, k, v):
+            # includes base (default scheduling) + opt (optimized loop scheduling based on heuristics)
+            return triton_tutorial_FA2_opt(
+                q, k, v, self.causal, self.sm_scale, "base_opt"
+            )
+
+        return preproc_noop, fn
 
     @register_benchmark(enabled=HAS_CUDA_124 and has_new_tma())
-    def triton_tutorial_flash_v2_tma(
-        self,
-        q: torch.Tensor,
-        k: torch.Tensor,
-        v: torch.Tensor,
-    ) -> Callable:
-        # autotune TMA/CompPipe
-        return lambda: triton_tutorial_FA2_opt(
-            q, k, v, self.causal, self.sm_scale, "tma"
-        )
+    @multi_input_wrapper
+    def triton_tutorial_flash_v2_tma(self, *args) -> Tuple[Callable, Callable]:
+        def fn(q, k, v):
+            # autotune TMA/CompPipe
+            return triton_tutorial_FA2_opt(q, k, v, self.causal, self.sm_scale, "tma")
 
-    def xformers_preprocess(
-        self,
-        q: torch.Tensor,
-        k: torch.Tensor,
-        v: torch.Tensor,
-    ):
+        return preproc_noop, fn
+
+    def xformers_preprocess(self, q, k, v):
         q_1, k_1, v_1 = permute_qkv(q, k, v, perm=(0, 2, 1, 3))
         attn_bias = xformers.ops.LowerTriangularMask() if self.causal else None
         fhma_input = xformers_fmha.Inputs(
@@ -315,35 +326,35 @@ class Operator(BenchmarkOperator):
 
     # Cutlass implementation is not supported on AMD GPUs.
     @register_benchmark(enabled=HAS_XFORMERS and not is_hip())  # noqa
-    def xformers(
-        self,
-        q: torch.Tensor,
-        k: torch.Tensor,
-        v: torch.Tensor,
-    ) -> Callable:
+    @multi_input_wrapper
+    def xformers(self, *args) -> Tuple[Callable, Callable]:
         need_gradient = not (self.mode == BenchmarkMode.FWD_NO_GRAD)
-        fhma_input = self.xformers_preprocess(q, k, v)
         xformers_cutlass_fhma = xformers.ops.fmha.cutlass.FwOp
-        return lambda: xformers_cutlass_fhma().apply(
-            fhma_input, needs_gradient=need_gradient
+
+        def preproc(q, k, v):
+            return (self.xformers_preprocess(q, k, v),)
+
+        fn = partial(
+            xformers_cutlass_fhma().apply,
+            needs_gradient=need_gradient,
         )
+        return preproc, fn
 
     @register_benchmark(enabled=HAS_XFORMERS, fwd_only=True)  # noqa
-    def xformers_splitk(
-        self,
-        q: torch.Tensor,
-        k: torch.Tensor,
-        v: torch.Tensor,
-    ):
+    @multi_input_wrapper
+    def xformers_splitk(self, *args):
         need_gradient = not (self.mode == BenchmarkMode.FWD_NO_GRAD)
-        fhma_input = self.xformers_preprocess(q, k, v)
         xformers_splitk_fhma = xformers_fmha.triton_splitk.FwOp
-        return lambda: xformers_splitk_fhma().apply(
-            fhma_input, needs_gradient=need_gradient
-        )
+
+        def preproc(q, k, v):
+            return (self.xformers_preprocess(q, k, v),)
+
+        fn = partial(xformers_splitk_fhma().apply, needs_gradient=need_gradient)
+        return preproc, fn
 
     @register_benchmark(enabled=False, label=f"cudnn-{torch.backends.cudnn.version()}")
-    def cudnn(self, q, k, v):
+    @multi_input_wrapper
+    def cudnn(self, *args):
         os.environ["TORCH_CUDNN_SDPA_ENABLED"] = "1"
 
         def sdpa_flash_attention(q, k, v):
@@ -356,135 +367,153 @@ class Operator(BenchmarkOperator):
                     scale=self.sm_scale,
                 )
 
-        return lambda: sdpa_flash_attention(
-            q,
-            k,
-            v,
-        )
+        return preproc_noop, sdpa_flash_attention
 
     if IS_B200:
         # Only enable calling this benchmark directly.
         @register_benchmark(enabled=False)
-        def proton_tutorial_flash_v2(
-            self,
-            q: torch.Tensor,
-            k: torch.Tensor,
-            v: torch.Tensor,
-        ) -> Callable:
+        @multi_input_wrapper
+        def proton_tutorial_flash_v2(self, *args) -> Tuple[Callable, Callable]:
             # includes base (default scheduling) + opt (optimized loop scheduling based on heuristics)
             # Also allows for TMA via WITH_TMA=1
-            return lambda: proton_tutorial_FA2_opt(
-                q, k, v, self.causal, self.sm_scale, "base_opt"
-            )
+            def fn(q, k, v):
+                return proton_tutorial_FA2_opt(
+                    q, k, v, self.causal, self.sm_scale, "base_opt"
+                )
+
+            return preproc_noop, fn
 
         # Only enable calling this benchmark directly.
         @register_benchmark(enabled=False)
+        @multi_input_wrapper
         def proton_blackwell_tutorial_flash_v2(
-            self,
-            q: torch.Tensor,
-            k: torch.Tensor,
-            v: torch.Tensor,
-        ) -> Callable:
+            self, *args
+        ) -> Tuple[Callable, Callable]:
             # Calls the Triton Tutorial from OAI without modification
             # without using the warp spec path.
-            return lambda: proton_blackwell_ws_FA2_opt(
-                q, k, v, self.causal, self.sm_scale, False
-            )
+            def fn(q, k, v):
+                return proton_blackwell_ws_FA2_opt(
+                    q, k, v, self.causal, self.sm_scale, False
+                )
+
+            return preproc_noop, fn
 
         # Only enable calling this benchmark directly.
         @register_benchmark(enabled=False)
+        @multi_input_wrapper
         def proton_blackwell_tutorial_flash_v2_ws(
-            self,
-            q: torch.Tensor,
-            k: torch.Tensor,
-            v: torch.Tensor,
-        ) -> Callable:
+            self, *args
+        ) -> Tuple[Callable, Callable]:
             # Calls the Triton Tutorial from OAI without modification
             # using the warp spec path.
-            return lambda: proton_blackwell_ws_FA2_opt(
-                q, k, v, self.causal, self.sm_scale, True
-            )
+            def fn(q, k, v):
+                return proton_blackwell_ws_FA2_opt(
+                    q,
+                    k,
+                    v,
+                    self.causal,
+                    self.sm_scale,
+                    True,
+                )
+
+            return preproc_noop, fn
 
     if not IS_B200:
 
         @register_benchmark(enabled=HAS_FLASH_V3)  # noqa
-        def flash_v3(
-            self,
-            q: torch.Tensor,
-            k: torch.Tensor,
-            v: torch.Tensor,
-        ) -> Callable:
-            # [B, H, S, D] -> [B, S, H, D]
-            q = q.transpose(1, 2).contiguous()
-            k = k.transpose(1, 2).contiguous()
-            v = v.transpose(1, 2).contiguous()
-            fn = lambda: flash_attn_v3(  # noqa
-                q, k, v, self.sm_scale, self.causal, deterministic=self.deterministic
-            )
-            return fn
+        @multi_input_wrapper
+        def flash_v3(self, *args) -> Tuple[Callable, Callable]:
+            def preproc(q, k, v):
+                # [B, H, S, D] -> [B, S, H, D]
+                q = q.transpose(1, 2).contiguous().detach()
+                k = k.transpose(1, 2).contiguous().detach()
+                v = v.transpose(1, 2).contiguous().detach()
+                q.requires_grad_()
+                k.requires_grad_()
+                v.requires_grad_()
+                return q, k, v
+
+            def fn(q, k, v):
+                return flash_attn_v3(  # noqa
+                    q,
+                    k,
+                    v,
+                    self.sm_scale,
+                    self.causal,
+                    deterministic=self.deterministic,
+                )
+
+            return preproc, fn
 
         @register_benchmark(enabled=HAS_CUDA_124 and has_warp_spec())
-        def triton_tutorial_flash_v2_ws(
-            self,
-            q: torch.Tensor,
-            k: torch.Tensor,
-            v: torch.Tensor,
-        ) -> Callable:
+        @multi_input_wrapper
+        def triton_tutorial_flash_v2_ws(self, *args) -> Tuple[Callable, Callable]:
             # autotune WarpSpec/CompPipe
-            return lambda: triton_tutorial_FA2_opt(
-                q, k, v, self.causal, self.sm_scale, "ws"
-            )
+            def fn(q, k, v):
+                return triton_tutorial_FA2_opt(
+                    q, k, v, self.causal, self.sm_scale, "ws"
+                )
+
+            return preproc_noop, fn
 
         @register_benchmark(enabled=HAS_CUDA_124 and has_warp_spec() and has_new_tma())
-        def triton_tutorial_flash_v2_tma_ws(
-            self,
-            q: torch.Tensor,
-            k: torch.Tensor,
-            v: torch.Tensor,
-        ) -> Callable:
+        @multi_input_wrapper
+        def triton_tutorial_flash_v2_tma_ws(self, *args) -> Tuple[Callable, Callable]:
             # autotune TMA/WarpSpec/CompPipe
-            return lambda: triton_tutorial_FA2_opt(
-                q, k, v, self.causal, self.sm_scale, "tma_ws"
-            )
+            def fn(q, k, v):
+                return triton_tutorial_FA2_opt(
+                    q, k, v, self.causal, self.sm_scale, "tma_ws"
+                )
+
+            return preproc_noop, fn
 
         @register_benchmark(enabled=HAS_CUDA_124 and has_warp_spec() and has_new_tma())
+        @multi_input_wrapper
         def triton_tutorial_flash_v2_tma_ws_persistent(
-            self,
-            q: torch.Tensor,
-            k: torch.Tensor,
-            v: torch.Tensor,
-        ) -> Callable:
+            self, *args
+        ) -> Tuple[Callable, Callable]:
             # autotune TMA/WarpSpec/CompPipe/Persistent
-            return lambda: triton_tutorial_FA2_opt(
-                q, k, v, self.causal, self.sm_scale, "tma_ws_persistent"
-            )
+            def fn(q, k, v):
+                return triton_tutorial_FA2_opt(
+                    q, k, v, self.causal, self.sm_scale, "tma_ws_persistent"
+                )
+
+            return preproc_noop, fn
 
         @register_benchmark(enabled=not is_fbcode() and HAS_TK)  # noqa
-        def tk(self, q, k, v):
-            def _inner():
+        @multi_input_wrapper
+        def tk(self, *args):
+            def _inner(q, k, v):
                 out = tk_attn(q, k, v, self.causal)
                 return out[0]
 
-            return _inner
+            return preproc_noop, _inner
 
         @register_benchmark(enabled=HAS_PALLAS)  # noqa
-        def pallas(self, q, k, v):
-            q = torch_to_jax_tensor(q)
-            k = torch_to_jax_tensor(k)
-            v = torch_to_jax_tensor(v)
+        @multi_input_wrapper
+        def pallas(self, *args):
+            def preproc(q, k, v):
+                q = torch_to_jax_tensor(q)
+                k = torch_to_jax_tensor(k)
+                v = torch_to_jax_tensor(v)
+                return q, k, v
 
-            def _inner():
+            def _inner(q, k, v):
                 pallas_mha(q, k, v, segment_ids=None)
                 jax.device_put(0.0).block_until_ready()
 
-            return _inner
+            return preproc, _inner
 
         @register_benchmark(enabled=HAS_TILELANG)  # noqa
-        def tile(self, q, k, v):
-            # [B, H, S, D] -> [B, S, H, D]
-            q = q.transpose(1, 2).contiguous()
-            k = k.transpose(1, 2).contiguous()
-            v = v.transpose(1, 2).contiguous()
+        @multi_input_wrapper
+        def tile(self, *args):
+            def preproc(q, k, v):
+                # [B, H, S, D] -> [B, S, H, D]
+                q = q.transpose(1, 2).contiguous()
+                k = k.transpose(1, 2).contiguous()
+                v = v.transpose(1, 2).contiguous()
+                return q, k, v
+
             best_config = tilelang_mha(
                 self.BATCH,
                 self.H,
@@ -504,14 +533,15 @@ class Operator(BenchmarkOperator):
             )(*best_config)
             jit_kernel = tilelang.compile(func, out_idx=[3])
 
-            def _inner():
+            def _inner(q, k, v):
                 o = jit_kernel(q, k, v)
                 return o
 
-            return _inner
+            return preproc, _inner
 
     @register_benchmark()
-    def flex_attention(self, q, k, v):
+    @multi_input_wrapper
+    def flex_attention(self, *args):
         from torch.nn.attention.flex_attention import create_block_mask, flex_attention
 
         def causal_mask(b, h, q_idx, kv_idx):
@@ -520,50 +550,57 @@ class Operator(BenchmarkOperator):
         flex_attention = torch.compile(flex_attention, dynamic=False)
 
         if self.causal:
-            B, H, S, D = q.shape
+            B, H, S, D = args[0].shape
             block_mask = create_block_mask(
                 causal_mask, B=None, H=None, Q_LEN=S, KV_LEN=S
             )
         else:
             block_mask = None
 
-        return lambda: flex_attention(q, k, v, block_mask=block_mask)
+        fn = partial(
+            flex_attention,
+            block_mask=block_mask,
+        )
+        return preproc_noop, fn
 
     def accuracy(self, fn, baseline_fn):
         """Override accuracy to use relaxed tolerance for bfloat16."""
-        output = fn()
-        baseline_output = baseline_fn()
+        output_list = fn()
+        baseline_output_list = baseline_fn()
 
-        # Check for NaN values
-        if torch.isnan(output).any():
-            return False
+        for output, baseline_output in zip(output_list, baseline_output_list):
+            # Check for NaN values
+            if torch.isnan(output).any():
+                return False
 
-        if output.dtype in [torch.bfloat16, torch.float16]:
-            default_rtol = 1e-2
-            default_atol = 2e-2
-        else:
-            default_rtol = 1e-5
-            default_atol = 1e-8
+            if output.dtype in [torch.bfloat16, torch.float16]:
+                default_rtol = 1e-2
+                default_atol = 2e-2
+            else:
+                default_rtol = 1e-5
+                default_atol = 1e-8
 
-        rtol = self.tb_args.rtol if self.tb_args.rtol is not None else default_rtol
-        atol = self.tb_args.atol if self.tb_args.atol is not None else default_atol
+            rtol = self.tb_args.rtol if self.tb_args.rtol is not None else default_rtol
+            atol = self.tb_args.atol if self.tb_args.atol is not None else default_atol
 
-        try:
-            torch.testing.assert_close(
-                output,
-                baseline_output,
-                rtol=rtol,
-                atol=atol,
-            )
-            return True
-        except Exception:
-            return False
+            try:
+                torch.testing.assert_close(
+                    output,
+                    baseline_output,
+                    rtol=rtol,
+                    atol=atol,
+                )
+                return True
+            except Exception:
+                return False
 
     @register_metric(x_only=True)
     def flops(
         self, fn_name: str, example_inputs: Any, metrics: BenchmarkOperatorMetrics
     ) -> float:
-        q, k, v = example_inputs
+        assert len(example_inputs) % 3 == 0
+        q, k, v = example_inputs[0:3]
+
         BATCH, H, N_CTX, D_HEAD = q.shape
         _, _, N_CTX_KV, _ = k.shape
         flops_per_matmul = 2.0 * BATCH * H * N_CTX * N_CTX_KV * D_HEAD
@@ -578,17 +615,22 @@ class Operator(BenchmarkOperator):
 
     def get_bwd_fn(self, fwd_fn: Callable) -> Callable:
         o = fwd_fn()
-        o_tensor = input_filter(
-            lambda x: isinstance(x, torch.Tensor),
-            o,
-        )
-        do = torch.rand_like(o_tensor)
-        fn = lambda: o_tensor.backward(do, retain_graph=True)
+        outputs = [input_filter(lambda x: isinstance(x, torch.Tensor), o_) for o_ in o]
+        dOs = [torch.rand_like(o_).detach() for o_ in outputs]
+
+        def fn():
+            for o_tensor, do in zip(outputs, dOs):
+                o_tensor.backward(do, retain_graph=True)
+
         return fn
 
     def get_input_iter(self) -> Generator:
         if self.input_types == "RAGGED_SHAPES":
-            return ragged_inputs(self.dtype, self.device)
+            return ragged_inputs(
+                self.dtype,
+                self.device,
+                gen_cache_size_inputs=self.gen_cache_size_inputs,
+            )
         elif self.input_types == "ADDITIONAL_SHAPES":
             return additional_inputs(
                 shape=(self.BATCH, self.H, self.SEQ_LEN, self.SEQ_LEN_KV, self.D_HEAD),
@@ -598,6 +640,7 @@ class Operator(BenchmarkOperator):
                 add_production_shapes=self.add_production_shapes,
                 name=self.name,
                 shuffle_shapes=self.tb_args.shuffle_shapes,
+                gen_cache_size_inputs=self.gen_cache_size_inputs,
             )
         elif self.input_types == "STANDARD_SHAPES":
             return standard_inputs(
@@ -605,15 +648,20 @@ class Operator(BenchmarkOperator):
                 num_inputs=self.tb_args.num_inputs,
                 dtype=self.dtype,
                 device=self.device,
+                gen_cache_size_inputs=self.gen_cache_size_inputs,
             )
         elif self.input_types == "SWEEP_SHAPES":
-            return sweep_inputs(self.dtype, self.device)
+            return sweep_inputs(
+                self.dtype,
+                self.device,
+                gen_cache_size_inputs=self.gen_cache_size_inputs,
+            )
         else:
             raise AssertionError(f"Unknown input type {self.input_types}")
 
     @register_x_val(label="(Batch, Heads, SeqLen, SeqLen_KV, Dhead)")
     def get_x_val(self, example_inputs) -> float:
-        q, k, v = example_inputs
+        q, k, v = example_inputs[0:3]
         B, H, S, D = q.shape
         _, _, S_KV, _ = k.shape
         return (B, H, S, S_KV, D)
@@ -663,3 +711,7 @@ class Operator(BenchmarkOperator):
         _plot.run(
             show_plots=True, print_data=False, save_path="/tmp/test_flashattention"
         )
+
+    def get_latency_scale(self, example_inputs):
+        assert len(example_inputs) % 3 == 0
+        return len(example_inputs) // 3
