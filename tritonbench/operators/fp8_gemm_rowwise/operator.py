@@ -6,7 +6,7 @@ import triton
 
 from tritonbench.utils.data_utils import get_production_shapes
 
-from tritonbench.utils.env_utils import get_nvidia_gpu_model, is_cuda, is_hip, is_fbcode
+from tritonbench.utils.env_utils import get_nvidia_gpu_model, is_cuda, is_fbcode, is_hip
 
 from tritonbench.utils.triton_op import (
     BenchmarkOperator,
