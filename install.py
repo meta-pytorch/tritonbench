@@ -5,10 +5,7 @@ import subprocess
 import sys
 from pathlib import Path
 
-from tools.cuda_utils import (
-    DEFAULT_TOOLKIT_VERSION,
-    TOOLKIT_MAPPING,
-)
+from tools.cuda_utils import DEFAULT_TOOLKIT_VERSION, TOOLKIT_MAPPING
 from tools.git_utils import checkout_submodules
 from tools.python_utils import (
     generate_build_constraints,
@@ -24,6 +21,7 @@ logger = logging.getLogger(__name__)
 # if torch does not exist
 if not has_pkg("torch"):
     from tools.torch_utils import install_pytorch_nightly
+
     env = os.environ
     toolkit_version = TOOLKIT_MAPPING[DEFAULT_TOOLKIT_VERSION]["pytorch_url"]
     install_pytorch_nightly(toolkit_version, env)

@@ -26,10 +26,13 @@ HIP_VERSION_MAP = {
     }
 }
 
-IS_CUDA = bool(shutil.which("nvidia-smi") is not None) or bool(os.environ.get("CUDA_HOME", None))
+IS_CUDA = bool(shutil.which("nvidia-smi") is not None) or bool(
+    os.environ.get("CUDA_HOME", None)
+)
 
 DEFAULT_TOOLKIT_VERSION = DEFAULT_CUDA_VERSION if IS_CUDA else DEFAULT_HIP_VERSION
 TOOLKIT_MAPPING = CUDA_VERSION_MAP if IS_CUDA else HIP_VERSION_MAP
+
 
 def detect_cuda_version_with_nvcc(env):
     test_nvcc = ["nvcc", "--version"]

@@ -382,7 +382,8 @@ def run_in_task(
         )
         benchmark_time = time.perf_counter() - start_time
         logger.info(
-            f"[tritonbench] Finish {benchmark_name} in {benchmark_time:.3f} seconds.")
+            f"[tritonbench] Finish {benchmark_name} in {benchmark_time:.3f} seconds."
+        )
     except subprocess.CalledProcessError:
         # By default, we will continue on the failed operators
         pass
