@@ -26,8 +26,8 @@ try:
 except ImportError:
     pass
 
-from tritonbench.utils.input import input_filter
 from tritonbench.utils.env_utils import is_hip
+from tritonbench.utils.input import input_filter
 from tritonbench.utils.triton_op import (
     BenchmarkOperator,
     BenchmarkOperatorMetrics,
