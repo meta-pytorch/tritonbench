@@ -1,6 +1,3 @@
-[submodule "submodules/FBGEMM"]
-	path = submodules/FBGEMM
-	url = https://github.com/pytorch/FBGEMM.git
 [submodule "submodules/flash-attention"]
 	path = submodules/flash-attention
 	url = https://github.com/Dao-AILab/flash-attention.git
