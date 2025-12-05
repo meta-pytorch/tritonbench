@@ -653,7 +653,9 @@ class Operator(BenchmarkOperator):
         def head_bias(score, b, h, m, n):
             return score + 2 * h
 
-        # AMD does not support tanh approximation w/flex attention
+        # TODO: AMD does not support tanh approximation w/flex attention for now
+        # need to use the fast_tanhf assembly at
+        # https://github.com/triton-lang/triton/blob/28e7587c5f67d8a744a50a0890fe4cd8431f5516/third_party/amd/language/hip/libdevice.py#L77
         approx = False if is_hip() else True
 
         function_dict = {
