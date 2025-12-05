@@ -375,6 +375,12 @@ def grouped_matmul_tlx_kernel(
             tile_idx = tl.program_id(0)
             last_problem_end = 0
             accum_cnt = 0
+            accum_cnt_outer = 0
+
+            # Allocate global scratch for tensor descriptors (pipelining)
+            desc_a_ptrs = tlx.allocate_tensor_descriptor(num=NUM_SMEM_BUFFERS + 1)
+            desc_b_ptrs = tlx.allocate_tensor_descriptor(num=NUM_SMEM_BUFFERS + 1)
+
             for g in range(group_size):
                 # get the gemm size of the current problem
                 gm = tl.load(group_gemm_sizes + g * 3)
@@ -396,15 +402,22 @@ def grouped_matmul_tlx_kernel(
                     a_ptr = tl.load(group_a_ptrs + g).to(tl.pointer_type(DTYPE))
                     b_ptr = tl.load(group_b_ptrs + g).to(tl.pointer_type(DTYPE))
 
-                    a_desc = tl.make_tensor_descriptor(
-                        a_ptr,
+                    desc_buf, _ = _get_bufidx_phase(
+                        accum_cnt_outer, NUM_SMEM_BUFFERS + 1
+                    )
+
+                    # Create tensor descriptors in global scratch (for pipelining across problems)
+                    tlx.make_tensor_descriptor(
+                        desc_ptr=desc_a_ptrs[desc_buf],
+                        base=a_ptr,
                         shape=[gm, gk],
                         strides=[lda, 1],
                         block_shape=[BLOCK_SIZE_M, BLOCK_SIZE_K],
                     )
 
-                    b_desc = tl.make_tensor_descriptor(
-                        b_ptr,
+                    tlx.make_tensor_descriptor(
+                        desc_ptr=desc_b_ptrs[desc_buf],
+                        base=b_ptr,
                         shape=[gk, gn],
                         strides=[ldb, 1],
                         block_shape=[BLOCK_SIZE_K, BLOCK_SIZE_N],
@@ -419,6 +432,18 @@ def grouped_matmul_tlx_kernel(
                         tile_idx_in_gemm = tile_idx - last_problem_end
                         tile_m_idx = tile_idx_in_gemm // num_n_tiles
                         tile_n_idx = tile_idx_in_gemm % num_n_tiles
+
+                        # Reinterpret descriptor pointers for TMA operations
+                        a_desc = tlx.reinterpret_tensor_descriptor(
+                            desc_ptr=desc_a_ptrs[desc_buf],
+                            block_shape=[BLOCK_SIZE_M, BLOCK_SIZE_K],
+                            dtype=DTYPE,
+                        )
+                        b_desc = tlx.reinterpret_tensor_descriptor(
+                            desc_ptr=desc_b_ptrs[desc_buf],
+                            block_shape=[BLOCK_SIZE_K, BLOCK_SIZE_N],
+                            dtype=DTYPE,
+                        )
 
                         # do regular gemm here
                         offs_am = tile_m_idx * BLOCK_SIZE_M
@@ -448,12 +473,7 @@ def grouped_matmul_tlx_kernel(
                         # go to the next tile by advancing NUM_SMS
                         tile_idx += NUM_SMS
 
-                # Wait for the last pair of TMA load to complete before doing
-                # the TMA desc update for the next gemm problem.
-                if num_k_tiles > 0:
-                    buf, phase = _get_bufidx_phase(accum_cnt - 1, NUM_SMEM_BUFFERS)
-                    tlx.barrier_wait(smem_full_bars[buf], phase)
-
+                    accum_cnt_outer += 1
                 # get ready to go to the next gemm problem
                 last_problem_end = last_problem_end + num_tiles
 
