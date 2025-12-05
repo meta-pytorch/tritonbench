@@ -136,15 +136,16 @@ class Operator(BenchmarkOperator):
         self.baseline_op = TorchLMHeadJSD(
             H=self.H, V=self.V, dtype=self.dtype, device=self.device
         )
-        self.liger_op = LigerLMHeadJSD(
-            H=self.H, V=self.V, dtype=self.dtype, device=self.device
-        )
-        self.baseline_op.student_lin.weight.data = (
-            self.liger_op.student_lin.weight.data
-        ) = torch.rand(self.V, self.H, device=self.device, dtype=self.dtype)
-        self.baseline_op.teacher_lin.weight.data = (
-            self.liger_op.teacher_lin.weight.data
-        ) = torch.rand(self.V, self.H, device=self.device, dtype=self.dtype)
+        if LigerFusedLinearJSD is not None:
+            self.liger_op = LigerLMHeadJSD(
+                H=self.H, V=self.V, dtype=self.dtype, device=self.device
+            )
+            self.baseline_op.student_lin.weight.data = (
+                self.liger_op.student_lin.weight.data
+            ) = torch.rand(self.V, self.H, device=self.device, dtype=self.dtype)
+            self.baseline_op.teacher_lin.weight.data = (
+                self.liger_op.teacher_lin.weight.data
+            ) = torch.rand(self.V, self.H, device=self.device, dtype=self.dtype)
 
     def get_input_iter(self) -> Generator:
         for BT in [2**i for i in range(10, 14)]:
@@ -158,7 +159,7 @@ class Operator(BenchmarkOperator):
     def torch_lm_head_jsd(self, student_input, teacher_input) -> Callable:
         return lambda: self.baseline_op(student_input, teacher_input)
 
-    @register_benchmark()
+    @register_benchmark(enabled=LigerFusedLinearJSD is not None)
     def liger_lm_head_jsd(self, student_input, teacher_input) -> Callable:
         return lambda: self.liger_op(student_input, teacher_input)
 
