@@ -144,7 +144,9 @@ class Operator(BenchmarkOperator):
     # On blackwell it fails with
     # "ERROR : Arch conditional MMA instruction used "
     # "without targeting appropriate compute capability. Aborting."
-    @register_benchmark(enabled=not is_b200(), baseline=True)
+    @register_benchmark(
+        enabled=HAS_CUTLASS and is_cuda() and not is_b200(), baseline=True
+    )
     def _cutlass(self, xq, wq, x_scale, w_scale) -> Callable:
         return lambda: cutlass_fp8_block(xq, wq, x_scale, w_scale)
 
