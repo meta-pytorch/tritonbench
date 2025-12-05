@@ -9,8 +9,9 @@ import argparse
 import math
 import os
 from contextlib import nullcontext
+from functools import partial
 
-from typing import Callable, Optional
+from typing import Callable, Optional, Tuple
 
 import torch
 
@@ -173,7 +174,39 @@ def parse_op_args(args: List[str]):
         choices=["CUSTOMIZED_SHAPES", "FA3_PAPER_SHAPES", "SWEEP_SHAPES"],
         help="specify input types",
     )
+    parser.add_argument(
+        "--gen-cache-size-inputs",
+        action="store_true",
+        help="Generate inputs as large as the GPU L2 cache size",
+    )
     return parser.parse_args(args)
+
+
+def multi_input_wrapper(fn):
+    def wrapper(self, *args):
+        preproc_fn, benchmark_fn = fn(self, *args)
+        arg_len = len(args)
+        assert arg_len % 3 == 0
+        inputs = []
+        for i in range(0, arg_len, 3):
+            q, k, v = args[i : i + 3]
+            inp = preproc_fn(q, k, v)
+            inputs.append(inp)
+
+        def multi_input_fn():
+            outputs = []
+            for i in inputs:
+                outputs.append(benchmark_fn(*i))
+            return outputs
+
+        return multi_input_fn
+
+    wrapper.__name__ = fn.__name__
+    return wrapper
+
+
+def preproc_noop(*args):
+    return args
 
 
 def _sdpa_cudnn_attention(q, k, v, is_causal=False, scale=False):
@@ -242,15 +275,12 @@ class Operator(BenchmarkOperator):
         self.input_types = args.input_types
         self.sm_scale = args.sm_scale if args.sm_scale else 1.0 / math.sqrt(self.D_HEAD)
         self.deterministic = args.deterministic
+        self.gen_cache_size_inputs = args.gen_cache_size_inputs
 
     @register_benchmark()
-    def aten(
-        self,
-        q: torch.Tensor,
-        k: torch.Tensor,
-        v: torch.Tensor,
-    ) -> Callable:
-        def _inner():
+    @multi_input_wrapper
+    def aten(self, *args) -> Tuple[Callable, Callable]:
+        def _inner(q, k, v):
             N_CTX = q.shape[2]
             N_CTX_KV = k.shape[2]
             p = torch.matmul(q, k.transpose(2, 3)) * self.sm_scale
@@ -273,15 +303,11 @@ class Operator(BenchmarkOperator):
             ref_out = torch.matmul(p, v)
             return ref_out
 
-        return _inner
+        return preproc_noop, _inner
 
     @register_benchmark()
-    def sdpa(
-        self,
-        q: torch.Tensor,
-        k: torch.Tensor,
-        v: torch.Tensor,
-    ) -> Callable:
+    @multi_input_wrapper
+    def sdpa(self, *args) -> Tuple[Callable, Callable]:
         if self.local:
             # sdpa with flash attention backend doesn't support non-null attn_mask
             raise NotImplementedError("Skip")
@@ -311,28 +337,22 @@ class Operator(BenchmarkOperator):
                     scale=self.sm_scale,
                 )
 
-        return lambda: sdpa_flash_attention(
-            q,
-            k,
-            v,
-        )
+        return preproc_noop, sdpa_flash_attention
 
     @register_benchmark(enabled=HAS_FLASH_V2)
-    def flash_v2(
-        self,
-        q: torch.Tensor,
-        k: torch.Tensor,
-        v: torch.Tensor,
-    ) -> Callable:
-        qkv = make_packed_qkv(q, k, v)
-        fn = lambda: flash_attn_func(
-            qkv,
+    @multi_input_wrapper
+    def flash_v2(self, *args) -> Tuple[Callable, Callable]:
+        def preproc(q, k, v):
+            return (make_packed_qkv(q, k, v),)
+
+        fn = partial(
+            flash_attn_func,
             softmax_scale=self.sm_scale,
             causal=self.causal,
             window_size=self.window_size,
             deterministic=self.deterministic,
         )
-        return fn
+        return preproc, fn
 
     def xformers_preprocess(
         self,
@@ -359,71 +379,66 @@ class Operator(BenchmarkOperator):
         fhma_input = xformers_fmha.Inputs(
             query=q_1, key=k_1, value=v_1, attn_bias=attn_bias, scale=self.sm_scale
         )
-        return fhma_input
+        return (fhma_input,)
 
     @register_benchmark(enabled=HAS_XFORMERS, label="cutlass-blackwell")
-    def cutlass_blackwell(
-        self,
-        q: torch.Tensor,
-        k: torch.Tensor,
-        v: torch.Tensor,
-    ) -> Callable:
-        fhma_input = self.xformers_preprocess(q, k, v)
-
-        return lambda: xformers.ops.fmha._memory_efficient_attention(
-            fhma_input,
+    @multi_input_wrapper
+    def cutlass_blackwell(self, *args) -> Tuple[Callable, Callable]:
+        fn = partial(
+            xformers.ops.fmha._memory_efficient_attention,
             op=MemoryEfficientAttentionCutlassBlackwellOp,
         )
+        return self.xformers_preprocess, fn
 
     @register_benchmark(enabled=HAS_XFORMERS, fwd_only=True)
-    def xformers_splitk(
-        self,
-        q: torch.Tensor,
-        k: torch.Tensor,
-        v: torch.Tensor,
-    ):
+    @multi_input_wrapper
+    def xformers_splitk(self, *args) -> Tuple[Callable, Callable]:
         if self.local or self.causal:
             # SplitK doesn't support local attention yet
             raise NotImplementedError("Skip")
         need_gradient = not (self.mode == BenchmarkMode.FWD_NO_GRAD)
-        fhma_input = self.xformers_preprocess(q, k, v)
         xformers_splitk_fhma = xformers_fmha.triton_splitk.FwOp
-        return lambda: xformers_splitk_fhma().apply(
-            fhma_input, needs_gradient=need_gradient
-        )
+        fn = partial(xformers_splitk_fhma().apply, needs_gradient=need_gradient)
+        return self.xformers_preprocess, fn
 
     @register_benchmark(
         enabled=IS_BLACKWELL and _is_sdpa_cudnn_attention_available(),
         label=f"cudnn-sdpa-{torch.backends.cudnn.version()}",
     )
-    def cudnn_sdpa(self, q, k, v):
+    @multi_input_wrapper
+    def cudnn_sdpa(self, *args) -> Tuple[Callable, Callable]:
         if self.local:
             # Skip CUDNN SDPA for local attention for now
             raise NotImplementedError("Skip")
 
-        return lambda: _sdpa_cudnn_attention(
-            q, k, v, is_causal=self.causal, scale=self.sm_scale
+        fn = partial(
+            _sdpa_cudnn_attention,
+            is_causal=self.causal,
+            scale=self.sm_scale,
         )
+        return preproc_noop, fn
 
     @register_benchmark(enabled=(IS_BLACKWELL and HAS_FLASH_CUTE), label="FAv4")
-    def cutedsl_blackwell(
-        self, q: torch.Tensor, k: torch.Tensor, v: torch.Tensor
-    ) -> Callable:
-        # [B, H, S, D] -> [B, S, H, D]
-        q = q.transpose(1, 2).contiguous()
-        k = k.transpose(1, 2).contiguous()
-        v = v.transpose(1, 2).contiguous()
-        return lambda: facute_flash_attn_func(
-            q,
-            k,
-            v,
+    @multi_input_wrapper
+    def cutedsl_blackwell(self, *args) -> Tuple[Callable, Callable]:
+        def preproc(q, k, v):
+            # [B, H, S, D] -> [B, S, H, D]
+            q = q.transpose(1, 2).contiguous()
+            k = k.transpose(1, 2).contiguous()
+            v = v.transpose(1, 2).contiguous()
+            return q, k, v
+
+        fn = partial(
+            facute_flash_attn_func,
             softmax_scale=self.sm_scale,
             causal=self.causal,
             window_size=self.window_size if self.local else (None, None),
         )
+        return preproc, fn
 
     @register_benchmark()
-    def flex_attention(self, q, k, v):
+    @multi_input_wrapper
+    def flex_attention(self, *args) -> Tuple[Callable, Callable]:
         from torch.nn.attention.flex_attention import create_block_mask, flex_attention
 
         def causal_mask(b, h, q_idx, kv_idx):
@@ -437,6 +452,9 @@ class Operator(BenchmarkOperator):
             return left_ok & right_ok
 
         flex_attention = torch.compile(flex_attention, dynamic=False)
+
+        assert len(args) % 3 == 0
+        q, k = args[0:2]
 
         B, H, S, D = q.shape
         _, _, S_KV, _ = k.shape
@@ -454,110 +472,77 @@ class Operator(BenchmarkOperator):
         else:
             block_mask = None
 
-        return lambda: flex_attention(q, k, v, block_mask=block_mask)
+        fn = partial(flex_attention, block_mask=block_mask)
+        return preproc_noop, fn
 
-    @register_benchmark(enabled=False)
-    def triton_tutorial_flash_v2_tma_ws_persistent_blackwell(
-        self,
-        q: torch.Tensor,
-        k: torch.Tensor,
-        v: torch.Tensor,
-    ) -> Callable:
-        return lambda: triton_tutorial_FA2_opt(
-            q, k, v, self.causal, self.sm_scale, "tma_ws_persistent_blackwell"
-        )
-
-    @register_benchmark(enabled=False)
-    def triton_tutorial_flash_v2_blackwell(
-        self,
-        q: torch.Tensor,
-        k: torch.Tensor,
-        v: torch.Tensor,
-    ) -> Callable:
-        return lambda: blackwell_triton_tutorial_FA2_opt(
-            q, k, v, self.causal, self.sm_scale, "ws"
-        )
-
-    @register_benchmark(enabled=False)
-    def triton_tutorial_flash_v2_persistent_blackwell(
-        self,
-        q: torch.Tensor,
-        k: torch.Tensor,
-        v: torch.Tensor,
-    ) -> Callable:
-        return lambda: blackwell_triton_tutorial_FA2_opt(
-            q, k, v, self.causal, self.sm_scale, "ws_persistent"
-        )
-
-    @register_benchmark(enabled=False)
-    def triton_tutorial_flash_dp_blackwell(
-        self,
-        q: torch.Tensor,
-        k: torch.Tensor,
-        v: torch.Tensor,
-    ) -> Callable:
-        return lambda: blackwell_triton_tutorial_FA2_dp(
-            q, k, v, self.causal, self.sm_scale, "ws"
-        )
-
-    @register_benchmark(enabled=is_blackwell() and HAS_BLACKWELL_AUTOWS, fwd_only=True)
+    # Disable for now due to the smem size problem
+    @register_benchmark(
+        enabled=False and is_blackwell() and HAS_BLACKWELL_AUTOWS, fwd_only=True
+    )
+    @multi_input_wrapper
     def triton_tutorial_flash_dp_persistent_blackwell(
-        self,
-        q: torch.Tensor,
-        k: torch.Tensor,
-        v: torch.Tensor,
-    ) -> Callable:
-        return lambda: blackwell_triton_tutorial_FA2_dp(
-            q, k, v, self.causal, self.sm_scale, "ws_persistent"
-        )
+        self, *args
+    ) -> Tuple[Callable, Callable]:
+        def fn(q, k, v):
+            return blackwell_triton_tutorial_FA2_dp(
+                q,
+                k,
+                v,
+                self.causal,
+                self.sm_scale,
+                "ws_persistent",
+            )
 
-    # Only works with triton main, forward only.
-    @register_benchmark(enabled=False)
-    def gluon_blackwell_tutorial_fwd(
-        self,
-        q: torch.Tensor,
-        k: torch.Tensor,
-        v: torch.Tensor,
-    ) -> Callable:
-        return lambda: gluon_blackwell_fwd(q, k, v, self.causal, self.sm_scale)
+        return preproc_noop, fn
 
     # Only works with triton main, forward only.
     @register_benchmark(enabled=SUPPORT_GLUON)
+    @multi_input_wrapper
     def gluon_blackwell_tutorial_persistent_fwd(
-        self,
-        q: torch.Tensor,
-        k: torch.Tensor,
-        v: torch.Tensor,
-    ) -> Callable:
-        return lambda: gluon_blackwell_persistent_fwd(
-            q, k, v, self.causal, self.sm_scale
+        self, *args
+    ) -> Tuple[Callable, Callable]:
+        fn = partial(
+            gluon_blackwell_persistent_fwd,
+            causal=self.causal,
+            sm_scale=self.sm_scale,
         )
+        return preproc_noop, fn
 
     # Only works with triton beta, forward only.
     @register_benchmark(enabled=HAS_TLX)
-    def tlx_blackwell_ws_pipelined_fwd(
-        self,
-        q: torch.Tensor,
-        k: torch.Tensor,
-        v: torch.Tensor,
-    ) -> Callable:
-        return lambda: tlx_blackwell(q, k, v, self.causal, self.sm_scale, False)
+    @multi_input_wrapper
+    def tlx_blackwell_ws_pipelined_fwd(self, *args) -> Tuple[Callable, Callable]:
+        def fn(q, k, v):
+            return tlx_blackwell(
+                q,
+                k,
+                v,
+                self.causal,
+                self.sm_scale,
+                False,
+            )
+
+        return preproc_noop, fn
 
     # Only works with triton beta.
     @register_benchmark(enabled=HAS_TLX)
-    def tlx_blackwell_ws_pipelined_persistent(
-        self,
-        q: torch.Tensor,
-        k: torch.Tensor,
-        v: torch.Tensor,
-    ) -> Callable:
-        return lambda: tlx_blackwell(q, k, v, self.causal, self.sm_scale, True)
+    @multi_input_wrapper
+    def tlx_blackwell_ws_pipelined_persistent(self, *args) -> Tuple[Callable, Callable]:
+        def fn(q, k, v):
+            return tlx_blackwell(
+                self.causal,
+                self.sm_scale,
+                True,
+            )
+
+        return preproc_noop, fn
 
     @register_metric(x_only=True)
     def flops(
         self, fn_name: str, example_inputs: Any, metrics: BenchmarkOperatorMetrics
     ) -> float:
-        q, k, v = example_inputs
+        assert len(example_inputs) % 3 == 0
+        q, k, v = example_inputs[0:3]
         BATCH, H, N_CTX, D_HEAD = q.shape
         _, _, N_CTX_KV, _ = k.shape
 
@@ -586,12 +571,16 @@ class Operator(BenchmarkOperator):
 
     def get_bwd_fn(self, fwd_fn: Callable) -> Callable:
         o = fwd_fn()
-        o_tensor = input_filter(
-            lambda x: isinstance(x, torch.Tensor),
-            o,
-        )
-        do = torch.rand_like(o_tensor)
-        fn = lambda: o_tensor.backward(do, retain_graph=True)
+        outputs = [input_filter(lambda x: isinstance(x, torch.Tensor), o_) for o_ in o]
+        dOs = [torch.rand_like(o_).detach() for o_ in outputs]
+
+        def fn():
+            for (
+                o_tensor,
+                do,
+            ) in zip(outputs, dOs):
+                o_tensor.backward(do, retain_graph=True)
+
         return fn
 
     def get_input_iter(self) -> Generator:
@@ -608,23 +597,27 @@ class Operator(BenchmarkOperator):
                 num_inputs=self.tb_args.num_inputs,
                 dtype=self.dtype,
                 device=self.device,
+                gen_cache_size_inputs=self.gen_cache_size_inputs,
             )
         elif self.input_types == "FA3_PAPER_SHAPES":
             return fa3_paper_inputs(
                 dtype=self.dtype,
                 device=self.device,
+                gen_cache_size_inputs=self.gen_cache_size_inputs,
             )
         elif self.input_types == "SWEEP_SHAPES":
             return sweep_inputs(
                 dtype=self.dtype,
                 device=self.device,
+                gen_cache_size_inputs=self.gen_cache_size_inputs,
             )
         else:
             raise AssertionError(f"Unknown input type {self.input_types}")
 
     @register_x_val(label="(Batch, Heads, Heads_KV, SeqLen, SeqLen_KV, Dhead)")
     def get_x_val(self, example_inputs) -> str:
-        q, k, v = example_inputs
+        assert len(example_inputs) % 3 == 0
+        q, k, v = example_inputs[0:3]
         B, H, S, D = q.shape
         _, H_KV, S_KV, _ = k.shape
 
@@ -639,3 +632,7 @@ class Operator(BenchmarkOperator):
         else:
             base_info += f" {self.mode.value}"
         return base_info
+
+    def get_latency_scale(self, example_inputs):
+        assert len(example_inputs) % 3 == 0
+        return len(example_inputs) // 3
