@@ -41,6 +41,10 @@ def is_cuda() -> bool:
     return torch.version.cuda is not None
 
 
+def has_manifold() -> bool:
+    return shutil.which("manifold") is not None
+
+
 def get_nvidia_gpu_model() -> str:
     """
     Retrieves the model of the NVIDIA GPU being used.

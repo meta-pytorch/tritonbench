@@ -1,12 +1,15 @@
+import subprocess
 import random
 import string
+from pathlib import Path
 from datetime import datetime
 from functools import partial
-from typing import Callable
+from typing import Callable, Optional
 
 import torch
 import torch.profiler as profiler
 
+from tritonbench.utils.env_utils import has_manifold
 from tritonbench.utils.constants import DEFAULT_N_REP, DEFAULT_N_WARMUP
 
 DEFAULT_PROFILE_OPTS = {
@@ -20,6 +23,39 @@ DEFAULT_PROFILE_OPTS = {
 if not hasattr(torch.version, "git_version"):
     from .fb.run_utils import trace_handler
 
+
+def _find_the_latest_file(output_dir, recursive: bool = False, glob_pattern="*"):
+    iterator = Path(output_dir).rglob(glob_pattern) if recursive else Path(output_dir).glob(glob_pattern)
+
+    latest_path: Optional[Path] = None
+    latest_ctime: float = float("-inf")
+
+    for p in iterator:
+        if p.is_file():
+            try:
+                ctime = p.stat().st_ctime
+            except OSError:
+                # Skip unreadable entries
+                continue
+
+            if ctime > latest_ctime:
+                latest_ctime = ctime
+                latest_path = p
+
+    return latest_path.name if latest_path else None
+
+
+def post_process(output_dir, name) -> str:
+    if not hasattr(torch.version, "git_version"):
+        return f"https://www.internalfb.com/intern/perfdoctor/trace_view?filepath=tree/traces/tritonbench/{name}.gz&bucket=pyper_traces"
+    elif has_manifold():
+        lastest_json_file = _find_the_latest_file(output_dir, glob_pattern="*.json.gz")
+        assert lastest_json_file is not None, "No trace file found"
+        cmd = ["manifold", "put", lastest_json_file, f"pyper_traces/tree/traces/tritonbench/{lastest_json_file}"]
+        subprocess.check_call(cmd, cwd=output_dir)
+        return f"https://www.internalfb.com/intern/perfdoctor/trace_view?filepath=tree/traces/tritonbench/{lastest_json_file}&bucket=pyper_traces"
+    else:
+        return f"{output_dir}/{name}"
 
 def do_bench_kineto_cudagraph(
     fn,
@@ -60,7 +96,7 @@ def do_bench_kineto_cudagraph(
             on_trace_ready=(
                 partial(trace_handler, name)
                 if not hasattr(torch.version, "git_version")
-                else profiler.tensorboard_trace_handler(output_dir)
+                else profiler.tensorboard_trace_handler(output_dir, use_gzip=True)
             ),
         ) as prof:
             for _i in range(n_warmup + n_repeat):
@@ -72,10 +108,7 @@ def do_bench_kineto_cudagraph(
                         x.grad = None
                 g.replay()
                 prof.step()
-        if not hasattr(torch.version, "git_version"):
-            return f"https://www.internalfb.com/intern/perfdoctor/trace_view?filepath=tree/traces/tritonbench/{name}.gz&bucket=pyper_traces"
-        else:
-            return output_dir
+    return post_process(output_dir, name)
 
 
 def do_bench_kineto(
@@ -168,7 +201,7 @@ def do_bench_kineto(
         on_trace_ready=(
             partial(trace_handler, name)
             if not hasattr(torch.version, "git_version")
-            else profiler.tensorboard_trace_handler(output_dir)
+            else profiler.tensorboard_trace_handler(output_dir, use_gzip=True)
         ),
     ) as prof:
         for i in range(n_warmup + n_repeat):
@@ -182,7 +215,4 @@ def do_bench_kineto(
             clear_cache()
             fn()
             prof.step()
-    if not hasattr(torch.version, "git_version"):
-        return f"https://www.internalfb.com/intern/perfdoctor/trace_view?filepath=tree/traces/tritonbench/{name}.gz&bucket=pyper_traces"
-    else:
-        return output_dir
+    return post_process(output_dir, name)
