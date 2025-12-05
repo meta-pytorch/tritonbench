@@ -1,16 +1,16 @@
-import subprocess
 import random
 import string
-from pathlib import Path
+import subprocess
 from datetime import datetime
 from functools import partial
+from pathlib import Path
 from typing import Callable, Optional
 
 import torch
 import torch.profiler as profiler
+from tritonbench.utils.constants import DEFAULT_N_REP, DEFAULT_N_WARMUP
 
 from tritonbench.utils.env_utils import has_manifold
-from tritonbench.utils.constants import DEFAULT_N_REP, DEFAULT_N_WARMUP
 
 DEFAULT_PROFILE_OPTS = {
     "record_shapes": True,
@@ -25,7 +25,11 @@ if not hasattr(torch.version, "git_version"):
 
 
 def _find_the_latest_file(output_dir, recursive: bool = False, glob_pattern="*"):
-    iterator = Path(output_dir).rglob(glob_pattern) if recursive else Path(output_dir).glob(glob_pattern)
+    iterator = (
+        Path(output_dir).rglob(glob_pattern)
+        if recursive
+        else Path(output_dir).glob(glob_pattern)
+    )
 
     latest_path: Optional[Path] = None
     latest_ctime: float = float("-inf")
@@ -51,11 +55,17 @@ def post_process(output_dir, name) -> str:
     elif has_manifold():
         lastest_json_file = _find_the_latest_file(output_dir, glob_pattern="*.json.gz")
         assert lastest_json_file is not None, "No trace file found"
-        cmd = ["manifold", "put", lastest_json_file, f"pyper_traces/tree/traces/tritonbench/{lastest_json_file}"]
+        cmd = [
+            "manifold",
+            "put",
+            lastest_json_file,
+            f"pyper_traces/tree/traces/tritonbench/{lastest_json_file}",
+        ]
         subprocess.check_call(cmd, cwd=output_dir)
         return f"https://www.internalfb.com/intern/perfdoctor/trace_view?filepath=tree/traces/tritonbench/{lastest_json_file}&bucket=pyper_traces"
     else:
         return f"{output_dir}/{name}"
+
 
 def do_bench_kineto_cudagraph(
     fn,
