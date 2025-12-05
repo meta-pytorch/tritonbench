@@ -4,7 +4,7 @@ from typing import Any, Callable, Generator, List, Optional, Tuple
 import torch
 import triton
 
-from tritonbench.utils.env_utils import is_cuda
+from tritonbench.utils.env_utils import is_cuda, is_fbcode
 
 from tritonbench.utils.triton_op import (
     BenchmarkOperator,
@@ -141,7 +141,7 @@ class Operator(BenchmarkOperator):
     def _triton(self, xq, wq, x_scale, w_scale) -> Callable:
         return lambda: triton_fp8_block(xq, wq, x_scale, w_scale)
 
-    @register_benchmark(enabled=HAS_CUTLASS, baseline=True)
+    @register_benchmark(enabled=HAS_CUTLASS and is_fbcode(), baseline=True)
     def _cutlass(self, xq, wq, x_scale, w_scale) -> Callable:
         return lambda: cutlass_fp8_block(xq, wq, x_scale, w_scale)
 
