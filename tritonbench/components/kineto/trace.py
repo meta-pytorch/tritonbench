@@ -243,9 +243,7 @@ def do_bench_kineto_walltime(fn, repcnt=5, profile_opts=None, output_dir=None):
     prefix = f"tritonbench_{fn._name}"
     name = f"{prefix}_{datetime.now().strftime('%Y%m%d_%H%M%S')}_{''.join(random.choices(string.digits, k=10))}.json"
     with profiler.profile(
-        schedule=profiler.schedule(
-            wait=0, warmup=repcnt - 1, active=1, repeat=1
-        ),
+        schedule=profiler.schedule(wait=0, warmup=repcnt - 1, active=1, repeat=1),
         activities=activity_groups,
         record_shapes=profile_opts["record_shapes"],
         profile_memory=profile_opts["profile_memory"],
