@@ -240,7 +240,7 @@ def get_parser(args=None):
     )
     parser.add_argument(
         "--repcnt",
-        type=str,
+        type=int,
         default=None,
         help="Number of repetitions to benchmark. Overrides --rep.",
     )

@@ -226,3 +226,40 @@ def do_bench_kineto(
             fn()
             prof.step()
     return post_process(output_dir, name)
+
+
+def do_bench_kineto_walltime(fn, repcnt=5, profile_opts=None, output_dir=None):
+    if profile_opts is None:
+        profile_opts = DEFAULT_PROFILE_OPTS
+    import torch
+
+    fn()
+    torch.cuda.synchronize()
+
+    activity_groups = [
+        profiler.ProfilerActivity.CUDA,
+        profiler.ProfilerActivity.CPU,
+    ]
+    prefix = f"tritonbench_{fn._name}"
+    name = f"{prefix}_{datetime.now().strftime('%Y%m%d_%H%M%S')}_{''.join(random.choices(string.digits, k=10))}.json"
+    with profiler.profile(
+        schedule=profiler.schedule(
+            wait=0, warmup=repcnt - 1, active=1, repeat=1
+        ),
+        activities=activity_groups,
+        record_shapes=profile_opts["record_shapes"],
+        profile_memory=profile_opts["profile_memory"],
+        with_stack=profile_opts["with_stack"],
+        with_flops=profile_opts["with_flops"],
+        with_modules=profile_opts["with_modules"],
+        on_trace_ready=(
+            partial(trace_handler, name)
+            if not hasattr(torch.version, "git_version")
+            else profiler.tensorboard_trace_handler(output_dir, use_gzip=True)
+        ),
+    ) as prof:
+        for i in range(repcnt):
+            fn()
+            torch.cuda.synchronize()
+            prof.step()
+    return post_process(output_dir, name)

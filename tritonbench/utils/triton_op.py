@@ -228,6 +228,8 @@ class BenchmarkOperatorMetrics:
     determinism: Optional[DeterminismResult] = None
     # wall time
     walltime: Optional[float] = None
+    # wall time kineto trace
+    walltime_kineto_trace: Optional[str] = None
     # compile time
     compile_time: Optional[float] = None
     # stage breakdown of compile times
@@ -1861,6 +1863,8 @@ class BenchmarkOperator(metaclass=PostInitProcessor):
                     metrics.att_trace = self.att_trace(input_id, fn_name)
             if "kineto_trace" in self.required_metrics:
                 metrics.kineto_trace = self.kineto_trace(input_id, fn)
+            if "walltime_kineto_trace" in self.required_metrics:
+                metrics.walltime_kineto_trace = self.walltime_kineto_trace(input_id, fn)
             if "proton" in self.required_metrics:
                 from tritonbench.components.proton import proton_trace
 
@@ -2252,6 +2256,17 @@ class BenchmarkOperator(metaclass=PostInitProcessor):
             output_dir=kineto_output_dir,
             use_cuda_graphs=self.use_cuda_graphs,
             skip_cache_clearing=self.tb_args.skip_cache_clearing,
+        )
+
+    def walltime_kineto_trace(self, input_id: int, fn: Callable) -> str:
+        from tritonbench.components.kineto import do_bench_kineto_walltime
+
+        kineto_output_dir = self.get_temp_path(fn._name)
+        kineto_output_dir.mkdir(parents=True, exist_ok=True)
+        return do_bench_kineto_walltime(
+            fn=fn,
+            repcnt=self.tb_args.repcnt,
+            output_dir=kineto_output_dir,
         )
 
     def compile_time(
