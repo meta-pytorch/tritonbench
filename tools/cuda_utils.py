@@ -20,7 +20,7 @@ CUDA_VERSION_MAP = {
     "13.0": {
         "pytorch_url": "cu130",
         "jax": "jax[cuda13]",
-    }
+    },
 }
 
 # the key is the value of `torch.version.hip`

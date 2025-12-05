@@ -33,13 +33,20 @@ def install_prebuilt_fbgemm(genai=True):
     ]
     subprocess.check_call(cmd)
 
+
 def checkout_fbgemm():
     git_clone_cmd = ["git", "clone", FBGEMM_REPO]
     subprocess.check_call(git_clone_cmd, cwd=FBGEMM_INSTALL_PATH)
     fbgemm_repo_path = FBGEMM_INSTALL_PATH.joinpath("FBGEMM")
     git_checkout_cmd = ["git", "checkout", FBGEMM_COMMIT]
     subprocess.check_call(git_checkout_cmd, cwd=fbgemm_repo_path)
-    git_submodule_checkout_cmd = ["git", "submodules", "update", "--init", "--recursive"]
+    git_submodule_checkout_cmd = [
+        "git",
+        "submodules",
+        "update",
+        "--init",
+        "--recursive",
+    ]
     subprocess.check_call(git_submodule_checkout_cmd, cwd=fbgemm_repo_path)
 
 
@@ -48,7 +55,9 @@ def install_build_fbgemm(genai=True):
     if not os.path.exists(fbgemm_repo_path):
         checkout_fbgemm()
     cmd = ["pip", "install", "-r", "requirements.txt"]
-    subprocess.check_call(cmd, cwd=str(fbgemm_repo_path.joinpath("fbgemm_gpu").resolve()))
+    subprocess.check_call(
+        cmd, cwd=str(fbgemm_repo_path.joinpath("fbgemm_gpu").resolve())
+    )
     # Build target H100(9.0, 9.0a) and blackwell (10.0, 12.0)
     extra_envs = os.environ.copy()
     if genai:
@@ -69,7 +78,9 @@ def install_build_fbgemm(genai=True):
                 f'. .github/scripts/setup_env.bash; test_fbgemm_gpu_build_and_install {current_conda_env} genai/rocm "{fbgemm_repo_path}"',
             ]
             extra_envs["BUILD_ROCM_VERSION"] = "7.0"
-            subprocess.check_call(cmd, cwd=str(fbgemm_repo_path.resolve()), env=extra_envs)
+            subprocess.check_call(
+                cmd, cwd=str(fbgemm_repo_path.resolve()), env=extra_envs
+            )
             return
     else:
         cmd = [

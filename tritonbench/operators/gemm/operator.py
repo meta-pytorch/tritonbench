@@ -356,7 +356,7 @@ class Operator(BenchmarkOperator):
             streamk_amd_matmul(a, b, bias) if bias else streamk_amd_matmul(a, b)
         )
 
-    @register_benchmark(enabled=is_cuda())
+    @register_benchmark(enabled=is_cuda(), fwd_only=True)
     def streamk_matmul(self, a, b, bias) -> Callable:
         print(f"Testing shape: {a.shape} x {b.shape}...")
         streamk = torch.matmul(a, b)
