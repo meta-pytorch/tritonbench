@@ -18,6 +18,7 @@ def get_cuda_autotune_config():
                 "NUM_SMEM_BUFFERS": s,
                 "NUM_TMEM_BUFFERS": t,
                 "EPILOGUE_SUBTILE": subtile,
+                "PAIR_CTA": pairCTA,
             },
             num_warps=4,
             num_stages=1,
@@ -29,6 +30,7 @@ def get_cuda_autotune_config():
         for s in [2, 3, 4]
         for t in [2, 3]
         for subtile in [True]
+        for pairCTA in [False]
     ]
 
 
@@ -37,7 +39,10 @@ def matmul_tma_set_block_size_hook(nargs):
     BLOCK_N = nargs["BLOCK_SIZE_N"]
     BLOCK_K = nargs["BLOCK_SIZE_K"]
     nargs["a_desc"].block_shape = [BLOCK_M, BLOCK_K]
-    nargs["b_desc"].block_shape = [BLOCK_K, BLOCK_N]
+    if nargs.get("PAIR_CTA", False):
+        nargs["b_desc"].block_shape = [BLOCK_K, BLOCK_N // 2]
+    else:
+        nargs["b_desc"].block_shape = [BLOCK_K, BLOCK_N]
     EPILOGUE_SUBTILE = nargs.get("EPILOGUE_SUBTILE", False)
     if EPILOGUE_SUBTILE:
         nargs["c_desc"].block_shape = [BLOCK_M, BLOCK_N // 2]
@@ -75,14 +80,21 @@ def matmul_kernel_tma_ws_blackwell(
     NUM_TMEM_BUFFERS: tl.constexpr,  #
     NUM_SMS: tl.constexpr,  #
     EPILOGUE_SUBTILE: tl.constexpr,  #
+    PAIR_CTA: tl.constexpr,  #
 ):
     # allocate NUM_SMEM_BUFFERS buffers
     buffers_A = tlx.local_alloc(
         (BLOCK_SIZE_M, BLOCK_SIZE_K), tl.float16, NUM_SMEM_BUFFERS
     )
-    buffers_B = tlx.local_alloc(
-        (BLOCK_SIZE_K, BLOCK_SIZE_N), tl.float16, NUM_SMEM_BUFFERS
-    )
+    # In pair CTA mode, each cta only needs to load half of B.
+    if PAIR_CTA:
+        buffers_B = tlx.local_alloc(
+            (BLOCK_SIZE_K, BLOCK_SIZE_N // 2), tl.float16, NUM_SMEM_BUFFERS
+        )
+    else:
+        buffers_B = tlx.local_alloc(
+            (BLOCK_SIZE_K, BLOCK_SIZE_N), tl.float16, NUM_SMEM_BUFFERS
+        )
     # use multiple TMEM buffers to overlap MMA and epilogue
     tmem_buffers = tlx.local_alloc(
         (BLOCK_SIZE_M, BLOCK_SIZE_N),
@@ -91,6 +103,14 @@ def matmul_kernel_tma_ws_blackwell(
         tlx.storage_kind.tmem,
     )
 
+    # CTA pairs are placed along M dim
+    if PAIR_CTA:
+        cluster_cta_rank = tlx.cluster_cta_rank()
+        pred_cta0 = cluster_cta_rank == 0
+        cta_bars = tlx.alloc_barriers(
+            num_barriers=NUM_SMEM_BUFFERS, arrive_count=2
+        )  # CTA0 waits for CTA1's data before mma
+
     # allocate barriers
     smem_empty_bars = tlx.alloc_barriers(num_barriers=NUM_SMEM_BUFFERS, arrive_count=1)
     smem_full_bars = tlx.alloc_barriers(num_barriers=NUM_SMEM_BUFFERS, arrive_count=1)
@@ -98,108 +118,7 @@ def matmul_kernel_tma_ws_blackwell(
     tmem_empty_bars = tlx.alloc_barriers(num_barriers=NUM_TMEM_BUFFERS, arrive_count=1)
 
     with tlx.async_tasks():
-        with tlx.async_task("default"):  # producer, TMA load
-            # common code duplicated for each region to avoid SMEM overhead
-            start_pid = tl.program_id(axis=0)
-            num_pid_m = tl.cdiv(M, BLOCK_SIZE_M)
-            num_pid_n = tl.cdiv(N, BLOCK_SIZE_N)
-            num_pid_in_group = GROUP_SIZE_M * num_pid_n
-            num_tiles = num_pid_m * num_pid_n
-            k_tiles = tl.cdiv(K, BLOCK_SIZE_K)
-            # end of common code
-
-            load_phase = 0  # the current phase of TMA load
-            # we virtually "flatten" the two layer loop as if we're performing tma loads on
-            # one big list of data
-            processed_k_iters = 0
-            for tile_id in range(start_pid, num_tiles, NUM_SMS):
-                pid_m, pid_n = _compute_pid(
-                    tile_id, num_pid_in_group, num_pid_m, GROUP_SIZE_M
-                )
-                offs_am = pid_m * BLOCK_SIZE_M
-                offs_bn = pid_n * BLOCK_SIZE_N
-
-                for k in range(0, k_tiles):
-                    # processed_k_iters + k means we use the immediate next buffer slot of tile_id x when we start tile_id x+1
-                    buf = (processed_k_iters + k) % NUM_SMEM_BUFFERS
-                    # wait for previous phase(round) of dot for this buf
-                    tlx.barrier_wait(smem_empty_bars[buf], load_phase ^ 1)
-                    # buffer is now ready to be used again
-                    offs_k = k * BLOCK_SIZE_K
-                    tlx.barrier_expect_bytes(
-                        smem_full_bars[buf],
-                        2 * (BLOCK_SIZE_M + BLOCK_SIZE_N) * BLOCK_SIZE_K,
-                    )  # float16
-                    tlx.async_descriptor_load(
-                        a_desc, buffers_A[buf], [offs_am, offs_k], smem_full_bars[buf]
-                    )
-                    tlx.async_descriptor_load(
-                        b_desc, buffers_B[buf], [offs_k, offs_bn], smem_full_bars[buf]
-                    )
-                    # flip phase at the end of a round
-                    load_phase = load_phase ^ (buf == NUM_SMEM_BUFFERS - 1)
-                processed_k_iters += k_tiles
-        with tlx.async_task(num_warps=1, num_regs=232):  # MMA consumer
-            # common code duplicated for each region to avoid SMEM overhead
-            start_pid = tl.program_id(axis=0)
-            num_pid_m = tl.cdiv(M, BLOCK_SIZE_M)
-            num_pid_n = tl.cdiv(N, BLOCK_SIZE_N)
-            num_pid_in_group = GROUP_SIZE_M * num_pid_n
-            num_tiles = num_pid_m * num_pid_n
-            k_tiles = tl.cdiv(K, BLOCK_SIZE_K)
-            # end of common code
-
-            dot_phase = 0  # the current phase of dot op
-            tmem_write_phase = 1  # sync between epilogue consumer and MMA consumer
-            cur_tmem_buf = 0
-
-            processed_k_iters = 0
-            for tile_id in range(start_pid, num_tiles, NUM_SMS):
-                pid_m, pid_n = _compute_pid(
-                    tile_id, num_pid_in_group, num_pid_m, GROUP_SIZE_M
-                )
-                offs_am = pid_m * BLOCK_SIZE_M
-                offs_bn = pid_n * BLOCK_SIZE_N
-
-                # wait epilogue consumer to be done with the buffer before reusing it
-                tlx.barrier_wait(tmem_empty_bars[cur_tmem_buf], tmem_write_phase)
-                # flip phase at the end of a round of using TMEM barriers
-                tmem_write_phase = tmem_write_phase ^ (
-                    cur_tmem_buf == NUM_TMEM_BUFFERS - 1
-                )
-
-                # now iterate along K to compute result for the block
-                for k in range(0, k_tiles):
-                    # processed_k_iters + k means we use the immediate next buffer slot of tile_id x when we start tile_id x+1
-                    buf = (processed_k_iters + k) % NUM_SMEM_BUFFERS
-                    # wait for current phase(round) of load for this buf
-                    tlx.barrier_wait(smem_full_bars[buf], dot_phase)
-                    # buffer is now ready with loaded data, tlx.async_dot will signal `mBarrier` when done
-                    tlx.async_dot(
-                        buffers_A[buf],
-                        buffers_B[buf],
-                        tmem_buffers[cur_tmem_buf],
-                        use_acc=k > 0,
-                        mBarriers=[smem_empty_bars[buf]],
-                        out_dtype=tl.float32,
-                    )
-                    # flip phase at the end of a round
-                    dot_phase = dot_phase ^ (buf == NUM_SMEM_BUFFERS - 1)
-
-                # wait for last mma to complete
-                last_buf = (processed_k_iters + k_tiles - 1) % NUM_SMEM_BUFFERS
-                # in case phase was flipped, we should use the phase value when dot op was issued
-                last_dot_phase = dot_phase ^ (last_buf == NUM_SMEM_BUFFERS - 1)
-                tlx.barrier_wait(smem_empty_bars[last_buf], last_dot_phase)
-
-                # done filling this buffer, signal epilogue consumer
-                tlx.barrier_arrive(tmem_full_bars[cur_tmem_buf], 1)
-
-                # possibly enter next iteration (next tile) without waiting for epilogue
-                cur_tmem_buf = (cur_tmem_buf + 1) % NUM_TMEM_BUFFERS
-                processed_k_iters += k_tiles
-
-        with tlx.async_task(num_warps=4, num_regs=232):  # epilogue consumer
+        with tlx.async_task("default"):  # epilogue consumer
             # common code duplicated for each region to avoid SMEM overhead
             start_pid = tl.program_id(axis=0)
             num_pid_m = tl.cdiv(M, BLOCK_SIZE_M)
@@ -250,6 +169,127 @@ def matmul_kernel_tma_ws_blackwell(
                 tlx.barrier_arrive(tmem_empty_bars[cur_tmem_buf], 1)
 
                 cur_tmem_buf = (cur_tmem_buf + 1) % NUM_TMEM_BUFFERS
+        with tlx.async_task(num_warps=1, num_regs=232):  # MMA consumer
+            # common code duplicated for each region to avoid SMEM overhead
+            start_pid = tl.program_id(axis=0)
+            num_pid_m = tl.cdiv(M, BLOCK_SIZE_M)
+            num_pid_n = tl.cdiv(N, BLOCK_SIZE_N)
+            num_pid_in_group = GROUP_SIZE_M * num_pid_n
+            num_tiles = num_pid_m * num_pid_n
+            k_tiles = tl.cdiv(K, BLOCK_SIZE_K)
+            # end of common code
+
+            dot_phase = 0  # the current phase of dot op
+            tmem_write_phase = 1  # sync between epilogue consumer and MMA consumer
+            cur_tmem_buf = 0
+
+            processed_k_iters = 0
+            for tile_id in range(start_pid, num_tiles, NUM_SMS):
+                pid_m, pid_n = _compute_pid(
+                    tile_id, num_pid_in_group, num_pid_m, GROUP_SIZE_M
+                )
+                offs_am = pid_m * BLOCK_SIZE_M
+                offs_bn = pid_n * BLOCK_SIZE_N
+
+                # wait epilogue consumer to be done with the buffer before reusing it
+                tlx.barrier_wait(tmem_empty_bars[cur_tmem_buf], tmem_write_phase)
+                # flip phase at the end of a round of using TMEM barriers
+                tmem_write_phase = tmem_write_phase ^ (
+                    cur_tmem_buf == NUM_TMEM_BUFFERS - 1
+                )
+
+                # now iterate along K to compute result for the block
+                for k in range(0, k_tiles):
+                    # processed_k_iters + k means we use the immediate next buffer slot of tile_id x when we start tile_id x+1
+                    buf = (processed_k_iters + k) % NUM_SMEM_BUFFERS
+                    # wait for current phase(round) of load for this buf
+                    tlx.barrier_wait(smem_full_bars[buf], dot_phase)
+                    # CTA0 waits for CTA0 and CTA1 to finish loading A and B before issuing dot op
+                    if PAIR_CTA:
+                        cta_bar = tlx.remote_view(cta_bars[buf], 0)
+                        tlx.barrier_arrive(cta_bar, 1)
+                        tlx.barrier_wait(cta_bar, phase=dot_phase, pred=pred_cta0)
+
+                    # buffer is now ready with loaded data, tlx.async_dot will signal `mBarrier` when done
+                    tlx.async_dot(
+                        buffers_A[buf],
+                        buffers_B[buf],
+                        tmem_buffers[cur_tmem_buf],
+                        use_acc=k > 0,
+                        mBarriers=[smem_empty_bars[buf]],
+                        two_ctas=PAIR_CTA,
+                        out_dtype=tl.float32,
+                    )
+
+                    # flip phase at the end of a round
+                    dot_phase = dot_phase ^ (buf == NUM_SMEM_BUFFERS - 1)
+
+                # wait for last mma to complete
+                last_buf = (processed_k_iters + k_tiles - 1) % NUM_SMEM_BUFFERS
+                # in case phase was flipped, we should use the phase value when dot op was issued
+                last_dot_phase = dot_phase ^ (last_buf == NUM_SMEM_BUFFERS - 1)
+                tlx.barrier_wait(smem_empty_bars[last_buf], last_dot_phase)
+
+                # done filling this buffer, signal epilogue consumer
+                tlx.barrier_arrive(tmem_full_bars[cur_tmem_buf], 1)
+
+                # possibly enter next iteration (next tile) without waiting for epilogue
+                cur_tmem_buf = (cur_tmem_buf + 1) % NUM_TMEM_BUFFERS
+                processed_k_iters += k_tiles
+
+        with tlx.async_task(num_warps=1, num_regs=232):  # producer, TMA load
+            # common code duplicated for each region to avoid SMEM overhead
+            start_pid = tl.program_id(axis=0)
+            num_pid_m = tl.cdiv(M, BLOCK_SIZE_M)
+            num_pid_n = tl.cdiv(N, BLOCK_SIZE_N)
+            num_pid_in_group = GROUP_SIZE_M * num_pid_n
+            num_tiles = num_pid_m * num_pid_n
+            k_tiles = tl.cdiv(K, BLOCK_SIZE_K)
+            # end of common code
+
+            load_phase = 0  # the current phase of TMA load
+            # we virtually "flatten" the two layer loop as if we're performing tma loads on
+            # one big list of data
+            processed_k_iters = 0
+            for tile_id in range(start_pid, num_tiles, NUM_SMS):
+                pid_m, pid_n = _compute_pid(
+                    tile_id, num_pid_in_group, num_pid_m, GROUP_SIZE_M
+                )
+                offs_am = pid_m * BLOCK_SIZE_M
+                # split B into two parts so each CTA has different offset
+                if PAIR_CTA:
+                    offs_bn = pid_n * BLOCK_SIZE_N + cluster_cta_rank * (
+                        BLOCK_SIZE_N // 2
+                    )
+                else:
+                    offs_bn = pid_n * BLOCK_SIZE_N
+
+                for k in range(0, k_tiles):
+                    # processed_k_iters + k means we use the immediate next buffer slot of tile_id x when we start tile_id x+1
+                    buf = (processed_k_iters + k) % NUM_SMEM_BUFFERS
+                    # wait for previous phase(round) of dot for this buf
+                    tlx.barrier_wait(smem_empty_bars[buf], load_phase ^ 1)
+                    # buffer is now ready to be used again
+                    offs_k = k * BLOCK_SIZE_K
+                    if PAIR_CTA:
+                        tlx.barrier_expect_bytes(
+                            smem_full_bars[buf],
+                            2 * (BLOCK_SIZE_M + BLOCK_SIZE_N // 2) * BLOCK_SIZE_K,
+                        )  # float16
+                    else:
+                        tlx.barrier_expect_bytes(
+                            smem_full_bars[buf],
+                            2 * (BLOCK_SIZE_M + BLOCK_SIZE_N) * BLOCK_SIZE_K,
+                        )  # float16
+                    tlx.async_descriptor_load(
+                        a_desc, buffers_A[buf], [offs_am, offs_k], smem_full_bars[buf]
+                    )
+                    tlx.async_descriptor_load(
+                        b_desc, buffers_B[buf], [offs_k, offs_bn], smem_full_bars[buf]
+                    )
+                    # flip phase at the end of a round
+                    load_phase = load_phase ^ (buf == NUM_SMEM_BUFFERS - 1)
+                processed_k_iters += k_tiles
 
 
 def tlx_matmul(a, b):
