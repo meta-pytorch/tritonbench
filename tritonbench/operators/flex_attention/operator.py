@@ -27,6 +27,7 @@ except ImportError:
     pass
 
 from tritonbench.utils.input import input_filter
+from tritonbench.utils.env_utils import is_hip
 from tritonbench.utils.triton_op import (
     BenchmarkOperator,
     BenchmarkOperatorMetrics,
@@ -652,6 +653,9 @@ class Operator(BenchmarkOperator):
         def head_bias(score, b, h, m, n):
             return score + 2 * h
 
+        # AMD does not support tanh approximation w/flex attention
+        approx = False if is_hip() else True
+
         function_dict = {
             "noop": None,
             "causal": None,
@@ -661,7 +665,7 @@ class Operator(BenchmarkOperator):
             "sliding_window": None,
             "document_mask": None,
             "prefix_lm": None,
-            "softcap": generate_tanh_softcap(20, approx=True),
+            "softcap": generate_tanh_softcap(20, approx=approx),
         }
 
         score_mod = function_dict[attn_type]
