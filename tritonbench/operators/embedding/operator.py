@@ -43,7 +43,7 @@ class Operator(BenchmarkOperator):
         self.baseline_op.weight.data.copy_(shared_weight)
         return lambda: self.baseline_op(input)
 
-    @register_benchmark()
+    @register_benchmark(enabled=LigerEmbedding is not None)
     def liger_embedding(self, V, D, input, shared_weight) -> Callable:
         self.liger_op = LigerEmbedding(V, D).to(self.device).to(self.dtype)
         self.liger_op.weight.data.copy_(shared_weight)
