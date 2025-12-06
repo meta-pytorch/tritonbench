@@ -1,4 +1,6 @@
 # TLX GEMM kernel optimized for Blackwell Warp Specialization
+import math
+
 import torch
 
 import triton
@@ -60,9 +62,30 @@ def _compute_pid(tile_id, num_pid_in_group, num_pid_m, GROUP_SIZE_M):
     return pid_m, pid_n
 
 
+def preprocess_configs(configs, named_args, **kwargs):
+    for conf in configs:
+        M = named_args["M"]
+        N = named_args["N"]
+        BLOCK_M = conf.kwargs["BLOCK_SIZE_M"]
+        BLOCK_N = conf.kwargs["BLOCK_SIZE_N"]
+
+        num_tiles_m = math.ceil(M / BLOCK_M)
+        num_tiles_n = math.ceil(N / BLOCK_N)
+        # checking num_tiles_m should be sufficent in this case, but adding num_tiles_n for clarity
+        pair_cta_compatible = (
+            num_tiles_m % 2 == 0 and (num_tiles_m * num_tiles_n) % 2 == 0
+        )
+        if not pair_cta_compatible:
+            # fall back to non-pair CTA mode
+            conf.kwargs["PAIR_CTA"] = False
+
+    return configs
+
+
 @triton.autotune(
     configs=get_cuda_autotune_config(),
     key=["M", "N", "K"],
+    prune_configs_by={"early_config_prune": preprocess_configs},
 )
 @triton.jit
 def matmul_kernel_tma_ws_blackwell(
