@@ -16,6 +16,3 @@
 [submodule "submodules/aiter"]
 	path = submodules/aiter
 	url = https://github.com/ROCm/aiter.git
-[submodule "submodules/quack"]
-	path = submodules/quack
-	url = https://github.com/Dao-AILab/quack.git
