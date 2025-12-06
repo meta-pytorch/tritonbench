@@ -93,6 +93,24 @@ class Operator(BenchmarkOperator):
         cute_args = cute_args[:-5]
         return lambda: kernel(*cute_args)
 
+    @register_benchmark(enabled=HAS_CUTEDSL)
+    def nop_cutedsl_tvm_ffi(self, *args):
+        if len(args) == 0:
+            kernel = cute.compile(cutedsl_nop_kernel)
+            return lambda: kernel()
+        cute_args = []
+        for arg in args:
+            if isinstance(arg, torch.Tensor):
+                cute_args.append(cute.runtime.from_dlpack(arg, enable_tvm_ffi=True))
+            else:
+                cute_args.append(arg)
+        kernel = cute.compile(
+            cutedsl_nop_with_args_kernel, *cute_args, options="--enable-tvm-ffi"
+        )
+        # remove constexpr args
+        cute_args = cute_args[:-5]
+        return lambda: kernel(*cute_args)
+
     @register_benchmark(baseline=True)
     def nop_python_function(self, *args):
         def nop():
