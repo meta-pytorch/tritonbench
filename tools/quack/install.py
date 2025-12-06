@@ -18,6 +18,7 @@ def install_quack():
     cmd = ["pip", "install", "-e", "."]
     subprocess.check_call(cmd, cwd=QUACK_PATH)
 
+
 def install_quack():
     QUACK_INSTALL_PATH.mkdir(parents=True, exist_ok=True)
     quack_path = QUACK_INSTALL_PATH.joinpath("quack")
