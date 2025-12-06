@@ -27,12 +27,12 @@ def get_cuda_autotune_config():
             pre_hook=matmul_tma_set_block_size_hook,
         )
         for BM in [128]
-        for BN in [128, 256]
+        for BN in [128, 256, 512]
         for BK in [64, 128]
-        for s in [2, 3, 4]
+        for s in [2, 3, 4, 5, 6, 7]
         for t in [2, 3]
-        for subtile in [True]
-        for pairCTA in [False]
+        for subtile in [True, False]
+        for pairCTA in [True, False]
     ]
 
 
