@@ -24,6 +24,11 @@ RUNNER_TYPE_MAPPING = {
         "gpu_count": 1,
         "avail_gpu_mem_in_gb": 288,
     },
+    "linux.dgx.b200": {
+        "name": "dgx-b200-runner",
+        "gpu_count": 1,
+        "avail_gpu_mem_in_gb": 192,
+    }
 }
 
 
