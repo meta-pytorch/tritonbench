@@ -22,6 +22,8 @@ else:
     MTIA_COMPUTE_SPECS = {}
     MTIA_MEMORY_SPECS = {}
 
+from tritonbench.utils.env_utils import is_hip
+
 
 # NVIDIA A100 GPU Spec:
 # https://www.nvidia.com/content/dam/en-zz/Solutions/Data-Center/a100/pdf/nvidia-a100-datasheet-us-nvidia-1758950-r4-web.pdf
@@ -102,6 +104,10 @@ MEMORY_FREQ_LIMIT = {
     "NVIDIA H100": "1593",
 }
 
+AMD_DEVICE_NAME_MAPPING = {
+    (9, 4): "AMD MI300X",
+    (9, 5): "AMD MI350X",
+}
 
 def _set_pm():
     command = ["sudo", "nvidia-smi", "-i", CUDA_VISIBLE_DEVICES, "-pm", "1"]
@@ -252,3 +258,12 @@ def has_nvidia_smi() -> bool:
         return True
     except (subprocess.SubprocessError, FileNotFoundError):
         return False
+
+def get_amd_device_name() -> str:
+    import torch
+    assert is_hip(), "get_amd_device_name() is only supported on AMD GPUs"
+    current_device = torch.cuda.current_device()
+    gcn_arch_major = torch.cuda.get_device_properties(current_device).major
+    gcn_arch_minor = torch.cuda.get_device_properties(current_device).minor
+    assert (gcn_arch_major, gcn_arch_minor) in AMD_DEVICE_NAME_MAPPING, f"Unsupported AMD GCN Arch {gcn_arch_major}.{gcn_arch_minor}"
+    return AMD_DEVICE_NAME_MAPPING[(gcn_arch_major, gcn_arch_minor)]
