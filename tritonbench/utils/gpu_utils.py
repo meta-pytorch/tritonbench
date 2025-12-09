@@ -263,6 +263,11 @@ def get_amd_device_name() -> str:
     import torch
     assert is_hip(), "get_amd_device_name() is only supported on AMD GPUs"
     current_device = torch.cuda.current_device()
+    device_name = torch.cuda.get_device_name()
+    if not device_name == "AMD Radeon Graphics":
+        return device_name
+
+    # if device name is "AMD Radeon Graphics", we need to infer the actual device name from gfx arch
     gcn_arch_major = torch.cuda.get_device_properties(current_device).major
     gcn_arch_minor = torch.cuda.get_device_properties(current_device).minor
     assert (gcn_arch_major, gcn_arch_minor) in AMD_DEVICE_NAME_MAPPING, f"Unsupported AMD GCN Arch {gcn_arch_major}.{gcn_arch_minor}"
