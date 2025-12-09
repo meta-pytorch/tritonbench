@@ -117,8 +117,8 @@ def run_in_helion(op_args: Dict[str, str], extra_envs: Dict[str, str]):
     cmd = [sys.executable, "benchmarks/run.py"] + op_args
     logger.info(
         f"[tritonbench] Running helion benchmark: " + " ".join(cmd),
-        flush=True,
     )
+
     subprocess.check_call(
         cmd,
         cwd=helion_root,
