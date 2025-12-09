@@ -82,7 +82,7 @@ def preprocess_configs(configs, named_args, **kwargs):
         # so we force single TMEM buffer and disable PAIR_CTA optimizations
         if not PERSISTENT:
             NUM_TMEM_BUFFERS = 1
-            conf.kwargs["PAIR_CTA"] = 1
+            conf.kwargs["NUM_TMEM_BUFFERS"] = 1
 
         num_tiles_m = math.ceil(M / BLOCK_M)
         num_tiles_n = math.ceil(N / BLOCK_N)
