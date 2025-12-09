@@ -28,7 +28,7 @@ def get_cuda_autotune_config():
             pre_hook=matmul_tma_set_block_size_hook,
         )
         for BM in [128]
-        for BN in [128, 256]
+        for BN in [128, 256, 512]
         for BK in [64, 128]
         for s in [2, 3, 4, 5, 6, 7]
         for t in [2, 3]
@@ -62,11 +62,27 @@ def _compute_pid(tile_id, num_pid_in_group, num_pid_m, GROUP_SIZE_M):
 
 
 def preprocess_configs(configs, named_args, **kwargs):
+    # Blackwell B200A resource limits
+    MAX_SHARED_MEMORY = 232 * 1024  # bytes (232KB)
+    MAX_TENSOR_MEMORY = 256 * 1024  # bytes (256KB TMEM per SM)
+
+    pruned_configs = []
     for conf in configs:
         M = named_args["M"]
         N = named_args["N"]
         BLOCK_M = conf.kwargs["BLOCK_SIZE_M"]
         BLOCK_N = conf.kwargs["BLOCK_SIZE_N"]
+        BLOCK_K = conf.kwargs["BLOCK_SIZE_K"]
+        NUM_SMEM_BUFFERS = conf.kwargs["NUM_SMEM_BUFFERS"]
+        NUM_TMEM_BUFFERS = conf.kwargs["NUM_TMEM_BUFFERS"]
+        PAIR_CTA = conf.kwargs["PAIR_CTA"]
+        PERSISTENT = conf.kwargs["PERSISTENT"]
+
+        # Non-persistent mode only processes a single tile and doesn't benefit from pipelining
+        # so we force single TMEM buffer and disable PAIR_CTA optimizations
+        if not PERSISTENT:
+            NUM_TMEM_BUFFERS = 1
+            conf.kwargs["PAIR_CTA"] = 1
 
         num_tiles_m = math.ceil(M / BLOCK_M)
         num_tiles_n = math.ceil(N / BLOCK_N)
@@ -77,8 +93,47 @@ def preprocess_configs(configs, named_args, **kwargs):
         if not pair_cta_compatible:
             # fall back to non-pair CTA mode
             conf.kwargs["PAIR_CTA"] = False
+            PAIR_CTA = False
 
-    return configs
+        # Estimate Shared Memory Usage
+        # buffers_A: BLOCK_M x BLOCK_K x float16 x NUM_SMEM_BUFFERS
+        smem_a = BLOCK_M * BLOCK_K * 2 * NUM_SMEM_BUFFERS
+        # buffers_B: BLOCK_K x BLOCK_N x float16 x NUM_SMEM_BUFFERS
+        # In PAIR_CTA mode, each CTA only loads half of B
+        smem_b_size = (BLOCK_N // 2) if PAIR_CTA else BLOCK_N
+        smem_b = BLOCK_K * smem_b_size * 2 * NUM_SMEM_BUFFERS
+        # Epilogue staging buffer: BLOCK_M x (BLOCK_N // EPILOGUE_SUBTILE) x float16
+        # The epilog group uses local_load/local_slice which implicitly stages data
+        # from TMEM to shared memory before TMA store to global memory
+        EPILOGUE_SUBTILE = conf.kwargs["EPILOGUE_SUBTILE"]
+        smem_epilog = BLOCK_M * (BLOCK_N // EPILOGUE_SUBTILE) * 2
+        smem_barriers = NUM_SMEM_BUFFERS * 2
+        if PAIR_CTA:
+            smem_barriers += NUM_SMEM_BUFFERS * 64  # cta_bars
+        # tmem_full_bars
+        smem_barriers += NUM_TMEM_BUFFERS
+
+        total_smem = smem_a + smem_b + smem_epilog + smem_barriers
+        # Prune configs that exceed memory limits
+        if total_smem > MAX_SHARED_MEMORY:
+            continue
+
+        # Estimate Tensor Memory (TMEM) Usage
+        # tmem_buffers: BLOCK_M x BLOCK_N x float32 x NUM_TMEM_BUFFERS
+        # TMEM stores the accumulation buffers for MMA operations
+        # Non-persistent mode only needs 1 TMEM buffer (processes single tile)
+        # Persistent mode uses NUM_TMEM_BUFFERS to overlap MMA and epilogue
+        total_tmem = BLOCK_M * BLOCK_N * 4 * NUM_TMEM_BUFFERS
+        if total_tmem > MAX_TENSOR_MEMORY:
+            continue
+
+        # TODO: add back configs that triggers compiler bug
+        if BLOCK_N == 512 and not PERSISTENT:
+            continue
+
+        pruned_configs.append(conf)
+
+    return pruned_configs
 
 
 @triton.jit
@@ -301,7 +356,8 @@ def matmul_kernel_tma_ws_blackwell(
         buffers_B = tlx.local_alloc(
             (BLOCK_SIZE_K, BLOCK_SIZE_N), tl.float16, NUM_SMEM_BUFFERS
         )
-    # use multiple TMEM buffers to overlap MMA and epilogue (only in persistent mode)
+    # Non-persistent mode: 1 TMEM buffer (processes single tile)
+    # Persistent mode: NUM_TMEM_BUFFERS (overlaps MMA and epilogue)
     tmem_buffers = tlx.local_alloc(
         (BLOCK_SIZE_M, BLOCK_SIZE_N),
         tl.float32,
@@ -324,6 +380,8 @@ def matmul_kernel_tma_ws_blackwell(
     # allocate barriers
     smem_empty_bars = tlx.alloc_barriers(num_barriers=NUM_SMEM_BUFFERS, arrive_count=1)
     smem_full_bars = tlx.alloc_barriers(num_barriers=NUM_SMEM_BUFFERS, arrive_count=1)
+    # Non-persistent mode: 1 TMEM barrier (processes single tile)
+    # Persistent mode: NUM_TMEM_BUFFERS (overlaps MMA and epilogue)
     tmem_full_bars = tlx.alloc_barriers(num_barriers=NUM_TMEM_BUFFERS, arrive_count=1)
     if PERSISTENT:
         tmem_empty_bars = tlx.alloc_barriers(
