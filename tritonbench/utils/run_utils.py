@@ -20,7 +20,7 @@ from tritonbench.operators_collection import list_operators_by_collection
 from tritonbench.utils.ab_test import compare_ab_results, run_ab_test
 from tritonbench.utils.env_utils import is_fbcode, is_hip
 from tritonbench.utils.git_utils import get_branch, get_commit_time, get_current_hash
-from tritonbench.utils.gpu_utils import gpu_lockdown, get_amd_device_name
+from tritonbench.utils.gpu_utils import get_amd_device_name, gpu_lockdown
 from tritonbench.utils.list_operator_details import list_operator_details
 from tritonbench.utils.parser import get_parser
 from tritonbench.utils.path_utils import (
@@ -68,9 +68,13 @@ def get_run_env(
     if is_hip():
         run_env["cuda_version"] = torch.version.hip
     else:
-        run_env["cuda_version"] = torch.version.cuda if torch.version.cuda else "unknown"
+        run_env["cuda_version"] = (
+            torch.version.cuda if torch.version.cuda else "unknown"
+        )
     try:
-        run_env["device"] = get_amd_device_name() if is_hip() else torch.cuda.get_device_name()
+        run_env["device"] = (
+            get_amd_device_name() if is_hip() else torch.cuda.get_device_name()
+        )
     except AssertionError:
         run_env["device"] = "unknown"
     run_env["conda_env"] = os.environ.get("CONDA_ENV", "unknown")
