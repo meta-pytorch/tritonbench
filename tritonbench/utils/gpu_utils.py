@@ -22,8 +22,6 @@ else:
     MTIA_COMPUTE_SPECS = {}
     MTIA_MEMORY_SPECS = {}
 
-from tritonbench.utils.env_utils import is_hip
-
 
 # NVIDIA A100 GPU Spec:
 # https://www.nvidia.com/content/dam/en-zz/Solutions/Data-Center/a100/pdf/nvidia-a100-datasheet-us-nvidia-1758950-r4-web.pdf
@@ -263,6 +261,7 @@ def has_nvidia_smi() -> bool:
 
 def get_amd_device_name() -> str:
     import torch
+    from tritonbench.utils.env_utils import is_hip
 
     assert is_hip(), "get_amd_device_name() is only supported on AMD GPUs"
     current_device = torch.cuda.current_device()
