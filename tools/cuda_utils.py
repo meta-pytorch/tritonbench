@@ -138,12 +138,12 @@ if __name__ == "__main__":
     )
     parser.add_argument(
         "--cuda",
-        across="store_true",
+        action="store_true",
         help="Setup the environment for CUDA",
     )
     parser.add_argument(
         "--hip",
-        across="store_true",
+        action="store_true",
         help="Setup the environment for ROCm",
     )
     parser.add_argument(
