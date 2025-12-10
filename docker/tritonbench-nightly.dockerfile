@@ -26,15 +26,14 @@ RUN sudo chmod +x /usr/bin/switch-cuda.sh
 RUN sudo mkdir -p /workspace; sudo chown runner:runner /workspace
 
 # We assume that the host NVIDIA driver binaries and libraries are mapped to the docker filesystem
-# Install CUDA 12.8 build toolchains
-RUN cd /workspace; mkdir -p pytorch-ci; cd pytorch-ci; wget https://raw.githubusercontent.com/pytorch/pytorch/main/.ci/docker/common/install_cuda.sh
-RUN cd /workspace/pytorch-ci; wget https://raw.githubusercontent.com/pytorch/pytorch/main/.ci/docker/common/install_cudnn.sh || true && \
-    wget https://raw.githubusercontent.com/pytorch/pytorch/main/.ci/docker/common/install_nccl.sh && \
-    wget https://raw.githubusercontent.com/pytorch/pytorch/main/.ci/docker/common/install_cusparselt.sh && \
-    mkdir ci_commit_pins && cd ci_commit_pins && \
-    wget https://raw.githubusercontent.com/pytorch/pytorch/main/.ci/docker/ci_commit_pins/nccl-cu12.txt
-
-RUN sudo bash -c "set -x;export OVERRIDE_GENCODE=\"${OVERRIDE_GENCODE}\" OVERRIDE_GENCODE_CUDNN=\"${OVERRIDE_GENCODE_CUDNN}\"; cd /workspace/pytorch-ci; bash install_cuda.sh 12.8"
+# Install CUDA 12.8 build toolchains (only useful for bisection)
+# RUN cd /workspace; mkdir -p pytorch-ci; cd pytorch-ci; wget https://raw.githubusercontent.com/pytorch/pytorch/main/.ci/docker/common/install_cuda.sh
+# RUN cd /workspace/pytorch-ci; wget https://raw.githubusercontent.com/pytorch/pytorch/main/.ci/docker/common/install_cudnn.sh || true && \
+#     wget https://raw.githubusercontent.com/pytorch/pytorch/main/.ci/docker/common/install_nccl.sh && \
+#     wget https://raw.githubusercontent.com/pytorch/pytorch/main/.ci/docker/common/install_cusparselt.sh && \
+#     mkdir ci_commit_pins && cd ci_commit_pins && \
+#     wget https://raw.githubusercontent.com/pytorch/pytorch/main/.ci/docker/ci_commit_pins/nccl-cu12.txt
+# RUN sudo bash -c "set -x;export OVERRIDE_GENCODE=\"${OVERRIDE_GENCODE}\" OVERRIDE_GENCODE_CUDNN=\"${OVERRIDE_GENCODE_CUDNN}\"; cd /workspace/pytorch-ci; bash install_cuda.sh 12.8"
 
 # Checkout TritonBench and submodules
 RUN git clone --recurse-submodules -b "${TRITONBENCH_BRANCH}" --single-branch \
