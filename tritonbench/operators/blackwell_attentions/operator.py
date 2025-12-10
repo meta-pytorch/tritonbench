@@ -543,6 +543,9 @@ class Operator(BenchmarkOperator):
     def tlx_blackwell_ws_pipelined_persistent(self, *args) -> Tuple[Callable, Callable]:
         def fn(q, k, v):
             return tlx_blackwell(
+                q,
+                k,
+                v,
                 self.causal,
                 self.sm_scale,
                 True,
