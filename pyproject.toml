@@ -10,6 +10,8 @@ dependencies = [
     "triton",
     "psutil",
     "tabulate",
+    "matplotlib",
+    "packaging",
 ]
 
 [tool.setuptools.packages.find]
