@@ -46,24 +46,16 @@ RUN echo "\
 . /workspace/miniconda3/etc/profile.d/conda.sh\n\
 conda activate base\n\
 export CONDA_HOME=/workspace/miniconda3\n\
-export CUDA_HOME=/usr/local/cuda\n\
-export PATH=\${CUDA_HOME}/bin:/home/runner/bin\${PATH:+:\${PATH}}\n\
-export LD_LIBRARY_PATH=\${CUDA_HOME}/lib64\${LD_LIBRARY_PATH:+:\${LD_LIBRARY_PATH}}\n\
-export LIBRARY_PATH=\${CUDA_HOME}/lib64\${LIBRARY_PATHPATH:+:\${LIBRARY_PATHPATH}}\n" >> /workspace/setup_instance.sh
+export PATH=/home/runner/bin\${PATH:+:\${PATH}}\n" >> /workspace/setup_instance.sh
 
 RUN echo ". /workspace/setup_instance.sh\n" >> ${HOME}/.bashrc
 
-# Setup conda env and CUDA
+# Setup conda env
 RUN cd /workspace/tritonbench && \
     . ${SETUP_SCRIPT} && \
     python tools/python_utils.py --create-conda-env ${CONDA_ENV} && \
     echo "if [ -z \${CONDA_ENV} ]; then export CONDA_ENV=${CONDA_ENV}; fi" >> /workspace/setup_instance.sh && \
     echo "conda activate \${CONDA_ENV}" >> /workspace/setup_instance.sh
-
-# Preserve env in sudo
-RUN cd /workspace/tritonbench && \
-    . ${SETUP_SCRIPT} && \
-    sudo -E python -m tools.cuda_utils --setup-cuda-softlink
 
 # Install PyTorch nightly and verify the date is correct
 RUN cd /workspace/tritonbench && \
