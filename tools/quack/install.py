@@ -17,7 +17,7 @@ BUILD_CONSTRAINTS_FILE = REPO_PATH.joinpath("build", "constraints.txt")
 
 def install_quack():
     QUACK_INSTALL_PATH.mkdir(parents=True, exist_ok=True)
-    constraints_parameters = ["-c", str(constraints_file.resolve())]
+    constraints_parameters = ["-c", str(BUILD_CONSTRAINTS_FILE.resolve())]
     quack_path = QUACK_INSTALL_PATH.joinpath("quack")
     if quack_path.exists():
         shutil.rmtree(quack_path)
