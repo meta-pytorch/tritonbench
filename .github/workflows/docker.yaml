@@ -57,12 +57,12 @@ jobs:
         if: github.event_name != 'pull_request'
         run: |
           # Extract pytorch version from the docker
+          set -x
           PYTORCH_VERSION=$(docker run -e SETUP_SCRIPT="${SETUP_SCRIPT}" ghcr.io/meta-pytorch/tritonbench:latest bash -c '. "${SETUP_SCRIPT}"; python -c "import torch; print(torch.__version__)"')
           export DOCKER_TAG=$(awk '{match($0, /dev[0-9]+/, arr); print arr[0]}' <<< "${PYTORCH_VERSION}")
           docker tag ghcr.io/meta-pytorch/tritonbench:latest ghcr.io/meta-pytorch/tritonbench:${DOCKER_TAG}
           docker push ghcr.io/meta-pytorch/tritonbench:${DOCKER_TAG}
           docker push ghcr.io/meta-pytorch/tritonbench:latest
-          set -x
           if [[ -n "${{ github.event.inputs.tags }}" ]]; then
             IFS=',' read -ra tags <<< "${{ github.event.inputs.tags }}"
             for tag in "${tags[@]}"; do
