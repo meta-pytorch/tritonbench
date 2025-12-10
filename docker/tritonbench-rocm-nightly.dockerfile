@@ -43,7 +43,7 @@ RUN cd /workspace/tritonbench && \
 RUN cd /workspace/tritonbench && \
     . ${SETUP_SCRIPT} && \
     python -m tools.cuda_utils --install-torch-deps && \
-    python -m tools.cuda_utils --install-torch-nightly
+    python -m tools.cuda_utils --install-torch-nightly --hip
 
 
 # Install Tritonbench

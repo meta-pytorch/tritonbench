@@ -133,8 +133,18 @@ if __name__ == "__main__":
     parser = argparse.ArgumentParser()
     parser.add_argument(
         "--toolkit-version",
-        default=DEFAULT_TOOLKIT_VERSION,
+        default=None,
         help="Specify the default CUDA/HIP version",
+    )
+    parser.add_argument(
+        "--cuda",
+        across="store_true",
+        help="Setup the environment for CUDA",
+    )
+    parser.add_argument(
+        "--hip",
+        across="store_true",
+        help="Setup the environment for ROCm",
     )
     parser.add_argument(
         "--setup-cuda-softlink",
@@ -166,6 +176,19 @@ if __name__ == "__main__":
         help="Force Pytorch nightly release date version. Date string format: YYmmdd",
     )
     args = parser.parse_args()
+    if args.toolkit_version is None:
+        if args.cuda:
+            args.toolkit_version = DEFAULT_CUDA_VERSION
+            toolkit_mapping = CUDA_VERSION_MAP
+        elif args.hip:
+            args.toolkit_version = DEFAULT_HIP_VERSION
+            toolkit_mapping = HIP_VERSION_MAP
+        elif IS_CUDA:
+            args.toolkit_version = DEFAULT_CUDA_VERSION
+            toolkit_mapping = CUDA_VERSION_MAP
+        else:
+            args.toolkit_version = DEFAULT_HIP_VERSION
+            toolkit_mapping = HIP_VERSION_MAP
     if args.setup_cuda_softlink:
         assert IS_CUDA, "Error: CUDA is not available on this machine."
         setup_cuda_softlink(cuda_version=args.toolkit_version)
@@ -177,7 +200,7 @@ if __name__ == "__main__":
         install_torch_deps()
         install_torch_build_deps()
     if args.install_torch_nightly:
-        toolkit_version = TOOLKIT_MAPPING[args.toolkit_version]["pytorch_url"]
+        toolkit_version = toolkit_mapping[args.toolkit_version]["pytorch_url"]
         install_pytorch_nightly(toolkit_version=toolkit_version, env=os.environ)
     if args.check_torch_nightly_version:
         from .torch_utils import check_torch_nightly_version
