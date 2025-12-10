@@ -189,6 +189,8 @@ if __name__ == "__main__":
         else:
             args.toolkit_version = DEFAULT_HIP_VERSION
             toolkit_mapping = HIP_VERSION_MAP
+    else:
+        toolkit_mapping = CUDA_VERSION_MAP if args.cuda or IS_CUDA else HIP_VERSION_MAP
     if args.setup_cuda_softlink:
         assert IS_CUDA, "Error: CUDA is not available on this machine."
         setup_cuda_softlink(cuda_version=args.toolkit_version)
