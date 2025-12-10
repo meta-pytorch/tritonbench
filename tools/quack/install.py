@@ -25,5 +25,5 @@ def install_quack():
     subprocess.check_call(git_clone_cmd, cwd=QUACK_INSTALL_PATH)
     git_checkout_cmd = ["git", "checkout", QUACK_SHA]
     subprocess.check_call(git_checkout_cmd, cwd=quack_path)
-    install_quack_cmd = ["pip", "install", "-e", ".[dev]"] +  constraints_parameters
+    install_quack_cmd = ["pip", "install", "-e", ".[dev]"] + constraints_parameters
     subprocess.check_call(install_quack_cmd, cwd=quack_path)

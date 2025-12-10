@@ -36,5 +36,3 @@ tritonbench_dir=$(dirname "$(readlink -f "$0")")/../..
 cd ${tritonbench_dir}
 
 python install.py --helion
-# Helion requires tritonbench installed as a library
-pip install -e .
