@@ -64,8 +64,9 @@ RUN cd /workspace/tritonbench && \
     python -m tools.cuda_utils --install-torch-nightly --cuda
 
 ## Setup libcublas path to LD_LIBRARY_PATH
-RUN PYTORCH_FILE_PATH=$(python -c "import torch; print(torch.__file__)") && \
-    NVIDIA_LIB_PATH=$(realpath $(dirname ${PYTORCH_FILE_PATH})/../nvidia/cublas/lib) && \
+RUN . ${SETUP_SCRIPT} && \
+    PYTORCH_FILE_PATH=$(python -c "import torch; print(torch.__file__)") \
+    NVIDIA_LIB_PATH=$(realpath $(dirname ${PYTORCH_FILE_PATH})/../nvidia/cublas/lib) \
     echo "export LD_LIBRARY_PATH=\${NVIDIA_LIB_PATH}\${LD_LIBRARY_PATH:+:\${LD_LIBRARY_PATH}}\n" >> /workspace/setup_instance.sh
 
 # Check the installed version of nightly if needed
