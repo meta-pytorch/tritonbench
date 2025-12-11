@@ -8,6 +8,7 @@ import json
 import os
 import re
 import sys
+from dataclasses import dataclass
 from os.path import abspath, exists
 from pathlib import Path
 
@@ -30,6 +31,8 @@ RUNNER_TYPE_MAPPING = {
         "avail_gpu_mem_in_gb": 192,
     }
 }
+
+DTYPE_PREFIXES = ["fp16", "fp32", "bf16", "int8", "int4", "fp8"]
 
 
 def setup_tritonbench_cwd():
@@ -81,27 +84,68 @@ def parse_dependencies(envs: Dict[str, str]) -> Dict[str, Dict[str, Any]]:
         out[dep]["extra_info"]["commit_time"] = envs[f"{dep}_commit_time"]
     return out
 
+@dataclass
+class TritonBenchMetricRow:
+    op: str
+    mode: str
+    metric_name: str
+    backend: Optional[str] = None
+    dtype: str = "unknown"
+    aggregation: Optional[str] = None
+    input: Optional[str] = None
 
-def parse_metric_id(metric_id: str) -> Tuple[str, str, str, str, str]:
+def get_dtype_from_op(op: str) -> Tuple[str, str]:
+    for dtype_prefix in DTYPE_PREFIXES:
+        if op.startswith(dtype_prefix):
+            return dtype_prefix, op[len(dtype_prefix) :]
+    return "unknown", op
+
+def parse_metric_id(metric_id: str) -> TritonBenchMetricRow:
     print(metric_id)
     # per-input metric
     if "[x_" in metric_id:
+        # ignore x_average input rows
+        if "[x_average" in metric_id:
+            continue
         metric_id_regex = (
             r"tritonbench_([0-9a-z_]+)_([a-z_]+)\[x_(.*)-([0-9a-z_]+)\]_([a-z_]+)"
         )
         op, mode, input, backend, metric = re.match(metric_id_regex, metric_id).groups()
-        out = (op, mode, input, backend, metric)
-        return out
+        dtype, op = get_dtype_from_op(op)
+        # individual input metric signal
+        return TritonBenchMetricRow(
+            op=op,
+            mode=mode,
+            metric_name=metric,
+            backend=backend,
+            dtype=dtype,
+            aggregation="p50",
+            input=input.strip(),
+        )
     elif metric_id.endswith("-pass"):  # pass/fail metric
         metric_id_regex = r"tritonbench_([0-9a-z_]+)_([a-z_]+)-pass"
         op, mode = re.match(metric_id_regex, metric_id).groups()
-        out = (op, mode, None, None, "pass")
-        return out
+        dtype, op = get_dtype_from_op(op)
+        # pass/fail signal
+        return TritonBenchMetricRow(
+            op=op,
+            mode=mode,
+            metric_name="pass",
+            backend=None,
+            dtype=dtype,
+        )
     # aggregated metric
     input = None
     metric_id_regex = r"tritonbench_([0-9a-z_]+)_([a-z_]+)\[([0-9a-z_]+)\]-(.+)"
     op, mode, backend, metric = re.search(metric_id_regex, metric_id).groups()
-    return (op, mode, input, backend, metric)
+    dtype, op = get_dtype_from_op(op)
+    return TritonBenchMetricRow(
+        op=op,
+        mode=mode,
+        metric_name=metric,
+        backend=backend,
+        dtype=dtype,
+    )
 
 
 def generate_oss_ci_benchmark_v3_json(
@@ -123,7 +167,7 @@ def generate_oss_ci_benchmark_v3_json(
             benchmark_result["env"],
         )
         entry["dependencies"] = parse_dependencies(benchmark_result["env"])
-        op, mode, _input, backend, metric_name = parse_metric_id(metric_id)
+        metric_row: TritonBenchMetricRow = parse_metric_id(metric_id)
         try:
             metric_value = benchmark_result["metrics"][metric_id]
             metric_value = float(metric_value) if metric_value else 0.0
@@ -132,20 +176,27 @@ def generate_oss_ci_benchmark_v3_json(
             metric_value = 0.0
         entry["benchmark"] = {
             "name": benchmark_result["name"],
-            "mode": mode,
-            "dtype": "unknown",
+            "mode": metric_row.mode,
+            "dtype": metric_row.dtype,
             "extra_info": {},
         }
         # We use the model field for operator
         entry["model"] = {
-            "name": op,
+            "name": metric_row.op,
             "type": "tritonbench-oss",
-            "backend": backend,
+            "backend": metric_row.backend,
         }
         entry["metric"] = {
-            "name": metric_name,
+            "name": metric_row.metric_name,
             "benchmark_values": [metric_value],
+            "extra_info": {},
         }
+        # add input shape if applicable
+        if metric_row.input:
+            entry["metric"]["extra_info"]["input_shape"] = metric_row.input
+        # add aggregation if applicable
+        if metric_row.aggregation:
+            entry["metric"]["extra_info"]["aggregation"] = metric_row.aggregation
         out.append(entry)
     return out
 
