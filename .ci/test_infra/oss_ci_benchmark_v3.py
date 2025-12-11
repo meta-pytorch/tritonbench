@@ -12,7 +12,7 @@ from dataclasses import dataclass
 from os.path import abspath, exists
 from pathlib import Path
 
-from typing import Any, Dict, List, Tuple
+from typing import Any, Dict, List, Tuple, Optional
 
 RUNNER_TYPE_MAPPING = {
     "gcp-h100-runner": {
@@ -89,10 +89,10 @@ class TritonBenchMetricRow:
     op: str
     mode: str
     metric_name: str
-    backend: Optional[str] = None
     dtype: str = "unknown"
-    aggregation: Optional[str] = None
+    backend: Optional[str] = None
     input: Optional[str] = None
+    aggregation: Optional[str] = None
 
 def get_dtype_from_op(op: str) -> Tuple[str, str]:
     for dtype_prefix in DTYPE_PREFIXES:
@@ -106,33 +106,38 @@ def parse_metric_id(metric_id: str) -> TritonBenchMetricRow:
     if "[x_" in metric_id:
         # ignore x_average input rows
         if "[x_average" in metric_id:
-            continue
+            return None
         metric_id_regex = (
             r"tritonbench_([0-9a-z_]+)_([a-z_]+)\[x_(.*)-([0-9a-z_]+)\]_([a-z_]+)"
         )
         op, mode, input, backend, metric = re.match(metric_id_regex, metric_id).groups()
         dtype, op = get_dtype_from_op(op)
+        # by default, aggregation for latency is p50
+        aggregation = "p50" if metric == "latency" else None
         # individual input metric signal
         return TritonBenchMetricRow(
             op=op,
             mode=mode,
             metric_name=metric,
-            backend=backend,
             dtype=dtype,
-            aggregation="p50",
+            backend=backend,
             input=input.strip(),
+            aggregation=aggregation,
         )
     elif metric_id.endswith("-pass"):  # pass/fail metric
         metric_id_regex = r"tritonbench_([0-9a-z_]+)_([a-z_]+)-pass"
         op, mode = re.match(metric_id_regex, metric_id).groups()
         dtype, op = get_dtype_from_op(op)
-        # pass/fail signal
+        if not mode == "fwd" and not mode == "bwd":
+            op = f"{op}_{mode}"
+            mode = "fwd"
+        # benchmark pass/fail signal
         return TritonBenchMetricRow(
             op=op,
             mode=mode,
             metric_name="pass",
-            backend=None,
             dtype=dtype,
+            backend=None,
         )
     # aggregated metric
     input = None
@@ -143,8 +148,8 @@ def parse_metric_id(metric_id: str) -> TritonBenchMetricRow:
         op=op,
         mode=mode,
         metric_name=metric,
-        backend=backend,
         dtype=dtype,
+        backend=backend,
     )
 
 
@@ -168,6 +173,8 @@ def generate_oss_ci_benchmark_v3_json(
         )
         entry["dependencies"] = parse_dependencies(benchmark_result["env"])
         metric_row: TritonBenchMetricRow = parse_metric_id(metric_id)
+        if metric_row is None:
+            continue
         try:
             metric_value = benchmark_result["metrics"][metric_id]
             metric_value = float(metric_value) if metric_value else 0.0
