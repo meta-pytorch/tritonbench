@@ -19,6 +19,7 @@ def get_cuda_autotune_config():
                 "GROUP_SIZE_M": 8,
                 "NUM_SMEM_BUFFERS": s,
                 "NUM_TMEM_BUFFERS": t,
+                "NUM_MMA_GROUPS": m,
                 "EPILOGUE_SUBTILE": subtile,
                 "PAIR_CTA": pairCTA,
                 "PERSISTENT": persistent,
@@ -27,11 +28,12 @@ def get_cuda_autotune_config():
             num_stages=1,
             pre_hook=matmul_tma_set_block_size_hook,
         )
-        for BM in [128]
+        for BM in [128, 256]
         for BN in [128, 256, 512]
         for BK in [64, 128]
         for s in [2, 3, 4, 5, 6, 7]
-        for t in [2, 3]
+        for t in [1, 2, 3]
+        for m in [1, 2]
         for subtile in [1, 2, 4, 8]
         for pairCTA in [True, False]
         for persistent in [True, False]
@@ -42,13 +44,17 @@ def matmul_tma_set_block_size_hook(nargs):
     BLOCK_M = nargs["BLOCK_SIZE_M"]
     BLOCK_N = nargs["BLOCK_SIZE_N"]
     BLOCK_K = nargs["BLOCK_SIZE_K"]
-    nargs["a_desc"].block_shape = [BLOCK_M, BLOCK_K]
+    NUM_MMA_GROUPS = nargs.get("NUM_MMA_GROUPS", 1)
+    nargs["a_desc"].block_shape = [BLOCK_M // NUM_MMA_GROUPS, BLOCK_K]
     if nargs.get("PAIR_CTA", False):
         nargs["b_desc"].block_shape = [BLOCK_K, BLOCK_N // 2]
     else:
         nargs["b_desc"].block_shape = [BLOCK_K, BLOCK_N]
     EPILOGUE_SUBTILE = nargs.get("EPILOGUE_SUBTILE", 1)
-    nargs["c_desc"].block_shape = [BLOCK_M, BLOCK_N // EPILOGUE_SUBTILE]
+    nargs["c_desc"].block_shape = [
+        BLOCK_M // NUM_MMA_GROUPS,
+        BLOCK_N // EPILOGUE_SUBTILE,
+    ]
 
 
 @triton.jit
@@ -77,6 +83,11 @@ def preprocess_configs(configs, named_args, **kwargs):
         NUM_TMEM_BUFFERS = conf.kwargs["NUM_TMEM_BUFFERS"]
         PAIR_CTA = conf.kwargs["PAIR_CTA"]
         PERSISTENT = conf.kwargs["PERSISTENT"]
+        NUM_MMA_GROUPS = conf.kwargs["NUM_MMA_GROUPS"]
+
+        # Filter out invalid config that causes wrong hardware MMA
+        if BLOCK_M // NUM_MMA_GROUPS > 128:
+            continue
 
         # Non-persistent mode only processes a single tile and doesn't benefit from pipelining
         # so we force single TMEM buffer and disable PAIR_CTA optimizations
@@ -128,7 +139,7 @@ def preprocess_configs(configs, named_args, **kwargs):
             continue
 
         # TODO: add back configs that triggers compiler bug
-        if BLOCK_N == 512 and not PERSISTENT:
+        if BLOCK_N == 512:
             continue
 
         pruned_configs.append(conf)
@@ -164,6 +175,8 @@ def _process_tile_epilogue_inner(
     BLOCK_SIZE_M,
     BLOCK_SIZE_N,
     EPILOGUE_SUBTILE,
+    NUM_MMA_GROUPS,
+    NUM_TMEM_BUFFERS,
     c_desc,
     tmem_buffers,
     tmem_full_bars,
@@ -174,42 +187,45 @@ def _process_tile_epilogue_inner(
 ):
     """Process epilogue for a single tile."""
     pid_m, pid_n = _compute_pid(tile_id, num_pid_in_group, num_pid_m, GROUP_SIZE_M)
-    offs_am = pid_m * BLOCK_SIZE_M
     offs_bn = pid_n * BLOCK_SIZE_N
+    BLOCK_M_SPLIT: tl.constexpr = BLOCK_SIZE_M // NUM_MMA_GROUPS
 
-    tlx.barrier_wait(tmem_full_bars[cur_tmem_buf], tmem_read_phase)
-
-    # load the result from TMEM to registers
-    acc_tmem = tmem_buffers[cur_tmem_buf]
     slice_size: tl.constexpr = BLOCK_SIZE_N // EPILOGUE_SUBTILE
-    for slice_id in tl.static_range(EPILOGUE_SUBTILE):
-        acc_tmem_subslice = tlx.local_slice(
-            acc_tmem,
-            [0, slice_id * slice_size],
-            [BLOCK_SIZE_M, slice_size],
-        )
-        result = tlx.local_load(acc_tmem_subslice)
-        c = result.to(tl.float16)
-        c_desc.store([offs_am, offs_bn + slice_id * slice_size], c)
+    for group_id in tl.static_range(NUM_MMA_GROUPS):
+        # Wait for TMEM to be filled
+        buf_idx = group_id * NUM_TMEM_BUFFERS + cur_tmem_buf
+        tlx.barrier_wait(tmem_full_bars[buf_idx], tmem_read_phase)
 
-    # Signal MMA consumer if in persistent mode
-    if PERSISTENT:
-        tlx.barrier_arrive(tmem_empty_bars[cur_tmem_buf], 1)
+        # load the result from TMEM to registers
+        acc_tmem = tmem_buffers[buf_idx]
+        offs_am = pid_m * BLOCK_SIZE_M + group_id * BLOCK_M_SPLIT
+        for slice_id in tl.static_range(EPILOGUE_SUBTILE):
+            acc_tmem_subslice = tlx.local_slice(
+                acc_tmem,
+                [0, slice_id * slice_size],
+                [BLOCK_M_SPLIT, slice_size],
+            )
+            result = tlx.local_load(acc_tmem_subslice)
+            c = result.to(tlx.dtype_of(c_desc))
+            c_desc.store([offs_am, offs_bn + slice_id * slice_size], c)
+
+        # Signal MMA consumer if in persistent mode
+        if PERSISTENT:
+            tlx.barrier_arrive(tmem_empty_bars[buf_idx], 1)
 
 
 @triton.jit
 def _process_tile_mma_inner(
-    tile_id,
-    num_pid_in_group,
-    num_pid_m,
-    GROUP_SIZE_M,
     k_tiles,
     NUM_SMEM_BUFFERS,
+    NUM_MMA_GROUPS,
+    NUM_TMEM_BUFFERS,
     buffers_A,
     buffers_B,
     tmem_buffers,
-    smem_full_bars,
-    smem_empty_bars,
+    A_smem_full_bars,
+    B_smem_full_bars,
+    A_smem_empty_bars,
     tmem_full_bars,
     cur_tmem_buf,
     tmem_empty_bars,
@@ -221,43 +237,56 @@ def _process_tile_mma_inner(
     PERSISTENT,
 ):
     """Process MMA for a single tile. Returns updated smem_accum_cnt."""
-    pid_m, pid_n = _compute_pid(tile_id, num_pid_in_group, num_pid_m, GROUP_SIZE_M)
 
+    # Wait for epilogue to be done with all TMEM buffers if persistent
     if PERSISTENT:
-        # wait epilogue consumer to be done with the buffer before reusing it
-        # Note: we start with phase 1 since epilogue starts with phase 0
-        tlx.barrier_wait(tmem_empty_bars[cur_tmem_buf], tmem_write_phase ^ 1)
+        for group_id in tl.static_range(NUM_MMA_GROUPS):
+            cur_barrier_idx = group_id * NUM_TMEM_BUFFERS + cur_tmem_buf
+            tlx.barrier_wait(tmem_empty_bars[cur_barrier_idx], tmem_write_phase ^ 1)
 
     # now iterate along K to compute result for the block
     for k in range(0, k_tiles):
         buf, phase = _get_bufidx_phase(smem_accum_cnt, NUM_SMEM_BUFFERS)
 
         # wait for current phase(round) of load for this buf
-        tlx.barrier_wait(smem_full_bars[buf], phase)
-        # CTA0 waits for CTA0 and CTA1 to finish loading A and B before issuing dot op
-        if PAIR_CTA:
-            cta_bar = tlx.remote_view(cta_bars[buf], 0)
-            tlx.barrier_arrive(cta_bar, 1)
-            tlx.barrier_wait(cta_bar, phase=phase, pred=pred_cta0)
+        tlx.barrier_wait(B_smem_full_bars[buf], phase)
 
-        # buffer is now ready with loaded data, tlx.async_dot will signal `mBarrier` when done
-        tlx.async_dot(
-            buffers_A[buf],
-            buffers_B[buf],
-            tmem_buffers[cur_tmem_buf],
-            use_acc=k > 0,
-            mBarriers=[smem_empty_bars[buf]],
-            two_ctas=PAIR_CTA,
-            out_dtype=tl.float32,
-        )
+        # Process all subtiles for this K iteration
+        for group_id in tl.static_range(NUM_MMA_GROUPS):
+            # Calculate buffer indices
+            a_buf = group_id * NUM_SMEM_BUFFERS + buf
+            acc_buf = group_id * NUM_TMEM_BUFFERS + cur_tmem_buf
+
+            # Wait for this A subtile buffer to be loaded
+            tlx.barrier_wait(A_smem_full_bars[a_buf], phase)
+
+            # CTA0 waits for CTA0 and CTA1 to finish loading A and B before issuing dot op
+            if PAIR_CTA:
+                cta_bar = tlx.remote_view(cta_bars[a_buf], 0)
+                tlx.barrier_arrive(cta_bar, 1)
+                tlx.barrier_wait(cta_bar, phase=phase, pred=pred_cta0)
+
+            # Perform MMA: use_acc=False for first K iteration, True otherwise
+            tlx.async_dot(
+                buffers_A[a_buf],
+                buffers_B[buf],
+                tmem_buffers[acc_buf],
+                use_acc=k > 0,
+                mBarriers=[A_smem_empty_bars[a_buf]],
+                two_ctas=PAIR_CTA,
+                out_dtype=tl.float32,
+            )
+
         smem_accum_cnt += 1
 
-    # Wait for last MMA to complete before signaling epilogue
+    # Wait for last MMA to complete and signal epilogue for all subtiles
     last_buf, last_phase = _get_bufidx_phase(smem_accum_cnt - 1, NUM_SMEM_BUFFERS)
-    tlx.barrier_wait(smem_empty_bars[last_buf], last_phase)
-
-    # Done filling this buffer, signal epilogue consumer
-    tlx.barrier_arrive(tmem_full_bars[cur_tmem_buf], 1)
+    for group_id in tl.static_range(NUM_MMA_GROUPS):
+        a_buf = group_id * NUM_SMEM_BUFFERS + last_buf
+        tlx.barrier_wait(A_smem_empty_bars[a_buf], last_phase)
+        acc_buf = group_id * NUM_TMEM_BUFFERS + cur_tmem_buf
+        # Done filling this buffer, signal epilogue consumer
+        tlx.barrier_arrive(tmem_full_bars[acc_buf], 1)
 
     return smem_accum_cnt
 
@@ -271,49 +300,76 @@ def _process_tile_producer_inner(
     BLOCK_SIZE_M,
     BLOCK_SIZE_N,
     BLOCK_SIZE_K,
+    NUM_MMA_GROUPS,
     k_tiles,
     NUM_SMEM_BUFFERS,
     a_desc,
     b_desc,
     buffers_A,
     buffers_B,
-    smem_full_bars,
-    smem_empty_bars,
+    A_smem_full_bars,
+    B_smem_full_bars,
+    A_smem_empty_bars,
     smem_accum_cnt,
     PAIR_CTA,
     cluster_cta_rank,
 ):
-    """Process TMA loads for a single tile. Returns updated smem_accum_cnt."""
+    """Process TMA loads for a single tile with all subtiles."""
     pid_m, pid_n = _compute_pid(tile_id, num_pid_in_group, num_pid_m, GROUP_SIZE_M)
-    offs_am = pid_m * BLOCK_SIZE_M
-    # split B into two parts so each CTA has different offset
+    dsize: tl.constexpr = tlx.size_of(tlx.dtype_of(b_desc))
+    BLOCK_M_SPLIT: tl.constexpr = BLOCK_SIZE_M // NUM_MMA_GROUPS
     if PAIR_CTA:
         offs_bn = pid_n * BLOCK_SIZE_N + cluster_cta_rank * (BLOCK_SIZE_N // 2)
+        expected_bytes: tl.constexpr = dsize * BLOCK_SIZE_N * BLOCK_SIZE_K // 2
     else:
         offs_bn = pid_n * BLOCK_SIZE_N
+        expected_bytes: tl.constexpr = dsize * BLOCK_SIZE_N * BLOCK_SIZE_K
 
+    # Iterate along K dimension
     for k in range(0, k_tiles):
-        buf, load_phase = _get_bufidx_phase(smem_accum_cnt, NUM_SMEM_BUFFERS)
-        # wait for previous phase(round) of dot for this buf
-        tlx.barrier_wait(smem_empty_bars[buf], load_phase ^ 1)
-        # buffer is now ready to be used again
+        buf, phase = _get_bufidx_phase(smem_accum_cnt, NUM_SMEM_BUFFERS)
         offs_k = k * BLOCK_SIZE_K
-        if PAIR_CTA:
-            tlx.barrier_expect_bytes(
-                smem_full_bars[buf],
-                2 * (BLOCK_SIZE_M + BLOCK_SIZE_N // 2) * BLOCK_SIZE_K,
-            )  # float16
-        else:
-            tlx.barrier_expect_bytes(
-                smem_full_bars[buf],
-                2 * (BLOCK_SIZE_M + BLOCK_SIZE_N) * BLOCK_SIZE_K,
-            )  # float16
-        tlx.async_descriptor_load(
-            a_desc, buffers_A[buf], [offs_am, offs_k], smem_full_bars[buf]
+
+        # Load A for the first group
+        a_buf = buf
+        tlx.barrier_wait(A_smem_empty_bars[a_buf], phase ^ 1)
+        offs_am = pid_m * BLOCK_SIZE_M
+        tlx.barrier_expect_bytes(
+            A_smem_full_bars[a_buf], dsize * BLOCK_M_SPLIT * BLOCK_SIZE_K
         )
         tlx.async_descriptor_load(
-            b_desc, buffers_B[buf], [offs_k, offs_bn], smem_full_bars[buf]
+            a_desc, buffers_A[a_buf], [offs_am, offs_k], A_smem_full_bars[a_buf]
         )
+
+        # Load B once per K iteration (shared across all subtiles)
+        # Wait for the last B subtile buffer from the previous phase to complete its dot operation
+        # This ensures A buffer is ready to be reused
+        last_a_buf = (NUM_MMA_GROUPS - 1) * NUM_SMEM_BUFFERS + buf
+        tlx.barrier_wait(A_smem_empty_bars[last_a_buf], phase ^ 1)
+        # Set expected bytes for B and load B (once per K iteration)
+        tlx.barrier_expect_bytes(B_smem_full_bars[buf], expected_bytes)
+        tlx.async_descriptor_load(
+            b_desc, buffers_B[buf], [offs_k, offs_bn], B_smem_full_bars[buf]
+        )
+
+        # Load all remaining A subtiles for this K iteration
+        for group_id in tl.static_range(1, NUM_MMA_GROUPS):
+            # Calculate buffer index: subtile_id * NUM_SMEM_BUFFERS + buf
+            a_buf = group_id * NUM_SMEM_BUFFERS + buf
+
+            # Wait for previous phase of dot for this B buffer
+            tlx.barrier_wait(A_smem_empty_bars[a_buf], phase ^ 1)
+
+            # Calculate B offset for this subtile
+            offs_am2 = offs_am + group_id * BLOCK_M_SPLIT
+
+            tlx.barrier_expect_bytes(
+                A_smem_full_bars[a_buf], dsize * BLOCK_M_SPLIT * BLOCK_SIZE_K
+            )
+            tlx.async_descriptor_load(
+                a_desc, buffers_A[a_buf], [offs_am2, offs_k], A_smem_full_bars[a_buf]
+            )
+
         smem_accum_cnt += 1
 
     return smem_accum_cnt
@@ -338,14 +394,18 @@ def matmul_kernel_tma_ws_blackwell(
     GROUP_SIZE_M: tl.constexpr,  #
     NUM_SMEM_BUFFERS: tl.constexpr,  #
     NUM_TMEM_BUFFERS: tl.constexpr,  #
+    NUM_MMA_GROUPS: tl.constexpr,  #
     EPILOGUE_SUBTILE: tl.constexpr,  #
     PAIR_CTA: tl.constexpr,  #
     PERSISTENT: tl.constexpr,  #
     NUM_SMS: tl.constexpr,  #
 ):
     # allocate NUM_SMEM_BUFFERS buffers
+    BLOCK_M_SPLIT: tl.constexpr = BLOCK_SIZE_M // NUM_MMA_GROUPS
     buffers_A = tlx.local_alloc(
-        (BLOCK_SIZE_M, BLOCK_SIZE_K), tl.float16, NUM_SMEM_BUFFERS
+        (BLOCK_M_SPLIT, BLOCK_SIZE_K),
+        tlx.dtype_of(a_desc),
+        NUM_SMEM_BUFFERS * NUM_MMA_GROUPS,
     )
     # In pair CTA mode, each cta only needs to load half of B.
     if PAIR_CTA:
@@ -358,10 +418,12 @@ def matmul_kernel_tma_ws_blackwell(
         )
     # Non-persistent mode: 1 TMEM buffer (processes single tile)
     # Persistent mode: NUM_TMEM_BUFFERS (overlaps MMA and epilogue)
+    # Each buffer holds one subtile: BLOCK_M_SPLIT x BLOCK_SIZE_N
+    # Total buffers: NUM_TMEM_BUFFERS * NUM_MMA_GROUPS
     tmem_buffers = tlx.local_alloc(
-        (BLOCK_SIZE_M, BLOCK_SIZE_N),
+        (BLOCK_M_SPLIT, BLOCK_SIZE_N),
         tl.float32,
-        NUM_TMEM_BUFFERS,
+        NUM_TMEM_BUFFERS * NUM_MMA_GROUPS,
         tlx.storage_kind.tmem,
     )
 
@@ -370,22 +432,29 @@ def matmul_kernel_tma_ws_blackwell(
         cluster_cta_rank = tlx.cluster_cta_rank()
         pred_cta0 = cluster_cta_rank == 0
         cta_bars = tlx.alloc_barriers(
-            num_barriers=NUM_SMEM_BUFFERS, arrive_count=2
+            num_barriers=NUM_SMEM_BUFFERS * NUM_MMA_GROUPS, arrive_count=2
         )  # CTA0 waits for CTA1's data before mma
     else:
         cluster_cta_rank = 0
         pred_cta0 = False
         cta_bars = None
 
-    # allocate barriers
-    smem_empty_bars = tlx.alloc_barriers(num_barriers=NUM_SMEM_BUFFERS, arrive_count=1)
-    smem_full_bars = tlx.alloc_barriers(num_barriers=NUM_SMEM_BUFFERS, arrive_count=1)
-    # Non-persistent mode: 1 TMEM barrier (processes single tile)
+    # allocate barriers - each subtile needs its own barriers
+    # NUM_SMEM_BUFFERS barriers per subtile for synchronization
+    A_smem_full_bars = tlx.alloc_barriers(
+        num_barriers=NUM_SMEM_BUFFERS * NUM_MMA_GROUPS, arrive_count=1
+    )
+    A_smem_empty_bars = tlx.alloc_barriers(
+        num_barriers=NUM_SMEM_BUFFERS * NUM_MMA_GROUPS, arrive_count=1
+    )
+    B_smem_full_bars = tlx.alloc_barriers(num_barriers=NUM_SMEM_BUFFERS, arrive_count=1)
     # Persistent mode: NUM_TMEM_BUFFERS (overlaps MMA and epilogue)
-    tmem_full_bars = tlx.alloc_barriers(num_barriers=NUM_TMEM_BUFFERS, arrive_count=1)
+    tmem_full_bars = tlx.alloc_barriers(
+        num_barriers=NUM_TMEM_BUFFERS * NUM_MMA_GROUPS, arrive_count=1
+    )
     if PERSISTENT:
         tmem_empty_bars = tlx.alloc_barriers(
-            num_barriers=NUM_TMEM_BUFFERS, arrive_count=1
+            num_barriers=NUM_TMEM_BUFFERS * NUM_MMA_GROUPS, arrive_count=1
         )
     else:
         tmem_empty_bars = None
@@ -406,20 +475,22 @@ def matmul_kernel_tma_ws_blackwell(
                         tmem_accum_cnt, NUM_TMEM_BUFFERS
                     )
                     _process_tile_epilogue_inner(
-                        tile_id,
-                        num_pid_in_group,
-                        num_pid_m,
-                        GROUP_SIZE_M,
-                        BLOCK_SIZE_M,
-                        BLOCK_SIZE_N,
-                        EPILOGUE_SUBTILE,
-                        c_desc,
-                        tmem_buffers,
-                        tmem_full_bars,
-                        tmem_empty_bars,
-                        cur_tmem_buf,
-                        tmem_read_phase,
-                        PERSISTENT,
+                        tile_id=tile_id,
+                        num_pid_in_group=num_pid_in_group,
+                        num_pid_m=num_pid_m,
+                        GROUP_SIZE_M=GROUP_SIZE_M,
+                        BLOCK_SIZE_M=BLOCK_SIZE_M,
+                        BLOCK_SIZE_N=BLOCK_SIZE_N,
+                        EPILOGUE_SUBTILE=EPILOGUE_SUBTILE,
+                        NUM_MMA_GROUPS=NUM_MMA_GROUPS,
+                        NUM_TMEM_BUFFERS=NUM_TMEM_BUFFERS,
+                        c_desc=c_desc,
+                        tmem_buffers=tmem_buffers,
+                        tmem_full_bars=tmem_full_bars,
+                        tmem_empty_bars=tmem_empty_bars,
+                        cur_tmem_buf=cur_tmem_buf,
+                        tmem_read_phase=tmem_read_phase,
+                        PERSISTENT=PERSISTENT,
                     )
                     tmem_accum_cnt += 1
             else:
@@ -428,20 +499,22 @@ def matmul_kernel_tma_ws_blackwell(
                 cur_tmem_buf = 0
                 tmem_read_phase = 0
                 _process_tile_epilogue_inner(
-                    tile_id,
-                    num_pid_in_group,
-                    num_pid_m,
-                    GROUP_SIZE_M,
-                    BLOCK_SIZE_M,
-                    BLOCK_SIZE_N,
-                    EPILOGUE_SUBTILE,
-                    c_desc,
-                    tmem_buffers,
-                    tmem_full_bars,
-                    tmem_empty_bars,
-                    cur_tmem_buf,
-                    tmem_read_phase,
-                    PERSISTENT,
+                    tile_id=tile_id,
+                    num_pid_in_group=num_pid_in_group,
+                    num_pid_m=num_pid_m,
+                    GROUP_SIZE_M=GROUP_SIZE_M,
+                    BLOCK_SIZE_M=BLOCK_SIZE_M,
+                    BLOCK_SIZE_N=BLOCK_SIZE_N,
+                    EPILOGUE_SUBTILE=EPILOGUE_SUBTILE,
+                    NUM_MMA_GROUPS=NUM_MMA_GROUPS,
+                    NUM_TMEM_BUFFERS=NUM_TMEM_BUFFERS,
+                    c_desc=c_desc,
+                    tmem_buffers=tmem_buffers,
+                    tmem_full_bars=tmem_full_bars,
+                    tmem_empty_bars=tmem_empty_bars,
+                    cur_tmem_buf=cur_tmem_buf,
+                    tmem_read_phase=tmem_read_phase,
+                    PERSISTENT=PERSISTENT,
                 )
 
         with tlx.async_task(num_warps=1, num_regs=24):  # MMA consumer
@@ -461,26 +534,25 @@ def matmul_kernel_tma_ws_blackwell(
                         tmem_accum_cnt, NUM_TMEM_BUFFERS
                     )
                     smem_accum_cnt = _process_tile_mma_inner(
-                        tile_id,
-                        num_pid_in_group,
-                        num_pid_m,
-                        GROUP_SIZE_M,
-                        k_tiles,
-                        NUM_SMEM_BUFFERS,
-                        buffers_A,
-                        buffers_B,
-                        tmem_buffers,
-                        smem_full_bars,
-                        smem_empty_bars,
-                        tmem_full_bars,
-                        cur_tmem_buf,
-                        tmem_empty_bars,
-                        tmem_write_phase,
-                        smem_accum_cnt,
-                        PAIR_CTA,
-                        cta_bars,
-                        pred_cta0,
-                        PERSISTENT,
+                        k_tiles=k_tiles,
+                        NUM_SMEM_BUFFERS=NUM_SMEM_BUFFERS,
+                        NUM_MMA_GROUPS=NUM_MMA_GROUPS,
+                        NUM_TMEM_BUFFERS=NUM_TMEM_BUFFERS,
+                        buffers_A=buffers_A,
+                        buffers_B=buffers_B,
+                        tmem_buffers=tmem_buffers,
+                        A_smem_full_bars=A_smem_full_bars,
+                        B_smem_full_bars=B_smem_full_bars,
+                        A_smem_empty_bars=A_smem_empty_bars,
+                        tmem_full_bars=tmem_full_bars,
+                        cur_tmem_buf=cur_tmem_buf,
+                        tmem_empty_bars=tmem_empty_bars,
+                        tmem_write_phase=tmem_write_phase,
+                        smem_accum_cnt=smem_accum_cnt,
+                        PAIR_CTA=PAIR_CTA,
+                        cta_bars=cta_bars,
+                        pred_cta0=pred_cta0,
+                        PERSISTENT=PERSISTENT,
                     )
                     tmem_accum_cnt += 1
             else:
@@ -490,26 +562,25 @@ def matmul_kernel_tma_ws_blackwell(
                 cur_tmem_buf = 0
                 tmem_write_phase = 0  # Not used in non-persistent mode
                 _process_tile_mma_inner(
-                    tile_id,
-                    num_pid_in_group,
-                    num_pid_m,
-                    GROUP_SIZE_M,
-                    k_tiles,
-                    NUM_SMEM_BUFFERS,
-                    buffers_A,
-                    buffers_B,
-                    tmem_buffers,
-                    smem_full_bars,
-                    smem_empty_bars,
-                    tmem_full_bars,
-                    cur_tmem_buf,
-                    tmem_empty_bars,
-                    tmem_write_phase,
-                    smem_accum_cnt,
-                    PAIR_CTA,
-                    cta_bars,
-                    pred_cta0,
-                    PERSISTENT,
+                    k_tiles=k_tiles,
+                    NUM_SMEM_BUFFERS=NUM_SMEM_BUFFERS,
+                    NUM_MMA_GROUPS=NUM_MMA_GROUPS,
+                    NUM_TMEM_BUFFERS=NUM_TMEM_BUFFERS,
+                    buffers_A=buffers_A,
+                    buffers_B=buffers_B,
+                    tmem_buffers=tmem_buffers,
+                    A_smem_full_bars=A_smem_full_bars,
+                    B_smem_full_bars=B_smem_full_bars,
+                    A_smem_empty_bars=A_smem_empty_bars,
+                    tmem_full_bars=tmem_full_bars,
+                    cur_tmem_buf=cur_tmem_buf,
+                    tmem_empty_bars=tmem_empty_bars,
+                    tmem_write_phase=tmem_write_phase,
+                    smem_accum_cnt=smem_accum_cnt,
+                    PAIR_CTA=PAIR_CTA,
+                    cta_bars=cta_bars,
+                    pred_cta0=pred_cta0,
+                    PERSISTENT=PERSISTENT,
                 )
 
         with tlx.async_task(num_warps=1, num_regs=24):  # producer, TMA load
@@ -524,48 +595,52 @@ def matmul_kernel_tma_ws_blackwell(
                 smem_accum_cnt = 0
                 for tile_id in range(start_pid, num_tiles, NUM_SMS):
                     smem_accum_cnt = _process_tile_producer_inner(
-                        tile_id,
-                        num_pid_in_group,
-                        num_pid_m,
-                        GROUP_SIZE_M,
-                        BLOCK_SIZE_M,
-                        BLOCK_SIZE_N,
-                        BLOCK_SIZE_K,
-                        k_tiles,
-                        NUM_SMEM_BUFFERS,
-                        a_desc,
-                        b_desc,
-                        buffers_A,
-                        buffers_B,
-                        smem_full_bars,
-                        smem_empty_bars,
-                        smem_accum_cnt,
-                        PAIR_CTA,
-                        cluster_cta_rank,
+                        tile_id=tile_id,
+                        num_pid_in_group=num_pid_in_group,
+                        num_pid_m=num_pid_m,
+                        GROUP_SIZE_M=GROUP_SIZE_M,
+                        BLOCK_SIZE_M=BLOCK_SIZE_M,
+                        BLOCK_SIZE_N=BLOCK_SIZE_N,
+                        BLOCK_SIZE_K=BLOCK_SIZE_K,
+                        NUM_MMA_GROUPS=NUM_MMA_GROUPS,
+                        k_tiles=k_tiles,
+                        NUM_SMEM_BUFFERS=NUM_SMEM_BUFFERS,
+                        a_desc=a_desc,
+                        b_desc=b_desc,
+                        buffers_A=buffers_A,
+                        buffers_B=buffers_B,
+                        A_smem_full_bars=A_smem_full_bars,
+                        B_smem_full_bars=B_smem_full_bars,
+                        A_smem_empty_bars=A_smem_empty_bars,
+                        smem_accum_cnt=smem_accum_cnt,
+                        PAIR_CTA=PAIR_CTA,
+                        cluster_cta_rank=cluster_cta_rank,
                     )
             else:
                 # Non-persistent mode: process single tile
                 tile_id = start_pid
                 smem_accum_cnt = 0
                 _process_tile_producer_inner(
-                    tile_id,
-                    num_pid_in_group,
-                    num_pid_m,
-                    GROUP_SIZE_M,
-                    BLOCK_SIZE_M,
-                    BLOCK_SIZE_N,
-                    BLOCK_SIZE_K,
-                    k_tiles,
-                    NUM_SMEM_BUFFERS,
-                    a_desc,
-                    b_desc,
-                    buffers_A,
-                    buffers_B,
-                    smem_full_bars,
-                    smem_empty_bars,
-                    smem_accum_cnt,
-                    PAIR_CTA,
-                    cluster_cta_rank,
+                    tile_id=tile_id,
+                    num_pid_in_group=num_pid_in_group,
+                    num_pid_m=num_pid_m,
+                    GROUP_SIZE_M=GROUP_SIZE_M,
+                    BLOCK_SIZE_M=BLOCK_SIZE_M,
+                    BLOCK_SIZE_N=BLOCK_SIZE_N,
+                    BLOCK_SIZE_K=BLOCK_SIZE_K,
+                    NUM_MMA_GROUPS=NUM_MMA_GROUPS,
+                    k_tiles=k_tiles,
+                    NUM_SMEM_BUFFERS=NUM_SMEM_BUFFERS,
+                    a_desc=a_desc,
+                    b_desc=b_desc,
+                    buffers_A=buffers_A,
+                    buffers_B=buffers_B,
+                    A_smem_full_bars=A_smem_full_bars,
+                    B_smem_full_bars=B_smem_full_bars,
+                    A_smem_empty_bars=A_smem_empty_bars,
+                    smem_accum_cnt=smem_accum_cnt,
+                    PAIR_CTA=PAIR_CTA,
+                    cluster_cta_rank=cluster_cta_rank,
                 )
 
 
