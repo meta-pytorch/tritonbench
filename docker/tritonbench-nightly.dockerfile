@@ -100,7 +100,7 @@ RUN cd /workspace/tritonbench && \
 
 # Test the install of meta-triton respects PTXAS_OPTIONS env var
 RUN cd /workspace/tritonbench && \
-    bash .ci/triton/test_ptxas_options.sh --conda-env "${CONDA_ENV_META_TRITON}" \
+    bash .ci/triton/test_ptxas_options.sh --conda-env "${CONDA_ENV_META_TRITON}"
 
 # Install Helion in the meta-triton conda env
 RUN cd /workspace/tritonbench && \
