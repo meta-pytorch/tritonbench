@@ -97,7 +97,10 @@ class TritonBenchMetricRow:
 def get_dtype_from_op(op: str) -> Tuple[str, str]:
     for dtype_prefix in DTYPE_PREFIXES:
         if op.startswith(dtype_prefix):
-            return dtype_prefix, op[len(dtype_prefix) :]
+            if dtype_prefix == "fp8":
+                return dtype_prefix, op
+            else:
+                return dtype_prefix, op[len(dtype_prefix) :]
     return "unknown", op
 
 def parse_metric_id(metric_id: str) -> TritonBenchMetricRow:
