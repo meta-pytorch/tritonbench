@@ -25,7 +25,7 @@ fi
 
 cd /workspace/tritonbench
 
-PTXAS_OPTIONS="--apply-controls non-exist.bin" TRITONBENCH_RUN_CONFIG=$PWD/benchmarks/run_config/example_config.yaml python run.py &> /workspace/ptxas_run.log || true
+PTXAS_OPTIONS="--apply-controls non-exist.bin" TRITONBENCH_RUN_CONFIG=$PWD/benchmarks/run_config/example_config.yaml python .ci/triton/test.py &> /workspace/ptxas_run.log || true
 PTXAS_ERROR_MESSAGE='ptxas fatal   : File 'non-exist.bin' could not be opened'
 
 # Test that ptxas options are passed correctly to ptxas
