@@ -234,20 +234,20 @@ class EntropyCriterion:
 
         # Calculate residual sum of squares (RSS) using the cached value
         # ss_res = Σ(y - (slope*x + intercept))² expanded
-        ss_res = (
-            (self._sum_y2 / n)
-            - 2 * slope * (self._sum_xy / n)
-            - 2 * intercept * (self._sum_y / n)
-            + slope * slope * (self._sum_x2 / n)
-            + 2 * slope * intercept * (self._sum_x / n)
-            + intercept * intercept
+        mean_xy = self._sum_xy / n
+        mean_xx = self._sum_x2 / n
+
+        ss_tot_m_res = (
+            slope * ((mean_xy - slope * mean_xx) + (mean_xy - intercept * mean_x))
+            + intercept * (mean_y - slope * mean_x - intercept)
+            + mean_y * (intercept - mean_y)
         )
 
         # If ss_tot < epsilon, entropy values are identical => perfect stability
         if abs(ss_tot) < 1e-12:
             r2 = 1.0
         else:
-            r2 = max(0.0, min(1.0, 1 - (ss_res / ss_tot)))
+            r2 = min(max((ss_tot_m_res / ss_tot), 0.0), 1.0)
 
         self._last_convergence_check = {
             "slope": slope,
