@@ -65,8 +65,8 @@ RUN cd /workspace/tritonbench && \
 
 ## Setup libcublas path to LD_LIBRARY_PATH
 RUN . ${SETUP_SCRIPT} && \
-    PYTORCH_FILE_PATH=$(python -c "import torch; print(torch.__file__)") \
-    NVIDIA_LIB_PATH=$(realpath $(dirname ${PYTORCH_FILE_PATH})/../nvidia/cublas/lib) \
+    export PYTORCH_FILE_PATH=$(python -c "import torch; print(torch.__file__)") && \
+    export NVIDIA_LIB_PATH=$(realpath $(dirname ${PYTORCH_FILE_PATH})/../nvidia/cublas/lib) && \
     echo "export LD_LIBRARY_PATH=${NVIDIA_LIB_PATH}\${LD_LIBRARY_PATH:+:\${LD_LIBRARY_PATH}}\n" >> /workspace/setup_instance.sh
 
 # Check the installed version of nightly if needed
