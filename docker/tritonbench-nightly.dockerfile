@@ -98,9 +98,14 @@ RUN cd /workspace/tritonbench && \
         --repo facebookexperimental/triton --commit b939601a9a376342985ab27bc649e02d4288afc6 --side single \
         --install-dir /workspace/meta-triton
 
+# Test the install of meta-triton respects PTXAS_OPTIONS env var
+RUN cd /workspace/tritonbench && \
+    bash .ci/triton/test_ptxas_options.sh --conda-env "${CONDA_ENV_META_TRITON}" \
+
 # Install Helion in the meta-triton conda env
 RUN cd /workspace/tritonbench && \
     bash .ci/helion/install.sh --conda-env "${CONDA_ENV_META_TRITON}"
+
 
 # Output setup script for inspection
 RUN cat "${SETUP_SCRIPT}"
