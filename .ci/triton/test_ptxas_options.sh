@@ -1,5 +1,4 @@
-set -x
-
+set -xeuo pipefail
 
 # Parse arguments
 while [[ "$#" -gt 0 ]]; do
@@ -26,21 +25,21 @@ fi
 cd /workspace/tritonbench
 
 PTXAS_OPTIONS="--apply-controls non-exist.bin" TRITONBENCH_RUN_CONFIG=$PWD/benchmarks/run_config/example_config.yaml python .ci/triton/test.py &> /workspace/ptxas_run.log || true
-PTXAS_ERROR_MESSAGE='ptxas fatal   : File 'non-exist.bin' could not be opened'
+PTXAS_ERROR_MESSAGE=" fatal   : File 'non-exist.bin' could not be opened"
 
 # Test that ptxas options are passed correctly to ptxas
 # If so, the output file should contain an error message
 
-if ! grep -q "$PTXAS_ERROR_MESSAGE" /workspace/ptxas_run.log; then
-    echo "============== Error: ptxas options not passed correctly =============="
-    echo ">>> Output file: "
-    cat /workspace/ptxas_run.log
-    rm /workspace/ptxas_run.log
-    exit 1
-else
+if grep -q "$PTXAS_ERROR_MESSAGE" /workspace/ptxas_run.log; then
     echo "============== PTXAS_OPTIONS config test passes  =============="
     echo ">>> Output file: "
     cat /workspace/ptxas_run.log
     rm /workspace/ptxas_run.log
     exit 0
+else
+    echo "============== Error: ptxas options not passed correctly =============="
+    echo ">>> Output file: "
+    cat /workspace/ptxas_run.log
+    rm /workspace/ptxas_run.log
+    exit 1
 fi 
