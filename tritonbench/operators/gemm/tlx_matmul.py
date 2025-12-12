@@ -72,6 +72,8 @@ def preprocess_configs(configs, named_args, **kwargs):
     MAX_SHARED_MEMORY = 232 * 1024  # bytes (232KB)
     MAX_TENSOR_MEMORY = 256 * 1024  # bytes (256KB TMEM per SM)
 
+    SZ_MBAR = 8  # bytes
+
     pruned_configs = []
     for conf in configs:
         M = named_args["M"]
@@ -118,9 +120,9 @@ def preprocess_configs(configs, named_args, **kwargs):
         # from TMEM to shared memory before TMA store to global memory
         EPILOGUE_SUBTILE = conf.kwargs["EPILOGUE_SUBTILE"]
         smem_epilog = BLOCK_M * (BLOCK_N // EPILOGUE_SUBTILE) * 2
-        smem_barriers = NUM_SMEM_BUFFERS * 2
+        smem_barriers = NUM_SMEM_BUFFERS * SZ_MBAR
         if PAIR_CTA:
-            smem_barriers += NUM_SMEM_BUFFERS * 64  # cta_bars
+            smem_barriers += NUM_SMEM_BUFFERS * NUM_MMA_GROUPS * SZ_MBAR  # cta_bars
         # tmem_full_bars
         smem_barriers += NUM_TMEM_BUFFERS
 
