@@ -37,6 +37,11 @@ def setup_tritonbench_cwd():
         sys.path.append(tritonbench_dir)
     return original_dir
 
+setup_tritonbench_cwd()
+from tritonbench.utils.run_utils import run_in_task, setup_output_dir
+from tritonbench.utils.env_utils import is_hip
+from tritonbench.utils.scuba_utils import decorate_benchmark_data, log_benchmark
+
 
 def get_operator_benchmarks() -> Dict[str, Any]:
     def _load_benchmarks(config_path: str) -> Dict[str, Any]:
@@ -50,6 +55,9 @@ def get_operator_benchmarks() -> Dict[str, Any]:
             if obj[benchmark_name].get("disabled", False):
                 continue
             out[benchmark_name] = obj[benchmark_name]["args"].split(" ")
+            # On AMD, use profiler to reduce latency variance
+            if is_hip():
+                out[benchmark_name].append("--latency-measure-mode=profiler")
         return out
 
     out = _load_benchmarks(os.path.join(CURRENT_DIR, "autogen.yaml"))
@@ -66,9 +74,6 @@ def run():
         "--log-scuba", action="store_true", help="Upload results to Scuba."
     )
     args = parser.parse_args()
-    setup_tritonbench_cwd()
-    from tritonbench.utils.run_utils import run_in_task, setup_output_dir
-    from tritonbench.utils.scuba_utils import decorate_benchmark_data, log_benchmark
 
     run_timestamp, output_dir = setup_output_dir("nightly", ci=args.ci)
     # Run each operator
