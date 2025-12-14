@@ -23,11 +23,15 @@ python -m tools.cuda_utils --install-torch-deps
 
 python -m tools.cuda_utils --install-torch-nightly --hip
 
-export PYTORCH_FILE_PATH=$(python -c "import torch; print(torch.__file__)") && \
-    export NVIDIA_LIB_PATH=$(realpath $(dirname ${PYTORCH_FILE_PATH})/../nvidia/cublas/lib) && \
-    cd ${NVIDIA_LIB_PATH} && \
+export PYTORCH_FILE_PATH=$(python -c "import torch; print(torch.__file__)")
+export NVIDIA_LIB_PATH=$(realpath $(dirname ${PYTORCH_FILE_PATH})/../nvidia/cublas/lib)
+
+if [ -e ${NVIDIA_LIB_PATH} ]; then
+    cd ${NVIDIA_LIB_PATH}
     ln -s libcublas.so.* libcublas.so && ln -s libcublasLt.so.* libcublasLt.so &&  ln -s libnvblas.so.* libnvblas.so && \
     echo "export LD_LIBRARY_PATH=${NVIDIA_LIB_PATH}\${LD_LIBRARY_PATH:+:\${LD_LIBRARY_PATH}}\n" >> /workspace/setup_instance.sh
+    cd -
+fi
 
 pip install ninja
 
