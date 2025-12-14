@@ -5,12 +5,12 @@ set -xeuo pipefail
 bash ./.ci/conda/install.sh
 
 echo "\
-. miniconda3/etc/profile.d/conda.sh\n\
-conda activate base\n\
-export CONDA_HOME=/workspace/miniconda3\n\
-export PATH=/home/runner/bin\${PATH:+:\${PATH}}\n" >> ${SETUP_SCRIPT}
+. miniconda3/etc/profile.d/conda.sh \
+conda activate base \
+export CONDA_HOME=/workspace/miniconda3 \
+export PATH=/home/runner/bin\${PATH:+:\${PATH}}" >> ${SETUP_SCRIPT}
 
-echo ". ${SETUP_SCRIPT}\n" >> ${HOME}/.bashrc
+echo ". \${SETUP_SCRIPT}\n" >> ${HOME}/.bashrc
 
 export CONDA_ENV=pytorch
 
@@ -36,6 +36,7 @@ bash .ci/tritonbench/install-pytorch-source.sh
 
 bash .ci/tritonbench/install.sh
 
+CONDA_ENV_TRITON_MAIN=triton-main
 bash .ci/triton/install.sh --conda-env "${CONDA_ENV_TRITON_MAIN}" \
         --repo triton-lang/triton --commit main --side single --nightly \
         --install-dir /workspace/triton-main
