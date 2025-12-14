@@ -99,7 +99,6 @@ fi
 CONDA_ENV=pytorch . "${SETUP_SCRIPT}"
 # Remove the conda env if exists
 conda remove --name "${CONDA_ENV}" -y --all || true
-cd /workspace/tritonbench
 conda create --name "${CONDA_ENV}" -y --clone pytorch
 
 . "${SETUP_SCRIPT}"
