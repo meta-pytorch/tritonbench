@@ -2,10 +2,10 @@
 
 set -ex
 
-wget -q https://repo.anaconda.com/miniconda/Miniconda3-latest-Linux-x86_64.sh -O /workspace/Miniconda3-latest-Linux-x86_64.sh
-
 sudo mkdir /workspace
 sudo chmod 777 /workspace
+
+wget -q https://repo.anaconda.com/miniconda/Miniconda3-latest-Linux-x86_64.sh -O /workspace/Miniconda3-latest-Linux-x86_64.sh
 
 cd /workspace
 chmod +x Miniconda3-latest-Linux-x86_64.sh
