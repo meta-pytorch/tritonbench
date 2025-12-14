@@ -12,11 +12,13 @@ export PATH=/home/runner/bin\${PATH:+:\${PATH}}\n" >> ${SETUP_SCRIPT}
 
 echo ". ${SETUP_SCRIPT}\n" >> ${HOME}/.bashrc
 
-cd /workspace/tritonbench && \
-    . ${SETUP_SCRIPT} && \
-    python tools/python_utils.py --create-conda-env ${CONDA_ENV} && \
-    echo "if [ -z \${CONDA_ENV} ]; then export CONDA_ENV=${CONDA_ENV}; fi" >> /workspace/setup_instance.sh && \
-    echo "conda activate \${CONDA_ENV}" >> /workspace/setup_instance.sh
+export CONDA_ENV=pytorch
+
+. ${SETUP_SCRIPT}
+
+python tools/python_utils.py --create-conda-env ${CONDA_ENV} && \
+echo "if [ -z \${CONDA_ENV} ]; then export CONDA_ENV=${CONDA_ENV}; fi" >> /workspace/setup_instance.sh && \
+echo "conda activate \${CONDA_ENV}" >> /workspace/setup_instance.sh
 
 python -m tools.cuda_utils --install-torch-deps
 
@@ -32,7 +34,8 @@ pip install ninja
 
 bash .ci/tritonbench/install-pytorch-source.sh
 
-bash ./.ci/tritonbench/install.sh
+bash .ci/tritonbench/install.sh
+
 bash .ci/triton/install.sh --conda-env "${CONDA_ENV_TRITON_MAIN}" \
         --repo triton-lang/triton --commit main --side single --nightly \
         --install-dir /workspace/triton-main
