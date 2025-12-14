@@ -5,10 +5,9 @@ set -xeuo pipefail
 bash ./.ci/conda/install.sh
 
 echo "\
-. /workspace/miniconda3/etc/profile.d/conda.sh \
-conda activate base \
-export CONDA_HOME=/workspace/miniconda3 \
-export PATH=/home/runner/bin\${PATH:+:\${PATH}}" >> ${SETUP_SCRIPT}
+. /workspace/miniconda3/etc/profile.d/conda.sh && \
+conda activate base && \
+export CONDA_HOME=/workspace/miniconda3 " >> ${SETUP_SCRIPT}
 
 echo ". \${SETUP_SCRIPT}\n" >> ${HOME}/.bashrc
 
