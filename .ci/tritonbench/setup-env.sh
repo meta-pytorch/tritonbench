@@ -5,13 +5,12 @@ set -xeuo pipefail
 bash ./.ci/conda/install.sh
 
 echo "\
-. /workspace/miniconda3/etc/profile.d/conda.sh\n\
+. miniconda3/etc/profile.d/conda.sh\n\
 conda activate base\n\
 export CONDA_HOME=/workspace/miniconda3\n\
-export PATH=/home/runner/bin\${PATH:+:\${PATH}}\n" >> /workspace/setup_instance.sh
+export PATH=/home/runner/bin\${PATH:+:\${PATH}}\n" >> ${SETUP_SCRIPT}
 
-echo ". /workspace/setup_instance.sh\n" >> ${HOME}/.bashrc
-
+echo ". ${SETUP_SCRIPT}\n" >> ${HOME}/.bashrc
 
 cd /workspace/tritonbench && \
     . ${SETUP_SCRIPT} && \

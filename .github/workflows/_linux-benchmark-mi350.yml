@@ -74,7 +74,11 @@ jobs:
         run: |
           sudo apt-get install -y python3-pip
           pip3 install -r .ci/upload/requirements.txt
-     - name: Compile Triton side A (On Demand)
+      - name: Install Tritonbench env
+        run: |
+          set -eux
+          bash ./.ci/tritonbench/setup-env.sh
+      - name: Compile Triton side A (On Demand)
         if: ${{ inputs.side_a_triton && inputs.side_a_commit }}
         run: |
           set -eux
