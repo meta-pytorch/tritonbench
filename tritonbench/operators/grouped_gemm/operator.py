@@ -52,8 +52,6 @@ if HAS_TLX:
     from .kernels import tlx_group_gemm_fn
 
 
-
-
 def get_default_shapes():
     group_size = 4
     x_vals = [2**i for i in range(7, 11)]  # 128, 256, 512, 1024

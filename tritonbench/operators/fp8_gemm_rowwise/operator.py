@@ -6,7 +6,13 @@ import triton
 
 from tritonbench.utils.data_utils import get_production_shapes
 
-from tritonbench.utils.env_utils import get_nvidia_gpu_model, is_cuda, is_fbcode, is_hip, IS_BLACKWELL
+from tritonbench.utils.env_utils import (
+    get_nvidia_gpu_model,
+    IS_BLACKWELL,
+    is_cuda,
+    is_fbcode,
+    is_hip,
+)
 
 from tritonbench.utils.triton_op import (
     BenchmarkOperator,
@@ -97,9 +103,7 @@ try:
 
     cutlass_or_ck_fp8_row = torch.ops.fbgemm.f8f8bf16_rowwise
     # TODO: remove these b200 hacks.
-    HAS_CUTLASS_OR_CK = is_hip() or (
-        is_cuda() and not IS_BLACKWELL
-    )
+    HAS_CUTLASS_OR_CK = is_hip() or (is_cuda() and not IS_BLACKWELL)
 except (ImportError, AttributeError, FileNotFoundError, OSError):
     HAS_CUTLASS_OR_CK = False
 
