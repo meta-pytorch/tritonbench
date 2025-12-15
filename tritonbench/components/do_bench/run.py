@@ -547,9 +547,8 @@ def _do_bench_entropy(
             fn()
             batch_end_events[i].record()
 
-        torch.cuda.synchronize()
-
         for i in range(batch_size):
+            batch_end_events[i].synchronize()
             v = round(
                 batch_start_events[i].elapsed_time(batch_end_events[i]), rounding_factor
             )
