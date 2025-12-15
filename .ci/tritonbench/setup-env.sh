@@ -10,6 +10,13 @@ if [ -z "${SETUP_SCRIPT}" ]; then
     export SETUP_SCRIPT=${WORKSPACE_DIR}/setup_instance.sh
 fi
 
+# Initialize workspace directory
+if [ -e "${WORKSPACE_DIR}" ]; then
+    rm -r "${WORKSPACE_DIR}"
+fi
+sudo mkdir ${WORKSPACE_DIR}
+sudo chmod 777 ${WORKSPACE_DIR}
+
 bash ./.ci/conda/install.sh
 
 echo "\

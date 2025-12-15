@@ -6,12 +6,10 @@ if [ -z "${WORKSPACE_DIR}" ]; then
     WORKSPACE_DIR=/workspace
 fi
 
-sudo mkdir ${WORKSPACE_DIR}
-sudo chmod 777 ${WORKSPACE_DIR}
+cd ${WORKSPACE_DIR}
 
 wget -q https://repo.anaconda.com/miniconda/Miniconda3-latest-Linux-x86_64.sh -O /workspace/Miniconda3-latest-Linux-x86_64.sh
 
-cd ${WORKSPACE_DIR}
 chmod +x Miniconda3-latest-Linux-x86_64.sh
 bash ./Miniconda3-latest-Linux-x86_64.sh -b -u -p ${WORKSPACE_DIR}/miniconda3
 
