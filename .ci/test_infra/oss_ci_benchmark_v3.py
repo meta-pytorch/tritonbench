@@ -119,6 +119,7 @@ def parse_metric_id(metric_id: str) -> TritonBenchMetricRow:
         )
         op, mode, input, backend, metric = re.match(metric_id_regex, metric_id).groups()
         dtype, op = get_dtype_from_op(op)
+        assert not op.startswith("_"), f"Invalid op {op} with dtype {dtype}."
         # by default, aggregation for latency is p50
         aggregation = "p50" if metric == "latency" else None
         # individual input metric signal
