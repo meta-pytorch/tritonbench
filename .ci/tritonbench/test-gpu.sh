@@ -16,6 +16,8 @@ python -c "import triton; print('triton version: ', triton.__version__); print('
 PYTORCH_FILE_PATH=$(python -c "import torch; print(torch.__file__)")
 NVIDIA_LIB_PATH=$(realpath $(dirname ${PYTORCH_FILE_PATH})/../nvidia/cublas/lib)
 
-export LD_LIBRARY_PATH=${NVIDIA_LIB_PATH}:${LD_LIBRARY_PATH}
+if [ -e "${NVIDIA_LIB_PATH}" ]; then
+  export LD_LIBRARY_PATH=${NVIDIA_LIB_PATH}:${LD_LIBRARY_PATH}
+fi
 
 python -m unittest test.test_gpu.main -v
