@@ -4,7 +4,7 @@ from typing import Any, Callable, Generator, List, Optional, Tuple
 import torch
 import triton
 
-from tritonbench.utils.env_utils import is_b200, is_cuda, is_fbcode
+from tritonbench.utils.env_utils import IS_BLACKWELL, is_cuda, is_fbcode
 
 from tritonbench.utils.triton_op import (
     BenchmarkOperator,
@@ -145,7 +145,7 @@ class Operator(BenchmarkOperator):
     # "ERROR : Arch conditional MMA instruction used "
     # "without targeting appropriate compute capability. Aborting."
     @register_benchmark(
-        enabled=HAS_CUTLASS and is_cuda() and not is_b200(), baseline=True
+        enabled=HAS_CUTLASS and is_cuda() and not IS_BLACKWELL, baseline=True
     )
     def _cutlass(self, xq, wq, x_scale, w_scale) -> Callable:
         return lambda: cutlass_fp8_block(xq, wq, x_scale, w_scale)

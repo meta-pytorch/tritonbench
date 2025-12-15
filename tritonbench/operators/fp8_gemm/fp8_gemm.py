@@ -12,7 +12,7 @@ from torch._inductor.kernel.mm import scaling_pairs, ScalingType
 
 from tritonbench.data.llama import llama_shapes
 from tritonbench.operators.fp8_gemm.persistent import blackwell_persistent_tma
-from tritonbench.utils.env_utils import get_nvidia_gpu_model, is_cuda
+from tritonbench.utils.env_utils import IS_BLACKWELL
 
 from tritonbench.utils.triton_op import (
     BenchmarkOperator,
@@ -25,7 +25,6 @@ from tritonbench.utils.triton_utils import has_experimental_descriptor
 
 from .tutorial import matmul as tutorial_matmul
 
-IS_B200 = is_cuda() and get_nvidia_gpu_model() == "NVIDIA B200"
 
 torch._dynamo.config.recompile_limit = 10000
 
@@ -284,7 +283,7 @@ class Operator(BenchmarkOperator):
 
         return lambda: compiled(a, b)
 
-    if IS_B200:
+    if IS_BLACKWELL:
 
         @register_benchmark(enabled=True)
         def blackwell_persistent_tma_fp8_gemm(self, a, b, scale_a, scale_b):

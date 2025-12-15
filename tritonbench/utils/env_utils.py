@@ -82,8 +82,15 @@ def is_hip_mi300():
         return False
 
 
-def is_b200():
-    return is_cuda() and get_nvidia_gpu_model() == "NVIDIA B200"
+def is_blackwell() -> bool:
+    """Check if running on an NVIDIA Blackwell GPU (B200 or B300 series)."""
+    if not is_cuda():
+        return False
+    gpu_model = get_nvidia_gpu_model()
+    return "B200" in gpu_model or "B300" in gpu_model
+
+
+IS_BLACKWELL = is_blackwell()
 
 
 def supports_tma():

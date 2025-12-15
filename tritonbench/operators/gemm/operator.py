@@ -38,7 +38,7 @@ with try_import("HAS_TILELANG"):
 from tritonbench.data.llama import llama_shapes
 from tritonbench.utils.data_utils import get_production_shapes
 from tritonbench.utils.env_utils import (
-    is_b200,
+    IS_BLACKWELL,
     is_cu130,
     is_cuda,
     is_fbcode,
@@ -414,7 +414,7 @@ class Operator(BenchmarkOperator):
         else:
             return lambda: compiled_decompose_k(a, b)
 
-    if is_b200():
+    if IS_BLACKWELL:
 
         @register_benchmark(enabled=False)
         def triton_blackwell_warpspec_persistent_matmul(self, a, b, bias) -> Callable:

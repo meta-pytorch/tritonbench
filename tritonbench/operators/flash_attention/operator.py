@@ -57,7 +57,7 @@ from tritonbench.kernels.triton_fused_attention import (
     attention_opt as triton_tutorial_FA2_opt,
 )
 
-from tritonbench.utils.env_utils import get_nvidia_gpu_model, is_cuda, is_hip
+from tritonbench.utils.env_utils import IS_BLACKWELL, is_hip
 from tritonbench.utils.path_utils import add_ld_library_path
 from tritonbench.utils.python_utils import try_import
 from tritonbench.utils.triton_op import is_fbcode
@@ -83,10 +83,8 @@ HAS_CUDA_124 = (
     torch.cuda.is_available() and torch.version.cuda and torch.version.cuda >= "12.4"
 )
 
-IS_B200 = is_cuda() and get_nvidia_gpu_model() == "NVIDIA B200"
-
-# only enabling the variants known to be working on B200 (trunk).
-if not IS_B200:
+# only enabling the variants known to be working on Blackwell (trunk).
+if not IS_BLACKWELL:
     # [Optional] flash_attn v3
     with try_import("HAS_FLASH_V3"):
         try:
@@ -382,7 +380,7 @@ class Operator(BenchmarkOperator):
 
         return preproc_noop, sdpa_flash_attention
 
-    if IS_B200:
+    if IS_BLACKWELL:
         # Only enable calling this benchmark directly.
         @register_benchmark(enabled=False)
         @multi_input_wrapper
@@ -431,7 +429,7 @@ class Operator(BenchmarkOperator):
 
             return preproc_noop, fn
 
-    if not IS_B200:
+    if not IS_BLACKWELL:
 
         @register_benchmark(enabled=HAS_FLASH_V3)  # noqa
         @multi_input_wrapper

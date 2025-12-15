@@ -7,7 +7,7 @@ from typing import Any, Generator, List, Tuple
 import torch
 from torch._inductor import config as inductor_config
 from torch._inductor.utils import ensure_cute_available
-from tritonbench.utils.env_utils import get_nvidia_gpu_model, is_cuda
+from tritonbench.utils.env_utils import IS_BLACKWELL, is_cuda
 from tritonbench.utils.triton_op import (
     BenchmarkOperator,
     BenchmarkOperatorMetrics,
@@ -52,11 +52,6 @@ if HAS_TLX:
     from .kernels import tlx_group_gemm_fn
 
 
-IS_B200 = is_cuda() and get_nvidia_gpu_model() in (
-    "NVIDIA B200",
-    "NVIDIA GB200",
-    "NVIDIA GB300",
-)
 
 
 def get_default_shapes():
@@ -150,7 +145,7 @@ class Operator(BenchmarkOperator):
         return _inner
 
     @register_benchmark(
-        enabled=HAS_CUTEDSL and IS_B200,
+        enabled=HAS_CUTEDSL and IS_BLACKWELL,
         label=f"preprocessed_pt2_cute_grouped_mm-{CUTLASS_VERSION}",
     )
     def preprocessed_pt2_cute_grouped_mm(self, group_A, group_B):
@@ -192,7 +187,7 @@ class Operator(BenchmarkOperator):
 
         return _inner
 
-    @register_benchmark(enabled=HAS_TLX and IS_B200)
+    @register_benchmark(enabled=HAS_TLX and IS_BLACKWELL)
     def tlx_grouped_gemm(self, group_A, group_B):
         def _inner():
             (d_a_ptrs, d_b_ptrs, d_c_ptrs, d_g_sizes, d_g_lds, group_C) = (
@@ -217,7 +212,7 @@ class Operator(BenchmarkOperator):
     # dims, strides, etc. that the kernel needs. Additionally, we are not including the compile time. This was done so we can measure raw kernel
     # performance. The Inductor implementation has not yet been fleshed out, but should hopefully hide some of the preprocessing steps we have chosen
     # to omit here.
-    @register_benchmark(enabled=HAS_CUTEDSL and IS_B200)
+    @register_benchmark(enabled=HAS_CUTEDSL and IS_BLACKWELL)
     def precompiled_cutedsl_grouped_mm(self, group_A, group_B):
         (
             compiled_grouped_gemm,
@@ -268,7 +263,7 @@ class Operator(BenchmarkOperator):
 
         return _inner
 
-    @register_benchmark(enabled=HAS_CUTEDSL and IS_B200)
+    @register_benchmark(enabled=HAS_CUTEDSL and IS_BLACKWELL)
     def cutedsl_grouped_mm(self, group_A, group_B):
         def _inner():
             (
@@ -322,7 +317,7 @@ class Operator(BenchmarkOperator):
     # autotuning time is not included in benchmark measurements.
     # NOTE(nikhilap): Right now we use the shape as an autotune key much like Triton. It is unclear whether that is the right approach for CuteDSL,
     # given how Quack keys instead on dynamic scheduling.
-    @register_benchmark(enabled=HAS_CUTEDSL and IS_B200)
+    @register_benchmark(enabled=HAS_CUTEDSL and IS_BLACKWELL)
     def precompiled_cutedsl_grouped_mm_tuned(self, group_A, group_B):
         # --- Trigger autotune outside of timing ---
         shape_sig = tuple(

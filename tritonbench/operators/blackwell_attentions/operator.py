@@ -48,7 +48,7 @@ if SUPPORT_GLUON:
 
 import logging
 
-from tritonbench.utils.env_utils import get_nvidia_gpu_model, is_cuda
+from tritonbench.utils.env_utils import IS_BLACKWELL
 
 logger = logging.getLogger(__name__)
 
@@ -125,10 +125,6 @@ from .generate_inputs import customized_inputs, fa3_paper_inputs, sweep_inputs
 
 HAS_CUDA_124 = (
     torch.cuda.is_available() and torch.version.cuda and torch.version.cuda >= "12.4"
-)
-
-IS_BLACKWELL = is_cuda() and (
-    "B200" in get_nvidia_gpu_model() or "B300" in get_nvidia_gpu_model()
 )
 
 

@@ -4,7 +4,7 @@ from typing import Any, Callable, List, Optional
 
 import torch
 
-from tritonbench.utils.env_utils import get_nvidia_gpu_model, is_cuda, is_fbcode
+from tritonbench.utils.env_utils import get_nvidia_gpu_model, is_cuda, is_fbcode, IS_BLACKWELL
 
 from tritonbench.utils.input import input_filter
 from tritonbench.utils.triton_op import (
@@ -19,7 +19,7 @@ from .hstu import get_test_inputs, HAS_HAMMER, triton_hstu_mha, triton_ragged_hs
 
 HAS_CUDA = False
 try:
-    HAS_CUDA = is_fbcode() and is_cuda() and get_nvidia_gpu_model() != "NVIDIA B200"
+    HAS_CUDA = is_fbcode() and is_cuda() and not IS_BLACKWELL
 except (FileNotFoundError, AttributeError):
     HAS_CUDA = False
 
