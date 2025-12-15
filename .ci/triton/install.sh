@@ -71,6 +71,10 @@ while [[ "$#" -gt 0 ]]; do
     shift
 done
 
+if [ -z "${WORKSPACE_DIR}" ]; then
+    export WORKSPACE_DIR=/workspace
+fi
+
 if [ -z "${SETUP_SCRIPT}" ]; then
   echo "ERROR: SETUP_SCRIPT is not set"
   exit 1
@@ -88,9 +92,9 @@ if [ "${SIDE}" == "single" ]; then
         exit 1
     fi
 elif [ "${SIDE}" == "a" ] || [ "${SIDE}" == "b" ]; then
-    mkdir -p /workspace/abtest
+    mkdir -p ${WORKSPACE_DIR}/abtest
     CONDA_ENV="triton-side-${SIDE}"
-    TRITON_INSTALL_DIR=/workspace/abtest/${CONDA_ENV}
+    TRITON_INSTALL_DIR=${WORKSPACE_DIR}/abtest/${CONDA_ENV}
 else
     echo "Unknown side: ${SIDE}"
     exit 1
@@ -116,7 +120,7 @@ TRITONBENCH_TRITON_REPO=$(git config --get remote.origin.url | sed -E 's|.*githu
 
 # If the current conda env matches the env we just created
 # then export all Triton related envs to shell env
-cat <<EOF >> /workspace/setup_instance.sh
+cat <<EOF >> "${SETUP_SCRIPT}"
 if [ \${CONDA_DEFAULT_ENV} == "${CONDA_ENV}" ] ; then
     export TRITONBENCH_TRITON_COMMIT_HASH="${TRITONBENCH_TRITON_COMMIT_HASH}"
     export TRITONBENCH_TRITON_REPO="${TRITONBENCH_TRITON_REPO}"

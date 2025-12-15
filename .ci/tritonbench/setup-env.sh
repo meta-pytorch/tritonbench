@@ -2,22 +2,30 @@
 
 set -xeuo pipefail
 
+if [ -z "${WORKSPACE_DIR}" ]; then
+    export WORKSPACE_DIR=/workspace
+fi
+
+if [ -z "${SETUP_SCRIPT}" ]; then
+    export SETUP_SCRIPT=${WORKSPACE_DIR}/setup_instance.sh
+fi
+
 bash ./.ci/conda/install.sh
 
 echo "\
-. /workspace/miniconda3/etc/profile.d/conda.sh && \
+. ${WORKSPACE_DIR}/miniconda3/etc/profile.d/conda.sh && \
 conda activate base && \
-export CONDA_HOME=/workspace/miniconda3 " >> ${SETUP_SCRIPT}
+export CONDA_HOME=${WORKSPACE_DIR}/miniconda3 " >> ${SETUP_SCRIPT}
 
-echo ". \${SETUP_SCRIPT}\n" >> ${HOME}/.bashrc
+echo ". ${SETUP_SCRIPT}" >> ${HOME}/.bashrc
 
 export CONDA_ENV=pytorch
 
-. ${SETUP_SCRIPT}
+. "${SETUP_SCRIPT}"
 
 python tools/python_utils.py --create-conda-env ${CONDA_ENV} && \
-echo "if [ -z \${CONDA_ENV} ]; then export CONDA_ENV=${CONDA_ENV}; fi" >> /workspace/setup_instance.sh && \
-echo "conda activate \${CONDA_ENV}" >> /workspace/setup_instance.sh
+echo "if [ -z \${CONDA_ENV} ]; then export CONDA_ENV=${CONDA_ENV}; fi" >> "${SETUP_SCRIPT}" && \
+echo "conda activate \${CONDA_ENV}" >> "${SETUP_SCRIPT}"
 
 python -m tools.cuda_utils --install-torch-deps
 
@@ -33,8 +41,6 @@ if [ -e ${NVIDIA_LIB_PATH} ]; then
     cd -
 fi
 
-pip install ninja
-
 bash .ci/tritonbench/install-pytorch-source.sh
 
 bash .ci/tritonbench/install.sh
@@ -42,7 +48,6 @@ bash .ci/tritonbench/install.sh
 CONDA_ENV_TRITON_MAIN=triton-main
 bash .ci/triton/install.sh --conda-env "${CONDA_ENV_TRITON_MAIN}" \
         --repo triton-lang/triton --commit main --side single --nightly \
-        --install-dir /workspace/triton-main
+        --install-dir ${WORKSPACE_DIR}/triton-main
 
 cat "${SETUP_SCRIPT}"
-

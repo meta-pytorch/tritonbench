@@ -50,6 +50,7 @@ jobs:
       id-token: write
       contents: read
     env:
+      WORKSPACE_DIR: "/workspace"
       SETUP_SCRIPT: "/workspace/setup_instance.sh"
       RUNNER_TYPE: "amd-mi350-runner"
       DOCKER_IMAGE: "ghcr.io/meta-pytorch/tritonbench:rocm-latest"
