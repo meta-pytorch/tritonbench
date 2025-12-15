@@ -15,7 +15,8 @@ jobs:
     timeout-minutes: 240
     environment: docker-s3-upload
     env:
-      DOCKER_IMAGE: "ghcr.io/meta-pytorch/tritonbench:rocm-latest"
+      WORKSPACE_DIR: "/workspace"
+      SETUP_SCRIPT: "/workspace/setup_instance.sh"
       CONDA_ENV: ${{ inputs.conda_env }}
     steps:
       - name: Checkout Tritonbench
