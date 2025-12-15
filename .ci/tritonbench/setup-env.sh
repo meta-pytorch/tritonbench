@@ -15,6 +15,18 @@ if [ -e "${WORKSPACE_DIR}" ]; then
     rm -r "${WORKSPACE_DIR}"
 fi
 
+
+# Parse arguments
+while [[ "$#" -gt 0 ]]; do
+    case $1 in
+        --cuda) USE_CUDA="1";  ;;
+        --hip) USE_HIP="1"; ;;
+        *) echo "Unknown parameter passed: $1"; usage ;;
+    esac
+    shift
+done
+
+
 sudo mkdir ${WORKSPACE_DIR}
 sudo chmod 777 ${WORKSPACE_DIR}
 
@@ -37,17 +49,24 @@ echo "conda activate \${CONDA_ENV}" >> "${SETUP_SCRIPT}"
 
 python -m tools.cuda_utils --install-torch-deps
 
-python -m tools.cuda_utils --install-torch-nightly --hip
+if [ -n "${USE_CUDA:-}" ]; then
+    python -m tools.cuda_utils --install-torch-nightly --cuda
+    export PYTORCH_FILE_PATH=$(python -c "import torch; print(torch.__file__)")
+    export NVIDIA_LIB_PATH=$(realpath $(dirname ${PYTORCH_FILE_PATH})/../nvidia/cublas/lib)
 
-export PYTORCH_FILE_PATH=$(python -c "import torch; print(torch.__file__)")
-export NVIDIA_LIB_PATH=$(realpath $(dirname ${PYTORCH_FILE_PATH})/../nvidia/cublas/lib)
-
-if [ -e ${NVIDIA_LIB_PATH} ]; then
-    cd ${NVIDIA_LIB_PATH}
-    ln -s libcublas.so.* libcublas.so && ln -s libcublasLt.so.* libcublasLt.so &&  ln -s libnvblas.so.* libnvblas.so && \
-    echo "export LD_LIBRARY_PATH=${NVIDIA_LIB_PATH}\${LD_LIBRARY_PATH:+:\${LD_LIBRARY_PATH}}\n" >> /workspace/setup_instance.sh
-    cd -
+    if [ -e ${NVIDIA_LIB_PATH} ]; then
+        cd ${NVIDIA_LIB_PATH}
+        ln -s libcublas.so.* libcublas.so && ln -s libcublasLt.so.* libcublasLt.so &&  ln -s libnvblas.so.* libnvblas.so && \
+        echo "export LD_LIBRARY_PATH=${NVIDIA_LIB_PATH}\${LD_LIBRARY_PATH:+:\${LD_LIBRARY_PATH}}\n" >> /workspace/setup_instance.sh
+        cd -
+    fi
+elif [ -n "${USE_HIP:-}" ]; then
+    python -m tools.cuda_utils --install-torch-nightly --hip
+else
+    echo "Unknown backend. Only CUDA and HIP are supported."
+    exit 1
 fi
+
 
 bash .ci/tritonbench/install-pytorch-source.sh
 

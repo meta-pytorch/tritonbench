@@ -78,7 +78,7 @@ jobs:
       - name: Install Tritonbench env
         run: |
           set -eux
-          bash ./.ci/tritonbench/setup-env.sh
+          bash ./.ci/tritonbench/setup-env.sh --hip
       - name: Compile Triton side A (On Demand)
         if: ${{ inputs.side_a_triton && inputs.side_a_commit }}
         run: |
