@@ -71,7 +71,7 @@ while [[ "$#" -gt 0 ]]; do
     shift
 done
 
-if [ -z "${WORKSPACE_DIR}" ]; then
+if [ -z "${WORKSPACE_DIR:-}" ]; then
     export WORKSPACE_DIR=/workspace
 fi
 
