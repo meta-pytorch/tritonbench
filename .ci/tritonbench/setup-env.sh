@@ -15,7 +15,7 @@ if [ -e "${WORKSPACE_DIR}" ]; then
     rm -r "${WORKSPACE_DIR}"
 fi
 sudo mkdir ${WORKSPACE_DIR}
-sudo chmod 777 ${WORKSPACE_DIR}
+sudo chown ${USER}:$(id -gn) ${WORKSPACE_DIR}
 
 bash ./.ci/conda/install.sh
 
