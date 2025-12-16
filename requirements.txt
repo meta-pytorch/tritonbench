@@ -3,4 +3,4 @@ nvidia-ml-py
 psutil
 tabulate
 matplotlib
-transformers==4.46.1
+transformers==4.53.0
