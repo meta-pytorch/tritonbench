@@ -91,7 +91,7 @@ with try_import("HAS_CUTLASS_API"):
     from .cutlass_api_helpers import get_best_cutlass_api_kernel
 
 BUILDIN_SHAPES = [
-    (8192, 8192, 8192, None),
+    (8192, 512, 8192, None),
     (8192, 8192, 1024, None),
     (8192, 8192, 2048, None),
     (8192, 8192, 4096, None),
