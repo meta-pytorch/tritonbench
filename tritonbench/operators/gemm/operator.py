@@ -526,7 +526,7 @@ class Operator(BenchmarkOperator):
 
             return out
 
-        @register_benchmark(enabled=HAS_CUTLASS_API)
+        @register_benchmark(enabled=False)
         def cutlass_api_matmul_exhaustive_autotune(self, a, b, bias) -> Callable:
             assert bias is None, "Cutlass API gemm does not currently support bias"
             M, _ = a.shape
