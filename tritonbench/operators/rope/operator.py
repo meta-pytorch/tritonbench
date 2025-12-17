@@ -6,6 +6,7 @@ from transformers.models.llama.modeling_llama import (
     apply_rotary_pos_emb,
     LlamaRotaryEmbedding,
 )
+from transformers.models.llama.configuration_llama import LlamaConfig
 
 from tritonbench.utils.triton_op import (
     BenchmarkOperator,
@@ -44,7 +45,10 @@ class Operator(BenchmarkOperator):
 
     def prepare_input(self, hidden_size, seq_length):
         head_dim = hidden_size // self.num_q_heads
-        rotary_emb = LlamaRotaryEmbedding(head_dim, device=self.device)
+        llama_config = LlamaConfig(
+            head_dim=head_dim,
+        )
+        rotary_emb = LlamaRotaryEmbedding(llama_config, device=self.device)
         q = (
             torch.randn(
                 (1, seq_length, self.num_q_heads, head_dim),
