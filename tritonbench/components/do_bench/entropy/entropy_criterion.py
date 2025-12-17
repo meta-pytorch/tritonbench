@@ -1,8 +1,8 @@
-# (c) Meta Platforms, Inc. and affiliates. Confidential and proprietary.
-
 import math
 from collections import deque
 from typing import Dict
+
+from .online_linear_regression import OnlineLinearRegression
 
 
 class EntropyCriterion:
@@ -47,7 +47,7 @@ class EntropyCriterion:
         window_size: int = 299,
         min_warmup_samples: int = 20,
         entropy_window_size: int = 500,
-    ):
+    ) -> None:
         self.max_angle = max_angle
         self.min_r2 = min_r2
         self.window_size = window_size
@@ -59,21 +59,13 @@ class EntropyCriterion:
         self.total_time = 0.0
 
         # Incremental Formula: H = log2(n) - S/n where S = Σ(count * log2(count))
-        self.measurement_window: deque = deque(maxlen=entropy_window_size)
+        self.measurement_window: deque[float] = deque(maxlen=entropy_window_size)
         self.freq_tracker: Dict[float, int] = {}
         self._sum_count_log_count = 0.0  # S = Σ(count * log2(count))
 
-        # Entropy tracking with running statistics
-        self.entropy_tracker: deque = deque(maxlen=window_size)
-
-        # Running statistics for linear regression
-        # x -> position in the sliding window, y -> entropy
-        self._sum_x = 0.0
-        self._sum_y = 0.0
-        self._sum_xy = 0.0
-        self._sum_x2 = 0.0
-        self._sum_y2 = 0.0
-        self._n = 0
+        # Entropy tracking with online linear regression
+        self.entropy_tracker: deque[float] = deque(maxlen=window_size)
+        self._regression = OnlineLinearRegression(window_size=window_size)
 
     def reset(self) -> None:
         """Reset the criterion state."""
@@ -83,12 +75,7 @@ class EntropyCriterion:
         self.freq_tracker.clear()
         self._sum_count_log_count = 0.0
         self.entropy_tracker.clear()
-        self._sum_x = 0.0
-        self._sum_y = 0.0
-        self._sum_xy = 0.0
-        self._sum_x2 = 0.0
-        self._sum_y2 = 0.0
-        self._n = 0
+        self._regression.reset()
 
     def _update_entropy_sum(self, old_count: int, new_count: int) -> None:
         """
@@ -160,35 +147,9 @@ class EntropyCriterion:
 
         entropy = self._compute_entropy()
 
-        # Update running statistics for linear regression
-        # If entropy_tracker is full, remove oldest component from running stats
-        # removal index in the sliding window = 0
-        if len(self.entropy_tracker) == self.window_size:
-            old_entropy = self.entropy_tracker[0]
-
-            # Remove old values from running sums
-            self._sum_y -= old_entropy
-            self._sum_y2 -= old_entropy * old_entropy
-
-            # Remove element's effect from sum of squares
-            n = self._n - 1
-            self._sum_x -= n
-            self._sum_x2 -= 2 * self._sum_x + n
-            self._sum_xy -= self._sum_y
-            self._n -= 1
-
-        # Add new entropy value to running stats
-        x = self._n
-        y = entropy
-
-        self._sum_x += x
-        self._sum_y += y
-        self._sum_xy += x * y
-        self._sum_x2 += x * x
-        self._sum_y2 += y * y
-        self._n += 1
-
+        # Update entropy tracker and regression
         self.entropy_tracker.append(entropy)
+        self._regression.add_value(entropy)
 
     def is_finished(self) -> bool:
         """
@@ -203,90 +164,63 @@ class EntropyCriterion:
             return False
 
         # Need at least 2 entropy samples for regression
-        if self._n < 2:
+        if len(self._regression) < 2:
             return False
 
         # Only check on even samples to reduce overhead
         if self.total_samples % 2 != 0:
             return False
 
-        n = self._n
-        mean_x = self._sum_x / n
-        mean_y = self._sum_y / n
-
-        # Compute slope using cached statistics
-        # scaled down by 1/n to avoid overflow
-        numerator = self._sum_xy / n - mean_x * mean_y
-        denominator = self._sum_x2 / n - mean_x * mean_x
-
-        if abs(denominator) < 1e-12:
-            return False
-
-        slope = numerator / denominator
-        intercept = mean_y - slope * mean_x
-
-        # Check if slope is sufficiently flat
-        slope_degrees = math.degrees(math.atan(slope))
-
-        # Compute total sum of squares (TSS)
-        # ss_tot and ss_res scaled by 1/n to avoid overflow
-        ss_tot = (self._sum_y2 / n) - mean_y * mean_y
-
-        # Calculate residual sum of squares (RSS) using the cached value
-        # ss_res = Σ(y - (slope*x + intercept))² expanded
-        mean_xy = self._sum_xy / n
-        mean_xx = self._sum_x2 / n
-
-        ss_tot_m_res = (
-            slope * ((mean_xy - slope * mean_xx) + (mean_xy - intercept * mean_x))
-            + intercept * (mean_y - slope * mean_x - intercept)
-            + mean_y * (intercept - mean_y)
-        )
-
-        # If ss_tot < epsilon, entropy values are identical => perfect stability
-        if abs(ss_tot) < 1e-12:
-            r2 = 1.0
-        else:
-            r2 = min(max((ss_tot_m_res / ss_tot), 0.0), 1.0)
+        # Get regression stats
+        stats = self._regression.get_stats()
+        slope_degrees = self._regression.get_slope_degrees()
 
         self._last_convergence_check = {
-            "slope": slope,
+            "slope": stats.slope,
             "slope_degrees": slope_degrees,
-            "r2": r2,
-            "mean_entropy": mean_y,
-            "window_samples": n,
+            "r2": stats.r2,
+            "mean_entropy": self._regression.mean_y(),
+            "window_samples": stats.n,
         }
 
         # Check convergence criteria
+        if not math.isfinite(slope_degrees) or not math.isfinite(stats.r2):
+            return False
+
         if slope_degrees > self.max_angle:
             return False
 
-        if r2 < self.min_r2:
+        if stats.r2 < self.min_r2:
             return False
 
         return True
 
-    def get_convergence_info(self) -> dict:
+    def get_convergence_info(self) -> dict[str, float]:
         """Get the last convergence check information."""
         return getattr(self, "_last_convergence_check", {})
 
-    def get_stats(self) -> dict:
-        """
-        Get current statistics for debugging/monitoring.
-
-        Returns:
-            Dictionary with current criterion statistics.
-        """
+    def get_regression_stats(self) -> dict[str, float]:
+        stats = self._regression.get_stats()
         return {
-            "total_samples": self.total_samples,
+            "slope": stats.slope,
+            "intercept": stats.intercept,
+            "r2": stats.r2,
+            "n": stats.n,
+        }
+
+    def get_stats(self) -> dict[str, float]:
+        return {
+            "total_samples": float(self.total_samples),
             "total_time_ms": self.total_time,
             "avg_time_ms": float(self.total_time / self.total_samples)
             if self.total_samples > 0
-            else 0,
-            "current_entropy": self.entropy_tracker[-1] if self.entropy_tracker else 0,
-            "entropy_samples": len(self.entropy_tracker),
-            "unique_measurements": len(self.freq_tracker),
-            "entropy_window_size": self.entropy_window_size,
+            else 0.0,
+            "current_entropy": self.entropy_tracker[-1]
+            if self.entropy_tracker
+            else 0.0,
+            "entropy_samples": float(len(self.entropy_tracker)),
+            "unique_measurements": float(len(self.freq_tracker)),
+            "entropy_window_size": float(self.entropy_window_size),
             "measurement_window_utilization": (
                 len(self.measurement_window) / self.entropy_window_size
             ),
