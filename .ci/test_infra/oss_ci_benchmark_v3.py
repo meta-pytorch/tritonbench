@@ -103,7 +103,7 @@ def get_dtype_from_op(op: str) -> Tuple[str, str]:
             if dtype_prefix in BUILTIN_DTYPE_PREFIXES:
                 return dtype_prefix, op
             else:
-                return dtype_prefix, op[len(dtype_prefix)+1 :]
+                return dtype_prefix, op[len(dtype_prefix) + 1 :]
     return "unknown", op
 
 
