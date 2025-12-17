@@ -88,6 +88,7 @@ else:
 with try_import("HAS_CUTLASS_API"):
     import cutlass_api
 
+    from .cutlass_api_helpers import get_best_cutlass_api_kernel
 
 BUILDIN_SHAPES = [
     (8192, 8192, 512, None),
@@ -518,6 +519,24 @@ class Operator(BenchmarkOperator):
             )
             kernel = cutlass_api.get_kernels(args, cc=100)[71]
             compiled_artifact = kernel.compile(args)
+
+            def out():
+                kernel.run(args, compiled_artifact, assume_supported_args=True)
+                return c
+
+            return out
+
+        @register_benchmark(enabled=False)
+        def cutlass_api_matmul_exhaustive_autotune(self, a, b, bias) -> Callable:
+            assert bias is None, "Cutlass API gemm does not currently support bias"
+            M, _ = a.shape
+            _, N = b.shape
+
+            c = torch.empty((M, N), device=a.device, dtype=a.dtype)
+            args = cutlass_api.arguments.GemmArguments(
+                a, b, c, accumulator_type=torch.float32
+            )
+            kernel, compiled_artifact = get_best_cutlass_api_kernel(args)
 
             def out():
                 kernel.run(args, compiled_artifact, assume_supported_args=True)
