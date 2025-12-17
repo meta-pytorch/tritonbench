@@ -28,7 +28,8 @@ done
 
 
 if [ ! -e ${WORKSPACE_DIR} ]; then
-    sudo -u $(whoami) mkdir -p ${WORKSPACE_DIR}
+    sudo mkdir -p ${WORKSPACE_DIR}
+    sudo chown -R $(whoami):$(id -gn) ${WORKSPACE_DIR}
 fi
 
 bash ./.ci/conda/install.sh

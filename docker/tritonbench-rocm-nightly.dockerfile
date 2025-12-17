@@ -11,7 +11,8 @@ ENV SETUP_SCRIPT=/workspace/setup_instance.sh
 ARG TRITONBENCH_BRANCH=${TRITONBENCH_BRANCH:-main}
 ARG FORCE_DATE=${FORCE_DATE}
 
-RUN sudo -u $(whoami) mkdir -p /workspace; touch "${SETUP_SCRIPT}"
+# Create workspace and permission check
+RUN sudo mkdir -p /workspace; sudo chown $(whoami):$(id -gn) /workspace; touch "${SETUP_SCRIPT}"
 
 # Checkout TritonBench and submodules
 RUN git clone --recurse-submodules -b "${TRITONBENCH_BRANCH}" --single-branch \
