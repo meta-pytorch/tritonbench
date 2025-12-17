@@ -49,6 +49,8 @@ python tools/python_utils.py --create-conda-env ${CONDA_ENV} && \
 echo "if [ -z \${CONDA_ENV} ]; then export CONDA_ENV=${CONDA_ENV}; fi" >> "${SETUP_SCRIPT}" && \
 echo "conda activate \${CONDA_ENV}" >> "${SETUP_SCRIPT}"
 
+. "${SETUP_SCRIPT}"
+
 python -m tools.cuda_utils --install-torch-deps
 
 if [ -n "${USE_CUDA:-}" ]; then
@@ -68,7 +70,6 @@ else
     echo "Unknown backend. Only CUDA and HIP are supported."
     exit 1
 fi
-
 
 bash .ci/tritonbench/install-pytorch-source.sh
 
