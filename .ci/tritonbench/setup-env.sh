@@ -27,8 +27,9 @@ while [[ "$#" -gt 0 ]]; do
 done
 
 
-sudo mkdir ${WORKSPACE_DIR}
-sudo chmod 777 ${WORKSPACE_DIR}
+if [ ! -e ${WORKSPACE_DIR} ]; then
+    sudo -u $(whoami) mkdir -p ${WORKSPACE_DIR}
+fi
 
 bash ./.ci/conda/install.sh
 
