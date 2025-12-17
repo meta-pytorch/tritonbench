@@ -85,12 +85,8 @@ if is_fbcode():
 else:
     HAS_HAMMER = False
 
-try:
+with try_import("HAS_CUTLASS_API"):
     import cutlass_api
-
-    HAS_CUTLASS_API = True
-except ImportError:
-    HAS_CUTLASS_API = False
 
 
 BUILDIN_SHAPES = [
@@ -512,6 +508,7 @@ class Operator(BenchmarkOperator):
 
         @register_benchmark(enabled=HAS_CUTLASS_API)
         def cutlass_api_matmul(self, a, b, bias) -> Callable:
+            assert bias is None, "Cutlass API gemm does not currently support bias"
             M, _ = a.shape
             _, N = b.shape
 
