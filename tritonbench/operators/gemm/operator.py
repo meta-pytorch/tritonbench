@@ -85,6 +85,10 @@ if is_fbcode():
 else:
     HAS_HAMMER = False
 
+with try_import("HAS_CUTLASS_API"):
+    import cutlass_api
+
+
 BUILDIN_SHAPES = [
     (8192, 8192, 512, None),
     (8192, 8192, 1024, None),
@@ -501,6 +505,25 @@ class Operator(BenchmarkOperator):
             assert bias is None, "Tilelang does not support bias"
             assert a.dtype == torch.bfloat16, "Tilelang only supports bf16"
             return tilelang_matmul_func(a, b)
+
+        @register_benchmark(enabled=HAS_CUTLASS_API)
+        def cutlass_api_matmul(self, a, b, bias) -> Callable:
+            assert bias is None, "Cutlass API gemm does not currently support bias"
+            M, _ = a.shape
+            _, N = b.shape
+
+            c = torch.empty((M, N), device=a.device, dtype=a.dtype)
+            args = cutlass_api.arguments.GemmArguments(
+                a, b, c, accumulator_type=torch.float32
+            )
+            kernel = cutlass_api.get_kernels(args, cc=100)[71]
+            compiled_artifact = kernel.compile(args)
+
+            def out():
+                kernel.run(args, compiled_artifact, assume_supported_args=True)
+                return c
+
+            return out
 
     @register_x_val(label="(M, N, K)")
     def get_x_val(self, example_inputs) -> Tuple[int, int, int]:
