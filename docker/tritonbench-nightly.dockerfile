@@ -37,6 +37,9 @@ RUN sudo apt-get install -y git jq gcc g++ \
 #     wget https://raw.githubusercontent.com/pytorch/pytorch/main/.ci/docker/ci_commit_pins/nccl-cu12.txt
 # RUN sudo bash -c "set -x;export OVERRIDE_GENCODE=\"${OVERRIDE_GENCODE}\" OVERRIDE_GENCODE_CUDNN=\"${OVERRIDE_GENCODE_CUDNN}\"; cd /workspace/pytorch-ci; bash install_cuda.sh 12.8"
 
+# Create workspace and permission check
+RUN sudo -u ${USER} mkdir -p /workspace; touch "${SETUP_SCRIPT}"
+
 # Checkout TritonBench and submodules
 RUN git clone --recurse-submodules -b "${TRITONBENCH_BRANCH}" --single-branch \
     https://github.com/meta-pytorch/tritonbench "${WORKSPACE_DIR}/tritonbench"
