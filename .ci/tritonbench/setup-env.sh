@@ -11,8 +11,8 @@ if [ -z "${SETUP_SCRIPT}" ]; then
 fi
 
 # Initialize workspace directory
-if [ -e "${WORKSPACE_DIR}" ]; then
-    rm -r "${WORKSPACE_DIR}"
+if [ -e "${WORKSPACE_DIR}/miniconda3" ]; then
+    rm -r "${WORKSPACE_DIR}/miniconda3"
 fi
 
 
