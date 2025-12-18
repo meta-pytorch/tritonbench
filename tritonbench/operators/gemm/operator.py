@@ -521,7 +521,12 @@ class Operator(BenchmarkOperator):
             compiled_artifact = kernel.compile(args)
 
             def out():
-                kernel.run(args, compiled_artifact, assume_supported_args=True)
+                kernel.run(
+                    args,
+                    compiled_artifact,
+                    stream=torch.cuda.current_stream(),
+                    assume_supported_args=True,
+                )
                 return c
 
             return out
@@ -539,7 +544,12 @@ class Operator(BenchmarkOperator):
             kernel, compiled_artifact = get_best_cutlass_api_kernel(args)
 
             def out():
-                kernel.run(args, compiled_artifact, assume_supported_args=True)
+                kernel.run(
+                    args,
+                    compiled_artifact,
+                    stream=torch.cuda.current_stream(),
+                    assume_supported_args=True,
+                )
                 return c
 
             return out
