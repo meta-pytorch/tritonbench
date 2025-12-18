@@ -12,7 +12,7 @@ from dataclasses import dataclass
 from os.path import abspath, exists
 from pathlib import Path
 
-from typing import Any, Dict, List, Tuple, Optional
+from typing import Any, Dict, List, Optional, Tuple
 
 RUNNER_TYPE_MAPPING = {
     "gcp-h100-runner": {
@@ -29,10 +29,11 @@ RUNNER_TYPE_MAPPING = {
         "name": "linux.dgx.b200",
         "gpu_count": 1,
         "avail_gpu_mem_in_gb": 192,
-    }
+    },
 }
 
 DTYPE_PREFIXES = ["fp16", "fp32", "bf16", "int8", "int4", "fp8"]
+BUILTIN_DTYPE_PREFIXES = ["fp8", "int8", "int4"]
 
 
 def setup_tritonbench_cwd():
@@ -84,6 +85,7 @@ def parse_dependencies(envs: Dict[str, str]) -> Dict[str, Dict[str, Any]]:
         out[dep]["extra_info"]["commit_time"] = envs[f"{dep}_commit_time"]
     return out
 
+
 @dataclass
 class TritonBenchMetricRow:
     op: str
@@ -94,14 +96,16 @@ class TritonBenchMetricRow:
     input: Optional[str] = None
     aggregation: Optional[str] = None
 
+
 def get_dtype_from_op(op: str) -> Tuple[str, str]:
     for dtype_prefix in DTYPE_PREFIXES:
-        if op.startswith(dtype_prefix):
-            if dtype_prefix == "fp8":
+        if op.startswith(f"{dtype_prefix}_"):
+            if dtype_prefix in BUILTIN_DTYPE_PREFIXES:
                 return dtype_prefix, op
             else:
-                return dtype_prefix, op[len(dtype_prefix) :]
+                return dtype_prefix, op[len(dtype_prefix) + 1 :]
     return "unknown", op
+
 
 def parse_metric_id(metric_id: str) -> TritonBenchMetricRow:
     print(metric_id)
@@ -115,6 +119,7 @@ def parse_metric_id(metric_id: str) -> TritonBenchMetricRow:
         )
         op, mode, input, backend, metric = re.match(metric_id_regex, metric_id).groups()
         dtype, op = get_dtype_from_op(op)
+        assert not op.startswith("_"), f"Invalid op {op} with dtype {dtype}."
         # by default, aggregation for latency is p50
         aggregation = "p50" if metric == "latency" else None
         # individual input metric signal

@@ -8,9 +8,10 @@ def parse_args(args: List[str]) -> argparse.Namespace:
     parser.add_argument("--k", type=int)
     parser.add_argument("--n", type=int)
     parser.add_argument("--input", type=str)
-    parser.add_argument("--col-major", type=bool, default=False)
-    parser.add_argument("--large-k-shapes", type=bool, default=False)
-    parser.add_argument("--bias-1D-y", type=bool, default=False)
+    parser.add_argument("--col-major", action="store_true", default=False)
+    parser.add_argument("--large-k-shapes", action="store_true", default=False)
+    parser.add_argument("--bias-1D-y", action="store_true", default=False)
+    parser.add_argument("--batch-scaling-shapes", action="store_true", default=False)
     parser.add_argument(
         "--config",
         type=str,

@@ -15,38 +15,19 @@ jobs:
     timeout-minutes: 240
     environment: docker-s3-upload
     env:
-      DOCKER_IMAGE: "ghcr.io/meta-pytorch/tritonbench:rocm-latest"
+      WORKSPACE_DIR: "/workspace"
+      SETUP_SCRIPT: "/workspace/setup_instance.sh"
       CONDA_ENV: ${{ inputs.conda_env }}
     steps:
       - name: Checkout Tritonbench
         uses: actions/checkout@v3
         with:
           submodules: recursive
-      - name: Pull docker image
-        uses: pytorch/test-infra/.github/actions/pull-docker-image@main
-        with:
-          docker-image: ${{ env.DOCKER_IMAGE }}
+      - name: Install Tritonbench env
+        run: |
+          set -eux
+          bash ./.ci/tritonbench/setup-env.sh --hip
       - name: Test Tritonbench
         run: |
           set -eux
-          
-          GPU_FLAG="--device /dev/kfd --device /dev/dri --security-opt seccomp=unconfined --group-add video"
-
-          container_name=$(docker run \
-            ${GPU_FLAG:-} \
-            --env-file /etc/podinfo/gha-gpu-isolation-settings \
-            -e CONDA_ENV \
-            --ipc=host \
-            --tty \
-            --detach \
-            --shm-size=32g \
-            --cap-add=SYS_PTRACE \
-            -v "${GITHUB_WORKSPACE}:/tmp/workspace" \
-            -w /tmp/workspace \
-            "${DOCKER_IMAGE}"
-          )
-
-          docker exec -t -w /tmp/workspace "${container_name}" bash -c "
-            set -eux
-            bash ./.ci/tritonbench/test-gpu.sh
-          "
+          bash ./.ci/tritonbench/test-gpu.sh

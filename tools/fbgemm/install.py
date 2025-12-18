@@ -75,7 +75,7 @@ def install_build_fbgemm(genai=True):
             cmd = [
                 "bash",
                 "-c",
-                f'. .github/scripts/setup_env.bash; test_fbgemm_gpu_build_and_install {current_conda_env} genai/rocm "{fbgemm_repo_path}"',
+                f'. .github/scripts/setup_env.bash; integration_fbgemm_gpu_build_and_install {current_conda_env} genai/rocm "{fbgemm_repo_path}"',
             ]
             extra_envs["BUILD_ROCM_VERSION"] = "7.0"
             subprocess.check_call(
