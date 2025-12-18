@@ -37,6 +37,7 @@ import os
 from contextlib import nullcontext
 from functools import partial
 
+from itertools import chain
 from typing import Callable, Optional
 
 import torch
@@ -235,7 +236,7 @@ class Operator(BenchmarkOperator):
         self.pt2_sdpa = args.pt2_sdpa
         # Use standard scale factor: 1/sqrt(head_dim)
         self.sm_scale = 1.0 / (self.D_HEAD**0.5)
-        self.input_types = args.input_types
+        self.input_types = args.input_types.split(",")
         self.deterministic = args.deterministic
         if self.deterministic:
             logger.warning(
@@ -642,39 +643,43 @@ class Operator(BenchmarkOperator):
         return fn
 
     def get_input_iter(self) -> Generator:
-        if self.input_types == "RAGGED_SHAPES":
-            return ragged_inputs(
-                self.dtype,
-                self.device,
-                gen_cache_size_inputs=self.gen_cache_size_inputs,
+        inputs = []
+        if "RAGGED_SHAPES" in self.input_types:
+            inputs.append(ragged_inputs(self.dtype, self.device))
+        if  "ADDITIONAL_SHAPES" in self.input_types:
+            inputs.append(
+                additional_inputs(
+                    shape=(
+                        self.BATCH,
+                        self.H,
+                        self.SEQ_LEN,
+                        self.SEQ_LEN_KV,
+                        self.D_HEAD
+                    ),
+                    num_inputs=self.tb_args.num_inputs,
+                    dtype=self.dtype,
+                    device=self.device,
+                    add_production_shapes=self.add_production_shapes,
+                    name=self.name,
+                    shuffle_shapes=self.tb_args.shuffle_shapes,
+                )
             )
-        elif self.input_types == "ADDITIONAL_SHAPES":
-            return additional_inputs(
-                shape=(self.BATCH, self.H, self.SEQ_LEN, self.SEQ_LEN_KV, self.D_HEAD),
-                num_inputs=self.tb_args.num_inputs,
-                dtype=self.dtype,
-                device=self.device,
-                add_production_shapes=self.add_production_shapes,
-                name=self.name,
-                shuffle_shapes=self.tb_args.shuffle_shapes,
-                gen_cache_size_inputs=self.gen_cache_size_inputs,
+        if "STANDARD_SHAPES" in self.input_types:
+            inputs.append(
+                standard_inputs(
+                    shape=(
+                        self.BATCH, self.H, self.SEQ_LEN, self.SEQ_LEN_KV, self.D_HEAD
+                    ),
+                    num_inputs=self.tb_args.num_inputs,
+                    dtype=self.dtype,
+                    device=self.device,
+                )
             )
-        elif self.input_types == "STANDARD_SHAPES":
-            return standard_inputs(
-                shape=(self.BATCH, self.H, self.SEQ_LEN, self.SEQ_LEN_KV, self.D_HEAD),
-                num_inputs=self.tb_args.num_inputs,
-                dtype=self.dtype,
-                device=self.device,
-                gen_cache_size_inputs=self.gen_cache_size_inputs,
-            )
-        elif self.input_types == "SWEEP_SHAPES":
-            return sweep_inputs(
-                self.dtype,
-                self.device,
-                gen_cache_size_inputs=self.gen_cache_size_inputs,
-            )
-        else:
+        if "SWEEP_SHAPES" in self.input_types:
+            inputs.append(sweep_inputs(self.dtype, self.device))
+        if len(inputs) == 0:
             raise AssertionError(f"Unknown input type {self.input_types}")
+        return chain(*inputs)
 
     @register_x_val(label="(Batch, Heads, SeqLen, SeqLen_KV, Dhead)")
     def get_x_val(self, example_inputs) -> float:
