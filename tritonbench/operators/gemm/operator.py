@@ -88,14 +88,17 @@ else:
 with try_import("HAS_CUTLASS_API"):
     import cutlass_api
 
-    from .cutlass_api_helpers import get_best_cutlass_api_kernel
+    from .cutlass_api_helpers import (
+        get_best_cutlass_api_kernel,
+        get_best_heuristic_kernel,
+    )
 
 BUILDIN_SHAPES = [
-    (8192, 8192, 512, None),
-    (8192, 8192, 1024, None),
-    (8192, 8192, 2048, None),
-    (8192, 8192, 4096, None),
-    (8192, 8192, 8192, None),
+    # (8192, 8192, 512, None),
+    # (8192, 8192, 1024, None),
+    # (8192, 8192, 2048, None),
+    # (8192, 8192, 4096, None),
+    # (8192, 8192, 8192, None),
     (8192, 8192, 16384, None),
     (1000000, 512, 512, None),
     (1000000, 768, 512, None),
@@ -521,7 +524,12 @@ class Operator(BenchmarkOperator):
             compiled_artifact = kernel.compile(args)
 
             def out():
-                kernel.run(args, compiled_artifact, assume_supported_args=True)
+                kernel.run(
+                    args,
+                    compiled_artifact,
+                    stream=torch.cuda.current_stream(),
+                    assume_supported_args=True,
+                )
                 return c
 
             return out
@@ -539,7 +547,12 @@ class Operator(BenchmarkOperator):
             kernel, compiled_artifact = get_best_cutlass_api_kernel(args)
 
             def out():
-                kernel.run(args, compiled_artifact, assume_supported_args=True)
+                kernel.run(
+                    args,
+                    compiled_artifact,
+                    stream=torch.cuda.current_stream(),
+                    assume_supported_args=True,
+                )
                 return c
 
             return out
