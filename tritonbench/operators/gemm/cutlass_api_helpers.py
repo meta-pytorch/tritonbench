@@ -27,6 +27,61 @@ class HeuristicConfig:
     estimated_runtime: float
 
 
+def _compile_kernels(
+    kernels: List[cutlass_api.Kernel],
+    args: cutlass_api.arguments.GemmArguments,
+) -> List[Any]:
+    """Compile a list of kernels and return their compiled artifacts."""
+    print(f"\nPre-compiling {len(kernels)} kernels...")
+    compiled_artifacts = []
+    for kernel in tqdm(kernels):
+        compiled_artifacts.append(kernel.compile(args))
+    print("Done compiling.")
+    return compiled_artifacts
+
+
+def _benchmark_kernels(
+    kernels: List[cutlass_api.Kernel],
+    compiled_artifacts: List[Any],
+    args: cutlass_api.arguments.GemmArguments,
+    num_iters: int = 10,
+    num_warmup: int = 3,
+) -> Tuple[cutlass_api.Kernel, Any]:
+    """Benchmark kernels and return the best one with its compiled artifact."""
+    results = []
+    print(f"\nBenchmarking {len(kernels)} kernels...")
+
+    for idx, kernel in enumerate(kernels):
+        compiled_artifact = compiled_artifacts[idx]
+
+        for _ in range(num_warmup):
+            kernel.run(
+                args,
+                compiled_artifact,
+                stream=torch.cuda.current_stream(),
+                assume_supported_args=True,
+            )
+
+        torch.cuda.synchronize()
+        start = time.perf_counter()
+        for _ in range(num_iters):
+            kernel.run(
+                args,
+                compiled_artifact,
+                stream=torch.cuda.current_stream(),
+                assume_supported_args=True,
+            )
+        torch.cuda.synchronize()
+        end = time.perf_counter()
+
+        avg_time_ms = (end - start) / num_iters * 1000
+        results.append((idx, kernel.metadata.kernel_name, avg_time_ms))
+        print(f"  [{idx}] {kernel.metadata.kernel_name}: {avg_time_ms:.4f} ms")
+
+    best_idx, _, _ = min(results, key=lambda x: x[2])
+    return kernels[best_idx], compiled_artifacts[best_idx]
+
+
 def _make_cutlass_api_validity_callback(nvmmh_lib):
     """
     Callback for nvMatmulHeuristics that only accepts configurations
@@ -80,44 +135,8 @@ def get_best_cutlass_api_kernel(
 ) -> Tuple[cutlass_api.Kernel, Any]:
     """Get best kernel by exhaustively benchmarking all cutlass_api kernels."""
     kernels = cutlass_api.get_kernels(args)
-
-    print(f"\nPre-compiling {len(kernels)} kernels...")
-    compiled_artifacts = []
-    for kernel in tqdm(kernels):
-        compiled_artifacts.append(kernel.compile(args))
-    print("Done compiling.")
-
-    results = []
-    print(f"\nBenchmarking {len(kernels)} kernels...")
-    for idx, kernel in enumerate(kernels):
-        compiled_artifact = compiled_artifacts[idx]
-
-        for _ in range(num_warmup):
-            kernel.run(
-                args,
-                compiled_artifact,
-                stream=torch.cuda.current_stream(),
-                assume_supported_args=True,
-            )
-
-        torch.cuda.synchronize()
-        start = time.perf_counter()
-        for _ in range(num_iters):
-            kernel.run(
-                args,
-                compiled_artifact,
-                stream=torch.cuda.current_stream(),
-                assume_supported_args=True,
-            )
-        torch.cuda.synchronize()
-        end = time.perf_counter()
-
-        avg_time_ms = (end - start) / num_iters * 1000
-        results.append((idx, kernel.metadata.kernel_name, avg_time_ms))
-        print(f"  [{idx}] {kernel.metadata.kernel_name}: {avg_time_ms:.4f} ms")
-
-    best_idx, _, _ = min(results, key=lambda x: x[2])
-    return kernels[best_idx], compiled_artifacts[best_idx]
+    compiled_artifacts = _compile_kernels(kernels, args)
+    return _benchmark_kernels(kernels, compiled_artifacts, args, num_iters, num_warmup)
 
 
 def get_heuristic_configs(
@@ -244,7 +263,6 @@ def get_heuristic_filtered_kernels(
             f"runtime={cfg.estimated_runtime * 1000:.4f}ms"
         )
 
-    # Map (tile_m, tile_n, cluster_m, cluster_n) -> best runtime
     config_key_to_runtime = {}
     for cfg in heuristic_configs:
         key = (cfg.tile_m, cfg.tile_n, cfg.cluster_m, cfg.cluster_n)
@@ -288,49 +306,10 @@ def get_best_heuristic_kernel(
     num_iters: int = 10,
     num_warmup: int = 3,
 ) -> Tuple[cutlass_api.Kernel, Any]:
-    """
-    Use nvMatmulHeuristic to narrow down kernels, then autotune among them.
-    """
+    """Use nvMatmulHeuristic to narrow down kernels, then autotune among them."""
     kernels, _ = get_heuristic_filtered_kernels(
         args, m, n, k, dtype_a, dtype_b, layout_a, layout_b, heuristic_count
     )
-
     print(f"\nHeuristic narrowed to {len(kernels)} kernels")
-
-    print(f"Pre-compiling {len(kernels)} kernels...")
-    compiled_artifacts = []
-    for kernel in tqdm(kernels):
-        compiled_artifacts.append(kernel.compile(args))
-    print("Done compiling.")
-
-    results = []
-    print(f"\nBenchmarking {len(kernels)} kernels...")
-    for idx, kernel in enumerate(kernels):
-        compiled_artifact = compiled_artifacts[idx]
-
-        for _ in range(num_warmup):
-            kernel.run(
-                args,
-                compiled_artifact,
-                stream=torch.cuda.current_stream(),
-                assume_supported_args=True,
-            )
-
-        torch.cuda.synchronize()
-        start = time.perf_counter()
-        for _ in range(num_iters):
-            kernel.run(
-                args,
-                compiled_artifact,
-                stream=torch.cuda.current_stream(),
-                assume_supported_args=True,
-            )
-        torch.cuda.synchronize()
-        end = time.perf_counter()
-
-        avg_time_ms = (end - start) / num_iters * 1000
-        results.append((idx, kernel.metadata.kernel_name, avg_time_ms))
-        print(f"  [{idx}] {kernel.metadata.kernel_name}: {avg_time_ms:.4f} ms")
-
-    best_idx, _, _ = min(results, key=lambda x: x[2])
-    return kernels[best_idx], compiled_artifacts[best_idx]
+    compiled_artifacts = _compile_kernels(kernels, args)
+    return _benchmark_kernels(kernels, compiled_artifacts, args, num_iters, num_warmup)
