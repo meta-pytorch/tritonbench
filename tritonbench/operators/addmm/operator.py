@@ -83,6 +83,8 @@ LARGE_K_SHAPES = list(
     itertools.product([13], [2**i for i in range(6, 26)], [2], [False])
 )
 
+BATCH_SCALING_SHAPES = [(1 << i, 512, 512, False) for i in range(6, 21)]
+
 
 class Operator(BenchmarkOperator):
     DEFAULT_METRICS = ["tflops", "best_config"]
@@ -96,14 +98,16 @@ class Operator(BenchmarkOperator):
         prod_shapes = get_prod_shapes(addmm_args.config)
         if prod_shapes:
             self.shapes = prod_shapes
-        elif addmm_args.m and addmm_args.n and addmm_args.k and addmm_args.bias_1D_y:
-            self.shapes = [
-                (addmm_args.m, addmm_args.k, addmm_args.n, addmm_args.bias_1D_y)
-            ]
+        elif addmm_args.m and addmm_args.n and addmm_args.k:
+            self.shapes = [(addmm_args.m, addmm_args.k, addmm_args.n, False)]
         elif addmm_args.large_k_shapes:
             self.shapes = LARGE_K_SHAPES
+        elif addmm_args.batch_scaling_shapes:
+            self.shapes = BATCH_SCALING_SHAPES
         else:
             self.shapes = BUILDIN_SHAPES
+        if addmm_args.bias_1D_y:
+            self.shapes = [(m, k, n, True) for m, k, n, _ in self.shapes]
         self.col_major = addmm_args.col_major
 
     @register_benchmark()

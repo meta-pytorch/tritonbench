@@ -2,6 +2,7 @@ import argparse
 from typing import Callable, Generator, List, Optional, Tuple
 
 import torch
+from transformers.models.llama.configuration_llama import LlamaConfig
 from transformers.models.llama.modeling_llama import (
     apply_rotary_pos_emb,
     LlamaRotaryEmbedding,
@@ -44,7 +45,10 @@ class Operator(BenchmarkOperator):
 
     def prepare_input(self, hidden_size, seq_length):
         head_dim = hidden_size // self.num_q_heads
-        rotary_emb = LlamaRotaryEmbedding(head_dim, device=self.device)
+        llama_config = LlamaConfig(
+            head_dim=head_dim,
+        )
+        rotary_emb = LlamaRotaryEmbedding(llama_config, device=self.device)
         q = (
             torch.randn(
                 (1, seq_length, self.num_q_heads, head_dim),
@@ -95,8 +99,11 @@ class Operator(BenchmarkOperator):
     def torch_compile_rotary_pos_emb_full_op(self, hidden_size, seq_length) -> Callable:
         q, k, cos, sin, pos_ids = self.prepare_input(hidden_size, seq_length)
         head_dim = hidden_size // self.num_q_heads
+        llama_config = LlamaConfig(
+            head_dim=head_dim,
+        )
         compiled = torch.compile(
-            LlamaRotaryEmbedding(head_dim, device=self.device),
+            LlamaRotaryEmbedding(llama_config, device=self.device),
             mode="max-autotune-no-cudagraphs",
         )
         cos, sin = compiled(k, pos_ids)

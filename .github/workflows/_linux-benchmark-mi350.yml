@@ -50,6 +50,7 @@ jobs:
       id-token: write
       contents: read
     env:
+      WORKSPACE_DIR: "/workspace"
       SETUP_SCRIPT: "/workspace/setup_instance.sh"
       RUNNER_TYPE: "amd-mi350-runner"
       DOCKER_IMAGE: "ghcr.io/meta-pytorch/tritonbench:rocm-latest"
@@ -74,48 +75,20 @@ jobs:
         run: |
           sudo apt-get install -y python3-pip
           pip3 install -r .ci/upload/requirements.txt
-      - name: Pull docker image
-        uses: pytorch/test-infra/.github/actions/pull-docker-image@main
-        with:
-          docker-image: ${{ env.DOCKER_IMAGE }}
-      - name: Start docker container
+      - name: Install Tritonbench env
         run: |
           set -eux
-          
-          GPU_FLAG="--device /dev/kfd --device /dev/dri --security-opt seccomp=unconfined "
-
-          container_name=$(docker run \
-            ${GPU_FLAG:-} \
-            -e CONDA_ENV="${TRITONBENCH_SIDE_A_ENV}" \
-            --ipc=host \
-            --tty \
-            --detach \
-            --security-opt seccomp=unconfined \
-            --shm-size=32g \
-            --cap-add=SYS_PTRACE \
-            --user root \
-            -v "${GITHUB_WORKSPACE}:/tmp/workspace" \
-            -w /tmp/workspace \
-            "${DOCKER_IMAGE}"
-          )
-
-          # write container id to env
-          echo "TRITONBENCH_CONTAINER_ID=${container_name}" >> $GITHUB_ENV
+          bash ./.ci/tritonbench/setup-env.sh --hip
       - name: Compile Triton side A (On Demand)
         if: ${{ inputs.side_a_triton && inputs.side_a_commit }}
         run: |
-          docker exec -t -w /tmp/workspace "${TRITONBENCH_CONTAINER_ID}" bash -c "
-            set -eux
-            bash ./.ci/triton/install.sh --repo ${{ inputs.side_a_triton }} --commit ${{ inputs.side_a_commit }} --side a
-          "
+          set -eux
+          bash ./.ci/triton/install.sh --repo ${{ inputs.side_a_triton }} --commit ${{ inputs.side_a_commit }} --side a
           export 'TRITONBENCH_SIDE_A_ENV="triton-side-a"' >> ${GITHUB_ENV}
       - name: Benchmark Triton (Side A)
         run: |
           set -eux
-          docker exec -t -w /tmp/workspace "${TRITONBENCH_CONTAINER_ID}" bash -c "
-            set -eux
-            bash .ci/tritonbench/run-benchmark.sh ${{ inputs.benchmark_name }} --conda-env ${TRITONBENCH_SIDE_A_ENV}
-          "
+          bash .ci/tritonbench/run-benchmark.sh ${{ inputs.benchmark_name }} --conda-env ${TRITONBENCH_SIDE_A_ENV}
           mkdir -p benchmark-output
           cp -r ".benchmarks/${{ inputs.benchmark_name }}" benchmark-output/${TRITONBENCH_SIDE_A_ENV}
           sudo rm -rf .benchmarks || true
@@ -126,19 +99,14 @@ jobs:
       - name: Compile Triton side B (On Demand)
         if: ${{ inputs.test_type == 'abtest' && inputs.side_b_triton && inputs.side_b_commit }}
         run: |
-          docker exec -t -w /tmp/workspace "${TRITONBENCH_CONTAINER_ID}" bash -c "
-            set -eux
-            bash ./.ci/triton/install.sh --repo ${{ inputs.side_b_triton }} --commit ${{ inputs.side_b_commit }} --side a
-          "
+          set -eux
+          bash ./.ci/triton/install.sh --repo ${{ inputs.side_b_triton }} --commit ${{ inputs.side_b_commit }} --side a
           export 'TRITONBENCH_SIDE_B_ENV="triton-side-b"' >> ${GITHUB_ENV}
       - name: Benchmark Triton (Side B)
         if: ${{ inputs.test_type == 'abtest' && inputs.side_b_triton && inputs.side_b_commit }}
         run: |
           set -eux
-          docker exec -t -w /tmp/workspace "${TRITONBENCH_CONTAINER_ID}" bash -c "
-            set -eux
-            bash .ci/tritonbench/run-benchmark.sh ${{ inputs.benchmark_name }} --conda-env ${TRITONBENCH_SIDE_B_ENV}
-          "
+          bash .ci/tritonbench/run-benchmark.sh ${{ inputs.benchmark_name }} --conda-env ${TRITONBENCH_SIDE_B_ENV}
           mkdir -p benchmark-output
           cp -r ".benchmarks/${{ inputs.benchmark_name }}" benchmark-output/${TRITONBENCH_SIDE_B_ENV}
           sudo rm -rf .benchmarks || true
@@ -180,7 +148,3 @@ jobs:
           dry-run: false
           schema-version: v3
           github-token: ${{ secrets.GITHUB_TOKEN }}
-      - name: Kill the container
-        if: always()
-        run: |
-          docker kill "${TRITONBENCH_CONTAINER_ID}" || true

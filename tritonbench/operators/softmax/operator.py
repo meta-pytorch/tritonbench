@@ -26,6 +26,21 @@ except ImportError:
     HAS_QUACK = False
 
 
+QUACK_SHAPES = [
+    (32 * 1024, 256),
+    (32 * 1024, 512),
+    (32 * 1024, 1024),
+    (32 * 1024, 2 * 1024),
+    (32 * 1024, 4 * 1024),
+    (32 * 1024, 8 * 1024),
+    (32 * 1024, 16 * 1024),
+    (32 * 1024, 32 * 1024),
+    (32 * 1024, 65 * 1024),
+    (16 * 1024, 131 * 1024),
+    (8 * 1024, 262 * 1024),
+]
+
+
 def parse_op_args(args: List[str]):
     parser = argparse.ArgumentParser()
     parser.add_argument(
@@ -38,6 +53,11 @@ def parse_op_args(args: List[str]):
         "--N",
         type=int,
         help="[Optional] Size of dimension 1 in input shape (integer)",
+    )
+    parser.add_argument(
+        "--quack-shapes",
+        action="store_true",
+        help="[Optional] Use the QuACK benchmark shapes for softmax evaluation",
     )
     return parser.parse_args(args)
 
@@ -93,6 +113,7 @@ class Operator(BenchmarkOperator):
         args = parse_op_args(self.extra_args)
         self.M = args.M
         self.N = args.N
+        self.quack_shapes = args.quack_shapes
 
     @register_benchmark()
     def triton_softmax(self, x):
@@ -270,8 +291,11 @@ class Operator(BenchmarkOperator):
         return lambda: _inner(x)
 
     def get_input_iter(self):
+        # If quack-shapes is provided, use the QuACK benchmark shapes
+        if self.quack_shapes:
+            shapes = QUACK_SHAPES
         # If N is provided, use only that value; otherwise use the default range
-        if self.N is not None:
+        elif self.N is not None:
             shapes = [(self.M, self.N)]
         else:
             shapes = [(self.M, 128 * i) for i in range(2, 100)]
