@@ -88,7 +88,10 @@ else:
 with try_import("HAS_CUTLASS_API"):
     import cutlass_api
 
-    from .cutlass_api_helpers import get_best_cutlass_api_kernel
+    from .cutlass_api_helpers import (
+        get_best_cutlass_api_kernel,
+        get_best_heuristic_kernel,
+    )
 
 BUILDIN_SHAPES = [
     (8192, 8192, 512, None),
@@ -542,6 +545,40 @@ class Operator(BenchmarkOperator):
                 a, b, c, accumulator_type=torch.float32
             )
             kernel, compiled_artifact = get_best_cutlass_api_kernel(args)
+
+            def out():
+                kernel.run(
+                    args,
+                    compiled_artifact,
+                    stream=torch.cuda.current_stream(),
+                    assume_supported_args=True,
+                )
+                return c
+
+            return out
+
+        @register_benchmark(enabled=False)
+        def cutlass_api_matmul_heuristic(self, a, b, bias) -> Callable:
+            """Use nvMatmulHeuristic to narrow down kernel choices before autotuning."""
+            assert bias is None, "Cutlass API gemm does not currently support bias"
+            M, K = a.shape
+            _, N = b.shape
+
+            c = torch.empty((M, N), device=a.device, dtype=a.dtype)
+            args = cutlass_api.arguments.GemmArguments(
+                a, b, c, accumulator_type=torch.float32
+            )
+            kernel, compiled_artifact = get_best_heuristic_kernel(
+                args,
+                m=M,
+                n=N,
+                k=K,
+                dtype_a=a.dtype,
+                dtype_b=b.dtype,
+                layout_a="row" if a.stride(1) == 1 else "col",
+                layout_b="row" if b.stride(1) == 1 else "col",
+                heuristic_count=5,
+            )
 
             def out():
                 kernel.run(
