@@ -17,6 +17,21 @@ from tritonbench.utils.triton_op import (
 from . import fused_triton, tutorial
 
 
+QUACK_SHAPES = [
+    (32 * 1024, 256),
+    (32 * 1024, 512),
+    (32 * 1024, 1024),
+    (32 * 1024, 2 * 1024),
+    (32 * 1024, 4 * 1024),
+    (32 * 1024, 8 * 1024),
+    (32 * 1024, 16 * 1024),
+    (32 * 1024, 32 * 1024),
+    (32 * 1024, 65 * 1024),
+    (16 * 1024, 131 * 1024),
+    (8 * 1024, 262 * 1024),
+]
+
+
 def parse_op_args(args: List[str]):
     parser = argparse.ArgumentParser()
     parser.add_argument(
@@ -29,6 +44,11 @@ def parse_op_args(args: List[str]):
         "--N",
         type=int,
         help="[Optional] Size of dimension 1 in input shape (integer)",
+    )
+    parser.add_argument(
+        "--quack-shapes",
+        action="store_true",
+        help="[Optional] Use the QuACK benchmark shapes for layer norm evaluation",
     )
     return parser.parse_args(args)
 
@@ -57,6 +77,7 @@ class Operator(BenchmarkOperator):
         args = parse_op_args(self.extra_args)
         self.M = args.M
         self.N = args.N
+        self.quack_shapes = args.quack_shapes
         if self.tb_args.rtol is None:
             self.tb_args.rtol = 1e-5
         if self.tb_args.atol is None:
@@ -109,14 +130,17 @@ class Operator(BenchmarkOperator):
     def get_input_iter(self):
         eps = 1e-5
 
+        # If quack-shapes is provided, use the QuACK benchmark shapes
+        if self.quack_shapes:
+            shapes = QUACK_SHAPES
         # If N is provided, use only that value; otherwise use the default range
-        if self.N is not None:
-            N_values = [self.N]
+        elif self.N is not None:
+            shapes = [(self.M, self.N)]
         else:
-            N_values = [512 * i for i in range(2, 32)]
+            shapes = [(self.M, 512 * i) for i in range(2, 32)]
 
-        for N in N_values:
-            x_shape = (self.M, N)
+        for M, N in shapes:
+            x_shape = (M, N)
             w_shape = (x_shape[-1],)
             x = -2.3 + 0.5 * torch.randn(
                 x_shape,
