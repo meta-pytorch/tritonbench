@@ -4,6 +4,8 @@ import torch.nn as nn
 import argparse
 import torch
 
+from functools import partial
+
 from tritonbench.utils.triton_op import (
     BenchmarkOperator,
     BenchmarkOperatorMetrics,
@@ -53,8 +55,8 @@ class Mlp(nn.Module):
 @torch.no_grad
 def run_forward(model, input):
     model.eval()
-    with torch.amp.autocast("cuda", torch.bfloat16):
-        output = model(input)
+    # with torch.amp.autocast("cuda", torch.bfloat16):
+    output = model(input)
     return output
 
 def parse_op_args(args: List[str]):
@@ -69,15 +71,18 @@ class Operator(BenchmarkOperator):
         super().__init__(tb_args, extra_args)
         approx_gelu = lambda: nn.ReLU()
         use_bias = parse_op_args(self.extra_args).use_bias
-        self.gt_model = Mlp(in_features=512, hidden_features=512 * 4, act_layer=approx_gelu, drop=0, bias=use_bias).cuda()
-        self.gt_model_copy = Mlp(in_features=512, hidden_features=512 * 4, act_layer=approx_gelu, drop=0, bias=use_bias).cuda()
+        self.gt_model = Mlp(in_features=512, hidden_features=512 * 4, act_layer=approx_gelu, drop=0, bias=use_bias).cuda().to(torch.bfloat16)
+        self.gt_model_copy = Mlp(in_features=512, hidden_features=512 * 4, act_layer=approx_gelu, drop=0, bias=use_bias).cuda().to(torch.bfloat16)
+        # self.gt_model = Mlp(in_features=512, hidden_features=512 * 4, act_layer=approx_gelu, drop=0, bias=use_bias).cuda()
+        # self.gt_model_copy = Mlp(in_features=512, hidden_features=512 * 4, act_layer=approx_gelu, drop=0, bias=use_bias).cuda()
         self.gt_model_copy.load_state_dict(self.gt_model.state_dict())
         self.compiled_model = torch.compile(self.gt_model_copy, dynamic=False)
-        
+
     def get_input_iter(self) -> Generator:
         B, C, T, H, W = 8, 512, 64, 3, 5
         for i in range(10):
-            yield torch.randn((B, T, H, W, C), generator=torch.Generator().manual_seed(i)).cuda()
+            yield torch.randn((B, T, H, W, C), generator=torch.Generator().manual_seed(i), dtype=torch.bfloat16).cuda()
+            # yield torch.randn((B, T, H, W, C), generator=torch.Generator().manual_seed(i)).cuda()
 
     @register_benchmark(baseline=True)
     def gt_mlp(self, input, *args, **kwargs) -> Callable:
@@ -86,4 +91,3 @@ class Operator(BenchmarkOperator):
     @register_benchmark()
     def compile_mlp(self, input, *args, **kwargs) -> Callable:
         return lambda: run_forward(self.compiled_model, input)
-    
