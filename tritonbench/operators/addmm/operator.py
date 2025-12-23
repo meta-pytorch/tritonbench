@@ -1,5 +1,6 @@
 import argparse
 import itertools
+import logging
 from typing import Any, Callable, Generator, List, Optional, Tuple
 
 import torch
@@ -16,6 +17,7 @@ except ModuleNotFoundError:
 with try_import("HAS_STREAMK"):
     from tritonbench.operators.gemm.stream_k import streamk_cuda_matmul
 
+from tritonbench.utils.diode_utils import setup_diode_model, teardown_diode_model
 from tritonbench.utils.triton_op import (
     BenchmarkOperator,
     BenchmarkOperatorMetrics,
@@ -85,6 +87,9 @@ LARGE_K_SHAPES = list(
 
 BATCH_SCALING_SHAPES = [(1 << i, 512, 512, False) for i in range(6, 21)]
 
+logger = logging.getLogger(__name__)
+logger.setLevel(logging.INFO)
+
 
 class Operator(BenchmarkOperator):
     DEFAULT_METRICS = ["tflops", "best_config"]
@@ -147,6 +152,24 @@ class Operator(BenchmarkOperator):
             f = lambda a, mat1, mat2: torch.addmm(a, mat1, mat2)
             compiled = torch.compile(f, dynamic=False)
             compiled(a, mat1, mat2)
+        return lambda: compiled(a, mat1, mat2)
+
+    @register_benchmark(enabled=False)
+    def pt2_addmm_maxautotune_diode(self, a, mat1, mat2) -> Callable:
+        torch._dynamo.reset()
+        logger.info("[DIODE][TritonBench] Run PT2 addmm Max-Autotune Diode benchmark")
+        old_diode_configs = setup_diode_model()
+
+        with inductor_config.patch(
+            max_autotune=True,
+            max_autotune_gemm_backends="ATEN,TRITON",
+            autotune_num_choices_displayed=None,
+        ):
+            f = lambda a, mat1, mat2: torch.addmm(a, mat1, mat2)
+            compiled = torch.compile(f, dynamic=False)
+            compiled(a, mat1, mat2)
+
+        teardown_diode_model(old_diode_configs)
         return lambda: compiled(a, mat1, mat2)
 
     @register_metric()

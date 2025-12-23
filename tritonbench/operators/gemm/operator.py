@@ -2,6 +2,7 @@ import argparse
 import contextlib
 import csv
 import itertools
+import logging
 import os
 from typing import Any, Callable, Generator, List, Optional, Tuple
 
@@ -19,6 +20,7 @@ from tritonbench.operators.gemm.warp_spec_persistent_matmul import (
     blackwell_matmul_tma,
     blackwell_matmul_tma_persistent,
 )
+from tritonbench.utils.diode_utils import setup_diode_model, teardown_diode_model
 from tritonbench.utils.triton_utils import has_tlx
 
 if has_tlx():
@@ -135,6 +137,9 @@ NON_SQUARE = [
 ]
 
 PERSISTENT_TUTORIAL_SHAPES = [(8192, 8192, 1 << k, None) for k in range(9, 15)]
+
+logger = logging.getLogger(__name__)
+logger.setLevel(logging.INFO)
 
 
 @contextlib.contextmanager
@@ -363,6 +368,27 @@ class Operator(BenchmarkOperator):
             compiled = torch.compile(f, dynamic=False)
             compiled(a, b)
 
+        return lambda: compiled(a, b)
+
+    @register_benchmark(enabled=False)
+    def pt2_matmul_maxautotune_diode(self, a, b, bias) -> Callable:
+        torch._dynamo.reset()
+        logger.info("[DIODE][TritonBench] Run PT2 gemm Max-Autotune Diode benchmark")
+        old_diode_configs = setup_diode_model()
+
+        with inductor_config.patch(
+            max_autotune=True,
+            max_autotune_gemm_backends="ATEN,TRITON",
+            autotune_num_choices_displayed=self.inductor_autotune_num_choices_displayed,
+        ):
+            if bias is not None:
+                f = lambda a, b: a.matmul(b) + bias
+            else:
+                f = lambda a, b: a.matmul(b)
+            compiled = torch.compile(f, dynamic=False)
+            compiled(a, b)
+
+        teardown_diode_model(old_diode_configs)
         return lambda: compiled(a, b)
 
     @register_benchmark(enabled=not is_cuda())
