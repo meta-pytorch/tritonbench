@@ -47,6 +47,7 @@ from tritonbench.utils.env_utils import (
     is_fbcode,
     is_hip,
     is_mtia,
+    override_default_precision_for_input_loader,
     set_env,
     set_random_seed,
 )
@@ -805,6 +806,7 @@ class BenchmarkOperator(metaclass=PostInitProcessor):
     # Run the post initialization
     def __post__init__(self):
         if self.tb_args.input_loader:
+            override_default_precision_for_input_loader(self.tb_args)
             self.get_input_iter = get_input_loader(self, self.tb_args.input_loader)
         # Count total available inputs directly
         self._available_num_inputs = self.get_available_num_inputs()
