@@ -38,6 +38,7 @@ with try_import("HAS_TILELANG"):
 from tritonbench.data.llama import llama_shapes
 from tritonbench.utils.data_utils import get_production_shapes
 from tritonbench.utils.env_utils import (
+    get_logger,
     IS_BLACKWELL,
     is_cu130,
     is_cuda,
@@ -135,6 +136,8 @@ NON_SQUARE = [
 ]
 
 PERSISTENT_TUTORIAL_SHAPES = [(8192, 8192, 1 << k, None) for k in range(9, 15)]
+
+logger = get_logger(__name__)
 
 
 @contextlib.contextmanager
@@ -363,6 +366,23 @@ class Operator(BenchmarkOperator):
             compiled = torch.compile(f, dynamic=False)
             compiled(a, b)
 
+        return lambda: compiled(a, b)
+
+    @register_benchmark(enabled=False)
+    def pt2_matmul_maxautotune_diode(self, a, b, bias) -> Callable:
+        torch._dynamo.reset()
+        logger.info("[DIODE][TritonBench] Run PT2 gemm Max-Autotune Diode benchmark")
+        with inductor_config.patch(
+            max_autotune=True,
+            max_autotune_gemm_backends="ATEN,TRITON",
+            autotune_num_choices_displayed=self.inductor_autotune_num_choices_displayed,
+        ):
+            if bias is not None:
+                f = lambda a, b: a.matmul(b) + bias
+            else:
+                f = lambda a, b: a.matmul(b)
+            compiled = torch.compile(f, dynamic=False)
+            compiled(a, b)
         return lambda: compiled(a, b)
 
     @register_benchmark(enabled=not is_cuda())
