@@ -249,6 +249,18 @@ def override_default_precision_for_input_loader(
     args.precision = override_value if args.input_loader else args.precision
 
 
+def set_allow_tf32(allow_tf32: bool) -> bool:
+    old_allow_tf32, torch.backends.cuda.matmul.allow_tf32 = (
+        torch.backends.cuda.matmul.allow_tf32,
+        allow_tf32,
+    )
+    return old_allow_tf32
+
+
+def reset_allow_tf32(old_allow_tf32: bool) -> None:
+    torch.backends.cuda.matmul.allow_tf32 = old_allow_tf32
+
+
 def get_logger(name, level: int = logging.INFO):
     logger = logging.getLogger(name)
     logger.setLevel(level)

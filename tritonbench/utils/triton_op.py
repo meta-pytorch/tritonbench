@@ -48,6 +48,8 @@ from tritonbench.utils.env_utils import (
     is_hip,
     is_mtia,
     override_default_precision_for_input_loader,
+    reset_allow_tf32,
+    set_allow_tf32,
     set_env,
     set_random_seed,
 )
@@ -802,6 +804,7 @@ class BenchmarkOperator(metaclass=PostInitProcessor):
         self.old_diode_configs = (
             None  # Updated in _reduce_benchmarks if running the Diode benchmark
         )
+        self.old_allow_tf32 = set_allow_tf32(self.tb_args.allow_tf32)
 
     # Run the post initialization
     def __post__init__(self):
@@ -1208,6 +1211,7 @@ class BenchmarkOperator(metaclass=PostInitProcessor):
                 power_manager_task.stop()
                 power_manager_task.finalize(result)
             self.output = result
+            reset_allow_tf32(self.old_allow_tf32)
 
     def get_x_val(self, example_inputs) -> Any:
         return self._cur_input_id

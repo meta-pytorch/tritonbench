@@ -1,5 +1,6 @@
 import argparse
 
+import torch
 from tritonbench.utils.constants import (
     DEFAULT_ENTROPY_CRITERION,
     DEFAULT_ENTROPY_MAX_ANGLE,
@@ -9,7 +10,6 @@ from tritonbench.utils.constants import (
     DEFAULT_REP,
     DEFAULT_WARMUP,
 )
-
 from tritonbench.utils.env_utils import AVAILABLE_PRECISIONS, is_fbcode
 
 
@@ -347,6 +347,12 @@ def get_parser(args=None):
         action="store_true",
         default=False,
         help="Enable bitwise accuracy comparison (atol=0, rtol=0). When enabled, results must match exactly bit-for-bit.",
+    )
+    parser.add_argument(
+        "--allow-tf32",
+        type=bool,
+        default=torch.backends.cuda.matmul.allow_tf32,
+        help="Set torch.backends.cuda.matmul.allow_tf32. Default to original value.",
     )
 
     # A/B Testing parameters
