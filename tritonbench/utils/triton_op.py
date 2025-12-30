@@ -41,6 +41,7 @@ from tritonbench.utils.constants import (
     DEFAULT_SLEEP,
     DEFAULT_WARMUP,
 )
+from tritonbench.utils.diode_utils import setup_diode_model, teardown_diode_model
 from tritonbench.utils.env_utils import (
     apply_precision,
     is_fbcode,
@@ -797,6 +798,9 @@ class BenchmarkOperator(metaclass=PostInitProcessor):
         self._num_inputs = self.tb_args.num_inputs
         self._input_sample_mode = self.tb_args.input_sample_mode
         self.prod_shapes = self.tb_args.prod_shapes
+        self.old_diode_configs = (
+            None  # Updated in _reduce_benchmarks if running the Diode benchmark
+        )
 
     # Run the post initialization
     def __post__init__(self):
@@ -1127,6 +1131,10 @@ class BenchmarkOperator(metaclass=PostInitProcessor):
                         if self.name in BASELINE_BENCHMARKS
                         else False
                     )
+                    if "diode" in bm_name:
+                        self.old_diode_configs = setup_diode_model(
+                            self.tb_args.diode_version
+                        )
                     acc[bm_name] = self._do_bench(
                         input_id=input_id,
                         fn_name=bm_name,
@@ -1144,6 +1152,9 @@ class BenchmarkOperator(metaclass=PostInitProcessor):
                     if sleep:
                         logging.debug(f"Sleeping for {sleep} seconds before next run")
                         time.sleep(sleep)
+                    if self.old_diode_configs:
+                        teardown_diode_model(self.old_diode_configs)
+                        self.old_diode_configs = None
                     return acc
 
                 y_vals: Dict[str, BenchmarkOperatorMetrics] = functools.reduce(

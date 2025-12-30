@@ -238,3 +238,9 @@ def apply_precision(
         torch.backends.cudnn.allow_tf32 = True
     else:
         log.warning(f"[tritonbench] Precision {precision} is handled by operator.")
+
+
+def get_logger(name, level: int = logging.INFO):
+    logger = logging.getLogger(name)
+    logger.setLevel(level)
+    return logger
