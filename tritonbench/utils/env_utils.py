@@ -3,6 +3,7 @@ Utils for checking and modifying the environment.
 Requires PyTorch
 """
 
+import argparse
 import logging
 import os
 import shutil
@@ -238,6 +239,14 @@ def apply_precision(
         torch.backends.cudnn.allow_tf32 = True
     else:
         log.warning(f"[tritonbench] Precision {precision} is handled by operator.")
+
+
+def override_default_precision_for_input_loader(
+    args: argparse.Namespace,
+    override_value: str = "bypass",
+):
+    # If loading shapes via input_loader, respect override value
+    args.precision = override_value if args.input_loader else args.precision
 
 
 def get_logger(name, level: int = logging.INFO):
