@@ -383,6 +383,12 @@ def get_parser(args=None):
             type=str,
             help="Set what version of Triton we are using for logging purposes.",
         )
+        parser.add_argument(
+            "--diode-version",
+            type=str,
+            default="v4",
+            help="Version of diode to use. Default: v4",
+        )  # Diode not available in OSS
 
     args, extra_args = parser.parse_known_args(args)
     if args.op and args.ci:

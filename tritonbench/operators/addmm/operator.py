@@ -5,7 +5,7 @@ from typing import Any, Callable, Generator, List, Optional, Tuple
 import torch
 import torch._inductor.config as inductor_config
 import triton
-from tritonbench.utils.env_utils import is_fbcode
+from tritonbench.utils.env_utils import get_logger, is_fbcode
 from tritonbench.utils.python_utils import try_import
 
 try:
@@ -85,6 +85,8 @@ LARGE_K_SHAPES = list(
 
 BATCH_SCALING_SHAPES = [(1 << i, 512, 512, False) for i in range(6, 21)]
 
+logger = get_logger(__name__)
+
 
 class Operator(BenchmarkOperator):
     DEFAULT_METRICS = ["tflops", "best_config"]
@@ -139,6 +141,20 @@ class Operator(BenchmarkOperator):
     @register_benchmark(enabled=False)
     def pt2_addmm_maxautotune(self, a, mat1, mat2) -> Callable:
         torch._dynamo.reset()
+        with inductor_config.patch(
+            max_autotune=True,
+            max_autotune_gemm_backends="ATEN,TRITON",
+            autotune_num_choices_displayed=None,
+        ):
+            f = lambda a, mat1, mat2: torch.addmm(a, mat1, mat2)
+            compiled = torch.compile(f, dynamic=False)
+            compiled(a, mat1, mat2)
+        return lambda: compiled(a, mat1, mat2)
+
+    @register_benchmark(enabled=False)
+    def pt2_addmm_maxautotune_diode(self, a, mat1, mat2) -> Callable:
+        torch._dynamo.reset()
+        logger.info("[DIODE][TritonBench] Run PT2 addmm Max-Autotune Diode benchmark")
         with inductor_config.patch(
             max_autotune=True,
             max_autotune_gemm_backends="ATEN,TRITON",
