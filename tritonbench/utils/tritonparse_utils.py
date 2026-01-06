@@ -65,7 +65,7 @@ def tritonparse_parse(tritonparse_log_path):
     if tritonparse_log_path is not None:
         # capture errors but don't fail the entire script
         try:
-            from tritonparse.utils import unified_parse
+            from tritonparse.parse.utils import unified_parse
 
             if is_fbcode():
                 out = None
