@@ -88,24 +88,22 @@ def setup_hip(args: argparse.Namespace):
     args.all = False
     args.liger = True
     args.aiter = True
-    args.fbgemm = True
+    args.mslk = True
 
 
 if __name__ == "__main__":
     parser = argparse.ArgumentParser(allow_abbrev=False)
     parser.add_argument("--numpy", action="store_true", help="Install suggested numpy")
     parser.add_argument(
-        "--fbgemm", action="store_true", help="Install prebuilt FBGEMM GPU (genai only)"
+        "--fbgemm", action="store_true", help="Install prebuilt FBGEMM"
     )
     parser.add_argument(
-        "--fbgemm-compile",
-        action="store_true",
-        help="Compile and install FBGEMM GPU (genai only)",
+        "--mslk", action="store_true", help="Install prebuilt MSLK"
     )
     parser.add_argument(
-        "--fbgemm-all",
+        "--mslk-compile",
         action="store_true",
-        help="Compoile and install all FBGEMM GPU kernels.",
+        help="Compile and install MSLK",
     )
     parser.add_argument(
         "--fa2", action="store_true", help="Install optional flash_attention 2 kernels"
@@ -156,16 +154,23 @@ if __name__ == "__main__":
 
         install_fa3()
     if args.fbgemm or args.all:
-        logger.info("[tritonbench] installing prebuilt FBGEMM GenAI variant...")
+        logger.info("[tritonbench] installing prebuilt FBGEMM GPU...")
         from tools.fbgemm.install import install_fbgemm, test_fbgemm
 
-        install_fbgemm(genai=True, prebuilt=True)
-    elif args.fbgemm_compile or args.fbgemm_all:
-        logger.info("[tritonbench] compiling and installing FBGEMM...")
-        from tools.fbgemm.install import install_fbgemm, test_fbgemm
-
-        install_fbgemm(genai=(not args.fbgemm_all), prebuilt=False)
+        install_fbgemm(prebuilt=True)
         test_fbgemm()
+    if args.mslk or args.all:
+        logger.info("[tritonbench] installing prebuilt MSLK...")
+        from tools.mslk.install import install_mslk, test_mslk
+
+        install_mslk(prebuilt=True)
+        test_mslk()
+    elif args.mslk_compile:
+        logger.info("[tritonbench] compiling and installing MSLK...")
+        from tools.mslk.install import install_mslk, test_mslk
+
+        install_mslk(prebuilt=False)
+        test_mslk()
     if args.fa2:
         logger.info("[tritonbench] installing fa2 from source...")
         install_fa2(compile=True)

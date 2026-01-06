@@ -4,16 +4,13 @@ from typing import Any, Callable, Generator, List, Optional, Tuple
 from tritonbench.utils.python_utils import try_import
 
 with try_import("HAS_FBGEMM"):
-    import fbgemm_gpu.experimental.gen_ai  # noqa: F401
-    from fbgemm_gpu.experimental.gemm.triton_gemm.fp8_gemm import (
-        matmul_fp8_row as triton_fp8_row,
-    )
+    import mslk.gemm  # noqa: F401
+    from mslk.gemm.triton.fp8_gemm import matmul_fp8_row as triton_fp8_row
 
 import torch
 import triton
 
 try:
-    from fbgemm_gpu.experimental.gemm.triton_gemm.fp8_gemm import quantize_fp8_row
     from gen_ai.llm_inference.fb.llm.kernel.rms_norm import (
         rms_norm,
         rms_norm_fp8_rowwise_quant,
@@ -22,6 +19,7 @@ try:
         silu_mul,
         silu_mul_fp8_rowwise_quant,
     )
+    from mslk.quantize.triton.fp8_quantize import quantize_fp8_row
 
     HAS_FB_IMPORT = True
 except ImportError:
@@ -92,7 +90,7 @@ class Operator(BenchmarkOperator):
             xq, x_scale = rms_norm_fp8_rowwise_quant(x1, wd)
             if torch.version.hip:
                 # use CK kernel for AMD
-                return torch.ops.fbgemm.f8f8bf16_rowwise(xq, wq, x_scale, w_scale)
+                return torch.ops.mslk.f8f8bf16_rowwise(xq, wq, x_scale, w_scale)
             return triton_fp8_row(xq, wq, x_scale, w_scale)
 
         return lambda: _impl(x1, x2, wq, w_scale, wd)
@@ -105,7 +103,7 @@ class Operator(BenchmarkOperator):
             xq, x_scale = quantize_fp8_row(x, use_triton=True)
             if torch.version.hip:
                 # use CK kernel for AMD
-                return torch.ops.fbgemm.f8f8bf16_rowwise(xq, wq, x_scale, w_scale)
+                return torch.ops.mslk.f8f8bf16_rowwise(xq, wq, x_scale, w_scale)
             return triton_fp8_row(xq, wq, x_scale, w_scale)
 
         return lambda: _impl(x1, x2, wq, w_scale, wd)
@@ -116,7 +114,7 @@ class Operator(BenchmarkOperator):
             xq, x_scale = silu_mul_fp8_rowwise_quant(x1, x2)
             if torch.version.hip:
                 # use CK kernel for AMD
-                return torch.ops.fbgemm.f8f8bf16_rowwise(xq, wq, x_scale, w_scale)
+                return torch.ops.mslk.f8f8bf16_rowwise(xq, wq, x_scale, w_scale)
             return triton_fp8_row(xq, wq, x_scale, w_scale)
 
         return lambda: _impl(x1, x2, wq, w_scale, wd)
@@ -128,7 +126,7 @@ class Operator(BenchmarkOperator):
             xq, x_scale = quantize_fp8_row(x, use_triton=True)
             if torch.version.hip:
                 # use CK kernel for AMD
-                return torch.ops.fbgemm.f8f8bf16_rowwise(xq, wq, x_scale, w_scale)
+                return torch.ops.mslk.f8f8bf16_rowwise(xq, wq, x_scale, w_scale)
             return triton_fp8_row(xq, wq, x_scale, w_scale)
 
         return lambda: _impl(x1, x2, wq, w_scale, wd)

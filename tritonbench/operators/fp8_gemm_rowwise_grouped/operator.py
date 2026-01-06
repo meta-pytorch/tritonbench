@@ -162,10 +162,7 @@ from tritonbench.utils.fp8_utils import get_fp8_constants
 
 # Try to import Triton grouped GEMM module
 try:
-    from fbgemm_gpu.experimental.gemm.triton_gemm.grouped_gemm import (
-        grouped_gemm as grouped_gemm,
-        grouped_gemm_fp8_rowwise as grouped_gemm_fp8_rowwise,
-    )
+    from mslk.gemm.triton.grouped_gemm import grouped_gemm_fp8_rowwise
 
     # If import succeeds, set HAS_TRITON to True
     HAS_TRITON = True
@@ -175,10 +172,10 @@ except (ImportError, AssertionError):
 
 # Try to import Cutlass or CK module
 try:
-    import fbgemm_gpu.experimental.gen_ai  # noqa: F401
+    import mslk.gemm  # noqa: F401
 
     # Define the Cutlass or CK FP8 grouped MM operator
-    cutlass_or_ck_fp8_grouped_mm = torch.ops.fbgemm.f8f8bf16_rowwise_grouped_stacked
+    cutlass_or_ck_fp8_grouped_mm = torch.ops.mslk.f8f8bf16_rowwise_grouped_stacked
     # Set HAS_CUTLASS_OR_CK to True if import succeeds
     HAS_CUTLASS_OR_CK = True
 except (ImportError, AttributeError, OSError):

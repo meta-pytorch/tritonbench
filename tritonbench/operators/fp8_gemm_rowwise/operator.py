@@ -86,9 +86,7 @@ HAS_CUBLAS = False
 from tritonbench.utils.fp8_utils import get_fp8_constants
 
 try:
-    from fbgemm_gpu.experimental.gemm.triton_gemm.fp8_gemm import (
-        matmul_fp8_row as triton_fp8_row,
-    )
+    from mslk.gemm.triton.fp8_gemm import matmul_fp8_row as triton_fp8_row
 
     if not torch.version.hip:
         assert hasattr(
@@ -99,19 +97,19 @@ except (ImportError, AssertionError):
     HAS_TRITON = False
 
 try:
-    import fbgemm_gpu.experimental.gen_ai  # noqa: F401
+    import mslk.gemm  # noqa: F401
 
-    cutlass_or_ck_fp8_row = torch.ops.fbgemm.f8f8bf16_rowwise
+    cutlass_or_ck_fp8_row = torch.ops.mslk.f8f8bf16_rowwise
     # TODO: remove these b200 hacks.
     HAS_CUTLASS_OR_CK = is_hip() or (is_cuda() and not IS_BLACKWELL)
 except (ImportError, AttributeError, FileNotFoundError, OSError):
     HAS_CUTLASS_OR_CK = False
 
 try:
-    import fbgemm_gpu.experimental.gen_ai  # noqa: F401
+    import mslk.gemm  # noqa: F401
 
-    cublas_fp8_row = torch.ops.fbgemm.f8f8bf16_cublas
-    from fbgemm_gpu.experimental.gemm.triton_gemm.fp8_gemm import scale_fp8_row
+    cublas_fp8_row = torch.ops.mslk.f8f8bf16_cublas
+    from mslk.quantize.triton.fp8_quantize import scale_fp8_row
 
     # TODO: remove these b200 hacks.
     HAS_CUBLAS = is_cuda() and not IS_BLACKWELL

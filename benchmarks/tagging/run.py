@@ -166,6 +166,8 @@ def prevalidate_backends(backend_edges, op_name=None):
             }
             if any(["fbgemm" in callee for callee in callees]):
                 op_with_tags[backend]["tags"].append("fbgemm")
+            if any(["mslk" in callee for callee in callees]):
+                op_with_tags[backend]["tags"].append("mslk")
 
     # Apply name-based heuristics for all prevalidated backends
     for backend in op_with_tags.keys():

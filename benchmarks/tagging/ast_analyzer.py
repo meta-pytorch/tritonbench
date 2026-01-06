@@ -438,6 +438,8 @@ def validate_edges(edges) -> Dict[str, str]:
             result_tags["kernels"].append(edge.caller)
         if "torch.ops.fbgemm" in edge.callee:
             result_tags["tags"].append("fbgemm")
+        if "torch.ops.mslk" in edge.callee:
+            result_tags["tags"].append("mslk")
         # heuristic: if no tag is found and maybe triton, apply triton tag
         if (
             not result_tags["tags"]

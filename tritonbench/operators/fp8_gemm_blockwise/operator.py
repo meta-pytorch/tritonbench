@@ -29,9 +29,7 @@ def parse_args(args: List[str]) -> argparse.Namespace:
 HAS_TRITON = False
 if is_cuda():
     try:
-        from fbgemm_gpu.experimental.gemm.triton_gemm.fp8_gemm import (
-            matmul_fp8_block as triton_fp8_block,
-        )
+        from mslk.gemm.triton.fp8_gemm import matmul_fp8_block as triton_fp8_block
 
         HAS_TRITON = True
     except:
@@ -42,15 +40,15 @@ if is_cuda():
 HAS_CUTLASS = False
 if is_cuda():
     try:
-        import fbgemm_gpu.experimental.gen_ai
+        import mslk.gemm
 
         cutlass_fp8_block = torch.ops.llama_cpp.fp8_blockwise_matmul
         HAS_CUTLASS = True
     except:
         try:
-            import fbgemm_gpu.experimental.gen_ai
+            import mslk.gemm
 
-            cutlass_fp8_block = torch.ops.fbgemm.f8f8bf16_blockwise
+            cutlass_fp8_block = torch.ops.mslk.f8f8bf16_blockwise
             HAS_CUTLASS = True
         except:
             HAS_CUTLASS = False

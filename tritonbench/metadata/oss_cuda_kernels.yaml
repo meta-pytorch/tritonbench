@@ -141,12 +141,12 @@ decoding_attention:
   fa3_mha_varlen_fwd:
     tags:
     - xformers
-  fbgemm_gqa_fp8kv:
+  mslk_gqa_fp8kv:
     kernels:
-    - torch.ops.fbgemm.gqa_attn_splitk
+    - torch.ops.mslk.gqa_attn_splitk
     tags:
     - native_custom_ops
-    - fbgemm
+    - mslk
   flash_cute_dsl:
     tags: []
   triton_splitk:
@@ -318,10 +318,10 @@ fp8_gemm:
 fp8_gemm_blockwise:
   _cutlass:
     kernels:
-    - torch.ops.fbgemm.f8f8bf16_blockwise
+    - torch.ops.mslk.f8f8bf16_blockwise
     tags:
     - native_custom_ops
-    - fbgemm
+    - mslk
     - cutlass
   _triton:
     kernels:
@@ -337,18 +337,18 @@ fp8_gemm_rowwise:
     - triton
   _cublas:
     kernels:
-    - torch.ops.fbgemm.f8f8bf16_cublas
-    - torch.ops.fbgemm.f8f8bf16_cublas
+    - torch.ops.mslk.f8f8bf16_cublas
+    - torch.ops.mslk.f8f8bf16_cublas
     tags:
     - native_custom_ops
-    - fbgemm
+    - mslk
   _cutlass_or_ck:
     kernels:
-    - torch.ops.fbgemm.f8f8bf16_rowwise
-    - torch.ops.fbgemm.f8f8bf16_rowwise
+    - torch.ops.mslk.f8f8bf16_rowwise
+    - torch.ops.mslk.f8f8bf16_rowwise
     tags:
     - native_custom_ops
-    - fbgemm
+    - mslk
     - cutlass
   _triton:
     kernels:
@@ -363,10 +363,10 @@ fp8_gemm_rowwise:
 fp8_gemm_rowwise_grouped:
   _cutlass_or_ck:
     kernels:
-    - torch.ops.fbgemm.f8f8bf16_rowwise_grouped_stacked
+    - torch.ops.mslk.f8f8bf16_rowwise_grouped_stacked
     tags:
     - native_custom_ops
-    - fbgemm
+    - mslk
     - cutlass
   _triton:
     kernels:

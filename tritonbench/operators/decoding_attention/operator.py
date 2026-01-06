@@ -52,11 +52,8 @@ except (ImportError, IOError, AttributeError):
     HAS_XFORMERS = False
 
 try:
+    import mslk.attention.gqa_attn_splitk  # noqa: F401
     from gen_ai.llm_inference.fb.llm.quantization.kv_quantize import quantize_kv_fp8
-
-    torch.ops.load_library(
-        "//deeplearning/fbgemm/fbgemm_gpu/experimental:gen_ai_attention_ops"
-    )
 
     HAS_FB_IMPORT = True
 except ImportError:
@@ -81,7 +78,7 @@ except (ImportError, IOError, AttributeError):
 # [Optional] cutlass_blackwell_fmha backend
 HAS_CUTLASS_BLACKWELL = True
 try:
-    from fbgemm_gpu.experimental.gen_ai.attention.cutlass_blackwell_fmha import (
+    from mslk.attention.cutlass_blackwell_fmha import (
         cutlass_blackwell_fmha_interface as blackwell,
     )
 
@@ -566,7 +563,7 @@ class Operator(BenchmarkOperator):
         )
 
     @register_benchmark(enabled=False)
-    def fbgemm_gqa_fp8kv(
+    def mslk_gqa_fp8kv(
         self,
         q: torch.Tensor,
         k_cache: torch.Tensor,
@@ -577,7 +574,7 @@ class Operator(BenchmarkOperator):
 
         k_fp8 = quantize_kv_fp8(k_cache, kv_cache_quant_num_groups).view(torch.uint8)
         v_fp8 = quantize_kv_fp8(v_cache, kv_cache_quant_num_groups).view(torch.uint8)
-        return lambda: torch.ops.fbgemm.gqa_attn_splitk(
+        return lambda: torch.ops.mslk.gqa_attn_splitk(
             q,
             k_fp8,
             v_fp8,
