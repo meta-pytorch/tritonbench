@@ -368,7 +368,7 @@ class Operator(BenchmarkOperator):
 
         return lambda: compiled(a, b)
 
-    @register_benchmark(enabled=False)
+    @register_benchmark(enabled=is_fbcode())
     def pt2_matmul_maxautotune_diode(self, a, b, bias) -> Callable:
         torch._dynamo.reset()
         logger.info("[DIODE][TritonBench] Run PT2 gemm Max-Autotune Diode benchmark")

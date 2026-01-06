@@ -151,7 +151,7 @@ class Operator(BenchmarkOperator):
             compiled(a, mat1, mat2)
         return lambda: compiled(a, mat1, mat2)
 
-    @register_benchmark(enabled=False)
+    @register_benchmark(enabled=is_fbcode())
     def pt2_addmm_maxautotune_diode(self, a, mat1, mat2) -> Callable:
         torch._dynamo.reset()
         logger.info("[DIODE][TritonBench] Run PT2 addmm Max-Autotune Diode benchmark")

@@ -7,13 +7,16 @@ from typing import Any, Generator, List, Tuple
 import torch
 from torch._inductor import config as inductor_config
 from torch._inductor.utils import ensure_cute_available
-from tritonbench.utils.env_utils import IS_BLACKWELL, is_cuda
+from tritonbench.utils.env_utils import IS_BLACKWELL, is_cuda, is_fbcode
 from tritonbench.utils.triton_op import (
     BenchmarkOperator,
     BenchmarkOperatorMetrics,
     register_benchmark,
     register_metric,
 )
+
+if is_fbcode():
+    from tritonbench.utils.fb.grouped_gemm import get_fb_shapes
 
 logger = logging.getLogger(__name__)
 
@@ -54,7 +57,7 @@ if HAS_TLX:
 
 def get_default_shapes():
     group_size = 4
-    x_vals = [2**i for i in range(7, 11)]  # 128, 256, 512, 1024
+    x_vals = [2**i for i in range(10, 14)]  # 128, 256, 512, 1024
 
     shapes = []
     for N in x_vals:
@@ -62,7 +65,7 @@ def get_default_shapes():
         N_out = N
         A_shapes = [(M, K)] * group_size
         B_shape = (K, N_out)
-        shapes.append((A_shapes, B_shape))
+        shapes.append((A_shapes, B_shape, None, None))
 
     return shapes
 
@@ -74,7 +77,7 @@ class Operator(BenchmarkOperator):
     FWD_ONLY = True
 
     @register_benchmark(baseline=True)
-    def aten_grouped_mm(self, group_A, group_B):
+    def aten_grouped_mm(self, group_A, group_B, w=None, split=None):
         def _inner():
             A_packed, B_shared, offs = self.list_input_to_jagged(group_A, group_B)
             return torch._grouped_mm(A_packed, B_shared, offs=offs, bias=None)
@@ -83,7 +86,7 @@ class Operator(BenchmarkOperator):
 
     # Version of the ATen benchmark that doesn't time input preprocessing
     @register_benchmark()
-    def preprocessed_aten_grouped_mm(self, group_A, group_B):
+    def preprocessed_aten_grouped_mm(self, group_A, group_B, w=None, split=None):
         A_packed, B_shared, offs = self.list_input_to_jagged(group_A, group_B)
 
         def _inner():
@@ -92,7 +95,7 @@ class Operator(BenchmarkOperator):
         return _inner
 
     @register_benchmark()
-    def naive(self, group_A, group_B):
+    def naive(self, group_A, group_B, w=None, split=None):
         b_shared = group_B[0]
 
         def _inner():
@@ -108,7 +111,7 @@ class Operator(BenchmarkOperator):
 
     # TODO: Does not work on hip
     @register_benchmark(enabled=is_cuda())
-    def torch_compile_grouped_gemm(self, group_A, group_B):
+    def torch_compile_grouped_gemm(self, group_A, group_B, w=None, split=None):
         def _inner():
             torch._dynamo.reset()
 
@@ -126,7 +129,7 @@ class Operator(BenchmarkOperator):
     # Version of the Inductor Triton benchmark that doesn't time input preprocessing
     # TODO: Does not work on hip
     @register_benchmark(enabled=is_cuda())
-    def preprocessed_pt2_triton_grouped_mm(self, group_A, group_B):
+    def preprocessed_pt2_triton_grouped_mm(self, group_A, group_B, w=None, split=None):
         torch._dynamo.reset()
 
         with inductor_config.patch(
@@ -146,7 +149,7 @@ class Operator(BenchmarkOperator):
         enabled=HAS_CUTEDSL and IS_BLACKWELL,
         label=f"preprocessed_pt2_cute_grouped_mm-{CUTLASS_VERSION}",
     )
-    def preprocessed_pt2_cute_grouped_mm(self, group_A, group_B):
+    def preprocessed_pt2_cute_grouped_mm(self, group_A, group_B, w=None, split=None):
         torch._dynamo.reset()
 
         A_packed, B_shared, offs = self.list_input_to_jagged(group_A, group_B)
@@ -166,7 +169,7 @@ class Operator(BenchmarkOperator):
         return _inner
 
     @register_benchmark()
-    def triton_grouped_gemm(self, group_A, group_B):
+    def triton_grouped_gemm(self, group_A, group_B, w=None, split=None):
         def _inner():
             (d_a_ptrs, d_b_ptrs, d_c_ptrs, d_g_sizes, d_g_lds, group_C) = (
                 self.list_input_to_triton_input(group_A, group_B)
@@ -186,7 +189,7 @@ class Operator(BenchmarkOperator):
         return _inner
 
     @register_benchmark(enabled=HAS_TLX and IS_BLACKWELL)
-    def tlx_grouped_gemm(self, group_A, group_B):
+    def tlx_grouped_gemm(self, group_A, group_B, w=None, split=None):
         def _inner():
             (d_a_ptrs, d_b_ptrs, d_c_ptrs, d_g_sizes, d_g_lds, group_C) = (
                 self.list_input_to_triton_input(group_A, group_B)
@@ -211,7 +214,7 @@ class Operator(BenchmarkOperator):
     # performance. The Inductor implementation has not yet been fleshed out, but should hopefully hide some of the preprocessing steps we have chosen
     # to omit here.
     @register_benchmark(enabled=HAS_CUTEDSL and IS_BLACKWELL)
-    def precompiled_cutedsl_grouped_mm(self, group_A, group_B):
+    def precompiled_cutedsl_grouped_mm(self, group_A, group_B, w=None, split=None):
         (
             compiled_grouped_gemm,
             initial_cute_tensors_abc,
@@ -262,7 +265,7 @@ class Operator(BenchmarkOperator):
         return _inner
 
     @register_benchmark(enabled=HAS_CUTEDSL and IS_BLACKWELL)
-    def cutedsl_grouped_mm(self, group_A, group_B):
+    def cutedsl_grouped_mm(self, group_A, group_B, w=None, split=None):
         def _inner():
             (
                 compiled_grouped_gemm,
@@ -316,7 +319,9 @@ class Operator(BenchmarkOperator):
     # NOTE(nikhilap): Right now we use the shape as an autotune key much like Triton. It is unclear whether that is the right approach for CuteDSL,
     # given how Quack keys instead on dynamic scheduling.
     @register_benchmark(enabled=HAS_CUTEDSL and IS_BLACKWELL)
-    def precompiled_cutedsl_grouped_mm_tuned(self, group_A, group_B):
+    def precompiled_cutedsl_grouped_mm_tuned(
+        self, group_A, group_B, w=None, split=None
+    ):
         # --- Trigger autotune outside of timing ---
         shape_sig = tuple(
             (A.shape[0], B.shape[1], A.shape[1]) for A, B in zip(group_A, group_B)
@@ -375,9 +380,11 @@ class Operator(BenchmarkOperator):
             self.shapes = self.external_shapes
         else:
             self.shapes = get_default_shapes()
+        if is_fbcode():
+            self.shapes += get_fb_shapes()
 
         # Generate tensors from shapes
-        for A_shapes, B_shape in self.shapes:
+        for A_shapes, B_shape, W_shapes, split_size in self.shapes:
             G = len(A_shapes)
 
             B_shared = torch.rand(
@@ -389,8 +396,19 @@ class Operator(BenchmarkOperator):
                 for A_shape in A_shapes
             ]
             group_B = [B_shared] * G
+            w = None
+            if W_shapes is not None:
+                w = [
+                    torch.randn(
+                        W_shape, device=self.device, dtype=self.dtype
+                    ).contiguous()
+                    for W_shape in W_shapes
+                ]
+            split = None
+            if split_size is not None:
+                split = torch.tensor(split_size, device=self.device, dtype=torch.int64)
 
-            yield (group_A, group_B)
+            yield (group_A, group_B, w, split)
 
     def list_input_to_jagged(
         self,
