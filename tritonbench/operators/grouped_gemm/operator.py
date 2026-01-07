@@ -1,13 +1,15 @@
 import logging
-
 from importlib.metadata import PackageNotFoundError, version
 from itertools import accumulate
 from typing import Any, Generator, List, Tuple
 
 import torch
+
+logger = logging.getLogger(__name__)
 from torch._inductor import config as inductor_config
 from torch._inductor.utils import ensure_cute_available
 from tritonbench.utils.env_utils import IS_BLACKWELL, is_cuda, is_fbcode
+from tritonbench.utils.path_utils import add_path, REPO_PATH
 from tritonbench.utils.triton_op import (
     BenchmarkOperator,
     BenchmarkOperatorMetrics,
@@ -18,7 +20,21 @@ from tritonbench.utils.triton_op import (
 if is_fbcode():
     from tritonbench.utils.fb.grouped_gemm import get_fb_shapes
 
-logger = logging.getLogger(__name__)
+    with add_path(str(REPO_PATH.joinpath("genai/msl"))):
+        try:
+            from ops.interfaces.gemm.grouped_gemm import (
+                Backend as SplitSizeBackend,
+                get_avaiable_backends as split_size_get_available_backends,
+                grouped_gemm_dgrad as split_size_grouped_gemm_dgrad,
+                grouped_gemm_fprop as split_size_grouped_gemm_fprop,
+                grouped_gemm_wgrad as split_size_grouped_gemm_wgrad,
+            )
+
+            HAS_SPLIT_SIZE_GROUPED_GEMM = True
+        except ImportError:
+            HAS_SPLIT_SIZE_GROUPED_GEMM = False
+else:
+    HAS_SPLIT_SIZE_GROUPED_GEMM = False
 
 
 if ensure_cute_available():
@@ -29,8 +45,8 @@ if ensure_cute_available():
     # Set HAS_CUTEDSL to True if import succeeds
     HAS_CUTEDSL = True
 else:
-    logger.warning("Failed to import CuteDSL and/or Cutlass")
     HAS_CUTEDSL = False
+    logger.warning("Failed to import CuteDSL and/or Cutlass")
 
 try:
     CUTLASS_VERSION = version("nvidia-cutlass-dsl")
@@ -73,8 +89,30 @@ def get_default_shapes():
 # TODO(nikhilap): Add a separate 3D grouped_gemm operator to alleviate the restriction that all B tensors must be the same.
 class Operator(BenchmarkOperator):
     DEFAULT_PRECISION = "bf16"
-    DEFAULT_METRICS = ["latency", "speedup", "accuracy"]
+    DEFAULT_METRICS = ["latency", "speedup", "accuracy", "tflops"]
     FWD_ONLY = True
+
+    def __init__(self, tb_args, extra_args: List[str] | None = None):
+        super().__init__(tb_args, extra_args)
+        self.only_fb_shapes = False
+        args, _ = self.parse_op_args(extra_args or [])
+        self.only_fb_shapes = args.only_fb_shapes
+        # Only use FB shapes when --only-fb-shapes is passed
+        if self.only_fb_shapes and not is_fbcode():
+            raise ValueError("--only-fb-shapes requires running in fbcode")
+
+    @staticmethod
+    def parse_op_args(extra_args: List[str]):
+        import argparse
+
+        parser = argparse.ArgumentParser()
+        parser.add_argument(
+            "--only-fb-shapes",
+            action="store_true",
+            default=False,
+            help="Only run benchmarks with FB-specific shapes (requires fbcode)",
+        )
+        return parser.parse_known_args(extra_args)
 
     @register_benchmark(baseline=True)
     def aten_grouped_mm(self, group_A, group_B, w=None, split=None):
@@ -364,6 +402,161 @@ class Operator(BenchmarkOperator):
 
         return _inner
 
+    # Split-size interface benchmarks - these use the unified interface from ops.interfaces.gemm.grouped_gemm
+    # Each benchmark tests a specific operation (fprop/dgrad/wgrad) with a specific backend
+
+    @register_benchmark(enabled=HAS_SPLIT_SIZE_GROUPED_GEMM and IS_BLACKWELL)
+    def split_size_grouped_gemm_fprop_native(
+        self, group_A, group_B, w=None, split=None
+    ):
+        if w is None or split is None:
+            return None
+        x = torch.cat(group_A, dim=0).contiguous()
+
+        def _inner():
+            return split_size_grouped_gemm_fprop(
+                x=x, w=w, split_sizes=split, backend=SplitSizeBackend.NATIVE.value
+            )
+
+        return _inner
+
+    @register_benchmark(enabled=HAS_SPLIT_SIZE_GROUPED_GEMM and IS_BLACKWELL)
+    def split_size_grouped_gemm_fprop_triton(
+        self, group_A, group_B, w=None, split=None
+    ):
+        if w is None or split is None:
+            return None
+        x = torch.cat(group_A, dim=0).contiguous()
+
+        def _inner():
+            return split_size_grouped_gemm_fprop(
+                x=x, w=w, split_sizes=split, backend=SplitSizeBackend.TRITON.value
+            )
+
+        return _inner
+
+    @register_benchmark(enabled=HAS_SPLIT_SIZE_GROUPED_GEMM and IS_BLACKWELL)
+    def split_size_grouped_gemm_fprop_tlx(self, group_A, group_B, w=None, split=None):
+        if w is None or split is None:
+            return None
+        x = torch.cat(group_A, dim=0).contiguous()
+
+        def _inner():
+            return split_size_grouped_gemm_fprop(
+                x=x, w=w, split_sizes=split, backend=SplitSizeBackend.TLX.value
+            )
+
+        return _inner
+
+    @register_benchmark(enabled=HAS_SPLIT_SIZE_GROUPED_GEMM and IS_BLACKWELL)
+    def split_size_grouped_gemm_dgrad_native(
+        self, group_A, group_B, w=None, split=None
+    ):
+        if w is None or split is None:
+            return None
+        # For dgrad, dy has shape [GM, N] where N is the output dimension
+        # w has shape [G, N, K], so N = w.shape[1]
+        GM = sum(a.shape[0] for a in group_A)
+        N = w.shape[1]
+        dy = torch.randn(GM, N, device=self.device, dtype=self.dtype).contiguous()
+
+        def _inner():
+            return split_size_grouped_gemm_dgrad(
+                dy=dy, w=w, split_sizes=split, backend=SplitSizeBackend.NATIVE.value
+            )
+
+        return _inner
+
+    @register_benchmark(enabled=HAS_SPLIT_SIZE_GROUPED_GEMM and IS_BLACKWELL)
+    def split_size_grouped_gemm_dgrad_triton(
+        self, group_A, group_B, w=None, split=None
+    ):
+        if w is None or split is None:
+            return None
+        GM = sum(a.shape[0] for a in group_A)
+        N = w.shape[1]
+        dy = torch.randn(GM, N, device=self.device, dtype=self.dtype).contiguous()
+
+        def _inner():
+            return split_size_grouped_gemm_dgrad(
+                dy=dy, w=w, split_sizes=split, backend=SplitSizeBackend.TRITON.value
+            )
+
+        return _inner
+
+    @register_benchmark(enabled=HAS_SPLIT_SIZE_GROUPED_GEMM and IS_BLACKWELL)
+    def split_size_grouped_gemm_dgrad_tlx(self, group_A, group_B, w=None, split=None):
+        if w is None or split is None:
+            return None
+        if SplitSizeBackend.TLX.value not in split_size_get_available_backends():
+            return None
+        GM = sum(a.shape[0] for a in group_A)
+        N = w.shape[1]
+        dy = torch.randn(GM, N, device=self.device, dtype=self.dtype).contiguous()
+
+        def _inner():
+            return split_size_grouped_gemm_dgrad(
+                dy=dy, w=w, split_sizes=split, backend=SplitSizeBackend.TLX.value
+            )
+
+        return _inner
+
+    @register_benchmark(enabled=HAS_SPLIT_SIZE_GROUPED_GEMM and IS_BLACKWELL)
+    def split_size_grouped_gemm_wgrad_native(
+        self, group_A, group_B, w=None, split=None
+    ):
+        if w is None or split is None:
+            return None
+        # For wgrad, we need dy [GM, N] and x [GM, K]
+        # w has shape [G, N, K], so N = w.shape[1]
+        x = torch.cat(group_A, dim=0).contiguous()
+        GM = x.shape[0]
+        N = w.shape[1]
+        dy = torch.randn(GM, N, device=self.device, dtype=self.dtype).contiguous()
+
+        def _inner():
+            return split_size_grouped_gemm_wgrad(
+                dy=dy, x=x, split_sizes=split, backend=SplitSizeBackend.NATIVE.value
+            )
+
+        return _inner
+
+    @register_benchmark(enabled=HAS_SPLIT_SIZE_GROUPED_GEMM and IS_BLACKWELL)
+    def split_size_grouped_gemm_wgrad_triton(
+        self, group_A, group_B, w=None, split=None
+    ):
+        if w is None or split is None:
+            return None
+        x = torch.cat(group_A, dim=0).contiguous()
+        GM = x.shape[0]
+        N = w.shape[1]
+        dy = torch.randn(GM, N, device=self.device, dtype=self.dtype).contiguous()
+
+        def _inner():
+            return split_size_grouped_gemm_wgrad(
+                dy=dy, x=x, split_sizes=split, backend=SplitSizeBackend.TRITON.value
+            )
+
+        return _inner
+
+    @register_benchmark(enabled=HAS_SPLIT_SIZE_GROUPED_GEMM and IS_BLACKWELL)
+    def split_size_grouped_gemm_wgrad_tlx(self, group_A, group_B, w=None, split=None):
+        if w is None or split is None:
+            return None
+        if SplitSizeBackend.TLX.value not in split_size_get_available_backends():
+            return None
+        x = torch.cat(group_A, dim=0).contiguous()
+        GM = x.shape[0]
+        N = w.shape[1]
+        dy = torch.randn(GM, N, device=self.device, dtype=self.dtype).contiguous()
+
+        def _inner():
+            return split_size_grouped_gemm_wgrad(
+                dy=dy, x=x, split_sizes=split, backend=SplitSizeBackend.TLX.value
+            )
+
+        return _inner
+
     def get_input_iter(self) -> Generator:
         """
         If external shapes are provided, generate inputs for those shapes.
@@ -372,19 +565,22 @@ class Operator(BenchmarkOperator):
             x_vals = [128, 256, 512, 1024]
         NOTE:
         The 2D+offs variant of torch._grouped_mm only supports a *single shared B* across groups.
-        That’s why group_B here just repeats the same B_shared reference.
+        That's why group_B here just repeats the same B_shared reference.
         If you need truly different B_i per group, you cannot use the 2D+offs API —
         instead, you must switch to the 3D variant (both A and B 3D) where offs is not required.
         """
         if hasattr(self, "external_shapes") and self.external_shapes:
             self.shapes = self.external_shapes
+        elif self.only_fb_shapes:
+            # Validation already done in __init__
+            self.shapes = get_fb_shapes()
         else:
             self.shapes = get_default_shapes()
-        if is_fbcode():
-            self.shapes += get_fb_shapes()
+            if is_fbcode():
+                self.shapes += get_fb_shapes()
 
         # Generate tensors from shapes
-        for A_shapes, B_shape, W_shapes, split_size in self.shapes:
+        for A_shapes, B_shape, W_shape, split_size in self.shapes:
             G = len(A_shapes)
 
             B_shared = torch.rand(
@@ -397,13 +593,10 @@ class Operator(BenchmarkOperator):
             ]
             group_B = [B_shared] * G
             w = None
-            if W_shapes is not None:
-                w = [
-                    torch.randn(
-                        W_shape, device=self.device, dtype=self.dtype
-                    ).contiguous()
-                    for W_shape in W_shapes
-                ]
+            if W_shape is not None:
+                w = torch.randn(
+                    W_shape, device=self.device, dtype=self.dtype
+                ).contiguous()
             split = None
             if split_size is not None:
                 split = torch.tensor(split_size, device=self.device, dtype=torch.int64)
@@ -478,13 +671,26 @@ class Operator(BenchmarkOperator):
     def flops(
         self, fn_name: str, example_inputs: Any, metrics: BenchmarkOperatorMetrics
     ) -> float:
-        group_A, group_B = example_inputs
+        group_A, group_B, w, split = example_inputs
         flops = 0
         for a, b in zip(group_A, group_B):
             m, k = a.size()
             k, n = b.size()
             flops += m * k * 2 * n
         return flops
+
+    @register_metric()
+    def tflops(
+        self, fn_name: str, example_inputs: Any, metrics: BenchmarkOperatorMetrics
+    ) -> float:
+        group_A, group_B, w, split = example_inputs
+        flops = 0
+        for a, b in zip(group_A, group_B):
+            m, k = a.size()
+            k, n = b.size()
+            flops += m * k * 2 * n
+        # Convert to TFlops: flops / (latency_ms * 1e-3) / 1e12 = flops / latency_ms / 1e9
+        return flops / metrics.latency / 1e9
 
     def get_x_val(self, example_inputs):
         N = example_inputs[0][0].shape[0]
