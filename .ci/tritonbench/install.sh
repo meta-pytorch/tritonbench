@@ -16,4 +16,4 @@ sudo apt update && sudo apt-get install -y libnvidia-compute-580
 # Install Tritonbench and all its customized packages
 python install.py --all
 
-sudo apt-get purge -y libnvidia-compute-580
+sudo apt-get purge -y '^libnvidia-'
