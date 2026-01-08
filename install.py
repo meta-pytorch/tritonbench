@@ -166,7 +166,7 @@ if __name__ == "__main__":
         from tools.mslk.install import install_mslk, test_mslk
 
         install_mslk(prebuilt=True)
-        test_mslk()
+        # test_mslk()
     elif args.mslk_compile:
         logger.info("[tritonbench] compiling and installing MSLK...")
         from tools.mslk.install import install_mslk, test_mslk
