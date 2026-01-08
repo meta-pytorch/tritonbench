@@ -7,6 +7,7 @@ from tritonbench.utils.env_utils import is_hip
 
 # requires torch
 from ..cuda_utils import get_toolkit_version_from_torch
+from ..python_utils import get_pip_cmd, pip_install_requirements
 
 REPO_PATH = Path(os.path.abspath(__file__)).parent.parent.parent
 MSLK_INSTALL_PATH = REPO_PATH.joinpath(".install", "MSLK")
@@ -23,8 +24,7 @@ def install_mslk(prebuilt=True):
 
 def install_prebuilt_mslk():
     toolkit_version = get_toolkit_version_from_torch()
-    cmd = [
-        "pip",
+    cmd = get_pip_cmd() + [
         "install",
         "--pre",
         "mslk",
@@ -54,10 +54,8 @@ def install_build_mslk():
     mslk_repo_path = MSLK_INSTALL_PATH.joinpath("MSLK")
     if not os.path.exists(mslk_repo_path):
         checkout_mslk()
-    cmd = ["pip", "install", "-r", "requirements.txt"]
-    subprocess.check_call(
-        cmd, cwd=str(mslk_repo_path)
-    )
+    pip_install_requirements("requirements.txt", current_dir=str(mslk_repo_path))
+
     # Build target H100(9.0, 9.0a) and blackwell (10.0, 12.0)
     extra_envs = os.environ.copy()
     if not is_hip():

@@ -6,6 +6,7 @@ from pathlib import Path
 
 # requires torch
 from ..cuda_utils import get_toolkit_version_from_torch
+from ..python_utils import get_pip_cmd, pip_install_requirements
 
 REPO_PATH = Path(os.path.abspath(__file__)).parent.parent.parent
 FBGEMM_INSTALL_PATH = REPO_PATH.joinpath(".install", "FBGEMM")
@@ -22,8 +23,7 @@ def install_fbgemm(prebuilt=True):
 
 def install_prebuilt_fbgemm():
     toolkit_version = get_toolkit_version_from_torch()
-    cmd = [
-        "pip",
+    cmd = get_pip_cmd() + [
         "install",
         "--pre",
         "fbgemm-gpu",
@@ -53,9 +53,8 @@ def install_build_fbgemm(genai=True):
     fbgemm_repo_path = FBGEMM_INSTALL_PATH.joinpath("FBGEMM")
     if not os.path.exists(fbgemm_repo_path):
         checkout_fbgemm()
-    cmd = ["pip", "install", "-r", "requirements.txt"]
-    subprocess.check_call(
-        cmd, cwd=str(fbgemm_repo_path.joinpath("fbgemm_gpu").resolve())
+    pip_install_requirements("requirements.txt",
+        current_dir=str(fbgemm_repo_path.joinpath("fbgemm_gpu").resolve())
     )
     # Build target H100(9.0, 9.0a) and blackwell (10.0, 12.0)
     extra_envs = os.environ.copy()

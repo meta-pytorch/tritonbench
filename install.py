@@ -12,6 +12,7 @@ from tools.python_utils import (
     get_pkg_versions,
     has_pkg,
     pip_install_requirements,
+    get_pip_cmd,
 )
 
 logging.basicConfig(level=logging.INFO)
@@ -45,7 +46,7 @@ def install_jax(toolkit_version=DEFAULT_TOOLKIT_VERSION):
     # install instruction:
     # https://jax.readthedocs.io/en/latest/installation.html
     # pip install -U --pre jax[cuda12] -f https://storage.googleapis.com/jax-releases/jax_nightly_releases.html
-    cmd = ["pip", "install", "--pre", jax_package_name, "-f", jax_nightly_html]
+    cmd = get_pip_cmd() + ["install", "--pre", jax_package_name, "-f", jax_nightly_html]
     subprocess.check_call(cmd)
     # Test jax installation
     test_cmd = [sys.executable, "-c", "import jax"]
@@ -56,25 +57,24 @@ def install_fa2(compile=False):
     if compile:
         # compile from source (slow)
         FA2_PATH = REPO_PATH.joinpath("submodules", "flash-attention")
-        cmd = ["pip", "install", "-e", "."]
+        cmd = get_pip_cmd() + ["install", "-e", "."]
         subprocess.check_call(cmd, cwd=str(FA2_PATH.resolve()))
     else:
         # Install the pre-built binary
-        cmd = ["pip", "install", "flash-attn", "--no-build-isolation"]
+        cmd = get_pip_cmd() + ["install", "flash-attn", "--no-build-isolation"]
         subprocess.check_call(cmd)
 
 
 def install_liger():
     # Liger-kernel has a conflict dependency `triton` with pytorch,
     # so we need to install it without dependencies
-    cmd = ["pip", "install", "liger-kernel-nightly", "--no-deps"]
+    cmd = get_pip_cmd() + ["install", "liger-kernel-nightly", "--no-deps"]
     subprocess.check_call(cmd)
 
 
 def install_tritonparse():
     # Install tritonparse from GitHub
-    cmd = [
-        "pip",
+    cmd = get_pip_cmd() + [
         "install",
         "-e",
         "git+https://github.com/meta-pytorch/tritonparse.git#egg=tritonparse",

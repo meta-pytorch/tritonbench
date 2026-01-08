@@ -2,6 +2,8 @@ import os
 import subprocess
 import sys
 
+from ..python_utils import pip_install_requirements
+
 REQUIREMENTS_FILE = os.path.join(
     os.path.dirname(os.path.abspath(__file__)), "requirements.txt"
 )
@@ -19,5 +21,5 @@ def check_install():
 
 
 def install_tile():
-    install_requirements(REQUIREMENTS_FILE)
+    pip_install_requirements(REQUIREMENTS_FILE, extra_args=["--no-deps"])
     check_install()

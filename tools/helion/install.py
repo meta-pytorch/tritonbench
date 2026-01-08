@@ -4,6 +4,8 @@ import subprocess
 
 from pathlib import Path
 
+from ..python_utils import get_pip_cmd
+
 
 REPO_PATH = Path(os.path.abspath(__file__)).parent.parent.parent
 CURRENT_DIR = Path(os.path.abspath(__file__)).parent
@@ -23,13 +25,12 @@ def install_helion():
     subprocess.check_call(git_clone_cmd, cwd=HELION_INSTALL_PATH)
     git_checkout_cmd = ["git", "checkout", HEION_COMMIT]
     subprocess.check_call(git_checkout_cmd, cwd=HELION_PATH)
-    install_tritonbench_cmd = [
-        "pip",
+    install_tritonbench_cmd = get_pip_cmd() + [
         "install",
         "--no-deps",
         "-e",
         ".",
     ] + constraints_parameters
     subprocess.check_call(install_tritonbench_cmd, cwd=REPO_PATH)
-    install_helion_cmd = ["pip", "install", "-e", ".[dev]"] + constraints_parameters
+    install_helion_cmd = get_pip_cmd() + ["install", "-e", ".[dev]"] + constraints_parameters
     subprocess.check_call(install_helion_cmd, cwd=HELION_PATH)

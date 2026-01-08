@@ -2,8 +2,17 @@
 
 set -ex
 
+if [ -z "${SETUP_SCRIPT}" ]; then
+    echo "SETUP_SCRIPT is not set"
+    exit 1
+fi
+
 if [ -z "${WORKSPACE_DIR}" ]; then
     WORKSPACE_DIR=/workspace
+fi
+
+if [ -e "${WORKSPACE_DIR}/miniconda3" ]; then
+    rm -r "${WORKSPACE_DIR}/miniconda3"
 fi
 
 cd ${WORKSPACE_DIR}
@@ -18,3 +27,8 @@ bash ./Miniconda3-latest-Linux-x86_64.sh -b -u -p ${WORKSPACE_DIR}/miniconda3
 conda activate base
 conda init
 conda tos accept
+
+echo "\
+. ${WORKSPACE_DIR}/miniconda3/etc/profile.d/conda.sh && \
+conda activate base && \
+export CONDA_HOME=${WORKSPACE_DIR}/miniconda3 " >> ${SETUP_SCRIPT}

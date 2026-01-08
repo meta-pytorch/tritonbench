@@ -4,6 +4,8 @@ import subprocess
 
 from pathlib import Path
 
+from ..python_utils import get_pip_cmd
+
 
 REPO_PATH = Path(os.path.abspath(__file__)).parent.parent.parent
 CURRENT_DIR = Path(os.path.abspath(__file__)).parent
@@ -25,5 +27,5 @@ def install_quack():
     subprocess.check_call(git_clone_cmd, cwd=QUACK_INSTALL_PATH)
     git_checkout_cmd = ["git", "checkout", QUACK_SHA]
     subprocess.check_call(git_checkout_cmd, cwd=quack_path)
-    install_quack_cmd = ["pip", "install", "-e", ".[dev]"] + constraints_parameters
+    install_quack_cmd = get_pip_cmd() + ["install", "-e", ".[dev]"] + constraints_parameters
     subprocess.check_call(install_quack_cmd, cwd=quack_path)

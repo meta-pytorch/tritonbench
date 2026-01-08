@@ -6,8 +6,12 @@ ENV CONDA_ENV=pytorch
 ENV CONDA_ENV_TRITON_MAIN=triton-main
 ENV CONDA_ENV_META_TRITON=meta-triton
 ENV WORKSPACE_DIR=/workspace
-ENV SETUP_SCRIPT=/workspace/setup_instance.sh
+ENV SETUP_SCRIPT=${WORKSPACE_DIR}/setup_instance.sh
 ENV META_TRITON_COMMIT=69302876e0a507542e93bef9389e7221df68f373
+
+# Use UV for Python venv
+ENV USE_UV=1
+
 
 # ARG OVERRIDE_GENCODE="-gencode arch=compute_80,code=sm_80 -gencode arch=compute_86,code=sm_86 -gencode arch=compute_90,code=sm_90 -gencode arch=compute_90a,code=sm_90a"
 # ARG OVERRIDE_GENCODE_CUDNN="-gencode arch=compute_80,code=sm_80 -gencode arch=compute_86,code=sm_86 -gencode arch=compute_90,code=sm_90 -gencode arch=compute_90a,code=sm_90a"
@@ -21,38 +25,22 @@ RUN sudo apt-get install -y git jq gcc g++ \
                             libsdl2-dev libsdl2-2.0-0 \
                             zlib1g-dev patch patchelf
 
-# get switch-cuda utility
-# RUN sudo wget -q https://raw.githubusercontent.com/phohenecker/switch-cuda/master/switch-cuda.sh -O /usr/bin/switch-cuda.sh
-# RUN sudo chmod +x /usr/bin/switch-cuda.sh
-
-# Create workspace
-# RUN sudo mkdir -p /workspace; sudo chown runner:runner /workspace
-
-# We assume that the host NVIDIA driver binaries and libraries are mapped to the docker filesystem
-# Install CUDA 12.8 build toolchains (only useful for bisection)
-# RUN cd /workspace; mkdir -p pytorch-ci; cd pytorch-ci; wget https://raw.githubusercontent.com/pytorch/pytorch/main/.ci/docker/common/install_cuda.sh
-# RUN cd /workspace/pytorch-ci; wget https://raw.githubusercontent.com/pytorch/pytorch/main/.ci/docker/common/install_cudnn.sh || true && \
-#     wget https://raw.githubusercontent.com/pytorch/pytorch/main/.ci/docker/common/install_nccl.sh && \
-#     wget https://raw.githubusercontent.com/pytorch/pytorch/main/.ci/docker/common/install_cusparselt.sh && \
-#     mkdir ci_commit_pins && cd ci_commit_pins && \
-#     wget https://raw.githubusercontent.com/pytorch/pytorch/main/.ci/docker/ci_commit_pins/nccl-cu12.txt
-# RUN sudo bash -c "set -x;export OVERRIDE_GENCODE=\"${OVERRIDE_GENCODE}\" OVERRIDE_GENCODE_CUDNN=\"${OVERRIDE_GENCODE_CUDNN}\"; cd /workspace/pytorch-ci; bash install_cuda.sh 12.8"
 
 # Create workspace and permission check
-RUN sudo mkdir -p /workspace; sudo chown $(whoami):$(id -gn) /workspace; touch "${SETUP_SCRIPT}"
+RUN sudo mkdir -p ${WORKSPACE_DIR}; sudo chown $(whoami):$(id -gn) ${WORKSPACE_DIR}; touch "${SETUP_SCRIPT}"
+RUN echo "\
+export WORKSPACE_DIR=${WORKSPACE_DIR}\n\
+export PATH=/home/runner/bin:/home/runner/.local/bin\${PATH:+:\${PATH}}\n" >> "${SETUP_SCRIPT}"
 
 # Checkout TritonBench and submodules
 RUN git clone --recurse-submodules -b "${TRITONBENCH_BRANCH}" --single-branch \
     https://github.com/meta-pytorch/tritonbench "${WORKSPACE_DIR}/tritonbench"
 
 # Install and setup env
-RUN cd /workspace/tritonbench && bash ./.ci/tritonbench/setup-env.sh --cuda
-
-RUN echo "\
-export PATH=/home/runner/bin\${PATH:+:\${PATH}}\n" >> "${SETUP_SCRIPT}"
+RUN cd ${WORKSPACE_DIR}/tritonbench && bash ./.ci/tritonbench/setup-env.sh --cuda
 
 # Check the installed version of nightly if needed
-RUN cd /workspace/tritonbench && \
+RUN cd ${WORKSPACE_DIR}/tritonbench && \
     . ${SETUP_SCRIPT} && \
     if [ "${FORCE_DATE}" = "skip_check" ]; then \
         echo "torch version check skipped"; \
@@ -64,17 +52,17 @@ RUN cd /workspace/tritonbench && \
     fi
 
 # Build meta-triton conda env
-RUN cd /workspace/tritonbench && \
+RUN cd "${WORKSPACE_DIR}"/tritonbench && \
     bash .ci/triton/install.sh --conda-env "${CONDA_ENV_META_TRITON}" \
         --repo facebookexperimental/triton --commit "${META_TRITON_COMMIT}" --side single \
         --install-dir /workspace/meta-triton
 
 # Test the install of meta-triton respects PTXAS_OPTIONS env var
-RUN cd /workspace/tritonbench && \
+RUN cd "${WORKSPACE_DIR}"/tritonbench && \
     bash .ci/triton/test_ptxas_options.sh --conda-env "${CONDA_ENV_META_TRITON}"
 
 # Install Helion in the meta-triton conda env
-RUN cd /workspace/tritonbench && \
+RUN cd "${WORKSPACE_DIR}"/tritonbench && \
     bash .ci/helion/install.sh --conda-env "${CONDA_ENV_META_TRITON}"
 
 # Output setup script for inspection
