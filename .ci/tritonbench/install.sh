@@ -17,3 +17,4 @@ sudo apt update && sudo apt-get install -y libnvidia-compute-580
 python install.py --all
 
 sudo apt-get purge -y '^libnvidia-'
+sudo apt-get purge -y '^nvidia-'
