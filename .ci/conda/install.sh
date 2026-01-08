@@ -8,7 +8,8 @@ if [ -z "${SETUP_SCRIPT}" ]; then
 fi
 
 if [ -z "${WORKSPACE_DIR}" ]; then
-    WORKSPACE_DIR=/workspace
+    echo "WORKSPACE_DIR is not set"
+    exit 1
 fi
 
 if [ -e "${WORKSPACE_DIR}/miniconda3" ]; then

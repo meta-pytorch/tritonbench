@@ -8,9 +8,9 @@ if [ -z "${SETUP_SCRIPT}" ]; then
 fi
 
 if [ -z "${WORKSPACE_DIR}" ]; then
-    WORKSPACE_DIR=/workspace
+    echo "WORKSPACE_DIR is not set"
+    exit 1
 fi
-
 
 # install uv
 curl -LsSf https://astral.sh/uv/install.sh | sh
