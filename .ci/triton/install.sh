@@ -52,6 +52,27 @@ install_triton() {
     popd
 }
 
+remove_env() {
+    # conda
+    CONDA_ENV=$1
+    if [ -n "${CONDA_PREFIX}" ]; then
+        conda remove --name "${CONDA_ENV}" -y --all || true
+    else
+    # uv
+    fi
+}
+
+clone_env() {
+    # conda
+    DEST_CONDA_ENV=$1
+    SRC_CONDA_ENV=$2
+    if [ -n "${CONDA_PREFIX}" ]; then
+        conda create --name "${DEST_CONDA_ENV}" -y --clone "${SRC_CONDA_ENV}"
+    else
+    # uv
+    fi
+}
+
 # "NIGHTLY" option controls whether to truncate the branch
 # to the earliest commit of the current day.
 # This is useful for nightly runs across multiple devices.
@@ -102,8 +123,8 @@ fi
 
 CONDA_ENV=pytorch . "${SETUP_SCRIPT}"
 # Remove the conda env if exists
-conda remove --name "${CONDA_ENV}" -y --all || true
-conda create --name "${CONDA_ENV}" -y --clone pytorch
+remove_env "${CONDA_ENV}"
+clone_env "${CONDA_ENV}" pytorch
 
 . "${SETUP_SCRIPT}"
 
