@@ -2,6 +2,10 @@
 
 set -xeuo pipefail
 
+if [ "${USE_UV:-}" == "1" ]; then
+    alias pip="uv pip"
+fi
+
 # Print usage
 usage() {
     echo "Usage: $0 --repo <repo-path> --commit <commit-hash> --side <a|b|single> --conda-env <env-name> --install-dir <triton-install-dir>"
@@ -55,10 +59,14 @@ install_triton() {
 remove_env() {
     # conda
     CONDA_ENV=$1
-    if [ -n "${CONDA_PREFIX}" ]; then
-        conda remove --name "${CONDA_ENV}" -y --all || true
+    if [ "${USE_UV:-}" == "1" ]; then
+        if [ -z "${UV_VENVS_DIR:-}" ]; then
+            echo "UV_VENVS_DIR is not set"
+            exit 1
+        fi
+        rm -r "${UV_VENVS_DIR}/${CONDA_ENV}" || true 
     else
-    # uv
+        conda remove --name "${CONDA_ENV}" -y --all || true
     fi
 }
 
@@ -66,10 +74,14 @@ clone_env() {
     # conda
     DEST_CONDA_ENV=$1
     SRC_CONDA_ENV=$2
-    if [ -n "${CONDA_PREFIX}" ]; then
-        conda create --name "${DEST_CONDA_ENV}" -y --clone "${SRC_CONDA_ENV}"
+    if [ "${USE_UV:-}" == "1" ]; then
+        if [ -z "${UV_VENVS_DIR:-}" ]; then
+            echo "UV_VENVS_DIR is not set"
+            exit 1
+        fi
+        cp -r "${UV_VENVS_DIR}/${SRC_CONDA_ENV}" "${UV_VENVS_DIR}/${DEST_CONDA_ENV}"
     else
-    # uv
+        conda create --name "${DEST_CONDA_ENV}" -y --clone "${SRC_CONDA_ENV}"
     fi
 }
 
@@ -93,17 +105,18 @@ while [[ "$#" -gt 0 ]]; do
 done
 
 if [ -z "${WORKSPACE_DIR:-}" ]; then
-    export WORKSPACE_DIR=/workspace
+  echo "ERROR: WORKSPACE_DIR is not set"
+  exit 1
 fi
 
-if [ -z "${SETUP_SCRIPT}" ]; then
+if [ -z "${SETUP_SCRIPT:-}" ]; then
   echo "ERROR: SETUP_SCRIPT is not set"
   exit 1
 fi
 
 # Validate arguments
 if [ -z "${REPO}" ] || [ -z "${COMMIT}" ] || [ -z "${SIDE}" ]; then
-    echo "Missing required arguments."
+    echo "Missing required arguments: --repo , --commit , or --side."
     usage
 fi
 

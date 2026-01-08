@@ -1,6 +1,6 @@
 #!/bin/bash
 
-if [ -z "${SETUP_SCRIPT}" ]; then
+if [ -z "${SETUP_SCRIPT:-}" ]; then
   echo "ERROR: SETUP_SCRIPT is not set"
   exit 1
 fi

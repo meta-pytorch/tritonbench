@@ -2,14 +2,13 @@
 
 set -xeuo pipefail
 
-if [ -z "${WORKSPACE_DIR}" ]; then
+if [ -z "${WORKSPACE_DIR:-}" ]; then
     export WORKSPACE_DIR=/workspace
 fi
 
-if [ -z "${SETUP_SCRIPT}" ]; then
+if [ -z "${SETUP_SCRIPT:-}" ]; then
     export SETUP_SCRIPT=${WORKSPACE_DIR}/setup_instance.sh
 fi
-
 
 # Parse arguments
 while [[ "$#" -gt 0 ]]; do
@@ -25,7 +24,7 @@ if [ ! -e ${WORKSPACE_DIR} ]; then
     sudo mkdir -p ${WORKSPACE_DIR}
     sudo chown -R $(whoami):$(id -gn) ${WORKSPACE_DIR}
 fi
-
+touch "${SETUP_SCRIPT}"
 
 echo ". ${SETUP_SCRIPT}" >> ${HOME}/.bashrc
 echo "if [ -z \${CONDA_ENV} ]; then export CONDA_ENV=${CONDA_ENV}; fi" >> "${SETUP_SCRIPT}"
