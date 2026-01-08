@@ -158,7 +158,9 @@ if __name__ == "__main__":
         from tools.fbgemm.install import install_fbgemm, test_fbgemm
 
         install_fbgemm(prebuilt=True)
-        test_fbgemm()
+        # TODO: skip testing fbgemm because it requires libcuda.so.1
+        # which is not available on the docker build machine
+        # test_fbgemm()
     if args.mslk or args.all:
         logger.info("[tritonbench] installing prebuilt MSLK...")
         from tools.mslk.install import install_mslk, test_mslk
