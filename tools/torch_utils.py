@@ -3,6 +3,7 @@ CUDA/ROCM independent pytorch installation helpers.
 """
 
 import importlib
+import os
 import re
 import subprocess
 from pathlib import Path
@@ -15,6 +16,7 @@ REPO_ROOT = Path(__file__).parent.parent.parent
 
 TORCH_NIGHTLY_PACKAGES = ["torch"]
 PIN_CMAKE_VERSION = "3.22.*"
+USE_UV = os.getenv("USE_UV", "0") == "1"
 BUILD_REQUIREMENTS_FILE = REPO_ROOT.joinpath("utils", "build_requirements.txt")
 
 
@@ -80,7 +82,9 @@ def install_pytorch_nightly(toolkit_version: str, env, dryrun=False):
     from .torch_utils import TORCH_NIGHTLY_PACKAGES
 
     install_cmd = get_pip_cmd()
-    uninstall_torch_cmd = install_cmd + ["uninstall", "-y"]
+    uninstall_torch_cmd = install_cmd + ["uninstall"]
+    if not USE_UV:
+        uninstall_torch_cmd.extend(["-y"])
     uninstall_torch_cmd.extend(TORCH_NIGHTLY_PACKAGES)
     if dryrun:
         print(f"Uninstall pytorch: {uninstall_torch_cmd}")

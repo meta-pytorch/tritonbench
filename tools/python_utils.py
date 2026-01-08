@@ -8,7 +8,7 @@ from typing import Dict, List, Optional
 DEFAULT_PYTHON_VERSION = "3.12"
 
 USE_UV = os.getenv("USE_UV", "0") == "1"
-UV_VENV_DIR = os.getenv("UV_VENVS", None)
+UV_VENV_DIR = os.getenv("UV_VENV_DIR", None)
 
 PYTHON_VERSION_MAP = {
     "3.11": {
@@ -28,7 +28,7 @@ logger = logging.getLogger(__name__)
 def create_venv(pyver: str, name: str):
     if USE_UV:
         assert UV_VENV_DIR is not None, "UV_VENV_DIR env is not set"
-        command = ["uv", "create", f"{UV_VENV_DIR}/{name}", f"python={pyver}"]
+        command = ["uv", "venv", f"{UV_VENV_DIR}/{name}", "--python", pyver, "--clear"]
     else:
         command = ["conda", "create", "-n", name, "-y", f"python={pyver}"]
     subprocess.check_call(command)

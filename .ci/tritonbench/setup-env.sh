@@ -40,7 +40,7 @@ fi
 . "${SETUP_SCRIPT}"
 
 export CONDA_ENV=pytorch
-python tools/python_utils.py --create-conda-env ${CONDA_ENV}
+python3 tools/python_utils.py --create-conda-env ${CONDA_ENV}
 if [ -n "${USE_UV:-}" ]; then
     echo "source ./.venvs/\${CONDA_ENV}/bin/activate" >> "${SETUP_SCRIPT}"
     . "${SETUP_SCRIPT}"
