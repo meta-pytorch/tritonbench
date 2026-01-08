@@ -7,6 +7,7 @@ ENV CONDA_ENV_TRITON_MAIN=triton-main
 ENV CONDA_ENV_META_TRITON=meta-triton
 ENV WORKSPACE_DIR=/workspace
 ENV SETUP_SCRIPT=/workspace/setup_instance.sh
+ENV META_TRITON_COMMIT=69302876e0a507542e93bef9389e7221df68f373
 
 # ARG OVERRIDE_GENCODE="-gencode arch=compute_80,code=sm_80 -gencode arch=compute_86,code=sm_86 -gencode arch=compute_90,code=sm_90 -gencode arch=compute_90a,code=sm_90a"
 # ARG OVERRIDE_GENCODE_CUDNN="-gencode arch=compute_80,code=sm_80 -gencode arch=compute_86,code=sm_86 -gencode arch=compute_90,code=sm_90 -gencode arch=compute_90a,code=sm_90a"
@@ -65,7 +66,7 @@ RUN cd /workspace/tritonbench && \
 # Build meta-triton conda env
 RUN cd /workspace/tritonbench && \
     bash .ci/triton/install.sh --conda-env "${CONDA_ENV_META_TRITON}" \
-        --repo facebookexperimental/triton --commit 969e1f50c38c09f679f2e054511fe74da51c3eb3 --side single \
+        --repo facebookexperimental/triton --commit "${META_TRITON_COMMIT}" --side single \
         --install-dir /workspace/meta-triton
 
 # Test the install of meta-triton respects PTXAS_OPTIONS env var
