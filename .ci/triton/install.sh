@@ -60,11 +60,11 @@ remove_env() {
     CONDA_ENV=$1
     if [ "${USE_UV:-}" == "1" ]; then
         # uv
-        if [ -z "${UV_VENVS_DIR:-}" ]; then
-            echo "UV_VENVS_DIR is not set"
+        if [ -z "${UV_VENV_DIR:-}" ]; then
+            echo "UV_VENV_DIR is not set"
             exit 1
         fi
-        rm -r "${UV_VENVS_DIR}/${CONDA_ENV}" || true 
+        rm -r "${UV_VENV_DIR}/${CONDA_ENV}" || true 
     else
         # conda
         conda remove --name "${CONDA_ENV}" -y --all || true
@@ -77,11 +77,11 @@ clone_env() {
     SRC_CONDA_ENV=$2
     if [ "${USE_UV:-}" == "1" ]; then
         # uv
-        if [ -z "${UV_VENVS_DIR:-}" ]; then
-            echo "UV_VENVS_DIR is not set"
+        if [ -z "${UV_VENV_DIR:-}" ]; then
+            echo "UV_VENV_DIR is not set"
             exit 1
         fi
-        cp -r "${UV_VENVS_DIR}/${SRC_CONDA_ENV}" "${UV_VENVS_DIR}/${DEST_CONDA_ENV}"
+        cp -r "${UV_VENV_DIR}/${SRC_CONDA_ENV}" "${UV_VENV_DIR}/${DEST_CONDA_ENV}"
     else
         # conda
         conda create --name "${DEST_CONDA_ENV}" -y --clone "${SRC_CONDA_ENV}"
