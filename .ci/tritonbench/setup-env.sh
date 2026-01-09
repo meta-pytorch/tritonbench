@@ -41,7 +41,7 @@ fi
 export CONDA_ENV=pytorch
 python3 tools/python_utils.py --create-conda-env ${CONDA_ENV}
 if [ -n "${USE_UV:-}" ]; then
-    echo ". ${PWD}/.venvs/\${CONDA_ENV}/bin/activate" >> "${SETUP_SCRIPT}"
+    echo ". ${UV_VENV_DIR}/\${CONDA_ENV}/bin/activate" >> "${SETUP_SCRIPT}"
     . "${SETUP_SCRIPT}"
 else
     echo "conda activate \${CONDA_ENV}" >> "${SETUP_SCRIPT}"
