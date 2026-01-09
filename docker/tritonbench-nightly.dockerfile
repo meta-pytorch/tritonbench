@@ -20,8 +20,7 @@ ARG FORCE_DATE=${FORCE_DATE}
 RUN sudo apt-get -y update && sudo apt -y update
 RUN sudo apt-get install -y git jq gcc g++ \
                             vim wget curl ninja-build cmake \
-                            libgl1-mesa-glx libsndfile1-dev kmod libxml2-dev libxslt1-dev \
-                            libsdl2-dev libsdl2-2.0-0 \
+                            libsndfile1-dev kmod libxml2-dev libxslt1-dev \
                             zlib1g-dev patch patchelf
 
 
