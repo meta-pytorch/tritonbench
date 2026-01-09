@@ -1138,7 +1138,8 @@ class BenchmarkOperator(metaclass=PostInitProcessor):
                     )
                     if "diode" in bm_name:
                         self.old_diode_configs = setup_diode_model(
-                            self.tb_args.diode_version
+                            self.tb_args.diode_version,
+                            topk=self.tb_args.diode_topk,
                         )
                     acc[bm_name] = self._do_bench(
                         input_id=input_id,
