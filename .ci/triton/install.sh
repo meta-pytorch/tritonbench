@@ -84,7 +84,7 @@ clone_env() {
         fi
         cp -r "${UV_VENV_DIR}/${SRC_CONDA_ENV}" "${UV_VENV_DIR}/${DEST_CONDA_ENV}"
         # replace the activate script to point to the new env
-        sed -i "s,${UV_VENV_DIR}/${SRC_CONDA_ENV},${UV_VENV_DIR}/${DEST_CONDA_ENV}/g" "${UV_VENV_DIR}/${DEST_CONDA_ENV}/bin/activate"
+        sed -i "s,${UV_VENV_DIR}/${SRC_CONDA_ENV},${UV_VENV_DIR}/${DEST_CONDA_ENV},g" "${UV_VENV_DIR}/${DEST_CONDA_ENV}/bin/activate"
     else
         # conda
         conda create --name "${DEST_CONDA_ENV}" -y --clone "${SRC_CONDA_ENV}"
