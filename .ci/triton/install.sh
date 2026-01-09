@@ -14,9 +14,9 @@ remove_triton() {
     TRITON_PKG_DIR=$(python -c "import triton; import os; print(os.path.dirname(triton.__file__))")
     # make sure all pytorch triton has been uninstalled
     if [ "${USE_UV:-}" == "1" ]; then
-        uv pip uninstall -y triton
-        uv pip uninstall -y triton
-        uv pip uninstall -y triton
+        uv pip uninstall triton
+        uv pip uninstall triton
+        uv pip uninstall triton
     else
         pip uninstall -y triton
         pip uninstall -y triton
