@@ -11,7 +11,7 @@ ENV META_TRITON_COMMIT=69302876e0a507542e93bef9389e7221df68f373
 
 # Use UV for Python venv
 ENV USE_UV=1
-
+ENV META_TRITON_COMMIT=69302876e0a507542e93bef9389e7221df68f373
 
 # ARG OVERRIDE_GENCODE="-gencode arch=compute_80,code=sm_80 -gencode arch=compute_86,code=sm_86 -gencode arch=compute_90,code=sm_90 -gencode arch=compute_90a,code=sm_90a"
 # ARG OVERRIDE_GENCODE_CUDNN="-gencode arch=compute_80,code=sm_80 -gencode arch=compute_86,code=sm_86 -gencode arch=compute_90,code=sm_90 -gencode arch=compute_90a,code=sm_90a"
