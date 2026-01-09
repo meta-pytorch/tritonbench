@@ -161,7 +161,7 @@ TRITONBENCH_TRITON_REPO=$(git config --get remote.origin.url | sed -E 's|.*githu
 # If the current conda env matches the env we just created
 # then export all Triton related envs to shell env
 cat <<EOF >> "${SETUP_SCRIPT}"
-if [ \${CONDA_DEFAULT_ENV} == "${CONDA_ENV}" ] ; then
+if [ \${CONDA_ENV} == "${CONDA_ENV}" ] ; then
     export TRITONBENCH_TRITON_COMMIT_HASH="${TRITONBENCH_TRITON_COMMIT_HASH}"
     export TRITONBENCH_TRITON_REPO="${TRITONBENCH_TRITON_REPO}"
     export TRITONBENCH_TRITON_COMMIT="${COMMIT}"

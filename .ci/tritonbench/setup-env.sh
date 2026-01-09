@@ -57,7 +57,7 @@ if [ -n "${USE_CUDA:-}" ]; then
     if [ -e ${NVIDIA_LIB_PATH} ]; then
         cd ${NVIDIA_LIB_PATH}
         ln -s libcublas.so.* libcublas.so && ln -s libcublasLt.so.* libcublasLt.so &&  ln -s libnvblas.so.* libnvblas.so && \
-        echo "export LD_LIBRARY_PATH=${NVIDIA_LIB_PATH}\${LD_LIBRARY_PATH:+:\${LD_LIBRARY_PATH}}\n" >> /workspace/setup_instance.sh
+        echo "export LD_LIBRARY_PATH=${NVIDIA_LIB_PATH}\${LD_LIBRARY_PATH:+:\${LD_LIBRARY_PATH}} \n" >> /workspace/setup_instance.sh
         cd -
     fi
 elif [ -n "${USE_HIP:-}" ]; then
