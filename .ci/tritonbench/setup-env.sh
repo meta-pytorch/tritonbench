@@ -29,9 +29,8 @@ touch "${SETUP_SCRIPT}"
 echo ". ${SETUP_SCRIPT}" >> ${HOME}/.bashrc
 echo "if [ -z \${CONDA_ENV} ]; then export CONDA_ENV=${CONDA_ENV}; fi" >> "${SETUP_SCRIPT}"
 
-if [ -n "${USE_UV:-}" ]; then
+if [ -n "${UV_VENV_DIR:-}" ]; then
     bash ./.ci/uv/install.sh
-    export UV_VENV_DIR=${PWD}/.venvs
 else
     bash ./.ci/conda/install.sh
 fi
@@ -40,7 +39,7 @@ fi
 
 export CONDA_ENV=pytorch
 python3 tools/python_utils.py --create-conda-env ${CONDA_ENV}
-if [ -n "${USE_UV:-}" ]; then
+if [ -n "${UV_VENV_DIR:-}" ]; then
     echo ". ${UV_VENV_DIR}/\${CONDA_ENV}/bin/activate" >> "${SETUP_SCRIPT}"
     . "${SETUP_SCRIPT}"
 else

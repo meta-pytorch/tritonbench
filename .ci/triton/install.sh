@@ -13,7 +13,7 @@ remove_triton() {
     # delete the original triton directory
     TRITON_PKG_DIR=$(python -c "import triton; import os; print(os.path.dirname(triton.__file__))")
     # make sure all pytorch triton has been uninstalled
-    if [ "${USE_UV:-}" == "1" ]; then
+    if [ -n "${UV_VENV_DIR:-}" ]; then
         uv pip uninstall triton
         uv pip uninstall triton
         uv pip uninstall triton
@@ -46,7 +46,7 @@ install_triton() {
     TRITON_INSTALL_DIR=$1
     cd "${TRITON_INSTALL_DIR}"
     # install main triton
-    if [ "${USE_UV:-}" == "1" ]; then
+    if [ -n "${UV_VENV_DIR:-}" ]; then
         uv pip install ninja cmake wheel pybind11; # build-time dependencies
         uv pip install -r python/requirements.txt
         uv pip install -e .
@@ -59,12 +59,8 @@ install_triton() {
 
 remove_env() {
     CONDA_ENV=$1
-    if [ "${USE_UV:-}" == "1" ]; then
+    if [ -n "${UV_VENV_DIR:-}" ]; then
         # uv
-        if [ -z "${UV_VENV_DIR:-}" ]; then
-            echo "UV_VENV_DIR is not set"
-            exit 1
-        fi
         rm -r "${UV_VENV_DIR}/${CONDA_ENV}" || true 
     else
         # conda
@@ -76,12 +72,7 @@ clone_env() {
     
     DEST_CONDA_ENV=$1
     SRC_CONDA_ENV=$2
-    if [ "${USE_UV:-}" == "1" ]; then
-        # uv
-        if [ -z "${UV_VENV_DIR:-}" ]; then
-            echo "UV_VENV_DIR is not set"
-            exit 1
-        fi
+    if [ -n "${UV_VENV_DIR:-}" ]; then
         cp -r "${UV_VENV_DIR}/${SRC_CONDA_ENV}" "${UV_VENV_DIR}/${DEST_CONDA_ENV}"
         # replace the activate script to point to the new env
         sed -i "s,${UV_VENV_DIR}/${SRC_CONDA_ENV},${UV_VENV_DIR}/${DEST_CONDA_ENV},g" "${UV_VENV_DIR}/${DEST_CONDA_ENV}/bin/activate"

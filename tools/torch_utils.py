@@ -16,7 +16,7 @@ REPO_ROOT = Path(__file__).parent.parent.parent
 
 TORCH_NIGHTLY_PACKAGES = ["torch"]
 PIN_CMAKE_VERSION = "3.22.*"
-USE_UV = os.getenv("USE_UV", "0") == "1"
+USE_UV = os.path.exists(os.getenv("VIRTUAL_ENV", ""))
 BUILD_REQUIREMENTS_FILE = REPO_ROOT.joinpath("utils", "build_requirements.txt")
 
 

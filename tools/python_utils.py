@@ -7,7 +7,6 @@ from typing import Dict, List, Optional
 
 DEFAULT_PYTHON_VERSION = "3.12"
 
-USE_UV = os.getenv("USE_UV", "0") == "1"
 UV_VENV_DIR = os.getenv("UV_VENV_DIR", None)
 
 PYTHON_VERSION_MAP = {
@@ -26,8 +25,7 @@ logger = logging.getLogger(__name__)
 
 
 def create_venv(pyver: str, name: str):
-    if USE_UV:
-        assert UV_VENV_DIR is not None, "UV_VENV_DIR env is not set"
+    if UV_VENV_DIR is not None:
         # avoid using system python, use uv managed instead
         command = ["uv", "venv", f"{UV_VENV_DIR}/{name}", "--python", pyver, "--managed-python", "--clear"]
     else:
@@ -47,7 +45,7 @@ def get_pkg_versions(packages: List[str]) -> Dict[str, str]:
 def get_pip_cmd():
     if env := os.getenv("PIP_MODULE"):
         return env.split()
-    elif USE_UV:
+    elif UV_VENV_DIR is not None:
         return ["uv", "pip"]
     else:
         return [sys.executable, "-m", "pip"]
