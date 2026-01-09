@@ -57,30 +57,33 @@ install_triton() {
 }
 
 remove_env() {
-    # conda
     CONDA_ENV=$1
     if [ "${USE_UV:-}" == "1" ]; then
+        # uv
         if [ -z "${UV_VENVS_DIR:-}" ]; then
             echo "UV_VENVS_DIR is not set"
             exit 1
         fi
         rm -r "${UV_VENVS_DIR}/${CONDA_ENV}" || true 
     else
+        # conda
         conda remove --name "${CONDA_ENV}" -y --all || true
     fi
 }
 
 clone_env() {
-    # conda
+    
     DEST_CONDA_ENV=$1
     SRC_CONDA_ENV=$2
     if [ "${USE_UV:-}" == "1" ]; then
+        # uv
         if [ -z "${UV_VENVS_DIR:-}" ]; then
             echo "UV_VENVS_DIR is not set"
             exit 1
         fi
         cp -r "${UV_VENVS_DIR}/${SRC_CONDA_ENV}" "${UV_VENVS_DIR}/${DEST_CONDA_ENV}"
     else
+        # conda
         conda create --name "${DEST_CONDA_ENV}" -y --clone "${SRC_CONDA_ENV}"
     fi
 }
