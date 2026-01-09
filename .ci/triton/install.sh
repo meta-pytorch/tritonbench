@@ -2,10 +2,6 @@
 
 set -xeuo pipefail
 
-if [ "${USE_UV:-}" == "1" ]; then
-    alias pip="uv pip"
-fi
-
 # Print usage
 usage() {
     echo "Usage: $0 --repo <repo-path> --commit <commit-hash> --side <a|b|single> --conda-env <env-name> --install-dir <triton-install-dir>"
@@ -17,9 +13,15 @@ remove_triton() {
     # delete the original triton directory
     TRITON_PKG_DIR=$(python -c "import triton; import os; print(os.path.dirname(triton.__file__))")
     # make sure all pytorch triton has been uninstalled
-    pip uninstall -y triton
-    pip uninstall -y triton
-    pip uninstall -y triton
+    if [ "${USE_UV:-}" == "1" ]; then
+        uv pip uninstall -y triton
+        uv pip uninstall -y triton
+        uv pip uninstall -y triton
+    else
+        pip uninstall -y triton
+        pip uninstall -y triton
+        pip uninstall -y triton
+    fi
     rm -rf "${TRITON_PKG_DIR}"
 }
 
@@ -44,16 +46,15 @@ install_triton() {
     TRITON_INSTALL_DIR=$1
     cd "${TRITON_INSTALL_DIR}"
     # install main triton
-    pip install ninja cmake wheel pybind11; # build-time dependencies
-    pip install -r python/requirements.txt
-    # old versions of triton have setup.py in ./python; newer versions in ./
-    if [ ! -f setup.py ]; then
-      pushd python
+    if [ "${USE_UV:-}" == "1" ]; then
+        uv pip install ninja cmake wheel pybind11; # build-time dependencies
+        uv pip install -r python/requirements.txt
+        uv pip install -e .
     else
-      pushd .
+        pip install ninja cmake wheel pybind11; # build-time dependencies
+        pip install -r python/requirements.txt
+        pip install -e .
     fi
-    pip install -e .
-    popd
 }
 
 remove_env() {
