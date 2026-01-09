@@ -27,7 +27,7 @@ def get_cuda_autotune_config():
             num_warps=4,
             num_stages=1,
             pre_hook=matmul_tma_set_block_size_hook,
-            # ctas_per_cga=(2, 1, 1) if pairCTA else None,
+            ctas_per_cga=(2, 1, 1) if pairCTA else None,
         )
         for BM in [128, 256]
         for BN in [128, 256, 512]
