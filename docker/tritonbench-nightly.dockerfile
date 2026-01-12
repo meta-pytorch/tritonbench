@@ -4,10 +4,9 @@ FROM ${BASE_IMAGE}
 ENV LANG=C.UTF-8 LC_ALL=C.UTF-8
 ENV CONDA_ENV=pytorch
 ENV CONDA_ENV_TRITON_MAIN=triton-main
-ENV CONDA_ENV_META_TRITON=meta-triton
+ENV CONDA_ENV_TRITON_META=triton-meta
 ENV WORKSPACE_DIR=/workspace
 ENV SETUP_SCRIPT=${WORKSPACE_DIR}/setup_instance.sh
-ENV META_TRITON_COMMIT=69302876e0a507542e93bef9389e7221df68f373
 
 # Use UV for Python venv
 ENV UV_VENV_DIR=${WORKSPACE_DIR}/uv_venvs
@@ -35,7 +34,7 @@ RUN git clone --recurse-submodules -b "${TRITONBENCH_BRANCH}" --single-branch \
     https://github.com/meta-pytorch/tritonbench "${WORKSPACE_DIR}/tritonbench"
 
 # Install and setup env
-RUN cd ${WORKSPACE_DIR}/tritonbench && bash ./.ci/tritonbench/setup-env.sh --cuda
+RUN cd ${WORKSPACE_DIR}/tritonbench && bash ./.ci/tritonbench/setup-env.sh --cuda --triton-main --triton-meta
 
 # Check the installed version of nightly if needed
 RUN cd ${WORKSPACE_DIR}/tritonbench && \
@@ -49,19 +48,13 @@ RUN cd ${WORKSPACE_DIR}/tritonbench && \
         python -m tools.cuda_utils --check-torch-nightly-version --force-date "${FORCE_DATE}"; \
     fi
 
-# Build meta-triton conda env
+# Test the install of triton-meta respects PTXAS_OPTIONS env var
 RUN cd "${WORKSPACE_DIR}"/tritonbench && \
-    bash .ci/triton/install.sh --conda-env "${CONDA_ENV_META_TRITON}" \
-        --repo facebookexperimental/triton --commit "${META_TRITON_COMMIT}" --side single \
-        --install-dir /workspace/meta-triton
+    bash .ci/triton/test_ptxas_options.sh --conda-env "${CONDA_ENV_TRITON_META}"
 
-# Test the install of meta-triton respects PTXAS_OPTIONS env var
+# Install Helion in the triton-meta venv
 RUN cd "${WORKSPACE_DIR}"/tritonbench && \
-    bash .ci/triton/test_ptxas_options.sh --conda-env "${CONDA_ENV_META_TRITON}"
-
-# Install Helion in the meta-triton conda env
-RUN cd "${WORKSPACE_DIR}"/tritonbench && \
-    bash .ci/helion/install.sh --conda-env "${CONDA_ENV_META_TRITON}"
+    bash .ci/helion/install.sh --conda-env "${CONDA_ENV_TRITON_META}"
 
 # Output setup script for inspection
 RUN cat "${SETUP_SCRIPT}"
