@@ -43,6 +43,19 @@ jobs:
       side_b_commit: ${{ inputs.side_b_commit }}
     secrets:
       TRITONBENCH_SCRIBE_GRAPHQL_ACCESS_TOKEN: ${{ secrets.TRITONBENCH_SCRIBE_GRAPHQL_ACCESS_TOKEN }}
+  h100-triton-meta-nightly-benchmark:
+    uses: ./.github/workflows/_linux-benchmark-h100.yml
+    if: ${{ inputs.test_type == 'single' }}
+    with:
+      test_type: ${{ inputs.test_type || 'periodic' }}
+      benchmark_name: "nightly"
+      venv_name: "meta-triton"
+      side_a_triton: ${{ inputs.side_a_triton }}
+      side_a_commit: ${{ inputs.side_a_commit }}
+      side_b_triton: ${{ inputs.side_b_triton }}
+      side_b_commit: ${{ inputs.side_b_commit }}
+    secrets:
+      TRITONBENCH_SCRIBE_GRAPHQL_ACCESS_TOKEN: ${{ secrets.TRITONBENCH_SCRIBE_GRAPHQL_ACCESS_TOKEN }}
   mi350-triton-main-nightly-benchmark:
     uses: ./.github/workflows/_linux-benchmark-mi350.yml
     with:
@@ -54,7 +67,19 @@ jobs:
       side_b_commit: ${{ inputs.side_b_commit }}
     secrets:
       TRITONBENCH_SCRIBE_GRAPHQL_ACCESS_TOKEN: ${{ secrets.TRITONBENCH_SCRIBE_GRAPHQL_ACCESS_TOKEN }}
-
+  mi350-triton-meta-nightly-benchmark:
+    uses: ./.github/workflows/_linux-benchmark-mi350.yml
+    if: ${{ inputs.test_type == 'single' }}
+    with:
+      test_type: ${{ inputs.test_type || 'periodic' }}
+      benchmark_name: "nightly"
+      venv_name: "meta-triton"
+      side_a_triton: ${{ inputs.side_a_triton }}
+      side_a_commit: ${{ inputs.side_a_commit }}
+      side_b_triton: ${{ inputs.side_b_triton }}
+      side_b_commit: ${{ inputs.side_b_commit }}
+    secrets:
+      TRITONBENCH_SCRIBE_GRAPHQL_ACCESS_TOKEN: ${{ secrets.TRITONBENCH_SCRIBE_GRAPHQL_ACCESS_TOKEN }}
 
 concurrency:
   group: ${{ github.workflow }}-${{ github.event.pull_request.number || github.sha }}-${{ github.event_name == 'workflow_dispatch' }}

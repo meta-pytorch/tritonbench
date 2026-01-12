@@ -17,6 +17,12 @@ on:
         type: string
         description: |
           Benchmark name
+      venv_name:
+        required: True
+        default: "triton-main"
+        type: string
+        description: |
+          Name of the virtual environment to use for the benchmark
       side_a_triton:
         type: string
         required: False
@@ -53,7 +59,7 @@ jobs:
       SETUP_SCRIPT: "/workspace/setup_instance.sh"
       RUNNER_TYPE: "gcp-h100-runner"
       JOB_NAME: tritonbench-h100-benchmark-${{ inputs.test_type }}-${{ inputs.benchmark_name }}
-      TRITONBENCH_SIDE_A_ENV: "triton-main"
+      TRITONBENCH_SIDE_A_ENV: ${{ inputs.venv_name }}
       TRITONBENCH_SCRIBE_GRAPHQL_ACCESS_TOKEN: ${{ secrets.TRITONBENCH_SCRIBE_GRAPHQL_ACCESS_TOKEN }}
       AWS_ACCESS_KEY_ID: ${{ secrets.AWS_ACCESS_KEY_ID }}
       AWS_SECRET_ACCESS_KEY: ${{ secrets.AWS_SECRET_ACCESS_KEY }}
