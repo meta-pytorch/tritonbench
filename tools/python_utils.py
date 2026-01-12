@@ -8,6 +8,7 @@ from typing import Dict, List, Optional
 DEFAULT_PYTHON_VERSION = "3.12"
 
 UV_VENV_DIR = os.getenv("UV_VENV_DIR", None)
+USE_UV = UV_VENV_DIR is not None or os.path.exists(os.getenv("VIRTUAL_ENV", ""))
 
 PYTHON_VERSION_MAP = {
     "3.11": {
@@ -53,7 +54,7 @@ def get_pkg_versions(packages: List[str]) -> Dict[str, str]:
 def get_pip_cmd():
     if env := os.getenv("PIP_MODULE"):
         return env.split()
-    elif UV_VENV_DIR is not None:
+    elif USE_UV:
         return ["uv", "pip"]
     else:
         return [sys.executable, "-m", "pip"]
