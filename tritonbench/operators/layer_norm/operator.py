@@ -62,7 +62,7 @@ except ModuleNotFoundError:
     HAS_LIGER_KERNEL = False
 
 try:
-    from quack.quack_layernorm import layernorm as quack_layernorm
+    from ads_mkl.ops.cute_dsl.quack.quack_layernorm import layernorm as quack_layernorm
 
     HAS_QUACK_KERNEL = True
 except ModuleNotFoundError:
