@@ -10,6 +10,9 @@ from torch._inductor.runtime.benchmarking import benchmarker
 from tritonbench.components.do_bench.entropy.entropy_criterion import EntropyCriterion
 from tritonbench.utils.constants import DEFAULT_N_REP, DEFAULT_N_WARMUP
 
+from .common import summarize_statistics
+from .gpu_events import do_bench_events
+
 from .power import do_bench_power
 
 NS_TO_MS = 1e-6
@@ -132,17 +135,6 @@ class Latency:
             self.times[i] /= scale
 
 
-def _summarize_statistics(times, quantiles, return_mode):
-    if quantiles is not None:
-        ret = torch.quantile(times, torch.tensor(quantiles, dtype=torch.float)).tolist()
-        if len(ret) == 1:
-            ret = ret[0]
-        return ret
-    if return_mode == "all":
-        return times.tolist()
-    return getattr(torch, return_mode)(times).item()
-
-
 def _do_bench_inductor(fn, warmup, rep, return_mode="all", grad_to_none=None):
     """Measure latency using inductor benchmarker.
 
@@ -177,7 +169,7 @@ def _do_bench_inductor(fn, warmup, rep, return_mode="all", grad_to_none=None):
         times_ms.append(ms_time)
 
     times = torch.tensor(times_ms, dtype=torch.float)
-    return _summarize_statistics(times, quantiles=None, return_mode=return_mode)
+    return summarize_statistics(times, quantiles=None, return_mode=return_mode)
 
 
 def _do_bench_cudagraph_with_cache_clear(
@@ -263,7 +255,7 @@ def _do_bench_cudagraph_with_cache_clear(
         all_kernel_times.append(kernel_time)
 
     times = torch.tensor(all_kernel_times, dtype=torch.float)
-    return _summarize_statistics(times, quantiles, return_mode)
+    return summarize_statistics(times, quantiles, return_mode)
 
 
 def _do_bench_profiler(
@@ -425,7 +417,7 @@ def _do_bench_profiler(
         torch.cuda.synchronize()
 
     times = torch.tensor(all_kernel_times, dtype=torch.float)
-    return _summarize_statistics(times, quantiles=None, return_mode=return_mode)
+    return summarize_statistics(times, quantiles=None, return_mode=return_mode)
 
 
 def _do_bench_cpu(
@@ -466,7 +458,7 @@ def _do_bench_cpu(
         t1 = time.time_ns()
         times_ms.append((t1 - t0) * NS_TO_MS)
     times = torch.tensor(times_ms, dtype=torch.float)
-    return _summarize_statistics(times, quantiles, return_mode)
+    return summarize_statistics(times, quantiles, return_mode)
 
 
 def _do_bench_entropy(
@@ -626,7 +618,7 @@ def _do_bench_entropy(
     benchmark_times = [s.elapsed_time(e) for s, e in zip(start_events, end_events)]
 
     times = torch.tensor(benchmark_times, dtype=torch.float)
-    return _summarize_statistics(times, quantiles, return_mode)
+    return summarize_statistics(times, quantiles, return_mode)
 
 
 def do_bench_wrapper(
@@ -711,6 +703,17 @@ def do_bench_wrapper(
                     use_cuda_graphs=use_cuda_graphs,
                 ),
                 remove_outliers=False,
+            )
+        elif latency_measure_mode == "gpu_events":
+            return Latency(
+                times=do_bench_events(
+                    fn,
+                    warmup=warmup,
+                    rep=rep,
+                    return_mode="all",
+                    grad_to_none=grad_to_none,
+                    skip_cache_clearing=skip_cache_clearing,
+                )
             )
         else:
             bench_fn = (
