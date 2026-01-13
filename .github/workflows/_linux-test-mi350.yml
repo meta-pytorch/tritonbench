@@ -16,6 +16,7 @@ jobs:
     environment: docker-s3-upload
     env:
       WORKSPACE_DIR: "/workspace"
+      UV_VENV_DIR: "/workspace/uv_venvs"
       SETUP_SCRIPT: "/workspace/setup_instance.sh"
       CONDA_ENV: ${{ inputs.conda_env }}
     steps:
