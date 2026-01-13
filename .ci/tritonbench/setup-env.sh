@@ -26,21 +26,21 @@ if [ ! -e ${WORKSPACE_DIR} ]; then
     sudo mkdir -p ${WORKSPACE_DIR}
     sudo chown -R $(whoami):$(id -gn) ${WORKSPACE_DIR}
 fi
-touch "${SETUP_SCRIPT}"
 
+touch "${SETUP_SCRIPT}"
 echo ". ${SETUP_SCRIPT}" >> ${HOME}/.bashrc
-echo "if [ -z \${CONDA_ENV} ]; then export CONDA_ENV=${CONDA_ENV}; fi" >> "${SETUP_SCRIPT}"
 
 if [ -n "${UV_VENV_DIR:-}" ]; then
     bash ./.ci/uv/install.sh
     . $HOME/.local/bin/env 
 else
     bash ./.ci/conda/install.sh
+    . "${SETUP_SCRIPT}"
 fi
 
-. "${SETUP_SCRIPT}"
-
 export CONDA_ENV=pytorch
+echo "if [ -z \${CONDA_ENV} ]; then export CONDA_ENV=${CONDA_ENV}; fi" >> "${SETUP_SCRIPT}"
+
 python3 tools/python_utils.py --create-conda-env ${CONDA_ENV}
 if [ -n "${UV_VENV_DIR:-}" ]; then
     echo ". ${UV_VENV_DIR}/\${CONDA_ENV}/bin/activate" >> "${SETUP_SCRIPT}"
