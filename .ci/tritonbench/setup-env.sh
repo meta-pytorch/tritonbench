@@ -85,7 +85,8 @@ fi
 
 if [ -n "${USE_TRITON_MAIN:-}" ]; then
     bash ./.ci/triton/install-triton-main.sh
-elif [ -n "${USE_META_TRITON:-}" ]; then
+fi
+if [ -n "${USE_META_TRITON:-}" ]; then
     bash ./.ci/triton/install-meta-triton.sh
 fi
 
