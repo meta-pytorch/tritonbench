@@ -37,6 +37,7 @@ jobs:
     with:
       test_type: ${{ inputs.test_type || 'periodic' }}
       benchmark_name: "nightly"
+      venv_name: "triton-main"
       side_a_triton: ${{ inputs.side_a_triton }}
       side_a_commit: ${{ inputs.side_a_commit }}
       side_b_triton: ${{ inputs.side_b_triton }}
@@ -49,7 +50,7 @@ jobs:
     with:
       test_type: ${{ inputs.test_type || 'periodic' }}
       benchmark_name: "nightly"
-      venv_name: "triton-meta"
+      venv_name: "meta-triton"
     secrets:
       TRITONBENCH_SCRIBE_GRAPHQL_ACCESS_TOKEN: ${{ secrets.TRITONBENCH_SCRIBE_GRAPHQL_ACCESS_TOKEN }}
   mi350-triton-main-nightly-benchmark:
@@ -57,6 +58,7 @@ jobs:
     with:
       test_type: ${{ inputs.test_type || 'periodic' }}
       benchmark_name: "nightly"
+      venv_name: "triton-main"
       side_a_triton: ${{ inputs.side_a_triton }}
       side_a_commit: ${{ inputs.side_a_commit }}
       side_b_triton: ${{ inputs.side_b_triton }}
@@ -69,7 +71,7 @@ jobs:
     with:
       test_type: ${{ inputs.test_type || 'periodic' }}
       benchmark_name: "nightly"
-      venv_name: "triton-meta"
+      venv_name: "meta-triton"
     secrets:
       TRITONBENCH_SCRIBE_GRAPHQL_ACCESS_TOKEN: ${{ secrets.TRITONBENCH_SCRIBE_GRAPHQL_ACCESS_TOKEN }}
 
