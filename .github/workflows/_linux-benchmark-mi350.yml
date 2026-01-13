@@ -57,6 +57,7 @@ jobs:
       contents: read
     env:
       WORKSPACE_DIR: "/workspace"
+      UV_VENV_DIR: "/workspace/uv_venvs"
       SETUP_SCRIPT: "/workspace/setup_instance.sh"
       RUNNER_TYPE: "amd-mi350-runner"
       DOCKER_IMAGE: "ghcr.io/meta-pytorch/tritonbench:rocm-latest"
