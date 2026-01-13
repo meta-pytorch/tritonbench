@@ -31,6 +31,7 @@ echo "if [ -z \${CONDA_ENV} ]; then export CONDA_ENV=${CONDA_ENV}; fi" >> "${SET
 
 if [ -n "${UV_VENV_DIR:-}" ]; then
     bash ./.ci/uv/install.sh
+    source $HOME/.local/bin/env 
 else
     bash ./.ci/conda/install.sh
 fi
