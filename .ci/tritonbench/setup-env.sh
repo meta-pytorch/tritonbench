@@ -16,7 +16,7 @@ while [[ "$#" -gt 0 ]]; do
         --cuda) USE_CUDA="1";  ;;
         --hip) USE_HIP="1"; ;;
         --triton-main) USE_TRITON_MAIN="1"; ;;
-        --triton-meta) USE_TRITON_META="1"; ;;
+        --meta-triton) USE_META_TRITON="1"; ;;
         *) echo "Unknown parameter passed: $1"; usage ;;
     esac
     shift
@@ -85,8 +85,8 @@ fi
 
 if [ -n "${USE_TRITON_MAIN:-}" ]; then
     bash ./.ci/triton/install-triton-main.sh
-elif [ -n "${USE_TRITON_META:-}" ]; then
-    bash ./.ci/triton/install-triton-meta.sh
+elif [ -n "${USE_META_TRITON:-}" ]; then
+    bash ./.ci/triton/install-meta-triton.sh
 fi
 
 cat "${SETUP_SCRIPT}"

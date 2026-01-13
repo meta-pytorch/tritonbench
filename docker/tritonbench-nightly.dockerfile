@@ -4,7 +4,7 @@ FROM ${BASE_IMAGE}
 ENV LANG=C.UTF-8 LC_ALL=C.UTF-8
 ENV CONDA_ENV=pytorch
 ENV CONDA_ENV_TRITON_MAIN=triton-main
-ENV CONDA_ENV_TRITON_META=triton-meta
+ENV CONDA_ENV_META_TRITON=meta-triton
 ENV WORKSPACE_DIR=/workspace
 ENV SETUP_SCRIPT=${WORKSPACE_DIR}/setup_instance.sh
 
@@ -34,7 +34,7 @@ RUN git clone --recurse-submodules -b "${TRITONBENCH_BRANCH}" --single-branch \
     https://github.com/meta-pytorch/tritonbench "${WORKSPACE_DIR}/tritonbench"
 
 # Install and setup env
-RUN cd ${WORKSPACE_DIR}/tritonbench && bash ./.ci/tritonbench/setup-env.sh --cuda --triton-main --triton-meta
+RUN cd ${WORKSPACE_DIR}/tritonbench && bash ./.ci/tritonbench/setup-env.sh --cuda --triton-main --meta-triton
 
 # Check the installed version of nightly if needed
 RUN cd ${WORKSPACE_DIR}/tritonbench && \
@@ -48,13 +48,13 @@ RUN cd ${WORKSPACE_DIR}/tritonbench && \
         python -m tools.cuda_utils --check-torch-nightly-version --force-date "${FORCE_DATE}"; \
     fi
 
-# Test the install of triton-meta respects PTXAS_OPTIONS env var
+# Test the install of meta-triton respects PTXAS_OPTIONS env var
 RUN cd "${WORKSPACE_DIR}"/tritonbench && \
-    bash .ci/triton/test_ptxas_options.sh --conda-env "${CONDA_ENV_TRITON_META}"
+    bash .ci/triton/test_ptxas_options.sh --conda-env "${CONDA_ENV_META_TRITON}"
 
 # Install Helion in the triton-meta venv
 RUN cd "${WORKSPACE_DIR}"/tritonbench && \
-    bash .ci/helion/install.sh --conda-env "${CONDA_ENV_TRITON_META}"
+    bash .ci/helion/install.sh --conda-env "${CONDA_ENV_META_TRITON}"
 
 # Output setup script for inspection
 RUN cat "${SETUP_SCRIPT}"
