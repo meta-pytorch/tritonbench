@@ -602,12 +602,12 @@ class Operator(BenchmarkOperator):
             return out
 
         @register_benchmark(enabled=False)
-        def pt2_cutlass_api_matmul(self, a, b, bias) -> Callable:
+        def pt2_nvgemm_matmul(self, a, b, bias) -> Callable:
             assert bias is None, "Cutlass API gemm does not currently support bias"
             torch._dynamo.reset()
             with inductor_config.patch(
                 max_autotune=True,
-                max_autotune_gemm_backends="CUTEDSL",
+                max_autotune_gemm_backends="NVGEMM",
                 autotune_fallback_to_aten=False,
                 autotune_num_choices_displayed=self.inductor_autotune_num_choices_displayed,
             ):
