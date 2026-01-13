@@ -43,7 +43,7 @@ jobs:
       side_b_commit: ${{ inputs.side_b_commit }}
     secrets:
       TRITONBENCH_SCRIBE_GRAPHQL_ACCESS_TOKEN: ${{ secrets.TRITONBENCH_SCRIBE_GRAPHQL_ACCESS_TOKEN }}
-  h100-triton-meta-nightly-benchmark:
+  h100-meta-triton-nightly-benchmark:
     uses: ./.github/workflows/_linux-benchmark-h100.yml
     if: ${{ inputs.test_type != 'abtest' }}
     with:
@@ -63,7 +63,7 @@ jobs:
       side_b_commit: ${{ inputs.side_b_commit }}
     secrets:
       TRITONBENCH_SCRIBE_GRAPHQL_ACCESS_TOKEN: ${{ secrets.TRITONBENCH_SCRIBE_GRAPHQL_ACCESS_TOKEN }}
-  mi350-triton-meta-nightly-benchmark:
+  mi350-meta-triton-nightly-benchmark:
     uses: ./.github/workflows/_linux-benchmark-mi350.yml
     if: ${{ inputs.test_type != 'abtest' }}
     with:
