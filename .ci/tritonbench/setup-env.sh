@@ -48,6 +48,8 @@ else
     python -m tools.cuda_utils --install-torch-deps
 fi
 
+bash .ci/tritonbench/install-pytorch-source.sh
+
 if [ -n "${USE_CUDA:-}" ]; then
     python -m tools.cuda_utils --install-torch-nightly --cuda
     export PYTORCH_FILE_PATH=$(python -c "import torch; print(torch.__file__)")
@@ -62,6 +64,8 @@ export LD_LIBRARY_PATH="${NVIDIA_LIB_PATH}\${LD_LIBRARY_PATH:+:\${LD_LIBRARY_PAT
 EOF
         cd -
     fi
+    # Hack: install nvidia compute to get libcuda.so.1
+    sudo apt update && sudo apt-get install -y libnvidia-compute-580
 elif [ -n "${USE_HIP:-}" ]; then
     python -m tools.cuda_utils --install-torch-nightly --hip
 else
@@ -69,9 +73,12 @@ else
     exit 1
 fi
 
-bash .ci/tritonbench/install-pytorch-source.sh
-
 bash .ci/tritonbench/install.sh
+
+if [ -n "${USE_CUDA:-}" ]; then
+    sudo apt-get purge -y '^libnvidia-'
+    sudo apt-get purge -y '^nvidia-'
+fi
 
 CONDA_ENV_TRITON_MAIN=triton-main
 bash .ci/triton/install.sh --conda-env "${CONDA_ENV_TRITON_MAIN}" \
