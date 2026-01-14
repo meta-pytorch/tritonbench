@@ -51,9 +51,10 @@ def _generated_qkv_inputs(
         if max_inputs_per_iter > 0:
             num_inputs = min(num_inputs, max_inputs_per_iter)
         for _ in range(num_inputs - 1):
-            inputs.append(q.clone().detach())
-            inputs.append(k.clone().detach())
-            inputs.append(v.clone().detach())
+            for t in (q, k, v):
+                t = t.clone().detach()
+                t.requires_grad = True
+                inputs.append(t)
     assert len(inputs) % 3 == 0
     return tuple(inputs)
 
