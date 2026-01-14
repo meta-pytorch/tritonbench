@@ -12,7 +12,6 @@ from tritonbench.utils.constants import DEFAULT_N_REP, DEFAULT_N_WARMUP
 
 from .common import summarize_statistics
 from .gpu_events import do_bench_events
-
 from .power import do_bench_power
 
 NS_TO_MS = 1e-6

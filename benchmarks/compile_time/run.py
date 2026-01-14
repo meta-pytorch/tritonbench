@@ -7,7 +7,6 @@ import json
 import logging
 import os
 import sys
-
 from os.path import abspath, exists
 from typing import Dict, List
 

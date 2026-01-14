@@ -2,10 +2,8 @@ import argparse
 from typing import Callable, Generator, List, Optional, Tuple
 
 import torch
-
 from tritonbench.utils.env_utils import is_hip
 from tritonbench.utils.python_utils import try_import
-
 from tritonbench.utils.triton_op import (
     BenchmarkOperator,
     Mode,

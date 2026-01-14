@@ -3,7 +3,6 @@ from typing import Callable, Generator, List, Optional, Tuple
 
 import torch
 from torch.nn import Embedding
-
 from tritonbench.utils.triton_op import (
     BenchmarkOperator,
     register_benchmark,

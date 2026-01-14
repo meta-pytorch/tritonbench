@@ -10,14 +10,11 @@ import math
 import os
 from contextlib import nullcontext
 from functools import partial
-
 from typing import Callable, Optional, Tuple
 
 import torch
-
 from torch.nn.attention import sdpa_kernel, SDPBackend
 from torch.nn.functional import scaled_dot_product_attention as sdpa
-
 from tritonbench.kernels.attention_utils import SUPPORT_GLUON
 from tritonbench.kernels.blackwell_attention_utils import is_blackwell
 
@@ -111,7 +108,6 @@ if HAS_TLX:
 from typing import Any, Generator, List
 
 from tritonbench.utils.input import input_filter
-
 from tritonbench.utils.triton_op import (
     BenchmarkOperator,
     BenchmarkOperatorMetrics,

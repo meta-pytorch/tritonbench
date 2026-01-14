@@ -1844,9 +1844,9 @@ def generalized_dot_product_attention(
     fused_qkv = key is None and value is None
     fused_kv = key is not None and value is None
     if use_start_end_offsets:
-        assert (
-            not fused_qkv and not fused_kv and not broadcast_q
-        ), "fused_qkv/fused_kv/broadcast_q not supported with start/end offsets"
+        assert not fused_qkv and not fused_kv and not broadcast_q, (
+            "fused_qkv/fused_kv/broadcast_q not supported with start/end offsets"
+        )
         assert total_num_objects is not None, "total_num_objects must be provided"
 
     if qk_scale is None:

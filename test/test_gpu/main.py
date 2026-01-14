@@ -1,10 +1,8 @@
 import logging
 import unittest
-
 from typing import Dict, List
 
 import yaml
-
 from tritonbench.operators import (  # @manual=//pytorch/tritonbench:tritonbench
     load_opbench_by_name,
 )
@@ -15,7 +13,6 @@ from tritonbench.utils.env_utils import (
     is_fbcode,  # @manual=//pytorch/tritonbench:tritonbench
     is_hip,  # @manual=//pytorch/tritonbench:tritonbench
 )
-
 from tritonbench.utils.parser import get_parser
 
 if is_fbcode():
@@ -69,9 +66,9 @@ def check_ci_output(op):
     )
     # Make sure that all the ci_enabled impls are in the output
     logger.info(f"output impls: {output_impls}, ci_enabled impls: {ci_enabled_impls}")
-    assert set(output_impls) == set(
-        ci_enabled_impls
-    ), f"output impls: {output_impls} != ci_enabled impls: {ci_enabled_impls}"
+    assert set(output_impls) == set(ci_enabled_impls), (
+        f"output impls: {output_impls} != ci_enabled impls: {ci_enabled_impls}"
+    )
 
 
 def _run_one_operator(args: List[str]):

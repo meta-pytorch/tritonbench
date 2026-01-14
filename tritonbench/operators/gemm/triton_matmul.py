@@ -6,7 +6,6 @@ Triton Matrix Multiplication is from the Triton tutorial:
 import os
 
 import torch
-
 import triton
 import triton.language as tl
 from tritonbench.utils.env_utils import is_tile_enabled

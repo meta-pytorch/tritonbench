@@ -7,7 +7,6 @@ import os
 import re
 import subprocess
 from pathlib import Path
-
 from typing import Optional
 
 from .python_utils import get_pip_cmd

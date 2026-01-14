@@ -9,7 +9,6 @@ import json
 import logging
 import os
 import sys
-
 from os.path import abspath, exists
 from typing import Dict, List
 
@@ -37,11 +36,9 @@ from typing import Callable
 
 import max.graph as mg
 import torch
-
 from max import driver, engine
 from max.graph import DeviceRef, Graph, ops, TensorType, TensorValue
 from max.graph.type import DType, Shape, ShapeLike
-
 from tritonbench.operators import load_opbench_by_name
 from tritonbench.utils.parser import get_parser
 from tritonbench.utils.triton_op import register_benchmark

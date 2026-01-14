@@ -5,15 +5,12 @@ import os
 import subprocess
 import sys
 import time
-
 from datetime import datetime
 from pathlib import Path
-
 from typing import Dict, List, Optional
 
 import torch
 import yaml
-
 from tritonbench.operator_loader import get_op_loader_bench_cls_by_name, is_loader_op
 from tritonbench.operators import load_opbench_by_name
 from tritonbench.operators_collection import list_operators_by_collection
@@ -175,9 +172,9 @@ def tritonbench_run(args: Optional[List[str]] = None):
     # Check if A/B testing mode is enabled
     if args.side_a is not None and args.side_b is not None:
         # A/B testing mode - only support single operator
-        assert (
-            len(ops) == 1
-        ), "A/B testing validation should have caught multiple operators"
+        assert len(ops) == 1, (
+            "A/B testing validation should have caught multiple operators"
+        )
         op = ops[0]
         args.op = op
 

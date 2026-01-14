@@ -3,9 +3,7 @@ from typing import Any, Callable, Generator, List, Optional, Tuple
 
 import torch
 import triton
-
 from tritonbench.utils.data_utils import get_production_shapes
-
 from tritonbench.utils.env_utils import (
     get_nvidia_gpu_model,
     IS_BLACKWELL,
@@ -13,7 +11,6 @@ from tritonbench.utils.env_utils import (
     is_fbcode,
     is_hip,
 )
-
 from tritonbench.utils.triton_op import (
     BenchmarkOperator,
     BenchmarkOperatorMetrics,
@@ -89,9 +86,9 @@ try:
     from mslk.gemm.triton.fp8_gemm import matmul_fp8_row as triton_fp8_row
 
     if not torch.version.hip:
-        assert hasattr(
-            triton.runtime.driver.active.utils, "fill_1d_tma_descriptor"
-        ), "TMA is required by the Triton kernel."
+        assert hasattr(triton.runtime.driver.active.utils, "fill_1d_tma_descriptor"), (
+            "TMA is required by the Triton kernel."
+        )
     HAS_TRITON = True
 except (ImportError, AssertionError):
     HAS_TRITON = False

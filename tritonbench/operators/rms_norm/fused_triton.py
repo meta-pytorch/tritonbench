@@ -113,9 +113,9 @@ class RMSNorm(torch.autograd.Function):
 
         MAX_FUSED_SIZE = 65536 // x.element_size()
         BLOCK_SIZE = triton.next_power_of_2(N)
-        assert (
-            BLOCK_SIZE <= MAX_FUSED_SIZE
-        ), "This layer norm doesn't support feature dim >= 64KB."
+        assert BLOCK_SIZE <= MAX_FUSED_SIZE, (
+            "This layer norm doesn't support feature dim >= 64KB."
+        )
 
         _rms_norm_bwd_fused[(PARTIAL_SIZE,)](  #
             dx,

@@ -2,7 +2,6 @@ import itertools
 
 import triton
 import triton.language as tl
-
 from tritonbench.kernels.profile import profile_mem_pre_hook, smid, time
 
 

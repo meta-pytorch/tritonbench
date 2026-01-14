@@ -30,7 +30,6 @@ In doing so, you will learn about:
 # Let’s first take a look at the forward pass implementation.
 
 import torch
-
 import triton
 import triton.language as tl
 

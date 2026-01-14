@@ -1,5 +1,4 @@
 import torch
-
 from quack import rmsnorm as quack_rmsnorm
 
 

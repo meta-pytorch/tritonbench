@@ -54,9 +54,7 @@ from typing import Any, Callable, Generator, List, Optional, Tuple
 import torch
 import triton
 from tritonbench.utils.data_utils import get_production_shapes
-
 from tritonbench.utils.env_utils import is_fbcode
-
 from tritonbench.utils.triton_op import (
     BenchmarkOperator,
     BenchmarkOperatorMetrics,

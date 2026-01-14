@@ -9,7 +9,6 @@ from typing import Callable, Generator, List, Optional
 
 import torch
 from torch._dynamo.testing import rand_strided
-
 from tritonbench.utils.triton_op import (
     BenchmarkOperator,
     BenchmarkOperatorMetrics,

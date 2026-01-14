@@ -14,7 +14,6 @@ Extra Credits:
 
 import logging
 import os
-
 from typing import Optional
 from uuid import uuid4
 
@@ -26,9 +25,7 @@ else:
     manifold = None
 
 import numpy as np
-
 import torch
-
 import triton
 
 # Note: This only works with 3.3.1+fb or earlier

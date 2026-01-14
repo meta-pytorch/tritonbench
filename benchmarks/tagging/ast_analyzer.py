@@ -150,7 +150,7 @@ class CallGraph(ast.NodeVisitor):
         lid = self._lambda_ids.get(node)
         if lid is None:
             scope = self._cur_scope() or "<module>"
-            lid = f"{scope}.<lambda>@{getattr(node,'lineno',-1)}:{getattr(node,'col_offset',-1)}"
+            lid = f"{scope}.<lambda>@{getattr(node, 'lineno', -1)}:{getattr(node, 'col_offset', -1)}"
             self._lambda_ids[node] = lid
         return lid
 

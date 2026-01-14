@@ -10,7 +10,6 @@ will only be supported on NVIDIA GPUs
 from enum import Enum
 
 import torch
-
 import triton  # @manual=//triton:triton
 import triton.language as tl  # @manual=//triton:triton
 from torch._inductor.runtime.triton_helpers import libdevice

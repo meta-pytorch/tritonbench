@@ -11,7 +11,6 @@ import sys
 from dataclasses import dataclass
 from os.path import abspath, exists
 from pathlib import Path
-
 from typing import Any, Dict, List, Optional, Tuple
 
 RUNNER_TYPE_MAPPING = {
@@ -239,9 +238,9 @@ if __name__ == "__main__":
     parser.add_argument("--output", required=True, help="output json.")
     args = parser.parse_args()
     upload_file_path = Path(args.json)
-    assert (
-        upload_file_path.exists()
-    ), f"Specified result json path {args.json} does not exist."
+    assert upload_file_path.exists(), (
+        f"Specified result json path {args.json} does not exist."
+    )
     with open(upload_file_path, "r") as fp:
         benchmark_result = json.load(fp)
     if args.add_github_env:

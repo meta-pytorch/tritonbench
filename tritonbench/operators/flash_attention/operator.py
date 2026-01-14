@@ -36,27 +36,21 @@ import logging
 import os
 from contextlib import nullcontext
 from functools import partial
-
 from typing import Callable, Optional
 
 import torch
 import triton  # @manual=//triton:triton
-
 from torch.nn.attention import sdpa_kernel, SDPBackend
 from torch.nn.functional import scaled_dot_product_attention as sdpa
-
 from tritonbench.kernels.proton_blackwell_ws_fused_attention import (
     attention_opt as proton_blackwell_ws_FA2_opt,
 )
-
 from tritonbench.kernels.proton_fused_attention import (
     attention_opt as proton_tutorial_FA2_opt,
 )
-
 from tritonbench.kernels.triton_fused_attention import (
     attention_opt as triton_tutorial_FA2_opt,
 )
-
 from tritonbench.utils.env_utils import IS_BLACKWELL, is_hip
 from tritonbench.utils.path_utils import add_ld_library_path
 from tritonbench.utils.python_utils import try_import
@@ -120,7 +114,6 @@ with try_import("HAS_XFORMERS"):
 from typing import Any, Generator, List, Tuple
 
 from tritonbench.utils.input import input_filter
-
 from tritonbench.utils.triton_op import (
     BenchmarkOperator,
     BenchmarkOperatorMetrics,

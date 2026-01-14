@@ -16,7 +16,6 @@ from triton.experimental.gluon.language.nvidia.blackwell import (
 from triton.experimental.gluon.language.nvidia.hopper import fence_async_shared
 from triton.experimental.gluon.language.nvidia.hopper.tma import tensor_descriptor
 from triton.experimental.gluon.nvidia.hopper import TensorDescriptor
-
 from triton.language.core import _aggregate as aggregate
 
 # ===-----------------------------------------------------------------------===#

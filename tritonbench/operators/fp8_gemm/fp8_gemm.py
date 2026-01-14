@@ -1,26 +1,20 @@
 import argparse
-
 import logging
-
 from typing import Any, Callable, List, Optional
 
 import torch
 import torch._inductor.config as inductor_config
 import triton
-
 from torch._inductor.kernel.mm import scaling_pairs, ScalingType
-
 from tritonbench.data.llama import llama_shapes
 from tritonbench.operators.fp8_gemm.persistent import blackwell_persistent_tma
 from tritonbench.utils.env_utils import IS_BLACKWELL
-
 from tritonbench.utils.triton_op import (
     BenchmarkOperator,
     BenchmarkOperatorMetrics,
     register_benchmark,
     register_metric,
 )
-
 from tritonbench.utils.triton_utils import has_experimental_descriptor
 
 from .tutorial import matmul as tutorial_matmul
@@ -249,9 +243,9 @@ class Operator(BenchmarkOperator):
 
     @register_benchmark(baseline=True)
     def torch_fp8_gemm(self, a, b, scale_a, scale_b):
-        assert (
-            not self.contains_blockwise_scaling or HAS_CUDA_129
-        ), "BlockWise scaling variants for scaled_gemm require CUDA 12.9+"
+        assert not self.contains_blockwise_scaling or HAS_CUDA_129, (
+            "BlockWise scaling variants for scaled_gemm require CUDA 12.9+"
+        )
 
         return lambda: torch._scaled_mm(
             a,

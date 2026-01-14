@@ -2,7 +2,6 @@ import unittest
 
 from tritonbench.operators import load_opbench_by_name
 from tritonbench.operators_collection import list_operators_by_collection
-
 from tritonbench.utils.parser import get_parser
 
 

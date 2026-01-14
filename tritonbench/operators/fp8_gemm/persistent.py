@@ -1,13 +1,10 @@
 from functools import lru_cache
-
 from typing import Optional
 
 import torch
 import triton
 import triton.language as tl
-
 from torch._inductor.kernel.mm import ScalingType
-
 from tritonbench.utils.env_utils import is_cuda
 from tritonbench.utils.triton_utils import has_experimental_descriptor
 
@@ -417,9 +414,9 @@ def blackwell_persistent_tma(a, b, scale_a_ptr, scale_b_ptr, acc_dtype, scaling_
     configs = matmul_configs_blackwell()
 
     # Check constraints.
-    assert (
-        a.shape[1] == b.shape[1]
-    ), "Incompatible dimensions"  # a.shape = (M, K), b.shape = (N, K)
+    assert a.shape[1] == b.shape[1], (
+        "Incompatible dimensions"
+    )  # a.shape = (M, K), b.shape = (N, K)
     assert a.dtype == b.dtype, "Incompatible dtypes"
 
     M, K = a.shape

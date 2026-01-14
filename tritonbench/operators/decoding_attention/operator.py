@@ -5,12 +5,10 @@
 # LICENSE file in the root directory of this source tree.
 import argparse
 import os
-
 from typing import Callable, Optional, Tuple
 
 import torch
 from tritonbench.utils.env_utils import IS_BLACKWELL, is_cuda
-
 from tritonbench.utils.path_utils import add_ld_library_path
 
 # [Optional] flash_attn v2

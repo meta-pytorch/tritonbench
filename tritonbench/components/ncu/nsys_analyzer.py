@@ -31,9 +31,9 @@ def get_nsys_metrics(metrics: List[str]) -> List[str]:
 def read_nsys_report(
     report_path: str, required_metrics: List[str]
 ) -> Dict[str, List[float]]:
-    assert os.path.exists(
-        report_path
-    ), f"The nsys report at {report_path} does not exist."
+    assert os.path.exists(report_path), (
+        f"The nsys report at {report_path} does not exist."
+    )
     reports_required = []
     for metric in required_metrics:
         if metric in nsys_metrics_to_reports:

@@ -1,11 +1,9 @@
 import os
 
 import torch
-
 from triton import autotune, cdiv, Config, heuristics, jit, language as tl
 
 from ..triton_matmul_configs import get_full_amd_config_space, init_to_zero
-
 from .matmul_perf_model import early_config_prune, estimate_matmul_time
 
 _ordered_datatypes = [torch.int8, torch.float16, torch.bfloat16, torch.float32]
@@ -349,12 +347,12 @@ class _matmul(torch.autograd.Function):
             acc_dtype = supported_acc_dtypes[ab_dtype][0]
         else:
             assert isinstance(acc_dtype, torch.dtype), "acc_dtype must be a torch.dtype"
-            assert (
-                acc_dtype in supported_acc_dtypes[a.dtype]
-            ), "acc_dtype not compatible with the type of a"
-            assert (
-                acc_dtype in supported_acc_dtypes[b.dtype]
-            ), "acc_dtype not compatible with the type of b"
+            assert acc_dtype in supported_acc_dtypes[a.dtype], (
+                "acc_dtype not compatible with the type of a"
+            )
+            assert acc_dtype in supported_acc_dtypes[b.dtype], (
+                "acc_dtype not compatible with the type of b"
+            )
 
         def to_tl_type(ty):
             return getattr(tl, str(ty).split(".")[-1])

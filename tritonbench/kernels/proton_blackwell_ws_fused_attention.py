@@ -19,7 +19,6 @@ NOTE: This only runs with TRUNK/OSS Triton at this time.
 """
 
 import torch
-
 import triton
 import triton.language as tl
 

@@ -4,7 +4,6 @@ Serialize pickled tensors to directory.
 
 import pickle
 from pathlib import Path
-
 from typing import Any, Callable
 
 from tritonbench.utils.input import input_cast

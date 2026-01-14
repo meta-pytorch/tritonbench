@@ -1,10 +1,8 @@
 import torch
 from torch import zeros
-
 from torch._inductor.utils import triton_version_uses_attrs_dict
 from triton.compiler import CompiledKernel
 from tritonbench.utils.python_utils import try_import
-
 from tritonbench.utils.triton_op import BenchmarkOperator, register_benchmark
 
 with try_import("HAS_TILELANG"):

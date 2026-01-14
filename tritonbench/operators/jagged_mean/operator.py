@@ -4,7 +4,6 @@ from typing import Callable, Generator, List, Optional, Tuple
 
 import torch
 import triton
-
 from tritonbench.utils.jagged_utils import (
     ABSOLUTE_TOLERANCE,
     generate_input_vals,
@@ -18,7 +17,6 @@ from tritonbench.utils.jagged_utils import (
     RANDOM_CHOICE_MARGIN,
     RELATIVE_TOLERANCE,
 )
-
 from tritonbench.utils.triton_op import (
     BenchmarkOperator,
     BenchmarkOperatorMetrics,

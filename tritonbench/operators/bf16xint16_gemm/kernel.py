@@ -3,10 +3,8 @@ Triton implementation by @jlebar: https://gist.github.com/jlebar/3435b2c00deea53
 """
 
 import torch
-
 import triton
 import triton.language as tl
-
 from tritonbench.utils.env_utils import is_cuda
 
 

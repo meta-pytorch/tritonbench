@@ -2,7 +2,6 @@ from typing import Generator, List
 
 import torch
 import triton
-
 from tritonbench.utils.triton_op import (
     BenchmarkOperator,
     BenchmarkOperatorMetrics,

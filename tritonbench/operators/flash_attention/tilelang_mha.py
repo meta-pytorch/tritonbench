@@ -7,7 +7,6 @@ import itertools
 from functools import partial
 
 import tilelang
-
 import tilelang.language as T
 
 # Copyright (c) Tile-AI Corporation.

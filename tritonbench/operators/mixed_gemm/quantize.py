@@ -82,14 +82,14 @@ def quantize_bf16_to_int2(input_tensor):
     Returns:
     - torch.Tensor: Packed INT8 tensor of shape (M, K // 4), where each INT8 contains 4 INT2 values.
     """
-    assert (
-        input_tensor.dtype == torch.bfloat16
-    ), "Input tensor must be of dtype torch.bfloat16"
+    assert input_tensor.dtype == torch.bfloat16, (
+        "Input tensor must be of dtype torch.bfloat16"
+    )
     assert input_tensor.dim() == 2, "Input tensor must be 2D"
     M, K = input_tensor.shape
-    assert (
-        K % 4 == 0
-    ), "Input tensor's second dimension (K) must be divisible by 4 for INT2 packing"
+    assert K % 4 == 0, (
+        "Input tensor's second dimension (K) must be divisible by 4 for INT2 packing"
+    )
 
     # Allocate output tensor
     output_tensor = torch.empty(

@@ -178,9 +178,9 @@ def matmul_kernel(
 
 
 def matmul(a, b):
-    assert (
-        a.shape[1] == b.shape[0] * 2
-    ), f"Incompatible dimensions: {a.shape[1], b.shape[0] * 2}"
+    assert a.shape[1] == b.shape[0] * 2, (
+        f"Incompatible dimensions: {a.shape[1], b.shape[0] * 2}"
+    )
     assert a.is_contiguous(), "Matrix A must be contiguous"
     M, K = a.shape
     _, N = b.shape

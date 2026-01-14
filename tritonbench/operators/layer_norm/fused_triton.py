@@ -186,9 +186,9 @@ class LayerNorm(torch.autograd.Function):
         _dw = torch.empty((PARTIAL_SIZE, N), dtype=torch.float32, device=w.device)
 
         MAX_FUSED_SIZE = 65536 // x.element_size()
-        assert (
-            ctx.BLOCK_SIZE <= MAX_FUSED_SIZE
-        ), "This layer norm doesn't support feature dim >= 64KB."
+        assert ctx.BLOCK_SIZE <= MAX_FUSED_SIZE, (
+            "This layer norm doesn't support feature dim >= 64KB."
+        )
         _layer_norm_bwd_dx_fused[(PARTIAL_SIZE,)](  #
             dx,
             dy,

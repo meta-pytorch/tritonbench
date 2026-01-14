@@ -3,11 +3,9 @@ import gc
 import os
 import threading
 from pathlib import Path
-
 from typing import Any, Dict, List, Optional
 
 import torch
-
 from tritonbench.components.tasks import base as base_task
 from tritonbench.components.workers import subprocess_worker
 
@@ -202,9 +200,9 @@ class OpTask(base_task.TaskBase):
             op.mode, REGISTERED_BENCHMARKS[output.op_name], op._skip
         )
         # Make sure that all the ci_enabled impls are in the output
-        assert set(output_impls) == set(
-            ci_enabled_impls
-        ), f"output impls: {output_impls} != ci_enabled impls: {ci_enabled_impls}"
+        assert set(output_impls) == set(ci_enabled_impls), (
+            f"output impls: {output_impls} != ci_enabled impls: {ci_enabled_impls}"
+        )
 
     def del_op_instance(self):
         self.worker.run(

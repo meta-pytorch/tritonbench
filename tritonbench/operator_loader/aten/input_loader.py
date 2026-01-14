@@ -208,9 +208,9 @@ class OperatorInputLoader:
             yield op
 
     def get_call_frequency(self, op):
-        assert (
-            str(op) in self.operator_db
-        ), f"Could not find {op}, must provide overload"
+        assert str(op) in self.operator_db, (
+            f"Could not find {op}, must provide overload"
+        )
 
         count = 0
         for counter in self.operator_db[str(op)].values():

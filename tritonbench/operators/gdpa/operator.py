@@ -30,7 +30,6 @@ import gc
 from typing import Any, Callable, Generator, List, Optional
 
 import torch
-
 from tritonbench.utils.triton_op import (
     BenchmarkOperator,
     BenchmarkOperatorMetrics,

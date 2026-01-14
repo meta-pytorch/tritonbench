@@ -47,15 +47,15 @@ def detect_cuda_version_with_nvcc(env):
 
 
 def prepare_cuda_env(cuda_version: str, dryrun=False):
-    assert (
-        cuda_version in CUDA_VERSION_MAP
-    ), f"Required CUDA version {cuda_version} doesn't exist in {CUDA_VERSION_MAP.keys()}."
+    assert cuda_version in CUDA_VERSION_MAP, (
+        f"Required CUDA version {cuda_version} doesn't exist in {CUDA_VERSION_MAP.keys()}."
+    )
     env = os.environ.copy()
     # step 1: setup CUDA path and environment variables
     cuda_path = Path("/").joinpath("usr", "local", f"cuda-{cuda_version}")
-    assert (
-        cuda_path.exists() and cuda_path.is_dir()
-    ), f"Expected CUDA Library path {cuda_path} doesn't exist."
+    assert cuda_path.exists() and cuda_path.is_dir(), (
+        f"Expected CUDA Library path {cuda_path} doesn't exist."
+    )
     cuda_path_str = str(cuda_path.resolve())
     env["CUDA_ROOT"] = cuda_path_str
     env["CUDA_HOME"] = cuda_path_str
@@ -69,26 +69,26 @@ def prepare_cuda_env(cuda_version: str, dryrun=False):
 
     # step 2: test call to nvcc to confirm the version is correct
     nvcc_version = detect_cuda_version_with_nvcc(env=env)
-    assert (
-        nvcc_version == cuda_version
-    ), f"Expected CUDA version {cuda_version}, getting nvcc test result {nvcc_version}"
+    assert nvcc_version == cuda_version, (
+        f"Expected CUDA version {cuda_version}, getting nvcc test result {nvcc_version}"
+    )
 
     return env
 
 
 def setup_cuda_softlink(cuda_version: str):
-    assert (
-        cuda_version in CUDA_VERSION_MAP
-    ), f"Required CUDA version {cuda_version} doesn't exist in {CUDA_VERSION_MAP.keys()}."
+    assert cuda_version in CUDA_VERSION_MAP, (
+        f"Required CUDA version {cuda_version} doesn't exist in {CUDA_VERSION_MAP.keys()}."
+    )
     cuda_path = Path("/").joinpath("usr", "local", f"cuda-{cuda_version}")
-    assert (
-        cuda_path.exists() and cuda_path.is_dir()
-    ), f"Expected CUDA Library path {cuda_path} doesn't exist."
+    assert cuda_path.exists() and cuda_path.is_dir(), (
+        f"Expected CUDA Library path {cuda_path} doesn't exist."
+    )
     current_cuda_path = Path("/").joinpath("usr", "local", "cuda")
     if current_cuda_path.exists():
-        assert (
-            current_cuda_path.is_symlink()
-        ), "Expected /usr/local/cuda to be a symlink."
+        assert current_cuda_path.is_symlink(), (
+            "Expected /usr/local/cuda to be a symlink."
+        )
         current_cuda_path.unlink()
     os.symlink(str(cuda_path.resolve()), str(current_cuda_path.resolve()))
 
@@ -207,5 +207,7 @@ if __name__ == "__main__":
     if args.check_torch_nightly_version:
         from .torch_utils import check_torch_nightly_version
 
-        assert not args.install_torch_nightly, "Error: Can't run install torch nightly and check version in the same command."
+        assert not args.install_torch_nightly, (
+            "Error: Can't run install torch nightly and check version in the same command."
+        )
         check_torch_nightly_version(args.force_date)

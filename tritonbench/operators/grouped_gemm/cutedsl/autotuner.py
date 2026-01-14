@@ -3,7 +3,6 @@
 from __future__ import annotations
 
 import base64
-
 import builtins
 import hashlib
 import inspect
@@ -16,9 +15,7 @@ from pathlib import Path
 from typing import Dict, List, Tuple
 
 import cutlass.utils as utils
-
 import torch
-
 import triton
 from torch import Tensor
 
@@ -160,9 +157,9 @@ class Autotuner:
 
         fn = self.fn
         config_str_list = [str(c) for c in configs]
-        assert len(config_str_list) == len(
-            set(config_str_list)
-        ), "Config strings must be unique"
+        assert len(config_str_list) == len(set(config_str_list)), (
+            "Config strings must be unique"
+        )
         cache_key = [VERSION, str(tuning_key)] + config_str_list
         cache_key = hashlib.sha256("-".join(cache_key).encode("utf-8")).hexdigest()
         cache = FileCacheManager(_base32(cache_key))

@@ -9,7 +9,6 @@ from typing import Callable, Optional
 import torch
 import torch.profiler as profiler
 from tritonbench.utils.constants import DEFAULT_N_REP, DEFAULT_N_WARMUP
-
 from tritonbench.utils.env_utils import has_manifold
 
 DEFAULT_PROFILE_OPTS = {

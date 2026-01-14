@@ -150,10 +150,8 @@ You will specifically learn about:
 # ------------
 
 import torch
-
 import triton
 import triton.language as tl
-
 from tritonbench.utils.env_utils import is_cuda
 
 

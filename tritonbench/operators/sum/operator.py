@@ -7,7 +7,6 @@ from typing import Callable, Generator, List, Optional, Tuple
 import torch
 import triton
 import triton.language as tl
-
 from tritonbench.utils.triton_op import (
     BenchmarkOperator,
     BenchmarkOperatorMetrics,
@@ -165,13 +164,13 @@ class Operator(BenchmarkOperator):
 
     @register_benchmark()
     def triton_sum(self, x: torch.Tensor):
-        assert (
-            x.is_contiguous()
-        ), "Existing sum Triton kernels only support contiguous tensors"
+        assert x.is_contiguous(), (
+            "Existing sum Triton kernels only support contiguous tensors"
+        )
 
-        assert (
-            self.reduce_dim is None or self.reduce_dim <= 1
-        ), f"Existing sum Triton kernels do not support reducing along dimension {self.reduce_dim}"
+        assert self.reduce_dim is None or self.reduce_dim <= 1, (
+            f"Existing sum Triton kernels do not support reducing along dimension {self.reduce_dim}"
+        )
 
         def _inner():
             if self.reduce_dim is None or self.input_dim == 1:
@@ -181,9 +180,9 @@ class Operator(BenchmarkOperator):
                     x, self.reduce_dim, self.sum_then_buffer
                 )
             elif self.input_dim == 3:
-                assert (
-                    self.reduce_dim == 1
-                ), f"Existing sum Triton kernels do not support reducing {self.input_dim}-D input along dimension {self.reduce_dim}"
+                assert self.reduce_dim == 1, (
+                    f"Existing sum Triton kernels do not support reducing {self.input_dim}-D input along dimension {self.reduce_dim}"
+                )
                 kernel_output = execute_kernel_2D_result(x)
             else:
                 raise NotImplementedError(
@@ -268,9 +267,9 @@ class Operator(BenchmarkOperator):
         )
 
     def get_input_iter(self) -> Generator:
-        assert (
-            self.input_dim <= 3
-        ), f"Existing sum Triton kernels do not support input dimension {self.input_dim}"
+        assert self.input_dim <= 3, (
+            f"Existing sum Triton kernels do not support input dimension {self.input_dim}"
+        )
 
         def get_size_in_bytes(shape) -> int:
             num_elements = math.prod(shape)

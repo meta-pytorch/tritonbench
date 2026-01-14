@@ -1,7 +1,6 @@
 import argparse
 import os
 import pickle
-
 from typing import Any
 
 import torch
@@ -26,15 +25,15 @@ def check_tensor_numeric(a, b):
     if isinstance(a, torch.Tensor) and isinstance(b, torch.Tensor):
         torch.testing.assert_close(a, b)
         return
-    assert isinstance(a, list) or isinstance(
-        a, tuple
-    ), f"Out A must be a tuple or list, get type {type(a)}."
-    assert isinstance(b, list) or isinstance(
-        b, tuple
-    ), f"Out B must be a tuple or list, get type {type(b)}."
-    assert len(a) == len(
-        b
-    ), f"A and B must be equal length, but len_a={len(a)}, len_b={len(b)}"
+    assert isinstance(a, list) or isinstance(a, tuple), (
+        f"Out A must be a tuple or list, get type {type(a)}."
+    )
+    assert isinstance(b, list) or isinstance(b, tuple), (
+        f"Out B must be a tuple or list, get type {type(b)}."
+    )
+    assert len(a) == len(b), (
+        f"A and B must be equal length, but len_a={len(a)}, len_b={len(b)}"
+    )
     for i in range(len(a)):
         tensor_a = a[i]
         tensor_b = b[i]

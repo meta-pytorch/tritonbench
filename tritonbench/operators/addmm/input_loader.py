@@ -5,7 +5,6 @@ Get input generator for TritonBench addmm type inputs.
 from typing import Any, Callable
 
 import torch
-
 from tritonbench.operator_loader.aten.input_loader import OperatorInputLoader
 from tritonbench.utils.triton_op import PRECISION_DTYPE_MAPPING
 
@@ -26,9 +25,9 @@ class InputLoader(OperatorInputLoader):
             K = int(entry["K"])
             strides = eval(entry["strides"])
             dtype = entry["dtype"]
-            assert (
-                len(strides) == 3
-            ), f"Can only have 3 strides from input, get: {strides}"
+            assert len(strides) == 3, (
+                f"Can only have 3 strides from input, get: {strides}"
+            )
             assert (
                 len(strides[0]) == 2 and len(strides[1]) == 2 and len(strides[2]) == 2
             ), f"Can only deal with 2D strides, get: {strides}"

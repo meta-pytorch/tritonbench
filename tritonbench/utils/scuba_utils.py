@@ -6,11 +6,9 @@ import json
 import os
 import time
 from collections import defaultdict
-
 from typing import Any, Dict, List, Optional
 
 import requests
-
 from tritonbench.utils.gpu_utils import get_nvidia_gpu_states, has_nvidia_smi
 from tritonbench.utils.path_utils import REPO_PATH
 
@@ -191,9 +189,9 @@ def log_benchmark(
     benchmark_data, run_timestamp: Optional[str] = None, opbench: Optional[Any] = None
 ):
     if opbench:
-        assert (
-            benchmark_data is None
-        ), "Only one of opbench or benchmark_data can be specified"
+        assert benchmark_data is None, (
+            "Only one of opbench or benchmark_data can be specified"
+        )
         benchmark_data = decorate_benchmark_data(
             name=opbench.logging_group
             if opbench.logging_group

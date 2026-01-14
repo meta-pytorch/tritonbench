@@ -1,6 +1,5 @@
 import gc
 import threading
-
 from typing import Any, Dict, Optional
 
 from tritonbench.components.tasks.base import run_in_worker, TaskBase

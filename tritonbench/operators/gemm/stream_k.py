@@ -9,11 +9,9 @@ This kernel has some known numerical issues due to the use of atomic_add.
 import os
 
 import torch
-
 import triton
 import triton.language as tl
 from triton.tools.tensor_descriptor import TensorDescriptor
-
 from tritonbench.utils.env_utils import is_cuda, is_fbcode, is_hip_mi300
 
 from .triton_matmul_configs import get_full_amd_config_space

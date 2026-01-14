@@ -4,7 +4,6 @@ Generated from Inductor for forward layernorm with and without welford
 """
 
 import torch
-
 import triton
 import triton.language as tl
 from torch._C import _cuda_getCurrentRawStream as get_raw_stream

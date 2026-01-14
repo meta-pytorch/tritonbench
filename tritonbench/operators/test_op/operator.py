@@ -2,7 +2,6 @@ import argparse
 from typing import Generator, List, Optional
 
 import torch
-
 from tritonbench.utils.triton_op import (
     BenchmarkOperator,
     BenchmarkOperatorMetrics,

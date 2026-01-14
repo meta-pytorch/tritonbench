@@ -2,12 +2,10 @@ from functools import partial
 from typing import List, Union
 
 import torch
-
 from torch._inductor.lowering import make_pointwise, register_lowering
 
 # Some internal torch.compile details
 from torch._inductor.virtualized import ops
-
 from torch.nn.attention.flex_attention import (
     _mask_mod_signature,
     _score_mod_signature,

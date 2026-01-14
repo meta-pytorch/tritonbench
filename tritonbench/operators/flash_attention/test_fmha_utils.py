@@ -61,9 +61,9 @@ def make_packed_qkv(
     Make a packed qkv tensor for flash_attention:
     from 3 * (batch, num_head, seq, head_dim) -> (batch, seq, 3, num_head, head_dim)
     """
-    assert (
-        q.size() == k.size() == v.size()
-    ), f"{q.size()=}, {k.size()=}, {v.size()=} must be equal!"
+    assert q.size() == k.size() == v.size(), (
+        f"{q.size()=}, {k.size()=}, {v.size()=} must be equal!"
+    )
     (BATCH, H, N_CTX, D_HEAD) = q.size()
     (q_1, k_1, v_1) = permute_qkv(q, k, v, perm=(0, 2, 1, 3))
     qkv = torch.cat([q_1, k_1, v_1], dim=2)

@@ -1,12 +1,10 @@
 import operator
-
 from typing import Optional
 
 import torch
 import torch.nn as nn
 import triton
 import triton.language as tl
-
 from liger_kernel.ops.utils import compare_version, element_mul_kernel, is_hip
 from liger_kernel.utils import infer_device
 
@@ -286,9 +284,9 @@ def cross_entropy_forward(
     softcap,
     return_z_loss,
 ):
-    assert isinstance(
-        return_z_loss, bool
-    ), f"return_z_loss must be True or False. Got: {return_z_loss}"
+    assert isinstance(return_z_loss, bool), (
+        f"return_z_loss must be True or False. Got: {return_z_loss}"
+    )
 
     BT, V = _input.shape
     n_rows = BT
@@ -319,12 +317,12 @@ def cross_entropy_forward(
     sum_non_ignore_weight = n_non_ignore.clone()
     weight_sum = torch.zeros_like(n_non_ignore)
     if weight is not None:
-        assert (
-            weight.shape[0] == V
-        ), f"If given, weight has to be a Tensor of size V. Got: {weight.shape}"
-        assert torch.is_floating_point(
-            weight
-        ), f"If given, weight has to be a Tensor of floating point dtype. Got: {weight.dtype}"
+        assert weight.shape[0] == V, (
+            f"If given, weight has to be a Tensor of size V. Got: {weight.shape}"
+        )
+        assert torch.is_floating_point(weight), (
+            f"If given, weight has to be a Tensor of floating point dtype. Got: {weight.dtype}"
+        )
         selected_weights = torch.gather(
             weight, dim=0, index=target.masked_select(target_mask)
         )

@@ -24,12 +24,12 @@ class InputLoader(OperatorInputLoader):
             K = int(entry["K"])
             strides = eval(entry["strides"])
             dtype = entry["dtype"]
-            assert (
-                len(strides) == 2
-            ), f"Can only have 2 strides from input, get: {strides}"
-            assert (
-                len(strides[0]) == 2 and len(strides[1]) == 2
-            ), f"Can only deal with 2D strides, get: {strides}"
+            assert len(strides) == 2, (
+                f"Can only have 2 strides from input, get: {strides}"
+            )
+            assert len(strides[0]) == 2 and len(strides[1]) == 2, (
+                f"Can only deal with 2D strides, get: {strides}"
+            )
             inputs.append(
                 {
                     "shapes": (M, K, N),

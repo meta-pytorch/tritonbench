@@ -6,7 +6,6 @@ For autotuned operators, we save the IRs of the best kernels.
 import argparse
 import os
 from pathlib import Path
-
 from typing import Dict, List
 
 from libfb.py import parutil

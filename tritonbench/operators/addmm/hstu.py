@@ -1,10 +1,8 @@
 import importlib
-
 from typing import Tuple
 
 import torch
 import triton
-
 from tritonbench.utils.path_utils import add_path, SUBMODULE_PATH
 
 with add_path(str(SUBMODULE_PATH.joinpath("generative-recommenders"))):

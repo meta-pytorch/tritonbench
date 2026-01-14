@@ -3,7 +3,6 @@ from typing import Callable, Generator, List, Optional, Tuple
 
 import torch
 from tritonbench.utils.jagged_utils import GIGABYTES_PER_BYTE
-
 # We are benchmarking the kernel used inside quantize_comm. Insofar, we are using the fp32_to_mx4 fbgemm API rather than the quantize_mx API.
 
 from tritonbench.utils.python_utils import try_import

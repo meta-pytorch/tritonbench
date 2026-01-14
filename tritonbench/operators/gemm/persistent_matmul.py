@@ -4,7 +4,6 @@ from functools import lru_cache
 import torch
 import triton
 import triton.language as tl
-
 from tritonbench.utils.env_utils import is_cuda, is_fbcode, is_tile_enabled
 
 from .triton_matmul_configs import get_full_amd_config_space, get_tileir_configs

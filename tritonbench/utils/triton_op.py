@@ -15,7 +15,6 @@ import sys
 import tempfile
 import time
 import types
-
 from collections import defaultdict, OrderedDict
 from dataclasses import asdict, dataclass, fields
 from enum import Enum
@@ -28,10 +27,8 @@ import tabulate
 import torch
 import triton
 from torch.utils._pytree import tree_map
-
 from tritonbench.components.do_bench import do_bench_wrapper, Latency
 from tritonbench.components.export import export_data
-
 from tritonbench.components.power import PowerManagerTask
 from tritonbench.data import get_input_loader
 from tritonbench.utils.constants import (
@@ -205,9 +202,9 @@ def _find_op_name_from_module_path(module_path: str) -> str:
     PATH_PREFIX = "tritonbench.operators."
     # We have a separate operator loader for aten operator benchmark.
     PATH_PREFIX_LOADER = "tritonbench.operator_loader."
-    assert (
-        PATH_PREFIX in module_path or PATH_PREFIX_LOADER in module_path
-    ), f"We rely on module path prefix to identify operator name. Expected {PATH_PREFIX}<operator_name>, get {module_path}."
+    assert PATH_PREFIX in module_path or PATH_PREFIX_LOADER in module_path, (
+        f"We rely on module path prefix to identify operator name. Expected {PATH_PREFIX}<operator_name>, get {module_path}."
+    )
     if PATH_PREFIX_LOADER in module_path:
         suffix = module_path.partition(PATH_PREFIX_LOADER)[2]
         suffix = suffix.partition(".")[2]
@@ -546,9 +543,9 @@ class BenchmarkOperatorResult:
             metrics_dict = asdict(y_vals)
         if metric_name in metrics_dict:
             return metrics_dict[metric_name]
-        assert (
-            metric_name in metrics_dict["extra_metrics"]
-        ), f"Metric {metric_name} could not be found."
+        assert metric_name in metrics_dict["extra_metrics"], (
+            f"Metric {metric_name} could not be found."
+        )
         return metrics_dict["extra_metrics"][metric_name]
 
     def _get_result_dict(self):
@@ -758,9 +755,9 @@ class BenchmarkOperator(metaclass=PostInitProcessor):
         elif self.tb_args.mode == "fwd_no_grad":
             self.mode = Mode.FWD_NO_GRAD
         else:
-            assert (
-                self.tb_args.mode == "bwd"
-            ), "We only accept test modes: fwd, bwd, fwd_bwd, or fwd_no_grad."
+            assert self.tb_args.mode == "bwd", (
+                "We only accept test modes: fwd, bwd, fwd_bwd, or fwd_no_grad."
+            )
             self.mode = Mode.BWD
         self.requires_grad = not (self.mode == Mode.FWD_NO_GRAD)
         self.device = tb_args.device
@@ -918,16 +915,16 @@ class BenchmarkOperator(metaclass=PostInitProcessor):
             setattr(fwd_fn, "_name", bm_func_name)
             return fwd_fn
         elif self.mode == Mode.BWD:
-            assert (
-                not backend.fwd_only
-            ), f"Backend {bm_func_name} does not support backward pass."
+            assert not backend.fwd_only, (
+                f"Backend {bm_func_name} does not support backward pass."
+            )
             bwd_fn = self.get_bwd_fn(fwd_fn)
             setattr(bwd_fn, "_name", bm_func_name)
             return bwd_fn
         elif self.mode == Mode.FWD_BWD:
-            assert (
-                not backend.fwd_only
-            ), f"Backend {bm_func_name} does not support backward pass."
+            assert not backend.fwd_only, (
+                f"Backend {bm_func_name} does not support backward pass."
+            )
             bwd_fn = self.get_bwd_fn(fwd_fn)
 
             # FWD_BWD returns (forward_output, grad_tensors_after_backward)
@@ -1295,7 +1292,6 @@ class BenchmarkOperator(metaclass=PostInitProcessor):
         from unittest import mock
 
         from triton.runtime import Autotuner
-
         from triton.runtime.jit import JITFunction
 
         original_run = Autotuner.run
@@ -1710,9 +1706,9 @@ class BenchmarkOperator(metaclass=PostInitProcessor):
                 self.required_metrics
             )
             for metric_name in required_custom_metrics:
-                assert (
-                    metric_name not in BUILTIN_METRICS
-                ), "Metric name {metric_name} is built-in and should be OVERRIDDEN_METRICS. Please report a bug."
+                assert metric_name not in BUILTIN_METRICS, (
+                    "Metric name {metric_name} is built-in and should be OVERRIDDEN_METRICS. Please report a bug."
+                )
                 extra_metrics[metric_name] = None
             return extra_metrics
 
@@ -2367,14 +2363,14 @@ class BenchmarkOperator(metaclass=PostInitProcessor):
             if is_mtia()
             else torch.cuda.get_device_name()
         )
-        assert (
-            device_name in rooflines
-        ), f"{device_name} is not supported in HW roofline specs."
+        assert device_name in rooflines, (
+            f"{device_name} is not supported in HW roofline specs."
+        )
         rooflines = rooflines[device_name]
         if self.is_compute_bound:
-            assert (
-                self.tb_args.precision in rooflines
-            ), f"{self.tb_args.precision} is not supported by {device_name}."
+            assert self.tb_args.precision in rooflines, (
+                f"{self.tb_args.precision} is not supported by {device_name}."
+            )
             return rooflines[self.tb_args.precision]
         return rooflines
 

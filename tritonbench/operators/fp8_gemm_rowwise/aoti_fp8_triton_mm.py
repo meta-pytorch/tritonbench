@@ -5,7 +5,6 @@ import torch
 import triton
 import triton.language as tl
 from triton import Config
-
 from tritonbench.utils.fp8_utils import get_fp8_constants
 
 FP8_DTYPE, _, _, _ = get_fp8_constants()

@@ -14,7 +14,6 @@ from typing import Optional
 
 import torch
 import triton
-
 from tritonbench.utils.path_utils import REPO_PATH
 
 log = logging.getLogger(__name__)

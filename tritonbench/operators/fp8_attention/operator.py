@@ -5,11 +5,9 @@ https://research.colfax-intl.com/adding-fp8-to-flashattention/
 
 import argparse
 import math
-
 from typing import Any, Callable, Generator, List, Optional, Tuple
 
 import torch
-
 from tritonbench.kernels.triton_fused_attention import attention_opt as triton_attention
 from tritonbench.utils.triton_op import (
     BenchmarkOperator,

@@ -8,7 +8,6 @@ from typing import Any, Callable, Generator, List, Optional, Tuple
 import torch
 import torch._inductor.config as inductor_config
 import triton
-
 from tritonbench.operators.gemm.kernels import matmul as kernels
 from tritonbench.operators.gemm.partition_k import (
     matmul_partition_k as matmul_partition_k_kernel,
@@ -45,9 +44,7 @@ from tritonbench.utils.env_utils import (
     is_fbcode,
     supports_tma,
 )
-
 from tritonbench.utils.path_utils import REPO_PATH
-
 from tritonbench.utils.triton_op import (
     BenchmarkOperator,
     BenchmarkOperatorMetrics,

@@ -5,7 +5,6 @@ import shlex
 from typing import Dict, List, Tuple
 
 from .parser import get_parser
-
 from .triton_op import BenchmarkOperatorResult, REGISTERED_X_VALS
 
 

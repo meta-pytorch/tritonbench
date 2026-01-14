@@ -7,7 +7,6 @@ from transformers.models.llama.modeling_llama import (
     apply_rotary_pos_emb,
     LlamaRotaryEmbedding,
 )
-
 from tritonbench.utils.triton_op import (
     BenchmarkOperator,
     register_benchmark,
