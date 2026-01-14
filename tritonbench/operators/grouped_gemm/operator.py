@@ -183,6 +183,23 @@ class Operator(BenchmarkOperator):
 
         return _inner
 
+    @register_benchmark(enabled=False)
+    def preprocessed_pt2_nvgemm_grouped_mm(self, group_A, group_B, w=None, split=None):
+        torch._dynamo.reset()
+
+        A_packed, B_shared, offs = self.list_input_to_jagged(group_A, group_B)
+        compiled = torch.compile(torch._grouped_mm, dynamic=False)
+
+        def _inner():
+            with inductor_config.patch(
+                max_autotune=True,
+                max_autotune_gemm_backends="NVGEMM",
+                autotune_fallback_to_aten=False,
+            ):
+                return compiled(A_packed, B_shared, offs=offs, bias=None)
+
+        return _inner
+
     @register_benchmark(
         enabled=HAS_CUTEDSL and IS_BLACKWELL,
         label=f"preprocessed_pt2_cute_grouped_mm-{CUTLASS_VERSION}",
