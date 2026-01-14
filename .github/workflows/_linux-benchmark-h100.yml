@@ -138,6 +138,7 @@ jobs:
       - name: Upload result to ClickHouse
         uses: pytorch/test-infra/.github/actions/upload-benchmark-results@main
         with:
+          venv: ${{ env.SETUP_SCRIPT }}
           benchmark-results-dir: benchmark-output/clickhouse-results
           dry-run: false
           schema-version: v3
