@@ -62,10 +62,10 @@ except ModuleNotFoundError:
     HAS_LIGER_KERNEL = False
 
 try:
-    from quack.quack_layernorm import layernorm as quack_layernorm
+    from quack.rmsnorm import layernorm_fwd as quack_layernorm
 
     HAS_QUACK_KERNEL = True
-except ModuleNotFoundError:
+except (ModuleNotFoundError, ImportError):
     HAS_QUACK_KERNEL = False
 
 
@@ -121,7 +121,7 @@ class Operator(BenchmarkOperator):
     @register_benchmark(enabled=HAS_QUACK_KERNEL)
     def quack_layer_norm(self, *args) -> Callable:
         (x, w_shape, weight, bias, eps) = args
-        return lambda: quack_layernorm(x, weight, eps, bias)
+        return lambda: quack_layernorm(x, weight, bias=bias, eps=eps)
 
     def get_grad_to_none(self, args) -> List[torch.Tensor]:
         x = args[0]

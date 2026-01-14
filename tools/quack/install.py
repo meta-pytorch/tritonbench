@@ -11,7 +11,7 @@ REPO_PATH = Path(os.path.abspath(__file__)).parent.parent.parent
 CURRENT_DIR = Path(os.path.abspath(__file__)).parent
 
 QUACK_REPO = "https://github.com/Dao-AILab/quack.git"
-QUACK_SHA = "21f1c053b1c35a3aaf20002107d0704f364de10a"
+QUACK_SHA = "12f11462f06f8c1d79ac2c3c04e308678c81253c"
 
 QUACK_INSTALL_PATH = REPO_PATH.joinpath(".install")
 BUILD_CONSTRAINTS_FILE = REPO_PATH.joinpath("build", "constraints.txt")
