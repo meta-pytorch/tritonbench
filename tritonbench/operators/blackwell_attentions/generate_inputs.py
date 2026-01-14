@@ -15,7 +15,7 @@ def get_bytes(x):
 
 
 def _generated_qkv_inputs(
-    shape, dtype, device, gen_cache_size_inputs
+    shape, dtype, device, gen_cache_size_inputs, max_inputs_per_iter
 ) -> Tuple[torch.Tensor, torch.Tensor, torch.Tensor]:
     requires_grad = True
 
@@ -48,6 +48,8 @@ def _generated_qkv_inputs(
         # Fix to 128 MB for now
         min_bytes = 128 * 1024 * 1024
         num_inputs = math.ceil(min_bytes / total_bytes)
+        if max_inputs_per_iter > 0:
+            num_inputs = min(num_inputs, max_inputs_per_iter)
         for _ in range(num_inputs - 1):
             inputs.append(q.clone().detach())
             inputs.append(k.clone().detach())
@@ -58,11 +60,7 @@ def _generated_qkv_inputs(
 
 # Config input tensors.
 # We can add more shapes, such as training, prefill, decoding, etc.
-
-
-def customized_inputs(
-    shape, num_inputs, dtype, device, gen_cache_size_inputs
-) -> Generator:
+def customized_inputs(shape, num_inputs, **kwargs) -> Generator:
     BATCH, H, N_HEADS_KV, SEQ_LEN, SEQ_LEN_KV, D_HEAD = shape
 
     SEQ_LEN_LOG2 = 7
@@ -72,17 +70,13 @@ def customized_inputs(
         if num_inputs is None:
             yield _generated_qkv_inputs(
                 (BATCH, H, N_HEADS_KV, SEQ_LEN, SEQ_LEN_KV, D_HEAD),
-                dtype=dtype,
-                device=device,
-                gen_cache_size_inputs=gen_cache_size_inputs,
+                **kwargs,
             )
         else:
             for _i in range(num_inputs):
                 yield _generated_qkv_inputs(
                     (BATCH, H, N_HEADS_KV, SEQ_LEN, SEQ_LEN, D_HEAD),
-                    dtype=dtype,
-                    device=device,
-                    gen_cache_size_inputs=gen_cache_size_inputs,
+                    **kwargs,
                 )
                 SEQ_LEN *= 2
         return
@@ -90,26 +84,22 @@ def customized_inputs(
         SEQ_LEN = 2**i
         yield _generated_qkv_inputs(
             (BATCH, H, H, SEQ_LEN, SEQ_LEN, D_HEAD),
-            dtype=dtype,
-            device=device,
-            gen_cache_size_inputs=gen_cache_size_inputs,
+            **kwargs,
         )
 
 
-def fa3_paper_inputs(dtype, device, gen_cache_size_inputs) -> Generator:
+def fa3_paper_inputs(**kwargs) -> Generator:
     D_HEAD = 128
     H = 2048 // D_HEAD
     for BATCH in [32, 16, 8, 4, 2, 1]:
         N_CTX = 16384 // BATCH
         yield _generated_qkv_inputs(
             shape=(BATCH, H, H, N_CTX, N_CTX, D_HEAD),
-            dtype=dtype,
-            device=device,
-            gen_cache_size_inputs=gen_cache_size_inputs,
+            **kwargs,
         )
 
 
-def sweep_inputs(dtype, device, gen_cache_size_inputs) -> Generator:
+def sweep_inputs(**kwargs) -> Generator:
     D = 128
     batch_sizes = [2**i for i in range(6)]
     num_heads = [1, 4, 8, 16]
@@ -119,7 +109,5 @@ def sweep_inputs(dtype, device, gen_cache_size_inputs) -> Generator:
             for S in seqlen:
                 yield _generated_qkv_inputs(
                     shape=(B, H, H, S, S, D),
-                    dtype=dtype,
-                    device=device,
-                    gen_cache_size_inputs=gen_cache_size_inputs,
+                    **kwargs,
                 )

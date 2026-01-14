@@ -175,6 +175,12 @@ def parse_op_args(args: List[str]):
         action="store_true",
         help="Generate inputs as large as the GPU L2 cache size",
     )
+    parser.add_argument(
+        "--max-inputs-per-iter",
+        type=int,
+        default=0,
+        help="Max inputs per iteration. This is used when --gen-cache-size-inputs is on.",
+    )
     return parser.parse_args(args)
 
 
@@ -284,6 +290,7 @@ class Operator(BenchmarkOperator):
         self.sm_scale = args.sm_scale if args.sm_scale else 1.0 / math.sqrt(self.D_HEAD)
         self.deterministic = args.deterministic
         self.gen_cache_size_inputs = args.gen_cache_size_inputs
+        self.max_inputs_per_iter = args.max_inputs_per_iter
         self.optims = {}
 
     @register_benchmark()
@@ -602,6 +609,12 @@ class Operator(BenchmarkOperator):
         return fn
 
     def get_input_iter(self) -> Generator:
+        common_kwargs = {
+            "dtype": self.dtype,
+            "device": self.device,
+            "gen_cache_size_inputs": self.gen_cache_size_inputs,
+            "max_inputs_per_iter": self.max_inputs_per_iter,
+        }
         if self.input_types == "CUSTOMIZED_SHAPES":
             return customized_inputs(
                 shape=(
@@ -613,22 +626,12 @@ class Operator(BenchmarkOperator):
                     self.D_HEAD,
                 ),
                 num_inputs=self.tb_args.num_inputs,
-                dtype=self.dtype,
-                device=self.device,
-                gen_cache_size_inputs=self.gen_cache_size_inputs,
+                **common_kwargs,
             )
         elif self.input_types == "FA3_PAPER_SHAPES":
-            return fa3_paper_inputs(
-                dtype=self.dtype,
-                device=self.device,
-                gen_cache_size_inputs=self.gen_cache_size_inputs,
-            )
+            return fa3_paper_inputs(**common_kwargs)
         elif self.input_types == "SWEEP_SHAPES":
-            return sweep_inputs(
-                dtype=self.dtype,
-                device=self.device,
-                gen_cache_size_inputs=self.gen_cache_size_inputs,
-            )
+            return sweep_inputs(**common_kwargs)
         else:
             raise AssertionError(f"Unknown input type {self.input_types}")
 
