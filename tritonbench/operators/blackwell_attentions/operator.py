@@ -447,6 +447,7 @@ class Operator(BenchmarkOperator):
             softmax_scale=self.sm_scale,
             causal=self.causal,
             window_size=self.window_size if self.local else (None, None),
+            deterministic=self.deterministic,
         )
         return preproc, fn
 
