@@ -63,7 +63,9 @@ except (ImportError, IOError, AttributeError):
 
 # [Optional] CuTe
 try:
-    from flash_attn.cute.interface import flash_attn_func as facute_flash_attn_func
+    from mslk.attention.flash_attn.interface import (
+        flash_attn_func as facute_flash_attn_func,
+    )
 
     HAS_FLASH_CUTE = True
 except (ImportError, IOError, AttributeError):
