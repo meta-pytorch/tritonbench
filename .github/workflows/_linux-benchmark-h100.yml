@@ -134,7 +134,8 @@ jobs:
           fi
       - name: Setup uploader dependencies
         run: |
-          sudo apt-get install -y python3-pip
+          . "${SETUP_SCRIPT}"
+          uv pip install pip
       - name: Upload result to ClickHouse
         uses: pytorch/test-infra/.github/actions/upload-benchmark-results@main
         with:
