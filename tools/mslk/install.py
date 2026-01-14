@@ -75,9 +75,7 @@ def install_build_mslk():
             f'. .github/scripts/setup_env.bash; integration_mslk_build_and_install {current_conda_env} default/rocm "{mslk_repo_path}"',
         ]
         extra_envs["BUILD_ROCM_VERSION"] = "7.0"
-        subprocess.check_call(
-            cmd, cwd=str(mslk_repo_path.resolve()), env=extra_envs
-        )
+        subprocess.check_call(cmd, cwd=str(mslk_repo_path.resolve()), env=extra_envs)
         return
     subprocess.check_call(cmd, cwd=str(mslk_repo_path.resolve()), env=extra_envs)
 

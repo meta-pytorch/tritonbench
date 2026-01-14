@@ -43,9 +43,7 @@ def compute_regression_naive(y_values: list[float]) -> RegressionStats:
     if abs(ss_tot) < 1e-12:
         return RegressionStats(slope=slope, intercept=intercept, r2=1.0, n=n)
 
-    ss_res = sum(
-        (y - (slope * x + intercept)) ** 2 for x, y in zip(x_values, y_values)
-    )
+    ss_res = sum((y - (slope * x + intercept)) ** 2 for x, y in zip(x_values, y_values))
     r2 = max(0.0, min(1.0, 1.0 - (ss_res / ss_tot)))
 
     return RegressionStats(slope=slope, intercept=intercept, r2=r2, n=n)

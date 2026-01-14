@@ -25,12 +25,18 @@ def install_helion():
     subprocess.check_call(git_clone_cmd, cwd=HELION_INSTALL_PATH)
     git_checkout_cmd = ["git", "checkout", HEION_COMMIT]
     subprocess.check_call(git_checkout_cmd, cwd=HELION_PATH)
-    install_tritonbench_cmd = get_pip_cmd() + [
-        "install",
-        "--no-deps",
-        "-e",
-        ".",
-    ] + constraints_parameters
+    install_tritonbench_cmd = (
+        get_pip_cmd()
+        + [
+            "install",
+            "--no-deps",
+            "-e",
+            ".",
+        ]
+        + constraints_parameters
+    )
     subprocess.check_call(install_tritonbench_cmd, cwd=REPO_PATH)
-    install_helion_cmd = get_pip_cmd() + ["install", "-e", ".[dev]"] + constraints_parameters
+    install_helion_cmd = (
+        get_pip_cmd() + ["install", "-e", ".[dev]"] + constraints_parameters
+    )
     subprocess.check_call(install_helion_cmd, cwd=HELION_PATH)

@@ -9,10 +9,10 @@ from tools.cuda_utils import DEFAULT_TOOLKIT_VERSION, TOOLKIT_MAPPING
 from tools.git_utils import checkout_submodules
 from tools.python_utils import (
     generate_build_constraints,
+    get_pip_cmd,
     get_pkg_versions,
     has_pkg,
     pip_install_requirements,
-    get_pip_cmd,
 )
 
 logging.basicConfig(level=logging.INFO)
@@ -94,12 +94,8 @@ def setup_hip(args: argparse.Namespace):
 if __name__ == "__main__":
     parser = argparse.ArgumentParser(allow_abbrev=False)
     parser.add_argument("--numpy", action="store_true", help="Install suggested numpy")
-    parser.add_argument(
-        "--fbgemm", action="store_true", help="Install prebuilt FBGEMM"
-    )
-    parser.add_argument(
-        "--mslk", action="store_true", help="Install prebuilt MSLK"
-    )
+    parser.add_argument("--fbgemm", action="store_true", help="Install prebuilt FBGEMM")
+    parser.add_argument("--mslk", action="store_true", help="Install prebuilt MSLK")
     parser.add_argument(
         "--mslk-compile",
         action="store_true",

@@ -27,7 +27,15 @@ logger = logging.getLogger(__name__)
 def create_venv(pyver: str, name: str):
     if UV_VENV_DIR is not None:
         # avoid using system python, use uv managed instead
-        command = ["uv", "venv", f"{UV_VENV_DIR}/{name}", "--python", pyver, "--managed-python", "--clear"]
+        command = [
+            "uv",
+            "venv",
+            f"{UV_VENV_DIR}/{name}",
+            "--python",
+            pyver,
+            "--managed-python",
+            "--clear",
+        ]
     else:
         command = ["conda", "create", "-n", name, "-y", f"python={pyver}"]
     subprocess.check_call(command)
