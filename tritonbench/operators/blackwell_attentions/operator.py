@@ -630,7 +630,7 @@ class Operator(BenchmarkOperator):
         elif self.input_types == "FA3_PAPER_SHAPES":
             return fa3_paper_inputs(**common_kwargs)
         elif self.input_types == "SWEEP_SHAPES":
-            return sweep_inputs(**common_kwargs)
+            return sweep_inputs(D=self.D_HEAD, **common_kwargs)
         else:
             raise AssertionError(f"Unknown input type {self.input_types}")
 

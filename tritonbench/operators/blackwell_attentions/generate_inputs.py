@@ -100,8 +100,7 @@ def fa3_paper_inputs(**kwargs) -> Generator:
         )
 
 
-def sweep_inputs(**kwargs) -> Generator:
-    D = 128
+def sweep_inputs(D: int, **kwargs) -> Generator:
     batch_sizes = [2**i for i in range(6)]
     num_heads = [1, 4, 8, 16]
     seqlen = [512 * (2**i) for i in range(6)]
