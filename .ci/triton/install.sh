@@ -21,7 +21,6 @@ remove_env() {
 }
 
 clone_env() {
-    
     DEST_CONDA_ENV=$1
     SRC_CONDA_ENV=$2
     if [ -n "${UV_VENV_DIR:-}" ]; then
