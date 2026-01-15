@@ -17,6 +17,7 @@ while [[ "$#" -gt 0 ]]; do
         --hip) USE_HIP="1"; ;;
         --triton-main) USE_TRITON_MAIN="1"; ;;
         --meta-triton) USE_META_TRITON="1"; ;;
+        --test-nvidia-driver) TEST_NVIDIA_DRIVER="1"; ;;
         *) echo "Unknown parameter passed: $1"; usage ;;
     esac
     shift
@@ -68,7 +69,9 @@ EOF
         cd -
     fi
     # Hack: install nvidia compute to get libcuda.so.1
-    sudo apt update && sudo apt-get install -y libnvidia-compute-580
+    if [ -n "${TEST_NVIDIA_DRIVER:-}" ]; then
+        sudo apt update && sudo apt-get install -y libnvidia-compute-580
+    fi
 elif [ -n "${USE_HIP:-}" ]; then
     python -m tools.cuda_utils --install-torch-nightly --hip
 else
@@ -78,7 +81,7 @@ fi
 
 bash .ci/tritonbench/install.sh
 
-if [ -n "${USE_CUDA:-}" ]; then
+if [ -n "${USE_CUDA:-}" && -n "${TEST_NVIDIA_DRIVER:-}" ]; then
     sudo apt-get purge -y '^libnvidia-'
     sudo apt-get purge -y '^nvidia-'
 fi
