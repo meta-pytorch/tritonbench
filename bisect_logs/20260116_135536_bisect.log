@@ -1,0 +1,74 @@
+2026-01-16 13:55:36 [INFO] Log directory: bisect_logs
+2026-01-16 13:55:36 [INFO]   Module log: 20260116_135536_bisect.log
+2026-01-16 13:55:36 [INFO]   Command log: 20260116_135536_bisect_commands.log
+2026-01-16 13:55:36 [INFO] ============================================================
+2026-01-16 13:55:36 [INFO] Phase 1: Triton Bisect
+2026-01-16 13:55:36 [INFO] ============================================================
+2026-01-16 13:55:36 [INFO] Triton directory: /data/users/xzhao9/triton
+2026-01-16 13:55:36 [INFO] Test script: /home/xzhao9/tritonbench/.ci/bisect/bisect-script.sh
+2026-01-16 13:55:36 [INFO] Good commit: 96e075c65e2d92800598a130d5d2d1ab2f9cdf74
+2026-01-16 13:55:36 [INFO] Bad commit: d3a4c78cb231c69f652a8fbfe6a087908881206f
+2026-01-16 13:55:36 [INFO] Conda environment: triton_bisect
+2026-01-16 13:55:36 [INFO] Build command: pip install -e .
+2026-01-16 13:55:36 [DEBUG] Executing: git status --porcelain
+2026-01-16 13:55:36 [DEBUG]   cwd: /data/users/xzhao9/triton
+2026-01-16 13:55:36 [INFO] Command completed in 0.1s (exit code: 0)
+2026-01-16 13:55:36 [INFO] Pre-bisect checks passed
+2026-01-16 13:55:36 [INFO] Using bisect script: /data/users/xzhao9/tritonparse/tritonparse/bisect/scripts/bisect_triton.sh
+2026-01-16 13:55:36 [INFO] 
+2026-01-16 13:55:36 [INFO] ========================================
+2026-01-16 13:55:36 [INFO] BISECT RANGE
+2026-01-16 13:55:36 [INFO]   Good: 96e075c65e2d92800598a130d5d2d1ab2f9cdf74
+2026-01-16 13:55:36 [INFO]   Bad:  d3a4c78cb231c69f652a8fbfe6a087908881206f
+2026-01-16 13:55:36 [INFO] ========================================
+2026-01-16 13:55:36 [INFO] 
+2026-01-16 13:55:36 [INFO] Starting git bisect: 96e075c65e2d92800598a130d5d2d1ab2f9cdf74 -> d3a4c78cb231c69f652a8fbfe6a087908881206f
+2026-01-16 13:55:36 [INFO]   Repository: /data/users/xzhao9/triton
+2026-01-16 13:55:36 [INFO]   Run script: /data/users/xzhao9/tritonparse/tritonparse/bisect/scripts/bisect_triton.sh
+2026-01-16 13:55:36 [INFO] Step 1/4: git bisect start
+2026-01-16 13:55:36 [DEBUG] Executing: git bisect start
+2026-01-16 13:55:36 [DEBUG]   cwd: /data/users/xzhao9/triton
+2026-01-16 13:55:36 [INFO] Command completed in 0.1s (exit code: 0)
+2026-01-16 13:55:36 [INFO] Step 2/4: git bisect good 96e075c65e2d92800598a130d5d2d1ab2f9cdf74
+2026-01-16 13:55:36 [DEBUG] Executing: git bisect good 96e075c65e2d92800598a130d5d2d1ab2f9cdf74
+2026-01-16 13:55:36 [DEBUG]   cwd: /data/users/xzhao9/triton
+2026-01-16 13:55:36 [INFO] Command completed in 0.1s (exit code: 0)
+2026-01-16 13:55:36 [INFO] Step 3/4: git bisect bad d3a4c78cb231c69f652a8fbfe6a087908881206f
+2026-01-16 13:55:36 [DEBUG] Executing: git bisect bad d3a4c78cb231c69f652a8fbfe6a087908881206f
+2026-01-16 13:55:36 [DEBUG]   cwd: /data/users/xzhao9/triton
+2026-01-16 13:55:36 [INFO] Command completed in 0.1s (exit code: 0)
+2026-01-16 13:55:36 [INFO] Step 4/4: git bisect run bash /data/users/xzhao9/tritonparse/tritonparse/bisect/scripts/bisect_triton.sh
+2026-01-16 13:55:36 [INFO] Executing (streaming): git bisect run bash /data/users/xzhao9/tritonparse/tritonparse/bisect/scripts/bisect_triton.sh
+2026-01-16 13:55:36 [DEBUG]   cwd: /data/users/xzhao9/triton
+2026-01-16 13:55:36 [INFO] Command completed in 0.2s (exit code: 0)
+2026-01-16 13:55:36 [DEBUG] Resetting git bisect state
+2026-01-16 13:55:36 [DEBUG] Executing: git bisect reset
+2026-01-16 13:55:36 [DEBUG]   cwd: /data/users/xzhao9/triton
+2026-01-16 13:55:37 [INFO] Command completed in 0.1s (exit code: 0)
+2026-01-16 13:55:37 [INFO] ============================================================
+2026-01-16 13:55:37 [INFO] Phase 1: Triton Bisect completed!
+2026-01-16 13:55:37 [INFO] Culprit commit: 63b387ce02dd7789d18482dc15e58912c30234fc
+2026-01-16 13:55:37 [INFO] ============================================================
+2026-01-16 13:55:37 [INFO] Detecting commit type for: 63b387ce02dd7789d18482dc15e58912c30234fc
+2026-01-16 13:55:37 [DEBUG] Executing: git diff --name-only 63b387ce02dd7789d18482dc15e58912c30234fc~1 63b387ce02dd7789d18482dc15e58912c30234fc
+2026-01-16 13:55:37 [DEBUG]   cwd: /home/xzhao9/triton
+2026-01-16 13:55:37 [INFO] Command completed in 0.1s (exit code: 0)
+2026-01-16 13:55:37 [INFO] Commit 63b387c is NOT an LLVM bump
+2026-01-16 13:55:37 [INFO] ============================================================
+2026-01-16 13:55:37 [INFO] FINAL SUMMARY
+2026-01-16 13:55:37 [INFO] ============================================================
+2026-01-16 13:55:37 [INFO] ╭───────────────────────────────────────────────────────────────────────────────────────────────── Triton Bisect Result ──────────────────────────────────────────────────────────────────────────────────────────────────╮
+2026-01-16 13:55:37 [INFO] │                                                                                                                                                                                                                         │
+2026-01-16 13:55:37 [INFO] │  ✅ Bisect Completed                                                                                                                                                                                                    │
+2026-01-16 13:55:37 [INFO] │                                                                                                                                                                                                                         │
+2026-01-16 13:55:37 [INFO] │  🔍 Triton culprit: 63b387ce02dd7789d18482dc15e58912c30234fc                                                                                                                                                            │
+2026-01-16 13:55:37 [INFO] │     🔗 Link:                                                                                                                                                                                                            │
+2026-01-16 13:55:37 [INFO] │        https://github.com/triton-lang/triton/commit/63b387ce02dd7789d18482dc15e58912c30234fc                                                                                                                            │
+2026-01-16 13:55:37 [INFO] │                                                                                                                                                                                                                         │
+2026-01-16 13:55:37 [INFO] │  ℹ️  This is a regular Triton commit (not an LLVM bump)                                                                                                                                                                  │
+2026-01-16 13:55:37 [INFO] │                                                                                                                                                                                                                         │
+2026-01-16 13:55:37 [INFO] │  ⏱️  Total time: 1s                                                                                                                                                                                                      │
+2026-01-16 13:55:37 [INFO] │  📁 Log directory: ./bisect_logs                                                                                                                                                                                        │
+2026-01-16 13:55:37 [INFO] │                                                                                                                                                                                                                         │
+2026-01-16 13:55:37 [INFO] ╰─────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────╯
+2026-01-16 13:55:37 [INFO] ============================================================

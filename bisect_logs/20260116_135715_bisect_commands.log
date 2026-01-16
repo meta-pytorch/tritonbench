@@ -1,0 +1,160 @@
+
+============================================================
+[2026-01-16 13:57:15] Command: git status --porcelain
+Exit code: 0
+============================================================
+
+
+============================================================
+[2026-01-16 13:57:15] Command: git bisect start
+Exit code: 0
+============================================================
+status: waiting for both good and bad commits
+
+
+============================================================
+[2026-01-16 13:57:15] Command: git bisect good 96e075c65e2d92800598a130d5d2d1ab2f9cdf74
+Exit code: 0
+============================================================
+status: waiting for bad commit, 1 good commit known
+
+
+============================================================
+[2026-01-16 13:57:15] Command: git bisect bad d3a4c78cb231c69f652a8fbfe6a087908881206f
+Exit code: 0
+============================================================
+Bisecting: 5 revisions left to test after this (roughly 3 steps)
+[b54cb947faf1d49058cc4417698080000d0add1c] [AMD] Enable AsyncCopy by default for gfx950 and gfx1250 (#9087)
+
+
+============================================================
+[2026-01-16 13:57:15] Command: git bisect run bash /data/users/xzhao9/tritonparse/tritonparse/bisect/scripts/bisect_triton.sh
+============================================================
+running 'bash' '/data/users/xzhao9/tritonparse/tritonparse/bisect/scripts/bisect_triton.sh'
++ '[' '' = --help ']'
++ '[' '' = -h ']'
++ TRITON_DIR=/data/users/xzhao9/triton
++ TEST_SCRIPT=/home/xzhao9/tritonbench/.ci/bisect/bisect-script.sh
++ CONDA_ENV=triton_bisect
++ CONDA_DIR=/home/xzhao9/local/uv_venvs/py312
++ USE_UV=1
++ LOG_DIR=bisect_logs
++ TEST_ARGS=
++ [[ 1 == \1 ]]
++ BUILD_COMMAND='uv pip install -e .'
++ PER_COMMIT_LOG=0
++ '[' -z /data/users/xzhao9/triton ']'
++ '[' -z /home/xzhao9/tritonbench/.ci/bisect/bisect-script.sh ']'
++ '[' '!' -d /data/users/xzhao9/triton ']'
++ '[' '!' -f /home/xzhao9/tritonbench/.ci/bisect/bisect-script.sh ']'
+++ realpath /data/users/xzhao9/triton
++ TRITON_DIR=/data/users/xzhao9/triton
+++ realpath /home/xzhao9/tritonbench/.ci/bisect/bisect-script.sh
++ TEST_SCRIPT=/home/xzhao9/tritonbench/.ci/bisect/bisect-script.sh
+++ realpath /home/xzhao9/local/uv_venvs/py312
++ CONDA_DIR=/data/users/xzhao9/uv_venvs/py312
++ mkdir -p bisect_logs
+++ realpath bisect_logs
++ LOG_DIR=/data/users/xzhao9/triton/bisect_logs
++ cd /data/users/xzhao9/triton
+++ git rev-parse HEAD
++ COMMIT_HASH=b54cb947faf1d49058cc4417698080000d0add1c
+++ git rev-parse --short=9 HEAD
++ SHORT_COMMIT=b54cb947f
+++ date +%Y%m%d_%H%M%S
++ TIMESTAMP=20260116_135715
++ COMMIT_LOG=
++ '[' 0 = 1 ']'
++ echo '=== Triton Bisect Run ==='
++ log_output
++ '[' -n '' ']'
++ cat
+++ date
+=== Triton Bisect Run ===
++ echo 'Timestamp: Fri Jan 16 01:57:15 PM PST 2026'
++ echo 'Commit: b54cb947faf1d49058cc4417698080000d0add1c'
++ echo 'Short: b54cb947f'
++ echo 'Triton Dir: /data/users/xzhao9/triton'
+Timestamp: Fri Jan 16 01:57:15 PM PST 2026
+Commit: b54cb947faf1d49058cc4417698080000d0add1c
+Short: b54cb947f
+Triton Dir: /data/users/xzhao9/triton
++ echo 'Test Script: /home/xzhao9/tritonbench/.ci/bisect/bisect-script.sh'
+Test Script: /home/xzhao9/tritonbench/.ci/bisect/bisect-script.sh
++ echo 'Test Args: '
+Test Args: 
++ echo 'Conda Env: triton_bisect'
+Conda Env: triton_bisect
++ echo =========================
+=========================
++ echo ''
+
++ echo 'Updating git submodules...'
++ log_output
++ '[' -n '' ']'
++ cat
+Updating git submodules...
++ git submodule update --init --recursive
++ log_output
++ '[' -n '' ']'
++ cat
++ echo ''
++ log_output
++ '[' -n '' ']'
++ cat
+
++ source /data/users/xzhao9/uv_venvs/py312/bin/activate
+++ '[' -z '' ']'
+++ '[' -n x ']'
+++ SCRIPT_PATH=/data/users/xzhao9/uv_venvs/py312/bin/activate
+++ '[' /data/users/xzhao9/uv_venvs/py312/bin/activate = /data/users/xzhao9/tritonparse/tritonparse/bisect/scripts/bisect_triton.sh ']'
+++ deactivate nondestructive
+++ unset -f pydoc
+++ '[' -z '' ']'
+++ '[' -z '' ']'
+++ hash -r
+++ '[' -z '' ']'
+++ unset VIRTUAL_ENV
+++ unset VIRTUAL_ENV_PROMPT
+++ '[' '!' nondestructive = nondestructive ']'
+++ VIRTUAL_ENV=/home/xzhao9/local/uv_venvs/py312
+++ '[' linux-gnu = cygwin ']'
+++ '[' linux-gnu = msys ']'
+++ export VIRTUAL_ENV
+++ '[' -z '' ']'
+++ unset SCRIPT_PATH
+++ _OLD_VIRTUAL_PATH=/usr/libexec/git-core:/home/xzhao9/local/uv_venvs/py312/bin:/home/xzhao9/bin:/usr/local/fbpkg/vscodefb/vscode-server/353/bin/remote-cli:/home/xzhao9/.conda/envs/py312/bin:/home/xzhao9/bin:/home/xzhao9/local/ccache/lib:/home/xzhao9/local/ccache/bin:/home/xzhao9/miniconda/bin:/home/xzhao9/ccache/lib:/home/xzhao9/local/cuda/bin:/usr/share/Modules/bin:/usr/condabin:/usr/lib64/ccache:/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/usr/facebook/ops/scripts:/usr/facebook/scripts:/usr/facebook/ops/scripts:/usr/facebook/scripts:/usr/facebook/scripts:/usr/facebook/scripts/db:/usr/facebook/ops/scripts:/usr/facebook/scripts:/usr/facebook/scripts:/usr/facebook/scripts/db:/usr/local/sbin:/usr/sbin:/sbin:/var/www/scripts/bin:/home/xzhao9/.yarn/bin:/home/xzhao9/bin:/usr/facebook/ops/scripts:/usr/facebook/scripts:/usr/facebook/scripts:/usr/facebook/scripts/db:/usr/facebook/ops/scripts:/usr/facebook/scripts:/usr/local/sbin:/usr/sbin:/sbin:/var/www/scripts/bin:/home/xzhao9/.yarn/bin
+++ PATH=/home/xzhao9/local/uv_venvs/py312/bin:/usr/libexec/git-core:/home/xzhao9/local/uv_venvs/py312/bin:/home/xzhao9/bin:/usr/local/fbpkg/vscodefb/vscode-server/353/bin/remote-cli:/home/xzhao9/.conda/envs/py312/bin:/home/xzhao9/bin:/home/xzhao9/local/ccache/lib:/home/xzhao9/local/ccache/bin:/home/xzhao9/miniconda/bin:/home/xzhao9/ccache/lib:/home/xzhao9/local/cuda/bin:/usr/share/Modules/bin:/usr/condabin:/usr/lib64/ccache:/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/usr/facebook/ops/scripts:/usr/facebook/scripts:/usr/facebook/ops/scripts:/usr/facebook/scripts:/usr/facebook/scripts:/usr/facebook/scripts/db:/usr/facebook/ops/scripts:/usr/facebook/scripts:/usr/facebook/scripts:/usr/facebook/scripts/db:/usr/local/sbin:/usr/sbin:/sbin:/var/www/scripts/bin:/home/xzhao9/.yarn/bin:/home/xzhao9/bin:/usr/facebook/ops/scripts:/usr/facebook/scripts:/usr/facebook/scripts:/usr/facebook/scripts/db:/usr/facebook/ops/scripts:/usr/facebook/scripts:/usr/local/sbin:/usr/sbin:/sbin:/var/www/scripts/bin:/home/xzhao9/.yarn/bin
+++ export PATH
+++ '[' x '!=' x ']'
++++ basename /home/xzhao9/local/uv_venvs/py312
+++ VIRTUAL_ENV_PROMPT=py312
+++ export VIRTUAL_ENV_PROMPT
+++ '[' -z '' ']'
+++ '[' -z '' ']'
+++ _OLD_VIRTUAL_PS1=
+++ PS1='(py312) '
+++ export PS1
+++ alias pydoc
+++ true
+++ hash -r
++ '[' 0 -ne 0 ']'
++ '[' 1 == 0 ']'
++ echo ''
++ log_output
++ '[' -n '' ']'
++ cat
+
++ echo 'Building Triton...'
++ log_output
++ '[' -n '' ']'
++ cat
+Building Triton...
+++ date +%s
++ BUILD_START=1768600635
++ '[' -n '' ']'
++ eval 'uv pip install -e .'
+++ uv pip install -e .
+Using Python 3.12.12 environment at: /home/xzhao9/local/uv_venvs/py312
+Resolved 1 package in 1.57s
+   Building triton @ file:///data/users/xzhao9/triton

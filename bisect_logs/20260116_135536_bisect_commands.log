@@ -1,0 +1,115 @@
+
+============================================================
+[2026-01-16 13:55:36] Command: git status --porcelain
+Exit code: 0
+============================================================
+
+
+============================================================
+[2026-01-16 13:55:36] Command: git bisect start
+Exit code: 0
+============================================================
+status: waiting for both good and bad commits
+
+
+============================================================
+[2026-01-16 13:55:36] Command: git bisect good 96e075c65e2d92800598a130d5d2d1ab2f9cdf74
+Exit code: 0
+============================================================
+status: waiting for bad commit, 1 good commit known
+
+
+============================================================
+[2026-01-16 13:55:36] Command: git bisect bad d3a4c78cb231c69f652a8fbfe6a087908881206f
+Exit code: 0
+============================================================
+Bisecting: 5 revisions left to test after this (roughly 3 steps)
+[b54cb947faf1d49058cc4417698080000d0add1c] [AMD] Enable AsyncCopy by default for gfx950 and gfx1250 (#9087)
+
+
+============================================================
+[2026-01-16 13:55:36] Command: git bisect run bash /data/users/xzhao9/tritonparse/tritonparse/bisect/scripts/bisect_triton.sh
+============================================================
+running 'bash' '/data/users/xzhao9/tritonparse/tritonparse/bisect/scripts/bisect_triton.sh'
++ '[' '' = --help ']'
++ '[' '' = -h ']'
++ TRITON_DIR=/data/users/xzhao9/triton
++ TEST_SCRIPT=/home/xzhao9/tritonbench/.ci/bisect/bisect-script.sh
++ CONDA_ENV=triton_bisect
++ CONDA_DIR=/home/xzhao9/local/uv_venvs/py312
++ USE_UV=1
++ LOG_DIR=bisect_logs
++ TEST_ARGS=
++ [[ 1 == \1 ]]
++ exit 1
+Bisecting: 2 revisions left to test after this (roughly 2 steps)
+[db1f8c3de069eb52ef9878ad1f10faa851885b6c] [Backend] Move TMA index translation from mid-end to lowerings (#9082)
+running 'bash' '/data/users/xzhao9/tritonparse/tritonparse/bisect/scripts/bisect_triton.sh'
++ '[' '' = --help ']'
++ '[' '' = -h ']'
++ TRITON_DIR=/data/users/xzhao9/triton
++ TEST_SCRIPT=/home/xzhao9/tritonbench/.ci/bisect/bisect-script.sh
++ CONDA_ENV=triton_bisect
++ CONDA_DIR=/home/xzhao9/local/uv_venvs/py312
++ USE_UV=1
++ LOG_DIR=bisect_logs
++ TEST_ARGS=
++ [[ 1 == \1 ]]
++ exit 1
+Bisecting: 0 revisions left to test after this (roughly 1 step)
+[a0e769fc26e4adefca6522598ab3969b089be45c] [TOOLS] Add hip support for link.py (#9084)
+running 'bash' '/data/users/xzhao9/tritonparse/tritonparse/bisect/scripts/bisect_triton.sh'
++ '[' '' = --help ']'
++ '[' '' = -h ']'
++ TRITON_DIR=/data/users/xzhao9/triton
++ TEST_SCRIPT=/home/xzhao9/tritonbench/.ci/bisect/bisect-script.sh
++ CONDA_ENV=triton_bisect
++ CONDA_DIR=/home/xzhao9/local/uv_venvs/py312
++ USE_UV=1
++ LOG_DIR=bisect_logs
++ TEST_ARGS=
++ [[ 1 == \1 ]]
++ exit 1
+Bisecting: 0 revisions left to test after this (roughly 0 steps)
+[63b387ce02dd7789d18482dc15e58912c30234fc] [LANGUAGE] change default 32-bit dot precision to TF32x3 (#9080)
+running 'bash' '/data/users/xzhao9/tritonparse/tritonparse/bisect/scripts/bisect_triton.sh'
++ '[' '' = --help ']'
++ '[' '' = -h ']'
++ TRITON_DIR=/data/users/xzhao9/triton
++ TEST_SCRIPT=/home/xzhao9/tritonbench/.ci/bisect/bisect-script.sh
++ CONDA_ENV=triton_bisect
++ CONDA_DIR=/home/xzhao9/local/uv_venvs/py312
++ USE_UV=1
++ LOG_DIR=bisect_logs
++ TEST_ARGS=
++ [[ 1 == \1 ]]
++ exit 1
+63b387ce02dd7789d18482dc15e58912c30234fc is the first bad commit
+commit 63b387ce02dd7789d18482dc15e58912c30234fc
+Author: Philippe Tillet <phil@openai.com>
+Date:   Mon Dec 22 18:45:31 2025 -0800
+
+    [LANGUAGE] change default 32-bit dot precision to TF32x3 (#9080)
+
+ python/triton/language/core.py       | 12 ++++++------
+ python/triton/runtime/interpreter.py |  2 +-
+ 2 files changed, 7 insertions(+), 7 deletions(-)
+bisect found first bad commit
+============================================================
+Exit code: 0, Duration: 0.2s
+
+============================================================
+[2026-01-16 13:55:37] Command: git bisect reset
+Exit code: 0
+============================================================
+Previous HEAD position was 63b387ce0 [LANGUAGE] change default 32-bit dot precision to TF32x3 (#9080)
+HEAD is now at 422704519 [FRONTEND] Add guardrails for preload on different target (#9234)
+
+
+============================================================
+[2026-01-16 13:55:37] Command: git diff --name-only 63b387ce02dd7789d18482dc15e58912c30234fc~1 63b387ce02dd7789d18482dc15e58912c30234fc
+Exit code: 0
+============================================================
+python/triton/language/core.py
+python/triton/runtime/interpreter.py
+

@@ -1,0 +1,42 @@
+2026-01-16 13:57:15 [INFO] Log directory: bisect_logs
+2026-01-16 13:57:15 [INFO]   Module log: 20260116_135715_bisect.log
+2026-01-16 13:57:15 [INFO]   Command log: 20260116_135715_bisect_commands.log
+2026-01-16 13:57:15 [INFO] ============================================================
+2026-01-16 13:57:15 [INFO] Phase 1: Triton Bisect
+2026-01-16 13:57:15 [INFO] ============================================================
+2026-01-16 13:57:15 [INFO] Triton directory: /data/users/xzhao9/triton
+2026-01-16 13:57:15 [INFO] Test script: /home/xzhao9/tritonbench/.ci/bisect/bisect-script.sh
+2026-01-16 13:57:15 [INFO] Good commit: 96e075c65e2d92800598a130d5d2d1ab2f9cdf74
+2026-01-16 13:57:15 [INFO] Bad commit: d3a4c78cb231c69f652a8fbfe6a087908881206f
+2026-01-16 13:57:15 [INFO] Conda environment: triton_bisect
+2026-01-16 13:57:15 [INFO] Build command: uv pip install -e .
+2026-01-16 13:57:15 [DEBUG] Executing: git status --porcelain
+2026-01-16 13:57:15 [DEBUG]   cwd: /data/users/xzhao9/triton
+2026-01-16 13:57:15 [INFO] Command completed in 0.1s (exit code: 0)
+2026-01-16 13:57:15 [INFO] Pre-bisect checks passed
+2026-01-16 13:57:15 [INFO] Using bisect script: /data/users/xzhao9/tritonparse/tritonparse/bisect/scripts/bisect_triton.sh
+2026-01-16 13:57:15 [INFO] 
+2026-01-16 13:57:15 [INFO] ========================================
+2026-01-16 13:57:15 [INFO] BISECT RANGE
+2026-01-16 13:57:15 [INFO]   Good: 96e075c65e2d92800598a130d5d2d1ab2f9cdf74
+2026-01-16 13:57:15 [INFO]   Bad:  d3a4c78cb231c69f652a8fbfe6a087908881206f
+2026-01-16 13:57:15 [INFO] ========================================
+2026-01-16 13:57:15 [INFO] 
+2026-01-16 13:57:15 [INFO] Starting git bisect: 96e075c65e2d92800598a130d5d2d1ab2f9cdf74 -> d3a4c78cb231c69f652a8fbfe6a087908881206f
+2026-01-16 13:57:15 [INFO]   Repository: /data/users/xzhao9/triton
+2026-01-16 13:57:15 [INFO]   Run script: /data/users/xzhao9/tritonparse/tritonparse/bisect/scripts/bisect_triton.sh
+2026-01-16 13:57:15 [INFO] Step 1/4: git bisect start
+2026-01-16 13:57:15 [DEBUG] Executing: git bisect start
+2026-01-16 13:57:15 [DEBUG]   cwd: /data/users/xzhao9/triton
+2026-01-16 13:57:15 [INFO] Command completed in 0.1s (exit code: 0)
+2026-01-16 13:57:15 [INFO] Step 2/4: git bisect good 96e075c65e2d92800598a130d5d2d1ab2f9cdf74
+2026-01-16 13:57:15 [DEBUG] Executing: git bisect good 96e075c65e2d92800598a130d5d2d1ab2f9cdf74
+2026-01-16 13:57:15 [DEBUG]   cwd: /data/users/xzhao9/triton
+2026-01-16 13:57:15 [INFO] Command completed in 0.1s (exit code: 0)
+2026-01-16 13:57:15 [INFO] Step 3/4: git bisect bad d3a4c78cb231c69f652a8fbfe6a087908881206f
+2026-01-16 13:57:15 [DEBUG] Executing: git bisect bad d3a4c78cb231c69f652a8fbfe6a087908881206f
+2026-01-16 13:57:15 [DEBUG]   cwd: /data/users/xzhao9/triton
+2026-01-16 13:57:15 [INFO] Command completed in 0.1s (exit code: 0)
+2026-01-16 13:57:15 [INFO] Step 4/4: git bisect run bash /data/users/xzhao9/tritonparse/tritonparse/bisect/scripts/bisect_triton.sh
+2026-01-16 13:57:15 [INFO] Executing (streaming): git bisect run bash /data/users/xzhao9/tritonparse/tritonparse/bisect/scripts/bisect_triton.sh
+2026-01-16 13:57:15 [DEBUG]   cwd: /data/users/xzhao9/triton

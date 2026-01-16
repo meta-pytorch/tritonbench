@@ -1,0 +1,64 @@
+2026-01-16 13:54:35 [INFO] Log directory: bisect_logs
+2026-01-16 13:54:35 [INFO]   Module log: 20260116_135435_bisect.log
+2026-01-16 13:54:35 [INFO]   Command log: 20260116_135435_bisect_commands.log
+2026-01-16 13:54:35 [INFO] ============================================================
+2026-01-16 13:54:35 [INFO] Phase 1: Triton Bisect
+2026-01-16 13:54:35 [INFO] ============================================================
+2026-01-16 13:54:35 [INFO] Triton directory: /data/users/xzhao9/triton
+2026-01-16 13:54:35 [INFO] Test script: /home/xzhao9/tritonbench/.ci/bisect/bisect-script.sh
+2026-01-16 13:54:35 [INFO] Good commit: 96e075c65e2d92800598a130d5d2d1ab2f9cdf74
+2026-01-16 13:54:35 [INFO] Bad commit: d3a4c78cb231c69f652a8fbfe6a087908881206f
+2026-01-16 13:54:35 [INFO] Conda environment: triton_bisect
+2026-01-16 13:54:35 [INFO] Build command: pip install -e .
+2026-01-16 13:54:35 [DEBUG] Executing: git status --porcelain
+2026-01-16 13:54:35 [DEBUG]   cwd: /data/users/xzhao9/triton
+2026-01-16 13:54:35 [INFO] Command completed in 0.1s (exit code: 0)
+2026-01-16 13:54:35 [INFO] Pre-bisect checks passed
+2026-01-16 13:54:35 [INFO] Using bisect script: /data/users/xzhao9/tritonparse/tritonparse/bisect/scripts/bisect_triton.sh
+2026-01-16 13:54:35 [INFO] 
+2026-01-16 13:54:35 [INFO] ========================================
+2026-01-16 13:54:35 [INFO] BISECT RANGE
+2026-01-16 13:54:35 [INFO]   Good: 96e075c65e2d92800598a130d5d2d1ab2f9cdf74
+2026-01-16 13:54:35 [INFO]   Bad:  d3a4c78cb231c69f652a8fbfe6a087908881206f
+2026-01-16 13:54:35 [INFO] ========================================
+2026-01-16 13:54:35 [INFO] 
+2026-01-16 13:54:35 [INFO] Starting git bisect: 96e075c65e2d92800598a130d5d2d1ab2f9cdf74 -> d3a4c78cb231c69f652a8fbfe6a087908881206f
+2026-01-16 13:54:35 [INFO]   Repository: /data/users/xzhao9/triton
+2026-01-16 13:54:35 [INFO]   Run script: /data/users/xzhao9/tritonparse/tritonparse/bisect/scripts/bisect_triton.sh
+2026-01-16 13:54:35 [INFO] Step 1/4: git bisect start
+2026-01-16 13:54:35 [DEBUG] Executing: git bisect start
+2026-01-16 13:54:35 [DEBUG]   cwd: /data/users/xzhao9/triton
+2026-01-16 13:54:35 [INFO] Command completed in 0.1s (exit code: 0)
+2026-01-16 13:54:35 [INFO] Step 2/4: git bisect good 96e075c65e2d92800598a130d5d2d1ab2f9cdf74
+2026-01-16 13:54:35 [DEBUG] Executing: git bisect good 96e075c65e2d92800598a130d5d2d1ab2f9cdf74
+2026-01-16 13:54:35 [DEBUG]   cwd: /data/users/xzhao9/triton
+2026-01-16 13:54:35 [INFO] Command completed in 0.1s (exit code: 0)
+2026-01-16 13:54:35 [INFO] Step 3/4: git bisect bad d3a4c78cb231c69f652a8fbfe6a087908881206f
+2026-01-16 13:54:35 [DEBUG] Executing: git bisect bad d3a4c78cb231c69f652a8fbfe6a087908881206f
+2026-01-16 13:54:35 [DEBUG]   cwd: /data/users/xzhao9/triton
+2026-01-16 13:54:35 [INFO] Command completed in 0.1s (exit code: 0)
+2026-01-16 13:54:35 [INFO] Step 4/4: git bisect run bash /data/users/xzhao9/tritonparse/tritonparse/bisect/scripts/bisect_triton.sh
+2026-01-16 13:54:35 [INFO] Executing (streaming): git bisect run bash /data/users/xzhao9/tritonparse/tritonparse/bisect/scripts/bisect_triton.sh
+2026-01-16 13:54:35 [DEBUG]   cwd: /data/users/xzhao9/triton
+2026-01-16 13:54:35 [INFO] Command completed in 0.1s (exit code: 128)
+2026-01-16 13:54:35 [DEBUG] Resetting git bisect state
+2026-01-16 13:54:35 [DEBUG] Executing: git bisect reset
+2026-01-16 13:54:35 [DEBUG]   cwd: /data/users/xzhao9/triton
+2026-01-16 13:54:35 [INFO] Command completed in 0.1s (exit code: 0)
+2026-01-16 13:54:35 [INFO] ============================================================
+2026-01-16 13:54:35 [INFO] FINAL SUMMARY
+2026-01-16 13:54:35 [INFO] ============================================================
+2026-01-16 13:54:35 [INFO] ╭───────────────────────────────────────────────────────────────────────────────────────────────────── Bisect Failed ─────────────────────────────────────────────────────────────────────────────────────────────────────╮
+2026-01-16 13:54:35 [INFO] │                                                                                                                                                                                                                         │
+2026-01-16 13:54:35 [INFO] │  ❌ Bisect Failed                                                                                                                                                                                                       │
+2026-01-16 13:54:35 [INFO] │                                                                                                                                                                                                                         │
+2026-01-16 13:54:35 [INFO] │  Phase 1: Triton Bisect failed:                                                                                                                                                                                         │
+2026-01-16 13:54:35 [INFO] │                                                                                                                                                                                                                         │
+2026-01-16 13:54:35 [INFO] │  ⏱️  Total time: 1s                                                                                                                                                                                                      │
+2026-01-16 13:54:35 [INFO] │                                                                                                                                                                                                                         │
+2026-01-16 13:54:35 [INFO] │  📄 Check command log for details:                                                                                                                                                                                      │
+2026-01-16 13:54:35 [INFO] │     bisect_logs/20260116_135435_bisect_commands.log                                                                                                                                                                     │
+2026-01-16 13:54:35 [INFO] │  📄 Module log: bisect_logs/20260116_135435_bisect.log                                                                                                                                                                  │
+2026-01-16 13:54:35 [INFO] │                                                                                                                                                                                                                         │
+2026-01-16 13:54:35 [INFO] ╰─────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────╯
+2026-01-16 13:54:35 [INFO] ============================================================
