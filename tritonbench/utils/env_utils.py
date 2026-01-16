@@ -93,6 +93,14 @@ def is_blackwell() -> bool:
 IS_BLACKWELL = is_blackwell()
 
 
+def is_h100() -> bool:
+    """Check if running on an NVIDIA H100 GPU."""
+    if not is_cuda():
+        return False
+    gpu_model = get_nvidia_gpu_model()
+    return "H100" in gpu_model
+
+
 def supports_tma():
     return is_cuda() and torch.cuda.get_device_capability()[0] >= 9
 
