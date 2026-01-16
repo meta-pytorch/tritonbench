@@ -365,6 +365,36 @@ class Operator(BenchmarkOperator):
 
         return lambda: compiled(a, b)
 
+    @register_benchmark(enabled=supports_tma())
+    def pt2_matmul_maxautotune_tma_only(self, a, b, bias) -> Callable:
+        from torch._inductor.template_heuristics.triton import (
+            CUDAMMTemplateConfigHeuristic,
+        )
+
+        torch._dynamo.reset()
+
+        mm_heuristic = CUDAMMTemplateConfigHeuristic()
+
+        original_mm_configs = mm_heuristic.mm_configs
+        mm_heuristic.mm_configs = []
+
+        try:
+            with inductor_config.patch(
+                max_autotune=True,
+                max_autotune_gemm_backends="TRITON",
+                autotune_num_choices_displayed=self.inductor_autotune_num_choices_displayed,
+            ):
+                if bias is not None:
+                    f = lambda a, b: a.matmul(b) + bias
+                else:
+                    f = lambda a, b: a.matmul(b)
+                compiled = torch.compile(f, dynamic=False)
+                compiled(a, b)
+        finally:
+            mm_heuristic.mm_configs = original_mm_configs
+
+        return lambda: compiled(a, b)
+
     @register_benchmark(enabled=is_fbcode())
     def pt2_matmul_maxautotune_diode(self, a, b, bias) -> Callable:
         torch._dynamo.reset()
