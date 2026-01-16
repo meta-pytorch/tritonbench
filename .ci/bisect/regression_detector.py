@@ -1,12 +1,17 @@
-import argparse
 import os
 import subprocess
 
-# The default regression threshold is 10%
+from pathlib import Path
+# the default regression threshold is 10%
 REGRESSION_THRESHOLD = float(os.environ.get("REGRESSION_THRESHOLD", 0.1))
+# functional or performance regression
+FUNCTIONAL = bool(os.environ.get("FUNCTIONAL", False))
+# repro command line
 REPRO_CMDLINE = os.environ.get("REPRO_CMDLINE", None)
-FUNCTIONAL = os.environ.get("FUNCTIONAL", False)
+# baseline log file
 BASELINE_LOG = os.environ.get("BASELINE_LOG", None)
+
+REPO_DIR = Path(__file__).parent.parent.parent
 
 def get_baseline(baseline_log) -> float:
     with open(baseline_log, "r") as f:
@@ -27,7 +32,7 @@ if __name__ == "__main__":
     # functional regression
     if FUNCTIONAL:
         try:
-            subprocess.check_call(cmdline)
+            subprocess.check_call(cmdline, cwd=REPO_DIR)
         except subprocess.CalledProcessError as e:
             print(f"cmd line {cmdline} failed: {e}")
             exit(e.returncode)
@@ -36,16 +41,18 @@ if __name__ == "__main__":
         has_baseline = True
     else:
         has_baseline = False
-    p = subprocess.Popen(cmdline, stdout=subprocess.PIPE, stderr=subprocess.STDERR)
+    p = subprocess.Popen(cmdline, cwd=REPO_DIR, stdout=subprocess.PIPE, stderr=None)
     assert p.stdout is not None
     stdout_lines = []
     for line in p.stdout:
-        print(line)
-        stdout_lines.append(line)
+        decoded_line = line.decode("utf-8").strip()
+        print(decoded_line)
+        stdout_lines.append(decoded_line)
     rc = p.wait()
     if not has_baseline:
+        Path(BASELINE_LOG).touch()
         with open(BASELINE_LOG, "w") as f:
-            f.write("\n".join(stdout_lines))
+            f.write("\n".join(stdout_lines) + "\n")
         exit(rc)
     # if subprocess failed, exit with the return code
     if not rc == 0:
