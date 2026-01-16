@@ -1,5 +1,5 @@
 #!/bin/bash
-set -xeuo pipefail
+set -xu
 
 if [ -z "${SETUP_SCRIPT:-}" ]; then
     echo "ERROR: SETUP_SCRIPT is not set"
@@ -16,8 +16,8 @@ if [ -z "${CONDA_ENV:-}" ]; then
     exit 1
 fi
 
-if [ -z "${TEST_SCRIPT:-}" ]; then
-    echo "ERROR: TEST_SCRIPT is not set"
+if [ -z "${REPRO_CMDLINE:-}" ]; then
+    echo "ERROR: REPRO_CMDLINE is not set"
     exit 1
 fi
 
@@ -41,6 +41,15 @@ NOWTIME=$(date +%Y%m%d%H%M%S)
 BISECT_DIR="${WORKSPACE_DIR}/bisect-${NOWTIME}"
 OUTPUT_DIR="${BISECT_DIR}/bisect-output"
 BISECT_LOG="${OUTPUT_DIR}/bisect.log"
+BASELINE_LOG="${OUTPUT_DIR}/baseline.log"
+
+if [ -n "${BISECT_FUNCTIONAL:-}" ]; then
+  REPRO_SUFFIX="--functional"
+fi
+
+if [ -n "${REGRESSION_THRESHOLD:-}" ]; then
+  REPRO_SUFFIX="${REPRO_SUFFIX} --threshold ${REGRESSION_THRESHOLD}"
+fi
 
 # helper functions for triton installation
 TRITONBENCH_DIR=$(dirname "$(readlink -f "$0")")/../..
@@ -114,12 +123,23 @@ echo "" | log_output
 echo "[tritonbench bisect] Running test..." | log_output
 TEST_START=$(date +%s)
 
-if [ -n "$COMMIT_LOG" ]; then
-  bash "${TEST_SCRIPT}" 2>&1 | tee -a "$COMMIT_LOG"
+
+# detect baseline output exists
+if [ -f "${BASELINE_LOG}" ]; then
+  # run the baseline with logs saved in the baseline log file
+  python ./.ci/bisect/regression_detector.py --repro \"${REPRO_CMDLINE}\" ${REPRO_SUFFIX} 2>&1 | tee -a "${BASELINE_LOG}"
   TEST_CODE=${PIPESTATUS[0]}
+  if [ -n "$COMMIT_LOG" ]; then
+    cat "${BASELINE_LOG}" | tee -a "$COMMIT_LOG"
+  fi
 else
-  bash "${TEST_SCRIPT}" 2>&1
-  TEST_CODE=$?
+  if [ -n "$COMMIT_LOG" ]; then
+    python ./.ci/bisect/regression_detector.py --repro \"${REPRO_CMDLINE}\" --baseline "${BASELINE_LOG}" ${REPRO_SUFFIX} 2>&1 | tee -a "$COMMIT_LOG"
+    TEST_CODE=${PIPESTATUS[0]}
+  else
+    python ./.ci/bisect/regression_detector.py --repro \"${REPRO_CMDLINE}\" --baseline "${BASELINE_LOG}" ${REPRO_SUFFIX} 2>&1
+    TEST_CODE=$?
+  fi
 fi
 
 TEST_END=$(date +%s)
