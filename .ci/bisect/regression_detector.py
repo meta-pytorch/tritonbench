@@ -73,10 +73,10 @@ if __name__ == "__main__":
     if not rc == 0:
         exit(rc)
     # otherwise, check for the perf regression or accuracy regression
+    current_value = get_current_value(stdout_lines)
     if current_value == 0 and "accuracy" in REPRO_CMDLINE:
         print("Accuracy test failed, exit with 1.")
         exit(1)
-    current_value = get_current_value(stdout_lines)
     smaller_value = min(baseline_signal, current_value)
     larger_value = max(baseline_signal, current_value)
     assert smaller_value > 0, "smaller_value should be positive, got zero."

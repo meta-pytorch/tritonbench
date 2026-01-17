@@ -60,7 +60,6 @@ jobs:
       UV_VENV_DIR: "/workspace/uv_venvs"
       SETUP_SCRIPT: "/workspace/setup_instance.sh"
       RUNNER_TYPE: "amd-mi350-runner"
-      DOCKER_IMAGE: "ghcr.io/meta-pytorch/tritonbench:rocm-latest"
       TRITONBENCH_SIDE_A_ENV: ${{ inputs.test_type == 'abtest' && 'triton-side-a' || inputs.venv_name }}
       TRITONBENCH_SIDE_B_ENV: "triton-side-b"
       JOB_NAME: tritonbench-mi350-benchmark-${{ inputs.venv_name }}-${{ inputs.test_type }}-${{ inputs.benchmark_name }}
