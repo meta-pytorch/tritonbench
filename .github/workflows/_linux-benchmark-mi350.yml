@@ -90,6 +90,8 @@ jobs:
             CMD_SUFFIX=" --meta-triton"
           elif [[ "${TRITONBENCH_SIDE_A_ENV}" == "triton-main" ]]; then
             CMD_SUFFIX=" --triton-main"
+          else
+            CMD_SUFFIX=""
           fi
           bash ./.ci/tritonbench/setup-env.sh --hip ${CMD_SUFFIX}
       - name: Compile Triton side A (On Demand)
