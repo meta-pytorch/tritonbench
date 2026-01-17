@@ -16,11 +16,6 @@ if [ -z "${CONDA_ENV:-}" ]; then
     exit 1
 fi
 
-if [ -z "${BENCHMARK_NAME:-}" ]; then
-    echo "ERROR: BENCHMARK_NAME is not set"
-    exit 1
-fi
-
 if [ -z "${GOOD_COMMIT:-}" ]; then
     echo "ERROR: GOOD_COMMIT is not set"
     exit 1
@@ -49,29 +44,30 @@ REGRESSION_THRESHOLD="${REGRESSION_THRESHOLD:-0.1}"
 
 TRITONBENCH_DIR=$(dirname "$(readlink -f "$0")")/../..
 
-cd "${TRITONBENCH_DIR}"
-
-
-git config --global --add safe.directory '*'
-
-BISECT_DIR="${WORKSPACE_DIR}/bisect"
-OUTPUT_DIR="${BISECT_DIR}/bisect-output"
-BASELINE_RESULTS="${OUTPUT_DIR}/baseline_results.json"
-BISECT_LOG="${OUTPUT_DIR}/bisect.log"
-
-mkdir -p "${BISECT_DIR}"
-mkdir -p "${OUTPUT_DIR}"
-
-echo "===== TritonBench Bisect Driver Script START =====" | tee "${BISECT_LOG}"
-echo "Good commit: ${GOOD_COMMIT}" | tee -a "${BISECT_LOG}"
-echo "Bad commit: ${BAD_COMMIT}" | tee -a "${BISECT_LOG}"
-echo "Triton repo: ${TRITON_REPO}" | tee -a "${BISECT_LOG}"
-echo "Benchmark: ${BENCHMARK_NAME}" | tee -a "${BISECT_LOG}"
-echo "Benchmark command-line: ${OPERATOR:-all}" | tee -a "${BISECT_LOG}"
-echo "==================================================" | tee -a "${BISECT_LOG}"
+echo "===== TritonBench Bisect Driver Script START ====="
+echo "Good commit: ${GOOD_COMMIT}"
+echo "Bad commit: ${BAD_COMMIT}"
+echo "Triton repo: ${TRITON_REPO}"
+echo "Triton installation dir: ${TRITON_SRC_DIR}"
+echo "Regression threshold: ${REGRESSION_THRESHOLD}"
+echo "Repo command line: ${REPRO_CMDLINE}"
+echo "=================================================="
 
 # Checkout tritonparse
 TRITONPARSE_DIR="${WORKSPACE_DIR}/tritonparse"
 git clone https://github.com/meta-pytorch/tritonparse.git ${TRITONPARSE_DIR}
 
 cd ${WORKSPACE_DIR}/tritonparse
+git checkout -t origin/xz9/pr11-uv
+
+# install tritonparse
+uv pip install -e .
+
+# switch back to tritonbench dir
+cd "${TRITONBENCH_DIR}"
+
+# kick off the bisect!
+USE_UV=1 CONDA_DIR="${WORKSPACE_DIR}/uv_venvs/${CONDA_ENV}" \
+BASELINE_LOG="${PWD}/bisect_logs/baseline.log" \
+tritonparseoss bisect --triton-dir "${TRITON_SRC_DIR}" --test-script ./.ci/bisect/regression_detector.py \
+--good ${GOOD_COMMIT} --bad ${BAD_COMMIT}

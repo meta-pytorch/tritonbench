@@ -1,0 +1,74 @@
+name: linux-bisect-mi350
+on:
+  workflow_call:
+    inputs:
+      conda_env:
+        required: True
+        type: string
+        default: "triton-main"
+        description: |
+          The conda env to bisect.
+      repro_cmdline:
+        required: True
+        type: string
+        description: |
+          The repro command line to run, starting with "python run.py", must have "--simple-output".
+      good_commit:
+        required: True
+        type: string
+        description: |
+          The known good commit (no regression)
+      bad_commit:
+        required: True
+        type: string
+        description: |
+          The known bad commit (has regression)
+      functional:
+        type: boolean
+        required: False
+        default: false
+        description: |
+          Whether to detect functional regression (True) or performance regression (False)
+      regression_threshold:
+        type: number
+        required: False
+        default: 0.1
+        description: |
+          Regression threshold (default 0.1 = 10%)
+
+jobs:
+  linux-bisect-mi350:
+    if: github.repository_owner == 'meta-pytorch'
+    runs-on: [amd-mi350-runner]
+    timeout-minutes: 480
+    environment: docker-s3-upload
+    env:
+      WORKSPACE_DIR: "/workspace"
+      SETUP_SCRIPT: "/workspace/setup_instance.sh"
+      RUNNER_TYPE: "amd-mi350-runner"
+      CONDA_ENV: ${{ inputs.conda_env }}
+      JOB_NAME: tritonbench-mi350-bisect
+      GOOD_COMMIT: ${{ inputs.good_commit }}
+      BAD_COMMIT: ${{ inputs.bad_commit }}
+      REGRESSION_THRESHOLD: ${{ inputs.regression_threshold }}
+      REPRO_CMDLINE: ${{ inputs.repro_cmdline }}
+      FUNCTIONAL: ${{ inputs.functional }}
+    steps:
+      - name: Checkout Tritonbench
+        uses: actions/checkout@v3
+        with:
+          submodules: recursive
+      - name: Install Tritonbench env
+        run: |
+          set -eux
+          bash ./.ci/tritonbench/setup-env.sh --hip
+      - name: Run Bisection
+        run: |
+          set -eux
+          bash ./.ci/bisect/run.sh
+      - name: Upload bisect logs
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: ${{ env.JOB_NAME }}-logs
+          path: bisect_logs/

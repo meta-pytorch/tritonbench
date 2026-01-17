@@ -1,0 +1,58 @@
+name: TritonBench Nightly
+on:
+  schedule:
+    # Test nightly docker daily at 4 PM UTC
+    - cron: '0 16 * * *'
+  workflow_dispatch:
+    inputs:
+      conda_env:
+        default: 'triton-main'
+        choices:
+          - 'triton-main'
+          - 'meta-triton'
+        description: 'Conda env to bisect'
+      repro_cmdline:
+        required: True
+        type: string
+        description: |
+          The command line to reproduce the regression
+      good_commit:
+        required: True
+        type: string
+        description: |
+          The known good commit (no regression)
+      bad_commit:
+        required: True
+        type: string
+        description: |
+          The known bad commit (has regression)
+      functional:
+        required: False
+        type: boolean
+        description: |
+          Whether the regression is functional or performance
+      regression_threshold:
+        required: False
+        type: number
+        default: 0.1
+        description: |
+          The regression threshold to bisect on, default to 0.1 (10%)
+
+
+jobs:
+  mi350-bisect:
+    uses: ./.github/workflows/_linux-bisect-mi350.yml
+    with:
+      conda_env: ${{ inputs.conda_env }}
+      repro_cmdline: ${{ inputs.repro_cmdline }}
+      good_commit: ${{ inputs.good_commit }}
+      bad_commit: ${{ inputs.bad_commit }}
+      functional: ${{ inputs.functional }}
+      regression_threshold: ${{ inputs.regression_threshold }}
+    secrets:
+      TRITONBENCH_SCRIBE_GRAPHQL_ACCESS_TOKEN: ${{ secrets.TRITONBENCH_SCRIBE_GRAPHQL_ACCESS_TOKEN }}
+
+
+concurrency:
+  group: ${{ github.workflow }}-${{ github.event.pull_request.number || github.sha }}-${{ github.event_name == 'workflow_dispatch' }}
+  cancel-in-progress: true

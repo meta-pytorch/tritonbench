@@ -1,3 +1,24 @@
+"""
+TritonBench Regression Detector
+Used toghether with TritonParse bisector for automatic bisection.
+
+Envs to control the behavior:
+
+- FUNCTIONAL: Detect performance or functional regression.
+- REPRO_CMDLINE: The repro command line to run, starting with "python run.py", must have "--simple-output".
+- BASELINE_LOG: The baseline log file to compare with.
+- REGRESSION_THRESHOLD: The regression threshold, default to 10%.
+
+Example usage:
+
+CONDA_ENV=triton-bisect CONDA_DIR=$HOME/local/uv_venvs/triton-bisect \
+REPRO_CMDLINE="python run.py --op ragged_attention --only hstu --metrics tflops --simple-output" \
+BASELINE_LOG="$PWD/bisect_logs/baseline.log" REGRESSION_THRESHOLD="0.1" \
+tritonparseoss bisect --triton-dir $HOME/triton --test-script $PWD/.ci/bisect/regression_detector.py \
+--good 945095b1c72a5aba063925be672d39ef2702fbde --bad ec5b855c132f145d6b695d99069753cd314b5c56
+
+"""
+
 import os
 import subprocess
 
