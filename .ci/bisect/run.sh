@@ -70,4 +70,4 @@ cd "${TRITONBENCH_DIR}"
 USE_UV=1 CONDA_DIR="${WORKSPACE_DIR}/uv_venvs/${CONDA_ENV}" \
 BASELINE_LOG="${PWD}/bisect_logs/baseline.log" \
 tritonparseoss bisect --triton-dir "${TRITON_SRC_DIR}" --test-script ./.ci/bisect/regression_detector.py \
---good ${GOOD_COMMIT} --bad ${BAD_COMMIT}
+    --good ${GOOD_COMMIT} --bad ${BAD_COMMIT}
