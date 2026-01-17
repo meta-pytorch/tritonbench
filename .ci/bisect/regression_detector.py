@@ -84,8 +84,8 @@ if __name__ == "__main__":
     smaller_value = min(baseline, current_value)
     larger_value = max(baseline, current_value)
     if larger_value > smaller_value * (1 + REGRESSION_THRESHOLD):
-        print(f"Regression detected: current value {current_value} regresses over the baseline {baseline} by {REGRESSION_THRESHOLD*100}%)")
+        print(f"Regression detected: current value {current_value} / {baseline} == {current_value / baseline} , threshold {REGRESSION_THRESHOLD*100}%)")
         exit(1)
     else:
-        print(f"No regression detected: current value {current_value} regresses over the baseline {baseline} by {REGRESSION_THRESHOLD*100}%)")
+        print(f"No regression detected: current value {current_value} / {baseline} == {current_value/baseline}, threshold {REGRESSION_THRESHOLD*100}%)")
         exit(0)
