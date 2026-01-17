@@ -77,9 +77,9 @@ mkdir -p "${BISECT_LOG_DIR}"
 checkout_triton_commit "${TRITON_SRC_DIR}" "${GOOD_COMMIT}"
 install_triton "${TRITON_SRC_DIR}"
 cd "${TRITONBENCH_DIR}"
-eval ${REPRO_CMDLINE} 2>&1 | tee "${BISECT_LOG_DIR}/baseline.log"
+eval ${REPRO_CMDLINE} 2>&1 | tee "${BASELINE_LOG}"
 
 # kick off the bisect!
-PER_COMMIT_LOG=1 USE_UV=1 CONDA_DIR="${WORKSPACE_DIR}/uv_venvs/${CONDA_ENV}" \
+BASELINE_LOG="${BASELINE_LOG}" PER_COMMIT_LOG=1 USE_UV=1 CONDA_DIR="${WORKSPACE_DIR}/uv_venvs/${CONDA_ENV}" \
 tritonparseoss bisect --triton-dir "${TRITON_SRC_DIR}" --test-script ./.ci/bisect/regression_detector.py \
     --good ${GOOD_COMMIT} --bad ${BAD_COMMIT} --per-commit-log --log-dir "${BISECT_LOG_DIR}"

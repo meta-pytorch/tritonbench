@@ -59,7 +59,7 @@ if __name__ == "__main__":
             exit(e.returncode)
         exit(0)
 
-    assert os.path.exists(BASELINE_LOG), "BASELINE_LOG is not set."
+    assert BASELINE_LOG and os.path.exists(BASELINE_LOG), f"BASELINE_LOG is not set or to a non-exist location: {BASELINE_LOG}."
     baseline_signal = get_baseline(BASELINE_LOG)
     p = subprocess.Popen(cmdline, cwd=REPO_DIR, stdout=subprocess.PIPE, stderr=None)
     assert p.stdout is not None
