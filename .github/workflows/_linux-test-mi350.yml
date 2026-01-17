@@ -27,9 +27,9 @@ jobs:
       - name: Install Tritonbench env
         run: |
           set -eux
-          if [[ "${TRITONBENCH_SIDE_A_ENV}" == "meta-triton" ]]; then
+          if [[ "${CONDA_ENV}" == "meta-triton" ]]; then
             CMD_SUFFIX=" --meta-triton"
-          elif [[ "${TRITONBENCH_SIDE_A_ENV}" == "triton-main" ]]; then
+          elif [[ "${CONDA_ENV}" == "triton-main" ]]; then
             CMD_SUFFIX=" --triton-main"
           fi
           bash ./.ci/tritonbench/setup-env.sh --hip ${CMD_SUFFIX}
