@@ -59,7 +59,8 @@ jobs:
       SETUP_SCRIPT: "/workspace/setup_instance.sh"
       RUNNER_TYPE: "gcp-h100-runner"
       JOB_NAME: tritonbench-h100-benchmark-${{ inputs.venv_name }}-${{ inputs.test_type }}-${{ inputs.benchmark_name }}
-      TRITONBENCH_SIDE_A_ENV: ${{ inputs.venv_name }}
+      TRITONBENCH_SIDE_A_ENV: ${{ inputs.test_type == 'abtest' && 'triton-side-a' || inputs.venv_name }}
+      TRITONBENCH_SIDE_B_ENV: "triton-side-b"
       TRITONBENCH_SCRIBE_GRAPHQL_ACCESS_TOKEN: ${{ secrets.TRITONBENCH_SCRIBE_GRAPHQL_ACCESS_TOKEN }}
       AWS_ACCESS_KEY_ID: ${{ secrets.AWS_ACCESS_KEY_ID }}
       AWS_SECRET_ACCESS_KEY: ${{ secrets.AWS_SECRET_ACCESS_KEY }}
@@ -88,7 +89,7 @@ jobs:
         if: ${{ inputs.side_a_triton && inputs.side_a_commit }}
         run: |
           bash ./.ci/triton/install.sh --repo ${{ inputs.side_a_triton }} --commit ${{ inputs.side_a_commit }} --side a
-          export 'TRITONBENCH_SIDE_A_ENV=triton-side-a' >> $GITHUB_ENV
+          export 'TRITONBENCH_SIDE_A_ENV=${{ env.TRITONBENCH_SIDE_A_ENV }}' >> $GITHUB_ENV
       - name: Benchmark Triton (Side A)
         run: |
           bash ./.ci/tritonbench/run-benchmark.sh ${{ inputs.benchmark_name }} --conda-env ${TRITONBENCH_SIDE_A_ENV}
@@ -99,11 +100,11 @@ jobs:
         if: ${{ inputs.test_type == 'abtest' && inputs.side_b_triton && inputs.side_b_commit }}
         run: |
           bash ./.ci/triton/install.sh --repo ${{ inputs.side_b_triton }} --commit ${{ inputs.side_b_commit }} --side b
-          export 'TRITONBENCH_SIDE_A_ENV=triton-side-a' >> $GITHUB_ENV
+          export 'TRITONBENCH_SIDE_B_ENV=${{ env.TRITONBENCH_SIDE_B_ENV }}' >> $GITHUB_ENV
       - name: Benchmark Triton (Side B)
         if: ${{ inputs.test_type == 'abtest' && inputs.side_b_triton && inputs.side_b_commit }}
         run: |
-          bash ./.ci/tritonbench/run-benchmark.sh ${{ inputs.benchmark_name }}  --conda-env ${TRITONBENCH_SIDE_B_ENV}
+          bash ./.ci/tritonbench/run-benchmark.sh ${{ inputs.benchmark_name }} --conda-env ${TRITONBENCH_SIDE_B_ENV}
           mkdir -p benchmark-output
           cp -r ".benchmarks/${{ inputs.benchmark_name }}" benchmark-output/${TRITONBENCH_SIDE_B_ENV}
           rm -rf .benchmarks || true
