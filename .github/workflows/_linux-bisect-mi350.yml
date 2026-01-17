@@ -47,6 +47,7 @@ jobs:
       SETUP_SCRIPT: "/workspace/setup_instance.sh"
       RUNNER_TYPE: "amd-mi350-runner"
       CONDA_ENV: ${{ inputs.conda_env }}
+      UV_VENV_DIR: "/workspace/uv_venvs"
       JOB_NAME: tritonbench-mi350-bisect
       GOOD_COMMIT: ${{ inputs.good_commit }}
       BAD_COMMIT: ${{ inputs.bad_commit }}
@@ -61,7 +62,15 @@ jobs:
       - name: Install Tritonbench env
         run: |
           set -eux
-          bash ./.ci/tritonbench/setup-env.sh --hip
+          if [[ "${CONDA_ENV}" == "meta-triton" ]]; then
+            CMD_SUFFIX=" --meta-triton"
+          elif [[ "${CONDA_ENV}" == "triton-main" ]]; then
+            CMD_SUFFIX=" --triton-main"
+          else
+            echo "Unknown conda env ${CONDA_ENV}"
+            exit 1
+          fi
+          bash ./.ci/tritonbench/setup-env.sh --hip ${CMD_SUFFIX}
       - name: Run Bisection
         run: |
           set -eux
