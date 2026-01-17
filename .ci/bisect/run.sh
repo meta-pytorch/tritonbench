@@ -67,11 +67,12 @@ uv pip install -e .
 cd "${TRITONBENCH_DIR}"
 
 # Run the baseline commit first!
-# mkdir -p "${TRITONBENCH_DIR}/bisect_logs"
-# python ./.ci/bisect/regression_detector.py --log-dir "${TRITONBENCH_DIR}/bisect_logs"
+BISECT_LOG_DIR="${TRITONBENCH_DIR}/bisect_logs"
+BASELINE_LOG="${BISECT_LOG_DIR}/baseline.log"
+mkdir -p "${BISECT_LOG_DIR}"
+eval ${REPRO_CMDLINE} 2>&1 | tee "${BISECT_LOG_DIR}/baseline.log"
 
 # kick off the bisect!
 PER_COMMIT_LOG=1 USE_UV=1 CONDA_DIR="${WORKSPACE_DIR}/uv_venvs/${CONDA_ENV}" \
-BASELINE_LOG="${TRITONBENCH_DIR}/bisect_logs/baseline.log" \
 tritonparseoss bisect --triton-dir "${TRITON_SRC_DIR}" --test-script ./.ci/bisect/regression_detector.py \
-    --good ${GOOD_COMMIT} --bad ${BAD_COMMIT} --per-commit-log --log-dir "${TRITONBENCH_DIR}/bisect_logs"
+    --good ${GOOD_COMMIT} --bad ${BAD_COMMIT} --per-commit-log --log-dir "${BISECT_LOG_DIR}"

@@ -59,10 +59,8 @@ if __name__ == "__main__":
             exit(e.returncode)
         exit(0)
 
-    if os.path.exists(BASELINE_LOG):
-        has_baseline = True
-    else:
-        has_baseline = False
+    assert os.path.exists(BASELINE_LOG), "BASELINE_LOG is not set."
+    baseline_signal = get_baseline(BASELINE_LOG)
     p = subprocess.Popen(cmdline, cwd=REPO_DIR, stdout=subprocess.PIPE, stderr=None)
     assert p.stdout is not None
     stdout_lines = []
@@ -71,16 +69,10 @@ if __name__ == "__main__":
         print(decoded_line)
         stdout_lines.append(decoded_line)
     rc = p.wait()
-    if not has_baseline:
-        Path(BASELINE_LOG).touch()
-        with open(BASELINE_LOG, "w") as f:
-            f.write("\n".join(stdout_lines) + "\n")
-        exit(rc)
     # if subprocess failed, exit with the return code
     if not rc == 0:
         exit(rc)
     # otherwise, check for the perf regression
-    baseline = get_baseline(BASELINE_LOG)
     current_value = get_current_value(stdout_lines)
     smaller_value = min(baseline, current_value)
     larger_value = max(baseline, current_value)
