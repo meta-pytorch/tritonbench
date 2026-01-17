@@ -1,6 +1,5 @@
 name: TritonBench Bisect
 on:
-  pull_request:
   workflow_dispatch:
     inputs:
       conda_env:
