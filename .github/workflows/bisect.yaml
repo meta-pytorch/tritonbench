@@ -1,8 +1,8 @@
-name: TritonBench Nightly
+name: TritonBench Bisect
 on:
-  schedule:
-    # Test nightly docker daily at 4 PM UTC
-    - cron: '0 16 * * *'
+  pull_request:
+    branches:
+      - xz9/amd-bisection
   workflow_dispatch:
     inputs:
       conda_env:
