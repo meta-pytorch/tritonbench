@@ -57,6 +57,7 @@ if __name__ == "__main__":
         except subprocess.CalledProcessError as e:
             print(f"cmd line {cmdline} failed: {e}")
             exit(e.returncode)
+        exit(0)
 
     if os.path.exists(BASELINE_LOG):
         has_baseline = True

@@ -66,6 +66,10 @@ uv pip install -e .
 # switch back to tritonbench dir
 cd "${TRITONBENCH_DIR}"
 
+# Run the baseline commit first!
+# mkdir -p "${TRITONBENCH_DIR}/bisect_logs"
+# python ./.ci/bisect/regression_detector.py --log-dir "${TRITONBENCH_DIR}/bisect_logs"
+
 # kick off the bisect!
 PER_COMMIT_LOG=1 USE_UV=1 CONDA_DIR="${WORKSPACE_DIR}/uv_venvs/${CONDA_ENV}" \
 BASELINE_LOG="${TRITONBENCH_DIR}/bisect_logs/baseline.log" \
