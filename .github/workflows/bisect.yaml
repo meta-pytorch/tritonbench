@@ -1,8 +1,6 @@
 name: TritonBench Bisect
 on:
   pull_request:
-    branches:
-      - xz9/amd-bisection
   workflow_dispatch:
     inputs:
       conda_env:
