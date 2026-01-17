@@ -16,7 +16,6 @@ import torch
 from torch.nn.attention import sdpa_kernel, SDPBackend
 from torch.nn.functional import scaled_dot_product_attention as sdpa
 from tritonbench.kernels.attention_utils import SUPPORT_GLUON
-from tritonbench.kernels.blackwell_attention_utils import is_blackwell
 
 try:
     from tritonbench.kernels.blackwell_triton_fused_attention import (
