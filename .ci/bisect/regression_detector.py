@@ -44,8 +44,8 @@ def get_current_value(stdout_lines) -> float:
     return float(last_line.strip())
 
 if __name__ == "__main__":
-    if "--simple-output" not in REPRO_CMDLINE:
-        print("Regression detector requires --simple-output as it only reads the last line in the benchmark output.")
+    if not FUNCTIONAL and "--simple-output" not in REPRO_CMDLINE:
+        print("Performance tests require --simple-output as we will only read the last line in the benchmark output.")
         exit(1)
     assert REPRO_CMDLINE is not None, "REPRO_CMDLINE is not set."
     cmdline = REPRO_CMDLINE.split()
