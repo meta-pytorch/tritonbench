@@ -68,6 +68,6 @@ cd "${TRITONBENCH_DIR}"
 
 # kick off the bisect!
 PER_COMMIT_LOG=1 USE_UV=1 CONDA_DIR="${WORKSPACE_DIR}/uv_venvs/${CONDA_ENV}" \
-BASELINE_LOG="${PWD}/bisect_logs/baseline.log" \
+BASELINE_LOG="${TRITONBENCH_DIR}/bisect_logs/baseline.log" \
 tritonparseoss bisect --triton-dir "${TRITON_SRC_DIR}" --test-script ./.ci/bisect/regression_detector.py \
-    --good ${GOOD_COMMIT} --bad ${BAD_COMMIT}
+    --good ${GOOD_COMMIT} --bad ${BAD_COMMIT} --per-commit-log --log-dir "${TRITONBENCH_DIR}/bisect_logs"
