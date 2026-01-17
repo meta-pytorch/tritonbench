@@ -18,7 +18,7 @@ while [[ "$#" -gt 0 ]]; do
 done
 
 if [ -n "${NO_BUILD:-}" ]; then
-    CMD_SUFFIX=" --no-build"
+    CMD_SUFFIX="--no-build"
 else
     CMD_SUFFIX=""
 fi
@@ -26,4 +26,4 @@ fi
 VENV_NAME=triton-main
 bash .ci/triton/install.sh --conda-env "${VENV_NAME}" \
         --repo triton-lang/triton --commit main --side single --nightly \
-        --install-dir ${WORKSPACE_DIR}/triton-main "${CMD_SUFFIX}"
+        --install-dir ${WORKSPACE_DIR}/triton-main ${CMD_SUFFIX}

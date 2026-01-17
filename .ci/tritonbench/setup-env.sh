@@ -88,7 +88,7 @@ if [ -n "${USE_CUDA:-}" && -n "${TEST_NVIDIA_DRIVER:-}" ]; then
 fi
 
 if [ -n "${NO_BUILD:-}" ]; then
-    CMD_SUFFIX=" --no-build"
+    CMD_SUFFIX="--no-build"
 else
     CMD_SUFFIX=""
 fi
