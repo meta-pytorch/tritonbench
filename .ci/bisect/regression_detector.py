@@ -72,13 +72,18 @@ if __name__ == "__main__":
     # if subprocess failed, exit with the return code
     if not rc == 0:
         exit(rc)
-    # otherwise, check for the perf regression
+    # otherwise, check for the perf regression or accuracy regression
+    if current_value == 0 and "accuracy" in REPRO_CMDLINE:
+        print("Accuracy test failed, exit with 1.")
+        exit(1)
     current_value = get_current_value(stdout_lines)
     smaller_value = min(baseline_signal, current_value)
     larger_value = max(baseline_signal, current_value)
+    assert smaller_value > 0, "smaller_value should be positive, got zero."
+    ratio = (larger_value - smaller_value) / smaller_value * 100
     if larger_value > smaller_value * (1 + REGRESSION_THRESHOLD):
-        print(f"Regression detected: current value {current_value} / {baseline_signal} == {current_value / baseline_signal} , threshold {REGRESSION_THRESHOLD*100}%)")
+        print(f"Regression detected: current value {current_value}, {larger_value} / {smaller_value} - 1 == {ratio}% , threshold {REGRESSION_THRESHOLD*100}%)")
         exit(1)
     else:
-        print(f"No regression detected: current value {current_value} / {baseline_signal} == {current_value/baseline_signal}, threshold {REGRESSION_THRESHOLD*100}%)")
+        print(f"No regression detected: current value {current_value}, {larger_value} / {smaller_value} - 1 == {ratio}%, threshold {REGRESSION_THRESHOLD*100}%)")
         exit(0)
