@@ -27,7 +27,12 @@ jobs:
       - name: Install Tritonbench env
         run: |
           set -eux
-          bash ./.ci/tritonbench/setup-env.sh --hip
+          if [[ "${TRITONBENCH_SIDE_A_ENV}" == "meta-triton" ]]; then
+            CMD_SUFFIX=" --meta-triton"
+          elif [[ "${TRITONBENCH_SIDE_A_ENV}" == "triton-main" ]]; then
+            CMD_SUFFIX=" --triton-main"
+          fi
+          bash ./.ci/tritonbench/setup-env.sh --hip ${CMD_SUFFIX}
       - name: Test Tritonbench
         run: |
           set -eux
