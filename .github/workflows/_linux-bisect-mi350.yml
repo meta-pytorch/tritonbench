@@ -1,5 +1,8 @@
 name: linux-bisect-mi350
 on:
+  pull_request:
+    branches:
+      - xz9/amd-bisection
   workflow_call:
     inputs:
       conda_env:
