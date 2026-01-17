@@ -24,9 +24,9 @@ import subprocess
 
 from pathlib import Path
 # the default regression threshold is 10%
-REGRESSION_THRESHOLD = float(os.environ.get("REGRESSION_THRESHOLD", 0.1))
+REGRESSION_THRESHOLD = float(os.environ.get("REGRESSION_THRESHOLD", 10.0)) / 100.0
 # functional or performance regression
-FUNCTIONAL = bool(os.environ.get("FUNCTIONAL", False))
+FUNCTIONAL = bool(int(os.environ["FUNCTIONAL"]))
 # repro command line
 REPRO_CMDLINE = os.environ.get("REPRO_CMDLINE", None)
 # baseline log file

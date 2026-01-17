@@ -24,18 +24,17 @@ on:
         required: True
         type: string
         description: |
-          The known good commit (no regression)
+          Last good commit (no regression)
       bad_commit:
         required: True
         type: string
         description: |
-          The known bad commit (has regression)
+          First bad commit (has regression)
       regression_threshold:
-        required: True
         type: number
-        default: 0.1
+        default: 10
         description: |
-          Performance regression threshold
+          Performance regression threshold in %
 
 
 jobs:

@@ -25,16 +25,15 @@ on:
           The known bad commit (has regression)
       functional:
         type: boolean
-        required: False
-        default: false
+        required: True
         description: |
           Whether to detect functional regression (True) or performance regression (False)
       regression_threshold:
         type: string
         required: False
-        default: "0.1"
+        default: "10"
         description: |
-          Regression threshold (default 0.1 = 10%)
+          Performance regression threshold in %. Only used when functional is False.
 
 jobs:
   linux-bisect-mi350:
@@ -53,7 +52,7 @@ jobs:
       BAD_COMMIT: ${{ inputs.bad_commit }}
       REGRESSION_THRESHOLD: ${{ inputs.regression_threshold }}
       REPRO_CMDLINE: ${{ inputs.repro_cmdline }}
-      FUNCTIONAL: ${{ inputs.functional }}
+      FUNCTIONAL: ${{ inputs.functional && '1' || '0' }}
     steps:
       - name: Checkout Tritonbench
         uses: actions/checkout@v3

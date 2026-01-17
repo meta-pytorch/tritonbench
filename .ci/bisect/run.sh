@@ -40,16 +40,18 @@ fi
 
 TRITON_REPO=${TRITONBENCH_TRITON_REPO}
 TRITON_SRC_DIR=${TRITONBENCH_TRITON_INSTALL_DIR}
-REGRESSION_THRESHOLD="${REGRESSION_THRESHOLD:-0.1}"
+REGRESSION_THRESHOLD="${REGRESSION_THRESHOLD:-10}"
 
 TRITONBENCH_DIR=$(dirname "$(readlink -f "$0")")/../..
 
 echo "===== TritonBench Bisect Driver Script START ====="
 echo "Good commit: ${GOOD_COMMIT}"
 echo "Bad commit: ${BAD_COMMIT}"
+echo "Virtual Env: ${CONDA_ENV}"
 echo "Triton repo: ${TRITON_REPO}"
 echo "Triton installation dir: ${TRITON_SRC_DIR}"
 echo "Regression threshold: ${REGRESSION_THRESHOLD}"
+echo "Functional bisect: ${FUNCTIONAL}"
 echo "Repo command line: ${REPRO_CMDLINE}"
 echo "=================================================="
 
