@@ -139,6 +139,12 @@ def parse_op_args(args: List[str]):
     parser.add_argument(
         "--n-heads-kv", type=int, default=None, help="Number of heads kv"
     )
+    parser.add_argument(
+        "--n-heads-q-per-kv",
+        type=int,
+        default=1,
+        help="Number of heads per KV group for GQA",
+    )
     parser.add_argument("--d-head", type=int, default=64, help="specify head dimension")
     parser.add_argument(
         "--causal",
@@ -267,6 +273,7 @@ class Operator(BenchmarkOperator):
         self.N_HEAD_KV = (
             args.n_heads_kv if args.n_heads_kv is not None else args.n_heads
         )
+        self.N_HEADS_Q_PER_KV = args.n_heads_q_per_kv
         self.H = args.n_heads
         self.D_HEAD = args.d_head
         self.causal = args.causal
@@ -630,7 +637,11 @@ class Operator(BenchmarkOperator):
         elif self.input_types == "FA3_PAPER_SHAPES":
             return fa3_paper_inputs(**common_kwargs)
         elif self.input_types == "SWEEP_SHAPES":
-            return sweep_inputs(D=self.D_HEAD, **common_kwargs)
+            return sweep_inputs(
+                D=self.D_HEAD,
+                num_heads_q_per_kv=self.N_HEADS_Q_PER_KV,
+                **common_kwargs,
+            )
         else:
             raise AssertionError(f"Unknown input type {self.input_types}")
 

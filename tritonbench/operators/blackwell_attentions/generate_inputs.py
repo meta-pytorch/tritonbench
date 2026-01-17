@@ -100,14 +100,15 @@ def fa3_paper_inputs(**kwargs) -> Generator:
         )
 
 
-def sweep_inputs(D: int, **kwargs) -> Generator:
+def sweep_inputs(D: int, num_heads_q_per_kv: int, **kwargs) -> Generator:
     batch_sizes = [2**i for i in range(6)]
-    num_heads = [1, 4, 8, 16]
+    num_kv_heads = [1, 4, 8, 16]
     seqlen = [512 * (2**i) for i in range(6)]
     for B in batch_sizes:
-        for H in num_heads:
+        for N_HEADS_KV in num_kv_heads:
+            H = N_HEADS_KV * num_heads_q_per_kv
             for S in seqlen:
                 yield _generated_qkv_inputs(
-                    shape=(B, H, H, S, S, D),
+                    shape=(B, H, N_HEADS_KV, S, S, D),
                     **kwargs,
                 )
