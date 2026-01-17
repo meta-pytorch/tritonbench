@@ -74,11 +74,11 @@ if __name__ == "__main__":
         exit(rc)
     # otherwise, check for the perf regression
     current_value = get_current_value(stdout_lines)
-    smaller_value = min(baseline, current_value)
-    larger_value = max(baseline, current_value)
+    smaller_value = min(baseline_signal, current_value)
+    larger_value = max(baseline_signal, current_value)
     if larger_value > smaller_value * (1 + REGRESSION_THRESHOLD):
-        print(f"Regression detected: current value {current_value} / {baseline} == {current_value / baseline} , threshold {REGRESSION_THRESHOLD*100}%)")
+        print(f"Regression detected: current value {current_value} / {baseline_signal} == {current_value / baseline_signal} , threshold {REGRESSION_THRESHOLD*100}%)")
         exit(1)
     else:
-        print(f"No regression detected: current value {current_value} / {baseline} == {current_value/baseline}, threshold {REGRESSION_THRESHOLD*100}%)")
+        print(f"No regression detected: current value {current_value} / {baseline_signal} == {current_value/baseline_signal}, threshold {REGRESSION_THRESHOLD*100}%)")
         exit(0)
