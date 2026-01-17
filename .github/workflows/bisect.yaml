@@ -35,7 +35,7 @@ on:
         type: number
         default: 0.1
         description: |
-          The regression threshold to bisect on, default to 0.1 (10%)
+          Performance regression threshold
 
 
 jobs:

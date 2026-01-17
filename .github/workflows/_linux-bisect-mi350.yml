@@ -30,9 +30,9 @@ on:
         description: |
           Whether to detect functional regression (True) or performance regression (False)
       regression_threshold:
-        type: number
+        type: string
         required: False
-        default: 0.1
+        default: "0.1"
         description: |
           Regression threshold (default 0.1 = 10%)
 
