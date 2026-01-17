@@ -8,7 +8,22 @@ if [ -z "${WORKSPACE_DIR:-}" ]; then
   exit 1
 fi
 
+# Parse arguments
+while [[ "$#" -gt 0 ]]; do
+    case $1 in
+        --no-build) NO_BUILD="1"; ;;
+        *) echo "Unknown parameter passed: $1"; usage ;;
+    esac
+    shift
+done
+
+if [ -n "${NO_BUILD:-}" ]; then
+    CMD_SUFFIX=" --no-build"
+else
+    CMD_SUFFIX=""
+fi
+
 VENV_NAME=meta-triton
 bash .ci/triton/install.sh --conda-env "${VENV_NAME}" \
         --repo facebookexperimental/triton --commit main --side single --nightly \
-        --install-dir ${WORKSPACE_DIR}/meta-triton
+        --install-dir ${WORKSPACE_DIR}/meta-triton "${CMD_SUFFIX}"

@@ -63,9 +63,9 @@ jobs:
         run: |
           set -eux
           if [[ "${CONDA_ENV}" == "meta-triton" ]]; then
-            CMD_SUFFIX=" --meta-triton"
+            CMD_SUFFIX=" --meta-triton --no-build"
           elif [[ "${CONDA_ENV}" == "triton-main" ]]; then
-            CMD_SUFFIX=" --triton-main"
+            CMD_SUFFIX=" --triton-main --no-build"
           else
             echo "Unknown conda env ${CONDA_ENV}"
             exit 1

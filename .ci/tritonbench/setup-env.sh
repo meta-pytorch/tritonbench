@@ -17,6 +17,7 @@ while [[ "$#" -gt 0 ]]; do
         --hip) USE_HIP="1"; ;;
         --triton-main) USE_TRITON_MAIN="1"; ;;
         --meta-triton) USE_META_TRITON="1"; ;;
+        --no-build) NO_BUILD="1"; ;;
         --test-nvidia-driver) TEST_NVIDIA_DRIVER="1"; ;;
         *) echo "Unknown parameter passed: $1"; usage ;;
     esac
@@ -86,11 +87,17 @@ if [ -n "${USE_CUDA:-}" && -n "${TEST_NVIDIA_DRIVER:-}" ]; then
     sudo apt-get purge -y '^nvidia-'
 fi
 
+if [ -n "${NO_BUILD:-}" ]; then
+    CMD_SUFFIX=" --no-build"
+else
+    CMD_SUFFIX=""
+fi
+
 if [ -n "${USE_TRITON_MAIN:-}" ]; then
-    bash ./.ci/triton/install-triton-main.sh
+    bash ./.ci/triton/install-triton-main.sh ${CMD_SUFFIX}
 fi
 if [ -n "${USE_META_TRITON:-}" ]; then
-    bash ./.ci/triton/install-meta-triton.sh
+    bash ./.ci/triton/install-meta-triton.sh ${CMD_SUFFIX}
 fi
 
 cat "${SETUP_SCRIPT}"
