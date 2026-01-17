@@ -112,7 +112,7 @@ jobs:
         if: ${{ inputs.test_type == 'abtest' && inputs.side_b_triton && inputs.side_b_commit }}
         run: |
           set -eux
-          bash ./.ci/triton/install.sh --repo ${{ inputs.side_b_triton }} --commit ${{ inputs.side_b_commit }} --side a
+          bash ./.ci/triton/install.sh --repo ${{ inputs.side_b_triton }} --commit ${{ inputs.side_b_commit }} --side b
           export 'TRITONBENCH_SIDE_B_ENV="triton-side-b"' >> ${GITHUB_ENV}
       - name: Benchmark Triton (Side B)
         if: ${{ inputs.test_type == 'abtest' && inputs.side_b_triton && inputs.side_b_commit }}
