@@ -70,6 +70,11 @@ cd "${TRITONBENCH_DIR}"
 BISECT_LOG_DIR="${TRITONBENCH_DIR}/bisect_logs"
 BASELINE_LOG="${BISECT_LOG_DIR}/baseline.log"
 mkdir -p "${BISECT_LOG_DIR}"
+. .ci/triton/triton_install_utils.sh
+# install triton of the good commit
+checkout_triton_commit "${TRITON_SRC_DIR}" "${GOOD_COMMIT}"
+install_triton "${TRITON_SRC_DIR}"
+cd "${TRITONBENCH_DIR}"
 eval ${REPRO_CMDLINE} 2>&1 | tee "${BISECT_LOG_DIR}/baseline.log"
 
 # kick off the bisect!

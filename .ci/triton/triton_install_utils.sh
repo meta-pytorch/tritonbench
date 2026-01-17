@@ -45,4 +45,13 @@ install_triton() {
         pip install -r python/requirements.txt
         pip install -e .
     fi
+    cd -
+}
+
+checkout_triton_commit() {
+    TRITON_INSTALL_DIR=$1
+    COMMIT=$2
+    cd "${TRITON_INSTALL_DIR}"
+    git checkout "${COMMIT}"
+    git submodule update --init --recursive
 }
