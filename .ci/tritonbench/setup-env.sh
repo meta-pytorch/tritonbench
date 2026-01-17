@@ -82,7 +82,7 @@ fi
 
 bash .ci/tritonbench/install.sh
 
-if [ -n "${USE_CUDA:-}" && -n "${TEST_NVIDIA_DRIVER:-}" ]; then
+if [ -n "${USE_CUDA:-}" ] && [ -n "${TEST_NVIDIA_DRIVER:-}" ]; then
     sudo apt-get purge -y '^libnvidia-'
     sudo apt-get purge -y '^nvidia-'
 fi
