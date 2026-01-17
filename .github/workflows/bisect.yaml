@@ -47,8 +47,6 @@ jobs:
       bad_commit: ${{ inputs.bad_commit }}
       functional: ${{ inputs.functional }}
       regression_threshold: ${{ inputs.regression_threshold }}
-    secrets:
-      TRITONBENCH_SCRIBE_GRAPHQL_ACCESS_TOKEN: ${{ secrets.TRITONBENCH_SCRIBE_GRAPHQL_ACCESS_TOKEN }}
 
 
 concurrency:
