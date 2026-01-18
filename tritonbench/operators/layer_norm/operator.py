@@ -117,7 +117,7 @@ class Operator(BenchmarkOperator):
         (x, w_shape, weight, bias, eps) = args
         return lambda: LigerLayerNormFunction.apply(x, weight, bias, eps)
 
-    @register_benchmark(enabled=HAS_QUACK_KERNEL)
+    @register_benchmark(enabled=HAS_QUACK_KERNEL, fwd_only=True)
     def quack_layer_norm(self, *args) -> Callable:
         (x, w_shape, weight, bias, eps) = args
         return lambda: quack_layernorm(x, weight, bias=bias, eps=eps)
