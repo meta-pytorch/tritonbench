@@ -89,7 +89,10 @@ def is_blackwell() -> bool:
     gpu_model = get_nvidia_gpu_model()
     if gpu_model:
         return "B200" in gpu_model or "B300" in gpu_model
-    return torch.cuda.get_device_capability()[0] == 10
+    try:
+        return torch.cuda.get_device_capability()[0] == 10
+    except RuntimeError:
+        return False
 
 
 IS_BLACKWELL = is_blackwell()
