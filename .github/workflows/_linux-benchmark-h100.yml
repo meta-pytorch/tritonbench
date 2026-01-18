@@ -120,7 +120,7 @@ jobs:
             triton_side_a_json=$(find ./benchmark-output/${TRITONBENCH_SIDE_A_ENV} -name "result.json"  | sort -r | head -n 1)
             python ./.ci/upload/scribe.py --json ${triton_side_a_json}
           fi
-          if [[ -n "${TRITONBENCH_SIDE_B_ENV}" ]] && [[ -e "./benchmark-output/${TRITONBENCH_SIDE_B_ENV}"]]; then
+          if [[ -n "${TRITONBENCH_SIDE_B_ENV}" ]] && [[ -e "./benchmark-output/${TRITONBENCH_SIDE_B_ENV}" ]]; then
             triton_side_b_json=$(find ./benchmark-output/${TRITONBENCH_SIDE_B_ENV} -name "result.json"  | sort -r | head -n 1)
             python ./.ci/upload/scribe.py --json ${triton_side_b_json}
           fi
@@ -132,7 +132,7 @@ jobs:
             python ./.ci/test_infra/oss_ci_benchmark_v3.py --json "${triton_side_a_json}" \
                  --output "benchmark-output/clickhouse-results/result-${TRITONBENCH_SIDE_A_ENV}.json"
           fi
-          if [[ -n "${TRITONBENCH_SIDE_B_ENV}" ]] && [[ -e "./benchmark-output/${TRITONBENCH_SIDE_B_ENV}"]]; then
+          if [[ -n "${TRITONBENCH_SIDE_B_ENV}" ]] && [[ -e "./benchmark-output/${TRITONBENCH_SIDE_B_ENV}" ]]; then
             triton_side_a_json=$(find ./benchmark-output/${TRITONBENCH_SIDE_B_ENV} -name "result.json"  | sort -r | head -n 1)
             python ./.ci/test_infra/oss_ci_benchmark_v3.py --json "${triton_side_a_json}" \
                  --output "benchmark-output/clickhouse-results/result-${TRITONBENCH_SIDE_B_ENV}.json"
