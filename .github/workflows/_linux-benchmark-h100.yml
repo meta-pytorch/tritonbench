@@ -115,6 +115,7 @@ jobs:
           path: benchmark-output/
       - name: Upload result to Scribe
         run: |
+          set -xeu
           . "${SETUP_SCRIPT}"
           if [[ -n "${TRITONBENCH_SIDE_A_ENV}" ]]; then
             triton_side_a_json=$(find ./benchmark-output/${TRITONBENCH_SIDE_A_ENV} -name "result.json"  | sort -r | head -n 1)
@@ -126,8 +127,9 @@ jobs:
           fi
       - name: Rewrite Tritonbench json to ClickHouse style
         run: |
+          set -xeu
           . "${SETUP_SCRIPT}"
-          if [[ -n "${TRITONBENCH_SIDE_A_ENV}"" ]]; then
+          if [[ -n "${TRITONBENCH_SIDE_A_ENV}" ]]; then
             triton_side_a_json=$(find ./benchmark-output/${TRITONBENCH_SIDE_A_ENV} -name "result.json"  | sort -r | head -n 1)
             python ./.ci/test_infra/oss_ci_benchmark_v3.py --json "${triton_side_a_json}" \
                  --output "benchmark-output/clickhouse-results/result-${TRITONBENCH_SIDE_A_ENV}.json"
