@@ -47,9 +47,7 @@ def is_cuda():
 
 
 def num_sms():
-    if is_cuda():
-        return torch.cuda.get_device_properties("cuda").multi_processor_count
-    return 148
+    return torch.cuda.get_device_properties("cuda").multi_processor_count
 
 
 def torch_dtype_to_triton_dtype(dtype):
@@ -73,7 +71,8 @@ def torch_dtype_to_triton_dtype(dtype):
                 "BLOCK_SIZE_N": BLOCK_N,
                 "BLOCK_SIZE_K": BLOCK_K,
                 "NUM_SMS": num_sms(),
-            }
+            },
+            num_stages = 3 if torch.version.hip is None else 2,
         )
         for BLOCK_M, BLOCK_N, BLOCK_K in itertools.product([128, 256], repeat=3)
     ],
