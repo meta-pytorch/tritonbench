@@ -65,7 +65,7 @@ jobs:
         with:
           submodules: recursive
       - name: Install Tritonbench env
-        if : contains(matrix.runner, "amd")
+        if : contains(matrix.runner, 'amd')
         run: |
           set -eux
           if [[ "${CONDA_ENV}" == "meta-triton" ]]; then
