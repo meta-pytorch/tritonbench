@@ -65,6 +65,12 @@ git checkout -t origin/xz9/pr11-uv
 # install tritonparse
 uv pip install -e .
 
+# refresh triton repo to the latest commit
+cd "${TRITON_REPO}"
+git checkout main
+git pull origin main
+git submodule update --init --recursive
+
 # switch back to tritonbench dir
 cd "${TRITONBENCH_DIR}"
 
