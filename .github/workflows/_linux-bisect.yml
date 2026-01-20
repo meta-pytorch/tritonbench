@@ -65,7 +65,6 @@ jobs:
         with:
           submodules: recursive
       - name: Install Tritonbench env
-        if : contains(matrix.runner, 'amd')
         run: |
           set -eux
           if [[ "${CONDA_ENV}" == "meta-triton" ]]; then
@@ -79,7 +78,7 @@ jobs:
           if [[ "${RUNNER_TYPE}" =~ "amd" ]]; then
             CMD_SUFFIX="${CMD_SUFFIX} --hip"
           elif [[ "${RUNNER_TYPE}" =~ "gcp" ]]; then
-            CMD_SUFFIX="${CMD_SUFFIX} --cuda"
+            exit 0
           else
             echo "Unknown runner type ${RUNNER_TYPE}"
             exit 1
