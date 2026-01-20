@@ -9,6 +9,12 @@ on:
           - 'triton-main'
           - 'meta-triton'
         description: 'Conda env to bisect'
+      runner:
+        type: choice
+        default: 'h100'
+        options:
+          - 'h100'
+          - 'mi350x'
       bisect_type:
         type: choice
         default: 'performance'
@@ -38,9 +44,37 @@ on:
 
 
 jobs:
+  set-parameters:
+    runs-on: ubuntu-latest
+    outputs:
+      benchmark_matrix: ${{ steps.set-parameters.outputs.benchmark_matrix }}
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+
+      - name: Set parameters
+        id: set-parameters
+        shell: bash
+        env:
+          TRITON_CHANNEL: ${{ inputs.conda_env || '' }}
+          RUNNER: ${{ inputs.runner || '' }}
+        run: |
+          set -eux
+
+          # The generated matrix is grouped by benchmark and runner
+          python .ci/bisect/generate_bisect_parameters.py \
+            --triton-channel "${TRITON_CHANNEL}" \
+            --runner "${RUNNER}"
+
   mi350-bisect:
-    uses: ./.github/workflows/_linux-bisect-mi350.yml
+    uses: ./.github/workflows/_linux-bisect.yml
+    needs: set-parameters
     with:
+      matrix: ${{ needs.set-parameters.outputs.benchmark_matrix }}
       conda_env: ${{ inputs.conda_env }}
       repro_cmdline: ${{ inputs.repro_cmdline }}
       good_commit: ${{ inputs.good_commit }}

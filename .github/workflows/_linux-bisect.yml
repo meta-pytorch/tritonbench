@@ -2,6 +2,9 @@ name: linux-bisect-mi350
 on:
   workflow_call:
     inputs:
+      matrix:
+        required: true
+        type: string
       conda_env:
         required: True
         type: string
@@ -36,18 +39,21 @@ on:
           Performance regression threshold in %. Only used when functional is False.
 
 jobs:
-  linux-bisect-mi350:
+  linux-bisect:
+    strategy:
+      fail-fast: false
+      matrix: ${{ fromJSON(inputs.matrix) }}
     if: github.repository_owner == 'meta-pytorch'
-    runs-on: [amd-mi350-runner]
+    runs-on: ${{ matrix.runner }}
     timeout-minutes: 480
     environment: docker-s3-upload
     env:
       WORKSPACE_DIR: "/workspace"
       SETUP_SCRIPT: "/workspace/setup_instance.sh"
-      RUNNER_TYPE: "amd-mi350-runner"
-      CONDA_ENV: ${{ inputs.conda_env }}
       UV_VENV_DIR: "/workspace/uv_venvs"
-      JOB_NAME: tritonbench-mi350-bisect
+      RUNNER_TYPE: ${{ matrix.runner }}
+      CONDA_ENV: ${{ matrix.triton_channel }}
+      JOB_NAME: tritonbench-${{ matrix.runner }}-bisect
       GOOD_COMMIT: ${{ inputs.good_commit }}
       BAD_COMMIT: ${{ inputs.bad_commit }}
       REGRESSION_THRESHOLD: ${{ inputs.regression_threshold }}
@@ -69,7 +75,15 @@ jobs:
             echo "Unknown conda env ${CONDA_ENV}"
             exit 1
           fi
-          bash ./.ci/tritonbench/setup-env.sh --hip ${CMD_SUFFIX}
+          if [[ "${RUNNER_TYPE}" =~ "amd" ]]; then
+            CMD_SUFFIX="${CMD_SUFFIX} --hip"
+          elif [[ "${RUNNER_TYPE}" =~ "gcp" ]]; then
+            CMD_SUFFIX="${CMD_SUFFIX} --cuda"
+          else
+            echo "Unknown runner type ${RUNNER_TYPE}"
+            exit 1
+          fi
+          bash ./.ci/tritonbench/setup-env.sh ${CMD_SUFFIX}
       - name: Run Bisection
         run: |
           set -eux
