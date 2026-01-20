@@ -481,7 +481,7 @@ def get_fwd_config_space(
     bmList = [128] if enable_ws else [64, 128]
     bnList = [64, 128]  # To handle hDim of 64, we need BLOCK_N to be <= 64
     wList = [4] if enable_ws else [4, 8]
-    stageList = [2] if enable_ws else [3, 4, 7]
+    stageList = [2] if enable_ws or torch.version.hip is not None else [3, 4, 7]
     for BM in bmList:
         for BN in bnList:
             for sched in schedList:  # set in global scope
