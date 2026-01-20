@@ -87,7 +87,7 @@ def generate_benchmark_matrix(triton_channel: str, runner: str) -> Dict[str, Any
 def main() -> None:
     args = parse_args()
     runner = args.runner
-    triton_channel = args.triton
+    triton_channel = args.triton_channel
     benchmark_matrix = generate_benchmark_matrix(triton_channel, runner)
     print(benchmark_matrix)
     set_output("benchmark_matrix", benchmark_matrix)
