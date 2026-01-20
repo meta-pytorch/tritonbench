@@ -66,7 +66,7 @@ git checkout -t origin/xz9/pr11-uv
 uv pip install -e .
 
 # refresh triton repo to the latest commit
-cd "${TRITON_REPO}"
+cd "${TRITON_SRC_DIR}"
 git checkout main
 git pull origin main
 git submodule update --init --recursive
