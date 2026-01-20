@@ -103,7 +103,9 @@ def _attn_fwd_subtile(
         qk0, qk1 = qk.reshape([PM, 2, PN // 2]).permute(0, 2, 1).split()
 
         p0 = tl.math.exp2(qk0)
+        p0_bf16 = p0.to(dtype)
         p1 = tl.math.exp2(qk1)
+        p1_bf16 = p1.to(dtype)
 
         p = tl.join(p0, p1).permute(0, 2, 1).reshape([PM, PN])
     else:
@@ -141,7 +143,10 @@ def _attn_fwd_subtile(
     # We can potentially move these to be before updating l_ij, so the dot
     # is not blocked.
     # prepare p and v for the dot
-    p_bf16 = p.to(dtype)
+    if not SUBTILING_P:
+        p_bf16 = p.to(dtype)
+    else:
+        p_bf16 = tl.join(p0_bf16, p1_bf16).permute(0, 2, 1).reshape([PM, PN])
     # note that this non transposed v for FP8 is only supported on Blackwell
     acc = tl.dot(p_bf16, v, acc)
     if not FADD2_REDUCE:
@@ -332,7 +337,7 @@ else:
         for s in NUM_STAGES_OPTIONS
         for w in [4]
         for subtile in [True]
-        for subtile_p in [False]
+        for subtile_p in [True, False]
         for vectmul in [1]
         for add2reduce in [False]
         for maxreg in [152, 192]
