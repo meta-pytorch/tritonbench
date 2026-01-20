@@ -65,6 +65,7 @@ jobs:
         with:
           submodules: recursive
       - name: Install Tritonbench env
+        if : contains(matrix.runner, "amd")
         run: |
           set -eux
           if [[ "${CONDA_ENV}" == "meta-triton" ]]; then
@@ -87,6 +88,7 @@ jobs:
       - name: Run Bisection
         run: |
           set -eux
+          . "${SETUP_SCRIPT}"
           bash ./.ci/bisect/run.sh
       - name: Upload bisect logs
         if: always()
