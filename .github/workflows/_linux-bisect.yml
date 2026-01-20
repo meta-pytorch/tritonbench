@@ -1,4 +1,4 @@
-name: linux-bisect-mi350
+name: linux-bisect
 on:
   workflow_call:
     inputs:

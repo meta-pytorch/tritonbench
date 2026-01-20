@@ -70,7 +70,7 @@ jobs:
             --triton-channel "${TRITON_CHANNEL}" \
             --runner "${RUNNER}"
 
-  mi350-bisect:
+  linux-bisect:
     uses: ./.github/workflows/_linux-bisect.yml
     needs: set-parameters
     with:
