@@ -3,6 +3,7 @@ from typing import Optional
 
 import torch
 import triton
+from triton import knobs
 import triton.language as tl
 from torch._inductor.kernel.mm import ScalingType
 from tritonbench.utils.env_utils import is_cuda
@@ -22,6 +23,16 @@ if is_cuda():
         cublas = nvidia.cublas.CublasLt(cublas_workspace)
     except (ImportError, IOError, AttributeError):
         pass
+
+
+def is_hip_async_copy_enabled():
+    if is_cuda():
+        return False
+    
+    # default is enabled
+    if knobs.amd.use_async_copy is None:
+        return True
+    return knobs.amd.use_async_copy
 
 
 def _matmul_launch_metadata(grid, kernel, args):
@@ -135,7 +146,7 @@ def matmul_persistent(a, b):
             "BLOCK_SIZE_N": 256,
             "BLOCK_SIZE_K": 128,
             "GROUP_SIZE_M": 8,
-            "num_stages": 4 if torch.version.hip is None else 3,
+            "num_stages": 3 if is_hip_async_copy_enabled()  else 4,
             "num_warps": 8,
         },
         torch.float16: {
@@ -143,7 +154,7 @@ def matmul_persistent(a, b):
             "BLOCK_SIZE_N": 256,
             "BLOCK_SIZE_K": 64,
             "GROUP_SIZE_M": 8,
-            "num_stages": 3 if torch.version.hip is None else 2,
+            "num_stages": 2 if is_hip_async_copy_enabled() else 3,
             "num_warps": 8,
         },
         torch.bfloat16: {
@@ -151,7 +162,7 @@ def matmul_persistent(a, b):
             "BLOCK_SIZE_N": 256,
             "BLOCK_SIZE_K": 64,
             "GROUP_SIZE_M": 8,
-            "num_stages": 3 if torch.version.hip is None else 2,
+            "num_stages": 2 if is_hip_async_copy_enabled() else 3,
             "num_warps": 8,
         },
     }

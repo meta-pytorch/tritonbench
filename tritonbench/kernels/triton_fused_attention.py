@@ -17,6 +17,8 @@ from typing import Optional
 import torch
 import triton
 import triton.language as tl
+from triton import knobs
+
 
 from .attention_utils import (
     HAS_EXPLICIT_WS,  # guard new tuning configs such as num_consumer_groups
@@ -26,6 +28,20 @@ from .attention_utils import (
     WITH_COMPPIPE,
     WITH_TMA,
 )
+
+
+def is_cuda():
+    return triton.runtime.driver.active.get_current_target().backend == "cuda"
+
+
+def is_hip_async_copy_enabled():
+    if is_cuda():
+        return False
+    
+    # default is enabled
+    if knobs.amd.use_async_copy is None:
+        return True
+    return knobs.amd.use_async_copy
 
 
 if HAS_TMA_DESC:
@@ -481,7 +497,7 @@ def get_fwd_config_space(
     bmList = [128] if enable_ws else [64, 128]
     bnList = [64, 128]  # To handle hDim of 64, we need BLOCK_N to be <= 64
     wList = [4] if enable_ws else [4, 8]
-    stageList = [2] if enable_ws else [3, 4, 7] if torch.version.hip is None else [3]
+    stageList = [2] if enable_ws else [3] if is_hip_async_copy_enabled() else [3, 4, 7]
     for BM in bmList:
         for BN in bnList:
             for sched in schedList:  # set in global scope
