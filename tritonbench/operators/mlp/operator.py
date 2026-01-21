@@ -3,6 +3,7 @@ import torch
 import torch.nn as nn 
 import argparse
 import torch
+import triton
 
 from functools import partial
 
@@ -12,6 +13,12 @@ from tritonbench.utils.triton_op import (
     register_benchmark,
     register_metric,
 )
+
+from torch._C import _cuda_getCurrentRawStream as get_raw_stream
+from .triton_kernel import triton_poi_fused_addmm_relu_view_0
+
+BATCH_SIZE = 960
+N_ELEMENTS = 2048
 
 class Mlp(nn.Module):
     """ MLP as used in Vision Transformer, MLP-Mixer and related networks
@@ -78,16 +85,109 @@ class Operator(BenchmarkOperator):
         self.gt_model_copy.load_state_dict(self.gt_model.state_dict())
         self.compiled_model = torch.compile(self.gt_model_copy, dynamic=False)
 
-    def get_input_iter(self) -> Generator:
-        B, C, T, H, W = 8, 512, 64, 3, 5
-        for i in range(10):
-            yield torch.randn((B, T, H, W, C), generator=torch.Generator().manual_seed(i), dtype=torch.bfloat16).cuda()
-            # yield torch.randn((B, T, H, W, C), generator=torch.Generator().manual_seed(i)).cuda()
+    # def get_input_iter(self) -> Generator:
+    #     # B, C, T, H, W = 8, 512, 64, 3, 5
+    #     # for i in range(10):
+    #     #     yield torch.randn((B, T, H, W, C), generator=torch.Generator().manual_seed(i), dtype=torch.bfloat16).cuda()
+    #         # yield torch.randn((B, T, H, W, C), generator=torch.Generator().manual_seed(i)).cuda()
+    #     # arg0 = torch.randn((2048, 512), dtype=torch.bfloat16).cuda()
+    #     # arg1 = torch.randn((2048, ), dtype=torch.bfloat16).cuda()
+    #     # arg2 = torch.randn((64, 3, 5, 512), dtype=torch.bfloat16).cuda()
+    #     arg0 = torch.randn((512, 2048), dtype=torch.bfloat16).cuda()
+    #     arg1 = torch.randn((2048, ), dtype=torch.bfloat16).cuda()
+    #     arg2 = torch.randn((960, 512), dtype=torch.bfloat16).cuda()
+    #     yield (arg0, arg1, arg2, )
 
-    @register_benchmark(baseline=True)
-    def gt_mlp(self, input, *args, **kwargs) -> Callable:
-        return lambda: run_forward(self.gt_model, input)
+    # @register_benchmark(baseline=True)
+    # def gt_mlp(self, input, *args, **kwargs) -> Callable:
+    #     return lambda: run_forward(self.gt_model, input)
+
+    # @register_benchmark()
+    # def compile_mlp(self, input, *args, **kwargs) -> Callable:
+    #    return lambda: run_forward(self.compiled_model, input)
+
+    # @register_benchmark()
+    # def cpu(self, arg0, arg1, arg2):
+    #     # reinterpret_tensor = torch._C._dynamo.guards._reinterpret_tensor
+    #     # arg2_1 = reinterpret_tensor(arg2, (960, 512), (512, 1), 0)
+    #     # arg0_1 = reinterpret_tensor(arg0, (512, 2048), (1, 512), 0)
+    #     arg1_cpu = arg1.cpu()
+    #     arg0_cpu = arg0.cpu()
+    #     arg2_cpu = arg2.cpu()
+    #     out3 = torch.randn(960, 2048, dtype=torch.bfloat16).cpu()
+    #     def _inner():
+    #         # out1 = torch.addmm(arg1_cpu, arg2_cpu, arg0_cpu)
+    #         # torch.clamp_min(out1, 0, out=out2)
+    #         out1 = torch.mm(arg2_cpu, arg0_cpu)
+    #         out2 = torch.add(out1, arg1_cpu)
+    #         torch.clamp_min(out2, 0, out=out3)
+    #         return out2.cuda()
+    #     return _inner
+
+    # @register_benchmark()
+    # def aten(self, arg0, arg1, arg2):
+    #     # reinterpret_tensor = torch._C._dynamo.guards._reinterpret_tensor
+    #     # arg2_1 = reinterpret_tensor(arg2, (960, 512), (512, 1), 0)
+    #     # arg0_1 = reinterpret_tensor(arg0, (512, 2048), (1, 512), 0)
+    #     out3 = torch.randn(960, 2048, dtype=torch.bfloat16).cuda()
+    #     def _inner():
+    #         out1 = torch.addmm(arg1, arg2, arg0)
+    #         # out1 = torch.mm(arg2, arg0)
+    #         # out2 = torch.add(out1, arg1)
+    #         torch.clamp_min(out1, 0, out=out3)
+    #         return out3
+    #     return _inner
+
+    # @register_benchmark()
+    # def triton(self, arg0, arg1, arg2):
+    #     n_elements = 1966080
+    #     grid = lambda meta: (triton.cdiv(n_elements, meta['XBLOCK']),)
+    #     def _inner():
+    #         # stream0 = get_raw_stream(0)
+    #         buf0 = torch.mm(arg2, arg0)
+    #         # triton_poi_fused_addmm_relu_view_0.run(buf0, arg1, 1966080, stream=stream0)
+    #         triton_poi_fused_addmm_relu_view_0[grid](buf0, arg1, 1966080, XBLOCK=1024)
+    #         return buf0
+    #     return _inner
+
+
+    def get_input_iter(self) -> Generator:
+        # B, C, T, H, W = 8, 512, 64, 3, 5
+        # for i in range(10):
+        #     yield torch.randn((B, T, H, W, C), generator=torch.Generator().manual_seed(i), dtype=torch.bfloat16).cuda()
+            # yield torch.randn((B, T, H, W, C), generator=torch.Generator().manual_seed(i)).cuda()
+        arg0 = torch.randn((512, 2048), dtype=torch.bfloat16).cuda()
+        arg1 = torch.randn((2048, ), dtype=torch.bfloat16).cuda()
+        arg2 = torch.randn((960, 512), dtype=torch.bfloat16).cuda()
+        yield (arg0, arg1, arg2)
+        return
 
     @register_benchmark()
-    def compile_mlp(self, input, *args, **kwargs) -> Callable:
-        return lambda: run_forward(self.compiled_model, input)
+    def aten(self, arg0, arg1, arg2):
+        out3 = torch.randn(BATCH_SIZE, N_ELEMENTS, dtype=torch.bfloat16).cuda()
+        def _inner():
+            out2 = torch.addmm(arg1, arg2, arg0)
+            # out2 = torch.add(out, arg1)
+            torch.clamp_min(out2, 0, out=out3)
+            return out3
+        return _inner
+    
+    @register_benchmark()
+    def aten2(self, arg0, arg1, arg2):
+        out3 = torch.randn(BATCH_SIZE, N_ELEMENTS, dtype=torch.bfloat16).cuda()
+        def _inner():
+            out = torch.mm(arg2, arg0)
+            out2 = torch.add(out, arg1)
+            torch.clamp_min(out2, 0, out=out3)
+            return out3
+        return _inner
+
+    @register_benchmark()
+    def triton(self, arg0, arg1, arg2):
+        n_elements = BATCH_SIZE * N_ELEMENTS
+        grid = lambda meta: (triton.cdiv(n_elements, meta['XBLOCK']),)
+        def _inner():
+            out = torch.mm(arg2, arg0)
+            triton_poi_fused_addmm_relu_view_0[grid](out, arg1, n_elements, XBLOCK=2048)
+            return out
+        return _inner
