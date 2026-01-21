@@ -72,6 +72,22 @@ except SystemError as e:
     print(f"SystemError resulted from importing FA4: {e.__class__.__name__}: {e}")
     traceback.print_exc()
 
+# [Optional] Vanilla Flash Attention v4
+try:
+    from flash_attn.cute import flash_attn_func as upstream_fa4_flash_attn_func
+
+    HAS_VANILLA_FA4 = True
+except (ImportError, IOError, AttributeError):
+    HAS_VANILLA_FA4 = False
+except SystemError as e:
+    HAS_VANILLA_FA4 = False
+    import traceback
+
+    print(
+        f"SystemError resulted from importing vanilla FA4: {e.__class__.__name__}: {e}"
+    )
+    traceback.print_exc()
+
 from ..flash_attention.test_fmha_utils import permute_qkv
 
 # [Optional] xformers backend
@@ -454,6 +470,19 @@ class Operator(BenchmarkOperator):
             causal=self.causal,
             window_size=self.window_size if self.local else (None, None),
             deterministic=self.deterministic,
+        )
+        return preproc_permute, fn
+
+    @register_benchmark(
+        enabled=(IS_BLACKWELL and HAS_VANILLA_FA4), label="vanilla-FAv4"
+    )
+    @multi_input_wrapper
+    def vanilla_fa4(self, *args) -> Tuple[Callable, Callable]:
+        fn = partial(
+            upstream_fa4_flash_attn_func,
+            softmax_scale=self.sm_scale,
+            causal=self.causal,
+            window_size=self.window_size if self.local else (None, None),
         )
         return preproc_permute, fn
 
