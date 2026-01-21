@@ -72,7 +72,7 @@ def torch_dtype_to_triton_dtype(dtype):
                 "BLOCK_SIZE_K": BLOCK_K,
                 "NUM_SMS": num_sms(),
             },
-            num_stages = 3 if torch.version.hip is None else 2,
+            num_stages=3 if torch.version.hip is None else 2,
         )
         for BLOCK_M, BLOCK_N, BLOCK_K in itertools.product([128, 256], repeat=3)
     ],
