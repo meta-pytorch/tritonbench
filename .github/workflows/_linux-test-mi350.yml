@@ -20,7 +20,6 @@ jobs:
       SETUP_SCRIPT: "/workspace/setup_instance.sh"
       CONDA_ENV: ${{ inputs.conda_env }}
       DOCKER_IMAGE: "ghcr.io/meta-pytorch/tritonbench:rocm-latest"
-      TRITON_HIP_USE_ASYNC_COPY: "0"
     steps:
       - name: Checkout Tritonbench
         uses: actions/checkout@v3
