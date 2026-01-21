@@ -92,7 +92,7 @@ jobs:
       - name: Setup uploader dependencies
         run: |
           set -eux
-          . "${SETUP_SCRIPT}"
+          CONDA_ENV=${TRITONBENCH_SIDE_A_ENV} . "${SETUP_SCRIPT}"
           uv pip install -r .ci/upload/requirements.txt
       - name: Compile Triton side A (On Demand)
         if: ${{ inputs.side_a_triton && inputs.side_a_commit }}
@@ -137,6 +137,7 @@ jobs:
       - name: Upload result to Scribe
         run: |
           set -xeu
+          CONDA_ENV=${TRITONBENCH_SIDE_A_ENV} . "${SETUP_SCRIPT}"
           if [[ -n "${TRITONBENCH_SIDE_A_ENV}" ]]; then
             latest_result_json=$(find ./benchmark-output/${TRITONBENCH_SIDE_A_ENV} -name "result.json"  | sort -r | head -n 1)
             python3 ./.ci/upload/scribe.py --json ${latest_result_json}
@@ -148,7 +149,7 @@ jobs:
       - name: Rewrite Tritonbench json to ClickHouse style
         run: |
           set -xeu
-          . "${SETUP_SCRIPT}"
+          CONDA_ENV=${TRITONBENCH_SIDE_A_ENV} . "${SETUP_SCRIPT}"
           if [[ -n "${TRITONBENCH_SIDE_A_ENV}" ]]; then
             latest_result_json=$(find ./benchmark-output/${TRITONBENCH_SIDE_A_ENV} -name "result.json"  | sort -r | head -n 1)
             python3 ./.ci/test_infra/oss_ci_benchmark_v3.py --json ${latest_result_json} \
