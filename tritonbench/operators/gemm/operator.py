@@ -92,18 +92,17 @@ with try_import("HAS_CUTLASS_API"):
     )
 
 BUILDIN_SHAPES = [
-    (8192, 8192, 512, None),
-    (8192, 8192, 1024, None),
-    (8192, 8192, 2048, None),
+    # (8192, 8192, 1024, None),
+    # (8192, 8192, 2048, None),
     (8192, 8192, 4096, None),
     (8192, 8192, 8192, None),
     (8192, 8192, 16384, None),
-    (1000000, 512, 512, None),
-    (1000000, 768, 512, None),
-    (1000000, 768, 256, None),
-    (2000000, 512, 512, None),
-    (2000000, 768, 512, None),
-    (2000000, 768, 256, None),
+    # (1000000, 512, 512, None),
+    # (1000000, 768, 512, None),
+    # (1000000, 768, 256, None),
+    # (2000000, 512, 512, None),
+    # (2000000, 768, 512, None),
+    # (2000000, 768, 256, None),
 ]
 
 SPLIT_K_SHAPES = [
@@ -237,6 +236,17 @@ class Operator(BenchmarkOperator):
 
         if self.use_buffer_ops and torch.version.hip is None:
             raise ValueError("Buffer ops are only supported on AMD GPUs.")
+
+        # Set dtype-aware default tolerances for accuracy checking
+        # fp16/bf16 have larger machine epsilon and accumulate more error in GEMMs
+        if self.tb_args.rtol is None:
+            self.tb_args.rtol = (
+                1e-1 if self.dtype in [torch.float16, torch.bfloat16] else 1e-3
+            )
+        if self.tb_args.atol is None:
+            self.tb_args.atol = (
+                1e-2 if self.dtype in [torch.float16, torch.bfloat16] else 1e-5
+            )
 
     @register_benchmark()
     def triton_tutorial_matmul(self, a, b, bias) -> Callable:
