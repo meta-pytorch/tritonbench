@@ -41,6 +41,16 @@ def is_cuda() -> bool:
     return torch.version.cuda is not None
 
 
+def is_cuda_available() -> bool:
+    """Check if CUDA is actually available at runtime (not just build-time support)."""
+    if not is_cuda():
+        return False
+    try:
+        return torch.cuda.is_available() and torch.cuda.device_count() > 0
+    except Exception:
+        return False
+
+
 def has_manifold() -> bool:
     return shutil.which("manifold") is not None
 
@@ -84,14 +94,14 @@ def is_hip_mi300():
 
 def is_blackwell() -> bool:
     """Check if running on an NVIDIA Blackwell GPU (B200 or B300 series)."""
-    if not is_cuda():
+    if not is_cuda_available():
         return False
     gpu_model = get_nvidia_gpu_model()
     if gpu_model:
         return "B200" in gpu_model or "B300" in gpu_model
     try:
         return torch.cuda.get_device_capability()[0] == 10
-    except RuntimeError:
+    except Exception:
         return False
 
 
@@ -100,14 +110,19 @@ IS_BLACKWELL = is_blackwell()
 
 def is_h100() -> bool:
     """Check if running on an NVIDIA H100 GPU."""
-    if not is_cuda():
+    if not is_cuda_available():
         return False
     gpu_model = get_nvidia_gpu_model()
     return "H100" in gpu_model
 
 
 def supports_tma():
-    return is_cuda() and torch.cuda.get_device_capability()[0] >= 9
+    if not is_cuda_available():
+        return False
+    try:
+        return torch.cuda.get_device_capability()[0] >= 9
+    except Exception:
+        return False
 
 
 def is_cu130():
