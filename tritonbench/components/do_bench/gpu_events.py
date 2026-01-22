@@ -3,6 +3,7 @@ import triton
 import triton.language as tl
 from tritonbench.utils.constants import DEFAULT_N_REP, DEFAULT_N_WARMUP
 from tritonbench.utils.env_utils import is_hip
+from tritonbench.utils.gpu_utils import sleep_amd
 
 from .common import summarize_statistics
 
@@ -25,6 +26,7 @@ def _block_stream_kernel(
     timeout_ptr,
     sleep_ns: tl.constexpr = 1000000,
     signal: tl.constexpr = 1,
+    is_amd: tl.constexpr = False,
 ):
     """
     Sleep kernel that performs an iterative check on a single value
@@ -38,6 +40,7 @@ def _block_stream_kernel(
         buffer_ptr: Pointer to a single-element buffer in global memory.
         sleep_ns: Sleep duration in nanoseconds between checks (default: 1ms = 1,000,000 ns).
         signal: The value to unblock the stream.
+        is_amd: Whether to use AMD-specific sleep instruction.
     """
     value = 0
     timeout = 1000
@@ -46,16 +49,19 @@ def _block_stream_kernel(
         # Read the value from global memory using volatile memory access
         value = tl.load(signal_ptr, volatile=True)
 
-        # Sleep for a few milliseconds before checking again
-        # Using CUDA PTX nanosleep instruction to reduce polling overhead
-        tl.inline_asm_elementwise(
-            "nanosleep.u32 $1;",
-            "=r, r",
-            args=[sleep_ns],
-            dtype=tl.int32,
-            is_pure=False,
-            pack=1,
-        )
+        # Sleep for a few milliseconds before checking again to reduce polling overhead
+        if is_amd:
+            sleep_amd(sleep_ns)
+        else:
+            # NVIDIA: CUDA PTX nanosleep instruction
+            tl.inline_asm_elementwise(
+                "nanosleep.u32 $1;",
+                "=r, r",
+                args=[sleep_ns],
+                dtype=tl.int32,
+                is_pure=False,
+                pack=1,
+            )
         num_checks += 1
 
     if value == signal:
@@ -68,6 +74,7 @@ def _block_stream(
     timeout_buffer: torch.Tensor,
     sleep_ns: int = 1000000,
     signal: int = 1,
+    is_amd: bool = False,
 ):
     """
     Block stream function that calls the block_stream_kernel.
@@ -78,9 +85,10 @@ def _block_stream(
             timeout in global memory. It's intalized with a non-zero value.
         sleep_ns: Sleep duration in nanoseconds between checks (default: 1ms = 1,000,000 ns).
         signal: The value to unblock the stream.
+        is_amd: Whether to use AMD-specific sleep instruction.
     """
     _block_stream_kernel[(1,)](
-        signal_buffer, timeout_buffer, sleep_ns, signal, num_warps=1
+        signal_buffer, timeout_buffer, sleep_ns, signal, is_amd, num_warps=1
     )
 
 
@@ -140,7 +148,9 @@ def do_bench_events(
         List of measured kernel times in milliseconds (if return_mode="all") or single value.
     """
     assert not use_cudagraph, "CUDA graphs are not supported for the gpu_events mode"
-    assert not is_hip(), "AMD GPUs are not supported for the gpu_events mode"
+
+    # Detect AMD for GPU sleep
+    amd_device = is_hip()
 
     # Get cache for L2 cache clearing
     cache = (
@@ -184,7 +194,10 @@ def do_bench_events(
     # Warm up block and unblock streams
     _unblock_stream(signal_buffer=signal_buffer, signal=signal)
     _block_stream(
-        signal_buffer=signal_buffer, timeout_buffer=timeout_buffer, signal=signal
+        signal_buffer=signal_buffer,
+        timeout_buffer=timeout_buffer,
+        signal=signal,
+        is_amd=amd_device,
     )
     torch.cuda.synchronize()
 
@@ -227,7 +240,10 @@ def do_bench_events(
         # Start benchmarking
         # Block the stream until the kernel dispatching is complete
         _block_stream(
-            signal_buffer=signal_buffer, timeout_buffer=timeout_buffer, signal=signal
+            signal_buffer=signal_buffer,
+            timeout_buffer=timeout_buffer,
+            signal=signal,
+            is_amd=amd_device,
         )
 
         # Benchmark
