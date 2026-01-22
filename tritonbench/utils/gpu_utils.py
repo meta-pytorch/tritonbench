@@ -4,11 +4,16 @@ import subprocess
 from contextlib import contextmanager
 from typing import Dict, List, Optional
 
+import triton
+import triton.language as tl
+
 try:
     from tritonbench.utils.env_utils import is_mtia
 except ModuleNotFoundError:
     # In CI environment, we don't have torch installed at this point
     is_mtia = lambda: False
+
+AMD_SLEEP_NS_PER_ITERATION = 3870
 
 # Defer MTIA check to avoid triggering Triton driver initialization at import time
 try:
@@ -276,3 +281,32 @@ def get_amd_device_name() -> str:
         f"Unsupported AMD GCN Arch {gcn_arch_major}.{gcn_arch_minor}"
     )
     return AMD_DEVICE_NAME_MAPPING[(gcn_arch_major, gcn_arch_minor)]
+
+
+@triton.jit
+def sleep_amd(sleep_ns: tl.constexpr = 1000000):
+    """
+    AMD GPU sleep using s_sleep instruction.
+
+    Each iteration of s_sleep 127 sleeps for ~127*64 = 8,128 clock cycles.
+    On MI300X @ 2.1 GHz, this is approximately 3.87 μs per iteration.
+    On MI350X @ 2.2 GHz, this is approximately 3.69 μs per iteration.
+
+    Args:
+        sleep_ns: Target sleep duration in nanoseconds.
+                 Default 1000000 (1ms).
+
+    Note:
+        Timing is approximate and varies with GPU clock frequency.
+    """
+    # Calculate iterations: sleep_ns / 3870 ns per iteration
+    num_iterations: tl.constexpr = max(1, sleep_ns // AMD_SLEEP_NS_PER_ITERATION)
+    for _ in range(num_iterations):
+        tl.inline_asm_elementwise(
+            "s_sleep 127",
+            "=r",
+            args=[],
+            dtype=tl.int32,
+            is_pure=False,
+            pack=1,
+        )
