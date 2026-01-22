@@ -38,12 +38,12 @@ def _block_stream_kernel(
 
     Args:
         buffer_ptr: Pointer to a single-element buffer in global memory.
-        sleep_ns: Sleep duration in nanoseconds between checks (default: 1ms = 1,000,000 ns).
+        sleep_ns: Sleep duration in nanoseconds between checks (default: 1ms).
         signal: The value to unblock the stream.
         is_amd: Whether to use AMD-specific sleep instruction.
     """
     value = 0
-    timeout = 1000
+    timeout = 10000
     num_checks = 0
     while value != signal and num_checks <= timeout:
         # Read the value from global memory using volatile memory access
@@ -250,8 +250,7 @@ def do_bench_events(
         for i in range(n_repeat):
             _bench_fn(i)
         if fn_only_bench:
-            time_events[-1].record()
-
+            time_events[n_repeat].record()
         # Unblock the stream to allow the benchmark to run
         with torch.cuda.stream(unblocking_stream):
             _unblock_stream(signal_buffer=signal_buffer, signal=signal)
@@ -261,14 +260,12 @@ def do_bench_events(
 
         # Stop benchmarking even when fail when n_repeat is 1 since we cannot
         # futher reduce the number of iterations
-        if n_repeat == 1:
-            break
-
-        # Reduce the number of iterations in case the benchmark has to be rerun
-        n_repeat = max(1, n_repeat // 2)
-
         # Rerun the benchmark if timeout occurs in the previous run
-        to_bench = timeout_buffer.item() != 0
+        to_bench = n_repeat != 1 and timeout_buffer.item() != 0
+
+        if to_bench:
+            # Reduce the number of iterations
+            n_repeat = max(1, n_repeat // 2)
 
     assert timeout_buffer.item() == 0, (
         "Failed to run the benchmark since the block_stream buffer runs into "
