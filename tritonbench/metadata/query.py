@@ -37,12 +37,12 @@ def get_benchmark_config_with_tags(tags: List[str]) -> Dict[str, Any]:
         benchmark_name = f"{benchmark_prefix}_fwd"
         result_dict[benchmark_name] = {}
         result_dict[benchmark_name]["args"] = " ".join(
-            ["--op", op, "--only"] + ",".join(backend_names_with_tags)
+            ["--op", op, "--only"] + [",".join(backend_names_with_tags)]
         )
         if op in backwards:
             benchmark_name = f"{benchmark_prefix}_bwd"
             result_dict[benchmark_name] = {}
             result_dict[benchmark_name]["args"] = " ".join(
-                ["--op", op, "--only"] + ",".join(backend_names_with_tags) + ["--bwd"]
+                ["--op", op, "--only"] + [",".join(backend_names_with_tags), "--bwd"]
             )
     return result_dict
