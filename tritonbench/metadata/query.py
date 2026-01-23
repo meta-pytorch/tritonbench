@@ -1,3 +1,7 @@
+import os
+import yaml
+
+from typing import List, Dict, Any
 
 CURRENT_DIR = os.path.dirname(os.path.abspath(__file__))
 
@@ -18,17 +22,17 @@ def get_benchmark_config_with_tags(tags: List[str]) -> Dict[str, Any]:
 
     result_dict = {}
     for op, backend in operators.items():
-        for backend_name, backend_tags in backend.items():
-            if "tags" in backend_tags and any(t in backend["tags"] for t in tags):
-                dtype_prefix = dtype[op] if op in dtype and dtype[op] not in SKIP_DTYPE else ""
-                benchmark_prefix = f"{dtype_prefix}_{op}_{backend_name}"
-                benchmark_name = f"{benchmark_prefix}_fwd"
-                result_dict[benchmark_name] = {}
-                result_dict[benchmark_name]["op"] = op
-                result_dict[benchmark_name]["args"] = ["--op", op, "--only", backend_name]
-                if op in backwards:
-                    benchmark_name = f"{benchmark_prefix}_bwd"
-                    result_dict[benchmark_name] = backend_tags
-                    result_dict[benchmark_name]["op"] = op
-                    result_dict[benchmark_name]["args"] = ["--op", op, "--only", backend_name, "--bwd"]
+        backend_with_wanted_tags = {b for b in backend if "tags" in backend[b] and any(t in backend[b]["tags"] for t in tags)}
+        backend_names_with_tags = [b for b in backend_with_wanted_tags]
+        if not backend_names_with_tags:
+            continue
+        dtype_prefix = dtype[op] if op in dtype and dtype[op] not in SKIP_DTYPE else ""
+        benchmark_prefix = f"{dtype_prefix}_{op}"
+        benchmark_name = f"{benchmark_prefix}_fwd"
+        result_dict[benchmark_name] = {}
+        result_dict[benchmark_name]["args"] = " ".join(["--op", op, "--only"] + backend_names_with_tags)
+        if op in backwards:
+            benchmark_name = f"{benchmark_prefix}_bwd"
+            result_dict[benchmark_name] = {}
+            result_dict[benchmark_name]["args"] = " ".join(["--op", op, "--only"] + backend_names_with_tags + ["--bwd"])
     return result_dict

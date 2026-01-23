@@ -49,12 +49,11 @@ def gen_tlx_benchmark_config() -> Dict[str, Any]:
             # bypass disabled benchmarks
             if obj[benchmark_name].get("disabled", False):
                 continue
-            out[benchmark_name] = obj[benchmark_name]["args"].split(" ")
         return out
 
     out = _load_benchmarks(os.path.join(CURRENT_DIR, "tlx_benchmarks_manual.yaml"))
     metadata_benchmarks = get_benchmark_config_with_tags(tags=["tlx"])
-    out = out.update(metadata_benchmarks)
+    out.update(metadata_benchmarks)
     return out
 
 
@@ -77,14 +76,14 @@ def run():
     # Run each operator
     output_files = []
     tlx_benchmarks = gen_tlx_benchmark_config()
+    print(yaml.dump(tlx_benchmarks))
     if args.generate_config:
         with open(os.path.join(output_dir, "tlx_benchmarks_autogen.yaml"), "w") as f:
             yaml.dump(tlx_benchmarks, f)
         logger.info(f"[tlx benchmark] Generated config file to {output_dir}.")
-        print(yaml.dump(tlx_benchmarks))
         return
     for tlx_bench in tlx_benchmarks:
-        op_args = tlx_benchmarks[tlx_bench]
+        op_args = tlx_benchmarks[tlx_bench].split(" ")
         output_file = output_dir.joinpath(f"{tlx_bench}.json")
         op_args.extend(["--output-json", str(output_file.absolute())])
         run_in_task(op_args=op_args, benchmark_name=tlx_bench)
