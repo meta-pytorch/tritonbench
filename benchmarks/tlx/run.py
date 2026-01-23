@@ -83,7 +83,7 @@ def run():
         logger.info(f"[tlx benchmark] Generated config file to {output_dir}.")
         return
     for tlx_bench in tlx_benchmarks:
-        op_args = tlx_benchmarks[tlx_bench].split(" ")
+        op_args = tlx_benchmarks[tlx_bench]["args"].split(" ")
         output_file = output_dir.joinpath(f"{tlx_bench}.json")
         op_args.extend(["--output-json", str(output_file.absolute())])
         run_in_task(op_args=op_args, benchmark_name=tlx_bench)
