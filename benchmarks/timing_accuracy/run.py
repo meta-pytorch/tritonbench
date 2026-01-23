@@ -26,7 +26,11 @@ class MethodStats:
 
     @property
     def inter_test_median(self) -> float:
-        return statistics.median(self.intra_test_medians) if self.intra_test_medians else 0.0
+        return (
+            statistics.median(self.intra_test_medians)
+            if self.intra_test_medians
+            else 0.0
+        )
 
     @property
     def inter_test_std(self) -> float:
@@ -191,11 +195,14 @@ def benchmark_method(
             stats.all_samples.append(samples)
 
             if verbose:
-                print(f"median={median:.4f}ms, mean={mean:.4f}ms, std={std:.4f}ms, cv={cv:.4f}")
+                print(
+                    f"median={median:.4f}ms, mean={mean:.4f}ms, std={std:.4f}ms, cv={cv:.4f}"
+                )
 
         except Exception as e:
             print(f"ERROR: {e}")
             import traceback
+
             traceback.print_exc()
 
     return stats
@@ -222,7 +229,9 @@ def print_summary_table(results: Dict[str, MethodStats], operation_name: str):
         )
 
     print("=" * 120)
-    print("\nLegend: Intra-CV = noise within each run, Inter-CV = noise between runs. Lower = better.\n")
+    print(
+        "\nLegend: Intra-CV = noise within each run, Inter-CV = noise between runs. Lower = better.\n"
+    )
 
 
 def main():
@@ -232,11 +241,17 @@ def main():
     )
 
     parser.add_argument("--op", type=str, required=True, help="TritonBench operator")
-    parser.add_argument("--only", type=str, default=None, help="Kernel implementation(s)")
+    parser.add_argument(
+        "--only", type=str, default=None, help="Kernel implementation(s)"
+    )
     parser.add_argument("--input-id", type=str, default="0", help="Input config ID")
-    parser.add_argument("--mode", choices=["fwd", "bwd", "fwd_bwd", "fwd_no_grad"], default="fwd")
+    parser.add_argument(
+        "--mode", choices=["fwd", "bwd", "fwd_bwd", "fwd_no_grad"], default="fwd"
+    )
     parser.add_argument("--precision", type=str, default="fp16")
-    parser.add_argument("--n-tests", type=int, default=10, help="Benchmark runs per method")
+    parser.add_argument(
+        "--n-tests", type=int, default=10, help="Benchmark runs per method"
+    )
     parser.add_argument("--reps-per-test", type=int, default=100, help="Reps per run")
     parser.add_argument("--warmup", type=int, default=25, help="Warmup (ms)")
     parser.add_argument("--sleep-between-tests", type=float, default=0.5)
@@ -263,12 +278,18 @@ def main():
     from tritonbench.utils.run_utils import load_operator_by_args
 
     tb_arg_list = [
-        "--op", args.op,
-        "--mode", args.mode,
-        "--precision", args.precision,
-        "--device", "cuda",
-        "--input-id", args.input_id,
-        "--num-inputs", "1",
+        "--op",
+        args.op,
+        "--mode",
+        args.mode,
+        "--precision",
+        args.precision,
+        "--device",
+        "cuda",
+        "--input-id",
+        args.input_id,
+        "--num-inputs",
+        "1",
         "--test-only",
     ]
     if args.only:
@@ -291,6 +312,7 @@ def main():
             sys.exit(1)
     else:
         from tritonbench.utils.triton_op import REGISTERED_BENCHMARKS
+
         registered = REGISTERED_BENCHMARKS.get(opbench.name, {})
         if not registered:
             print(f"ERROR: No benchmarks registered for '{args.op}'")
@@ -305,7 +327,9 @@ def main():
         kernel_fn = bench_fn_factory(*example_inputs)
 
     operation_name = f"{args.op}:{backend_name} (input_id={args.input_id})"
-    print(f"Device: {device_name}, Backend: {backend_name}, Tests: {args.n_tests}, Reps: {args.reps_per_test}\n")
+    print(
+        f"Device: {device_name}, Backend: {backend_name}, Tests: {args.n_tests}, Reps: {args.reps_per_test}\n"
+    )
 
     # Determine methods to run
     if args.methods == "all":
@@ -314,7 +338,9 @@ def main():
         methods_to_run = [m.strip() for m in args.methods.split(",")]
         for m in methods_to_run:
             if m not in BENCHMARK_METHODS:
-                print(f"ERROR: Unknown method '{m}'. Available: {', '.join(BENCHMARK_METHODS.keys())}")
+                print(
+                    f"ERROR: Unknown method '{m}'. Available: {', '.join(BENCHMARK_METHODS.keys())}"
+                )
                 sys.exit(1)
 
     # Warmup
@@ -327,7 +353,7 @@ def main():
     results: Dict[str, MethodStats] = {}
     for method_key in methods_to_run:
         method_display_name, method_fn = BENCHMARK_METHODS[method_key]
-        print(f"\n{'='*60}\nBenchmarking: {method_display_name}\n{'='*60}")
+        print(f"\n{'=' * 60}\nBenchmarking: {method_display_name}\n{'=' * 60}")
 
         stats = benchmark_method(
             method_name=method_display_name,

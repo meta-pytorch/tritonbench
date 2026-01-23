@@ -21,8 +21,8 @@ tritonparseoss bisect --triton-dir $HOME/triton --test-script $PWD/.ci/bisect/re
 
 import os
 import subprocess
-
 from pathlib import Path
+
 # the default regression threshold is 10%
 REGRESSION_THRESHOLD = float(os.environ.get("REGRESSION_THRESHOLD", 10.0)) / 100.0
 # functional or performance regression
@@ -34,18 +34,23 @@ BASELINE_LOG = os.environ.get("BASELINE_LOG", None)
 
 REPO_DIR = Path(__file__).parent.parent.parent
 
+
 def get_baseline(baseline_log) -> float:
     with open(baseline_log, "r") as f:
         last_line = f.readlines()[-1]
     return float(last_line.strip())
 
+
 def get_current_value(stdout_lines) -> float:
     last_line = stdout_lines[-1]
     return float(last_line.strip())
 
+
 if __name__ == "__main__":
     if not FUNCTIONAL and "--simple-output" not in REPRO_CMDLINE:
-        print("Performance tests require --simple-output as we will only read the last line in the benchmark output.")
+        print(
+            "Performance tests require --simple-output as we will only read the last line in the benchmark output."
+        )
         exit(1)
     assert REPRO_CMDLINE is not None, "REPRO_CMDLINE is not set."
     cmdline = REPRO_CMDLINE.split()
@@ -59,7 +64,9 @@ if __name__ == "__main__":
             exit(e.returncode)
         exit(0)
 
-    assert BASELINE_LOG and os.path.exists(BASELINE_LOG), f"BASELINE_LOG is not set or to a non-exist location: {BASELINE_LOG}."
+    assert BASELINE_LOG and os.path.exists(BASELINE_LOG), (
+        f"BASELINE_LOG is not set or to a non-exist location: {BASELINE_LOG}."
+    )
     baseline_signal = get_baseline(BASELINE_LOG)
     p = subprocess.Popen(cmdline, cwd=REPO_DIR, stdout=subprocess.PIPE, stderr=None)
     assert p.stdout is not None
@@ -82,8 +89,12 @@ if __name__ == "__main__":
     assert smaller_value > 0, "smaller_value should be positive, got zero."
     ratio = (larger_value - smaller_value) / smaller_value * 100
     if larger_value > smaller_value * (1 + REGRESSION_THRESHOLD):
-        print(f"Regression detected: current value {current_value}, {larger_value} / {smaller_value} - 1 == {ratio}% , threshold {REGRESSION_THRESHOLD*100}%)")
+        print(
+            f"Regression detected: current value {current_value}, {larger_value} / {smaller_value} - 1 == {ratio}% , threshold {REGRESSION_THRESHOLD * 100}%)"
+        )
         exit(1)
     else:
-        print(f"No regression detected: current value {current_value}, {larger_value} / {smaller_value} - 1 == {ratio}%, threshold {REGRESSION_THRESHOLD*100}%)")
+        print(
+            f"No regression detected: current value {current_value}, {larger_value} / {smaller_value} - 1 == {ratio}%, threshold {REGRESSION_THRESHOLD * 100}%)"
+        )
         exit(0)

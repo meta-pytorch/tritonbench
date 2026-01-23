@@ -114,7 +114,9 @@ def preprocess_configs(configs, named_args, **kwargs):
         smem_epilog = BLOCK_M * (BLOCK_N // EPILOGUE_SUBTILE) * 2
         smem_barriers = NUM_SMEM_BUFFERS * MBARRIER_SIZE
         if PAIR_CTA:
-            smem_barriers += NUM_SMEM_BUFFERS * NUM_MMA_GROUPS * MBARRIER_SIZE  # cta_bars
+            smem_barriers += (
+                NUM_SMEM_BUFFERS * NUM_MMA_GROUPS * MBARRIER_SIZE
+            )  # cta_bars
         # tmem_full_bars
         smem_barriers += NUM_TMEM_BUFFERS
 
@@ -459,7 +461,9 @@ def matmul_kernel_tma_ws_blackwell(
             clc_phase_consumer = 0
 
             while tile_id != -1:
-                tlx.clc_producer(clc_context, 0, clc_phase_producer, multi_ctas=PAIR_CTA)
+                tlx.clc_producer(
+                    clc_context, 0, clc_phase_producer, multi_ctas=PAIR_CTA
+                )
                 clc_phase_producer ^= 1
 
                 cur_tmem_buf, tmem_read_phase = _get_bufidx_phase(
@@ -484,7 +488,9 @@ def matmul_kernel_tma_ws_blackwell(
                 )
                 tmem_accum_cnt += 1
 
-                tile_id = tlx.clc_consumer(clc_context, 0, clc_phase_consumer, multi_ctas=PAIR_CTA)
+                tile_id = tlx.clc_consumer(
+                    clc_context, 0, clc_phase_consumer, multi_ctas=PAIR_CTA
+                )
                 clc_phase_consumer ^= 1
 
         with tlx.async_task(num_warps=1, num_regs=24):  # MMA consumer
@@ -525,7 +531,9 @@ def matmul_kernel_tma_ws_blackwell(
                 )
                 tmem_accum_cnt += 1
 
-                tile_id = tlx.clc_consumer(clc_context, 0, clc_phase_consumer, multi_ctas=PAIR_CTA)
+                tile_id = tlx.clc_consumer(
+                    clc_context, 0, clc_phase_consumer, multi_ctas=PAIR_CTA
+                )
                 clc_phase_consumer ^= 1
 
         with tlx.async_task(num_warps=1, num_regs=24):  # producer, TMA load
@@ -562,7 +570,9 @@ def matmul_kernel_tma_ws_blackwell(
                     PAIR_CTA=PAIR_CTA,
                     cluster_cta_rank=cluster_cta_rank,
                 )
-                tile_id = tlx.clc_consumer(clc_context, 0, clc_phase_consumer, multi_ctas=PAIR_CTA)
+                tile_id = tlx.clc_consumer(
+                    clc_context, 0, clc_phase_consumer, multi_ctas=PAIR_CTA
+                )
                 clc_phase_consumer ^= 1
 
 

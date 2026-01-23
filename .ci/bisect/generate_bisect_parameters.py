@@ -15,12 +15,7 @@ RUNNER_TO_PLATFORM_MAPPING = {
 }
 
 # TritonBench benchmarks
-TRITON_CHANNELS = set(
-    [
-        "triton-main",
-        "meta-triton"
-    ]
-)
+TRITON_CHANNELS = set(["triton-main", "meta-triton"])
 
 
 def set_output(name: str, val: Any) -> None:
@@ -63,6 +58,7 @@ def parse_args() -> Any:
 
     return parser.parse_args()
 
+
 def generate_benchmark_matrix(triton_channel: str, runner: str) -> Dict[str, Any]:
     benchmark_matrix: Dict[str, Any] = {
         "include": [],
@@ -76,10 +72,12 @@ def generate_benchmark_matrix(triton_channel: str, runner: str) -> Dict[str, Any
     assert runner_args is not None, f"Unknown runner {runner}"
 
     # Gather all possible benchmarks
-    benchmark_matrix["include"] = [{
-        "runner": runner_args,
-        "triton_channel": triton_channel,
-    }]
+    benchmark_matrix["include"] = [
+        {
+            "runner": runner_args,
+            "triton_channel": triton_channel,
+        }
+    ]
 
     return benchmark_matrix
 
