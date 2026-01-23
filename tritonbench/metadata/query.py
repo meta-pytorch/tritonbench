@@ -1,7 +1,8 @@
 import os
-import yaml
 
-from typing import List, Dict, Any
+from typing import Any, Dict, List
+
+import yaml
 
 CURRENT_DIR = os.path.dirname(os.path.abspath(__file__))
 
@@ -10,6 +11,7 @@ BACKWARD_METADATA_PATH = os.path.join(CURRENT_DIR, "backward_operators.yaml")
 DTYPE_METADATA_PATH = os.path.join(CURRENT_DIR, "dtype_operators.yaml")
 
 SKIP_DTYPE = ["bypass", "fp8", "int4"]
+
 
 def get_benchmark_config_with_tags(tags: List[str]) -> Dict[str, Any]:
     """Return benchmark config dict with any of these tags"""
@@ -22,7 +24,11 @@ def get_benchmark_config_with_tags(tags: List[str]) -> Dict[str, Any]:
 
     result_dict = {}
     for op, backend in operators.items():
-        backend_with_wanted_tags = {b for b in backend if "tags" in backend[b] and any(t in backend[b]["tags"] for t in tags)}
+        backend_with_wanted_tags = {
+            b
+            for b in backend
+            if "tags" in backend[b] and any(t in backend[b]["tags"] for t in tags)
+        }
         backend_names_with_tags = [b for b in backend_with_wanted_tags]
         if not backend_names_with_tags:
             continue
@@ -30,9 +36,13 @@ def get_benchmark_config_with_tags(tags: List[str]) -> Dict[str, Any]:
         benchmark_prefix = f"{dtype_prefix}_{op}"
         benchmark_name = f"{benchmark_prefix}_fwd"
         result_dict[benchmark_name] = {}
-        result_dict[benchmark_name]["args"] = " ".join(["--op", op, "--only"] + backend_names_with_tags)
+        result_dict[benchmark_name]["args"] = " ".join(
+            ["--op", op, "--only"] + backend_names_with_tags
+        )
         if op in backwards:
             benchmark_name = f"{benchmark_prefix}_bwd"
             result_dict[benchmark_name] = {}
-            result_dict[benchmark_name]["args"] = " ".join(["--op", op, "--only"] + backend_names_with_tags + ["--bwd"])
+            result_dict[benchmark_name]["args"] = " ".join(
+                ["--op", op, "--only"] + backend_names_with_tags + ["--bwd"]
+            )
     return result_dict
