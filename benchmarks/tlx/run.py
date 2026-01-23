@@ -1,7 +1,7 @@
 """
-Tritonbench nightly run, dashboard: https://hud.pytorch.org/tritonbench/commit_view
-Run all operators in nightly/autogen.yaml.
-Requires the operator to support the speedup metric.
+Tritonbench nightly run on TLX
+Run all operator backends with tlx tags, plus tlx/tlx_benchmarks.yaml.
+Output default metrics.
 """
 
 import argparse
@@ -51,7 +51,7 @@ def gen_tlx_benchmark_config() -> Dict[str, Any]:
                 continue
         return out
 
-    out = _load_benchmarks(os.path.join(CURRENT_DIR, "tlx_benchmarks_manual.yaml"))
+    out = _load_benchmarks(os.path.join(CURRENT_DIR, "tlx_benchmarks.yaml"))
     metadata_benchmarks = get_benchmark_config_with_tags(tags=["tlx"])
     out.update(metadata_benchmarks)
     return out
