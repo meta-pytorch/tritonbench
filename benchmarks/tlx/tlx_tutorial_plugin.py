@@ -1,6 +1,7 @@
 """
 Add tlx tutorial kernels to tritonbench
 """
+from tritonbench.utils.triton_utils import has_tlx
 import pdb
 import functools
 import importlib
@@ -40,9 +41,9 @@ def load_tlx_tutorial_backends() -> Dict[str, Any]:
     def _reduce_benchmarks(acc: Dict[str, Any], op_tuple: Tuple[str, str, str, str]) -> Dict[str, Any]:
         op, backend, backend_module, backend_func = op_tuple
         if "blackwell" in backend_module:
-            enabled = is_blackwell()
+            enabled = is_blackwell() and has_tlx()
         elif "hopper" in backend_module:
-            enabled = is_h100()
+            enabled = is_h100() and has_tlx()
         else:
             assert False, f"Unknown backend module {backend_module}"
         # adding the backend at runtime, so if it is not enabled, we don't add it
@@ -53,7 +54,7 @@ def load_tlx_tutorial_backends() -> Dict[str, Any]:
         func = load_symbol_from_module(backend_module, backend_func)
 
         def _inner(self, *input):
-            if func.__name__ == "matmul":
+            if op == "gemm":
                 # tlx tutorial matmul does not support bias
                 bias = input[-1]
                 assert bias is None, "tlx tutorial matmul does not support bias"
