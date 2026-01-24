@@ -59,6 +59,10 @@ def run():
         help="Generate Tritonbench run config file.",
     )
     parser.add_argument(
+        "--op",
+        help="only run specified operator."
+    )
+    parser.add_argument(
         "--ci", action="store_true", help="Running in GitHub Actions CI mode."
     )
     parser.add_argument(
@@ -80,7 +84,9 @@ def run():
         logger.info(f"[tlx benchmark] Generated config file to {output_dir}.")
         return
     for tlx_bench in tlx_benchmarks:
-        op_args = tlx_benchmarks[tlx_bench]["args"].split(" ")
+        if args.op and f"--op {args.op}" not in tlx_benchmarks[tlx_bench]["args"]:
+            continue
+        op_args = tlx_benchmarks[tlx_bench]["args"].split(" ") + ["--plugin", "benchmarks.tlx.tlx_tutorial_plugin.load_tlx_tutorial_backends"]
         output_file = output_dir.joinpath(f"{tlx_bench}.json")
         op_args.extend(["--output-json", str(output_file.absolute())])
         run_in_task(op_args=op_args, benchmark_name=tlx_bench)

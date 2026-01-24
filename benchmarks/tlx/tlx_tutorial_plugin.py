@@ -1,13 +1,17 @@
 """
 Add tlx tutorial kernels to tritonbench
 """
+import pdb
 import functools
 import importlib
 import os
 
-from common import setup_tritonbench_cwd
+try:
+    from common import setup_tritonbench_cwd
 
-setup_tritonbench_cwd()
+    setup_tritonbench_cwd()
+except (ModuleNotFoundError, ImportError):
+    pass
 
 from tritonbench.utils.triton_op import register_benchmark
 from tritonbench.utils.env_utils import is_blackwell, is_h100
@@ -25,6 +29,7 @@ def load_symbol_from_module(module, symbol):
     return getattr(module, symbol)
 
 runtime_op_list = [
+    # op, backend, backend_module, backend_func
     ("gemm", "tlx_tutorial_matmul", "blackwell-gemm-ws_test", "matmul"),
     ("gemm", "tlx_tutorial_matmul", "hopper-gemm-ws_test", "matmul"),
     ("blackwell_attentions", "tlx_tutorial_fa_ws_pipelined_persistent", "blackwell-fa-ws-pipelined-persistent_test", "attention"),
@@ -43,9 +48,27 @@ def load_tlx_tutorial_backends() -> Dict[str, Any]:
         # adding the backend at runtime, so if it is not enabled, we don't add it
         if not enabled:
             return acc
+
+        cls = load_symbol_from_module(f"tritonbench.operators.{op}", "Operator")
         func = load_symbol_from_module(backend_module, backend_func)
-        register_benchmark(op, backend, func, tags=["tlx"], enabled=True)(
-            func
+
+        def _inner(self, *input):
+            if func.__name__ == "matmul":
+                # tlx tutorial matmul does not support bias
+                bias = input[-1]
+                assert bias is None, "tlx tutorial matmul does not support bias"
+                input_without_bias = input[:-1]
+                return lambda: func(*input_without_bias)
+            if op == "flash_attention" or op == "blackwell_attentions":
+                sm_scale = self.sm_scale
+                causal = self.causal
+                BWD_BLOCK_M1 = 128
+                GROUP_SIZE_M = 1
+                return lambda: func(*input, sm_scale, causal, BWD_BLOCK_M1, GROUP_SIZE_M)
+            return lambda: func(*input)
+
+        register_benchmark(op, backend, func, tags=["tlx"], enabled=True, cls=cls)(
+            _inner
         )
         acc.update({
             op: {

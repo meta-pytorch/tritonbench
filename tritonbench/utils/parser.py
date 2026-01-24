@@ -376,6 +376,11 @@ def get_parser(args=None):
         action="store_true",
         help="Skip the L2 cache clearing during benchmarking",
     )
+    parser.add_argument(
+        "--plugin",
+        type=str,
+        help="Load plugin from a Python function. This is for loading backends at runtime."
+    )
 
     if is_fbcode():
         parser.add_argument(
