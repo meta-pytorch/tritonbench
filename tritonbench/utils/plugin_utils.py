@@ -1,5 +1,7 @@
 import importlib
+
 from tritonbench.utils.path_utils import add_path, REPO_PATH
+
 
 def load_plugin(plugin_name: str):
     module_name, delimiter, func_name = plugin_name.rpartition(".")

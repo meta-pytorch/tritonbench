@@ -5,10 +5,9 @@ Output default metrics.
 """
 
 import argparse
-import os
 import json
 import logging
-
+import os
 from pathlib import Path
 from typing import Any, Dict
 
@@ -24,9 +23,10 @@ from common import setup_tritonbench_cwd
 
 setup_tritonbench_cwd()
 
+
 def gen_tlx_benchmark_config() -> Dict[str, Any]:
-    from tritonbench.metadata.query import get_benchmark_config_with_tags
     from tlx_tutorial_plugin import load_tlx_tutorial_backends
+    from tritonbench.metadata.query import get_benchmark_config_with_tags
 
     def _load_benchmarks(config_path: str) -> Dict[str, Any]:
         out = {}
@@ -43,8 +43,7 @@ def gen_tlx_benchmark_config() -> Dict[str, Any]:
     out = _load_benchmarks(os.path.join(CURRENT_DIR, "tlx_benchmarks.yaml"))
     tlx_tutorial_benchmark_metadata = load_tlx_tutorial_backends()
     metadata_benchmarks = get_benchmark_config_with_tags(
-        tags=["tlx"],
-        runtime_metadata=tlx_tutorial_benchmark_metadata
+        tags=["tlx"], runtime_metadata=tlx_tutorial_benchmark_metadata
     )
     out.update(metadata_benchmarks)
     return out
@@ -58,10 +57,7 @@ def run():
         action="store_true",
         help="Generate Tritonbench run config file.",
     )
-    parser.add_argument(
-        "--op",
-        help="only run specified operator."
-    )
+    parser.add_argument("--op", help="only run specified operator.")
     parser.add_argument(
         "--ci", action="store_true", help="Running in GitHub Actions CI mode."
     )
@@ -86,7 +82,10 @@ def run():
     for tlx_bench in tlx_benchmarks:
         if args.op and f"--op {args.op}" not in tlx_benchmarks[tlx_bench]["args"]:
             continue
-        op_args = tlx_benchmarks[tlx_bench]["args"].split(" ") + ["--plugin", "benchmarks.tlx.tlx_tutorial_plugin.load_tlx_tutorial_backends"]
+        op_args = tlx_benchmarks[tlx_bench]["args"].split(" ") + [
+            "--plugin",
+            "benchmarks.tlx.tlx_tutorial_plugin.load_tlx_tutorial_backends",
+        ]
         output_file = output_dir.joinpath(f"{tlx_bench}.json")
         op_args.extend(["--output-json", str(output_file.absolute())])
         run_in_task(op_args=op_args, benchmark_name=tlx_bench)

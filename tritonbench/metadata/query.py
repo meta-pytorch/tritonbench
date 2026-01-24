@@ -12,7 +12,9 @@ DTYPE_METADATA_PATH = os.path.join(CURRENT_DIR, "dtype_operators.yaml")
 SKIP_DTYPE = ["bypass", "fp8", "int4"]
 
 
-def get_benchmark_config_with_tags(tags: List[str], runtime_metadata: Optional[Dict[str, Any]]=None) -> Dict[str, Any]:
+def get_benchmark_config_with_tags(
+    tags: List[str], runtime_metadata: Optional[Dict[str, Any]] = None
+) -> Dict[str, Any]:
     """Return benchmark config dict with any of these tags"""
     with open(KERNEL_METADATA_PATH, "r") as f:
         operators = yaml.safe_load(f)

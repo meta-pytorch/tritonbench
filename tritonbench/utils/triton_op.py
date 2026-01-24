@@ -20,7 +20,7 @@ from dataclasses import asdict, dataclass, fields
 from enum import Enum
 from numbers import Number
 from pathlib import Path
-from typing import Any, Callable, Dict, Generator, List, Optional, Tuple, Union, Type
+from typing import Any, Callable, Dict, Generator, List, Optional, Tuple, Type, Union
 
 import psutil
 import tabulate

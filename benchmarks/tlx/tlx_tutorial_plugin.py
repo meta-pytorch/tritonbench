@@ -1,11 +1,13 @@
 """
 Add tlx tutorial kernels to tritonbench
 """
-from tritonbench.utils.triton_utils import has_tlx
-import pdb
+
 import functools
 import importlib
 import os
+import pdb
+
+from tritonbench.utils.triton_utils import has_tlx
 
 try:
     from common import setup_tritonbench_cwd
@@ -14,31 +16,48 @@ try:
 except (ModuleNotFoundError, ImportError):
     pass
 
-from tritonbench.utils.triton_op import register_benchmark
+from typing import Any, Dict, List, Optional, Tuple
+
 from tritonbench.utils.env_utils import is_blackwell, is_h100
 from tritonbench.utils.path_utils import add_path
-
-from typing import Any, Dict, List, Optional, Tuple
+from tritonbench.utils.triton_op import register_benchmark
 
 META_TRITON_PATH = os.environ.get("TRITONBENCH_TRITON_INSTALL_DIR", None)
 
-assert os.path.exists(META_TRITON_PATH), f"Meta Triton path {META_TRITON_PATH} does not exist."
+assert os.path.exists(META_TRITON_PATH), (
+    f"Meta Triton path {META_TRITON_PATH} does not exist."
+)
+
 
 def load_symbol_from_module(module, symbol):
     with add_path(os.path.join(META_TRITON_PATH, "third_party/tlx/tutorials")):
         module = importlib.import_module(module)
     return getattr(module, symbol)
 
+
 runtime_op_list = [
     # op, backend, backend_module, backend_func
     ("gemm", "tlx_tutorial_matmul", "blackwell-gemm-ws_test", "matmul"),
     ("gemm", "tlx_tutorial_matmul", "hopper-gemm-ws_test", "matmul"),
-    ("blackwell_attentions", "tlx_tutorial_fa_ws_pipelined_persistent", "blackwell-fa-ws-pipelined-persistent_test", "attention"),
-    ("flash_attention", "tlx_tutorial_fa_ws_pipelined_pingpong", "hopper-fa-ws-pipelined-pingpong_test", "attention"),
+    (
+        "blackwell_attentions",
+        "tlx_tutorial_fa_ws_pipelined_persistent",
+        "blackwell-fa-ws-pipelined-persistent_test",
+        "attention",
+    ),
+    (
+        "flash_attention",
+        "tlx_tutorial_fa_ws_pipelined_pingpong",
+        "hopper-fa-ws-pipelined-pingpong_test",
+        "attention",
+    ),
 ]
 
+
 def load_tlx_tutorial_backends() -> Dict[str, Any]:
-    def _reduce_benchmarks(acc: Dict[str, Any], op_tuple: Tuple[str, str, str, str]) -> Dict[str, Any]:
+    def _reduce_benchmarks(
+        acc: Dict[str, Any], op_tuple: Tuple[str, str, str, str]
+    ) -> Dict[str, Any]:
         op, backend, backend_module, backend_func = op_tuple
         if "blackwell" in backend_module:
             enabled = is_blackwell() and has_tlx()
@@ -65,21 +84,24 @@ def load_tlx_tutorial_backends() -> Dict[str, Any]:
                 causal = self.causal
                 BWD_BLOCK_M1 = 128
                 GROUP_SIZE_M = 1
-                return lambda: func(*input, sm_scale, causal, BWD_BLOCK_M1, GROUP_SIZE_M)
+                return lambda: func(
+                    *input, sm_scale, causal, BWD_BLOCK_M1, GROUP_SIZE_M
+                )
             return lambda: func(*input)
 
         register_benchmark(op, backend, func, tags=["tlx"], enabled=True, cls=cls)(
             _inner
         )
-        acc.update({
-            op: {
-                backend: {
-                    "tags": ["tlx"],
+        acc.update(
+            {
+                op: {
+                    backend: {
+                        "tags": ["tlx"],
+                    }
                 }
             }
-        })
+        )
         return acc
-    runtime_operators = functools.reduce(
-        _reduce_benchmarks, runtime_op_list, {}
-    )
+
+    runtime_operators = functools.reduce(_reduce_benchmarks, runtime_op_list, {})
     return runtime_operators

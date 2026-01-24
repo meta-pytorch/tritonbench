@@ -379,7 +379,7 @@ def get_parser(args=None):
     parser.add_argument(
         "--plugin",
         type=str,
-        help="Load plugin from a Python function. This is for loading backends at runtime."
+        help="Load plugin from a Python function. This is for loading backends at runtime.",
     )
 
     if is_fbcode():
