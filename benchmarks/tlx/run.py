@@ -5,11 +5,10 @@ Output default metrics.
 """
 
 import argparse
+import os
 import json
 import logging
-import os
-import sys
-from os.path import abspath, exists
+
 from pathlib import Path
 from typing import Any, Dict
 
@@ -21,24 +20,14 @@ logger = logging.getLogger(__name__)
 logging.basicConfig(level=logging.INFO)
 
 
-def setup_tritonbench_cwd():
-    original_dir = abspath(os.getcwd())
+from common import setup_tritonbench_cwd
 
-    for tritonbench_dir in (
-        ".",
-        "../../../tritonbench",
-    ):
-        if exists(tritonbench_dir):
-            break
-
-    if exists(tritonbench_dir):
-        tritonbench_dir = abspath(tritonbench_dir)
-        os.chdir(tritonbench_dir)
-        sys.path.append(tritonbench_dir)
-    return original_dir
+setup_tritonbench_cwd()
 
 def gen_tlx_benchmark_config() -> Dict[str, Any]:
     from tritonbench.metadata.query import get_benchmark_config_with_tags
+    from tlx_tutorial_plugin import load_tlx_tutorial_backends
+
     def _load_benchmarks(config_path: str) -> Dict[str, Any]:
         out = {}
         with open(config_path, "r") as f:
@@ -52,7 +41,8 @@ def gen_tlx_benchmark_config() -> Dict[str, Any]:
         return out
 
     out = _load_benchmarks(os.path.join(CURRENT_DIR, "tlx_benchmarks.yaml"))
-    metadata_benchmarks = get_benchmark_config_with_tags(tags=["tlx"])
+    tlx_tutorial_benchmark_metadata = load_tlx_tutorial_backends()
+    metadata_benchmarks = get_benchmark_config_with_tags(tags=["tlx"], runtime_metadata=tlx_tutorial_benchmark_metadata)
     out.update(metadata_benchmarks)
     return out
 
@@ -60,7 +50,11 @@ def gen_tlx_benchmark_config() -> Dict[str, Any]:
 def run():
     parser = argparse.ArgumentParser()
     parser.add_argument("--name", default="tlx", help="Benchmark name.")
-    parser.add_argument("--generate-config", action="store_true", help="Generate Tritonbench run config file.")
+    parser.add_argument(
+        "--generate-config",
+        action="store_true",
+        help="Generate Tritonbench run config file.",
+    )
     parser.add_argument(
         "--ci", action="store_true", help="Running in GitHub Actions CI mode."
     )
