@@ -24,9 +24,6 @@ def load_symbol_from_module(module, symbol):
         module = importlib.import_module(module)
     return getattr(module, symbol)
 
-def add_backend_to_tritonbench(op, backend_name, backend_func, tags, enabled) -> Dict[str, Any]:
-    return result_dict
-
 runtime_op_list = [
     ("gemm", "tlx_tutorial_matmul", "blackwell-gemm-ws_test", "matmul"),
     ("gemm", "tlx_tutorial_matmul", "hopper-gemm-ws_test", "matmul"),
@@ -47,7 +44,9 @@ def load_tlx_tutorial_backends() -> Dict[str, Any]:
         if not enabled:
             return acc
         func = load_symbol_from_module(backend_module, backend_func)
-        register_benchmark(op, backend, func, tags=["tlx"], enabled=True)
+        register_benchmark(op, backend, func, tags=["tlx"], enabled=True)(
+            func
+        )
         acc.update({
             op: {
                 backend: {

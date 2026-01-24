@@ -17,7 +17,11 @@ def get_benchmark_config_with_tags(tags: List[str], runtime_metadata: Optional[D
     with open(KERNEL_METADATA_PATH, "r") as f:
         operators = yaml.safe_load(f)
         if runtime_metadata is not None:
-            operators.update(runtime_metadata)
+            for op in runtime_metadata:
+                if op not in operators:
+                    operators.update({op: runtime_metadata[op]})
+                else:
+                    operators[op].update(runtime_metadata[op])
 
     with open(BACKWARD_METADATA_PATH, "r") as f:
         backwards = yaml.safe_load(f)
