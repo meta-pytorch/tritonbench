@@ -92,6 +92,14 @@ def is_hip_mi300():
         return False
 
 
+def is_hip_mi350():
+    try:
+        target = triton.runtime.driver.active.get_current_target()
+        return is_hip() and target.arch == "gfx950"
+    except Exception:
+        return False
+
+
 def is_blackwell() -> bool:
     """Check if running on an NVIDIA Blackwell GPU (B200 or B300 series)."""
     if not is_cuda_available():
