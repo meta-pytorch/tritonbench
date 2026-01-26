@@ -75,10 +75,11 @@ def load_tlx_tutorial_backends() -> Dict[str, Any]:
         def _inner(self, *input):
             if op == "gemm":
                 # tlx tutorial matmul does not support bias
+                a = input[0]
+                b = input[1].contiguous()
                 bias = input[-1]
                 assert bias is None, "tlx tutorial matmul does not support bias"
-                input_without_bias = input[:-1]
-                return lambda: func(*input_without_bias)
+                return lambda: func(a, b)
             if op == "flash_attention" or op == "blackwell_attentions":
                 sm_scale = self.sm_scale
                 causal = self.causal
@@ -89,7 +90,8 @@ def load_tlx_tutorial_backends() -> Dict[str, Any]:
                 )
             return lambda: func(*input)
 
-        register_benchmark(op, backend, func, tags=["tlx"], enabled=True, cls=cls)(
+        # gemm tlx is fwd-only
+        register_benchmark(op, backend, func, tags=["tlx"], fwd_only=(op == "gemm"), enabled=True, cls=cls)(
             _inner
         )
         acc.update(
