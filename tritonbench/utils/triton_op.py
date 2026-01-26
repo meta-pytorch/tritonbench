@@ -524,10 +524,16 @@ class BenchmarkOperatorResult:
                     )
                     if value is None:
                         continue
-                    if isinstance(value, (int, float)):
+                    numeric_value = value
+                    if isinstance(value, str):
+                        try:
+                            numeric_value = float(value)
+                        except (ValueError, TypeError):
+                            continue
+                    if isinstance(numeric_value, (int, float)):
                         agg_data[agg_metric_name] = agg_data.get(
                             agg_metric_name, []
-                        ) + [value]
+                        ) + [numeric_value]
         final_agg_data = {k: sum(v) / len(v) for k, v in agg_data.items()}
         userbenchmark_metrics_dict.update(final_agg_data)
 
