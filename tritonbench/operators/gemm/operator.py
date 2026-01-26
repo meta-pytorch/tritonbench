@@ -68,20 +68,22 @@ from tritonbench.operators.gemm.triton_matmul import (
     matmul as triton_tutorial_matmul_kernel,
 )
 
+HAS_HAMMER = False
 if is_fbcode():
-    import generative_recommenders.ops.triton.triton_addmm as hstu_triton_addmm
+    try:
+        import generative_recommenders.ops.triton.triton_addmm as hstu_triton_addmm
 
-    # without this set we can only pick a single config for AMD, Nvidia has 8
-    # with this set AMD will pick from 256 different configs (not the actual full
-    # tuning space, so some perf may be left on the table)
-    hstu_triton_addmm.ENABLE_FULL_TURNING_SPACE = True
-    from hammer.ops.triton.triton_matmul import (
-        triton_matmul as hstu_triton_matmul_kernel,
-    )
+        # without this set we can only pick a single config for AMD, Nvidia has 8
+        # with this set AMD will pick from 256 different configs (not the actual full
+        # tuning space, so some perf may be left on the table)
+        hstu_triton_addmm.ENABLE_FULL_TURNING_SPACE = True
+        from hammer.ops.triton.triton_matmul import (
+            triton_matmul as hstu_triton_matmul_kernel,
+        )
 
-    HAS_HAMMER = True
-else:
-    HAS_HAMMER = False
+        HAS_HAMMER = True
+    except ImportError:
+        pass
 
 with try_import("HAS_CUTLASS_API"):
     import cutlass_api
