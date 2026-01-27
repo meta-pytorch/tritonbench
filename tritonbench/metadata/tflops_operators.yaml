@@ -3,6 +3,7 @@
 # List of operators that support tflops metric
 # =================================================================
 - addmm
+- gemm
 - bf16xint16_gemm
 - blackwell_attentions
 - flash_attention
