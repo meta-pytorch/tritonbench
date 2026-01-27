@@ -1,3 +1,5 @@
+from typing import Any, Callable
+
 import torch
 import triton
 import triton.language as tl
@@ -122,6 +124,89 @@ def _unblock_stream(
     _unblock_stream_kernel[(1,)](signal_buffer, signal, num_warps=1)
 
 
+def _setup_stream_blocking(signal: int, is_amd: bool):
+    """
+    Allocate buffers and streams for stream blocking and warmup the
+    blocking/unblocking stream kernels.
+    """
+    signal_buffer = torch.zeros(1, dtype=torch.int32, device="cuda")
+    timeout_buffer = torch.ones(1, dtype=torch.int32, device="cuda")
+    unblocking_stream = _get_unblocking_stream(signal_buffer.device)
+
+    # Warm up block and unblock streams
+    _unblock_stream(signal_buffer=signal_buffer, signal=signal)
+    _block_stream(
+        signal_buffer=signal_buffer,
+        timeout_buffer=timeout_buffer,
+        signal=signal,
+        is_amd=is_amd,
+    )
+    torch.cuda.synchronize()
+    return signal_buffer, timeout_buffer, unblocking_stream
+
+
+def _reset_stream_blocking_flags(
+    signal_buffer: torch.Tensor,
+    timeout_buffer: torch.Tensor,
+):
+    """
+    Reset the blocking flags for the given signal buffer.
+    """
+    signal_buffer.fill_(0)
+    timeout_buffer.fill_(1)
+
+
+def _bench_with_stream_blocking(
+    fn: Callable,
+    unblocking_stream: torch.cuda.Stream,
+    signal_buffer: torch.Tensor,
+    timeout_buffer: torch.Tensor,
+    signal: int,
+    n_repeat: int,
+    is_amd: bool,
+) -> Any:
+    to_bench = True
+    while to_bench:
+        # Reset the signal and timeout buffers
+        _reset_stream_blocking_flags(signal_buffer, timeout_buffer)
+        torch.cuda.synchronize()
+
+        # Start benchmarking
+        # Block the stream until the kernel dispatching is complete
+        _block_stream(
+            signal_buffer=signal_buffer,
+            timeout_buffer=timeout_buffer,
+            signal=signal,
+            is_amd=is_amd,
+        )
+
+        # Benchmark
+        fn(n_repeat)
+
+        # Unblock the stream to allow the benchmark to run
+        with torch.cuda.stream(unblocking_stream):
+            _unblock_stream(signal_buffer=signal_buffer, signal=signal)
+
+        # Wait for the events to complete
+        torch.cuda.synchronize()
+
+        # Stop benchmarking even when fail when n_repeat is 1 since we cannot
+        # futher reduce the number of iterations
+        # Rerun the benchmark if timeout occurs in the previous run
+        to_bench = n_repeat != 1 and timeout_buffer.item() != 0
+
+        if to_bench:
+            # Reduce the number of iterations
+            n_repeat = max(1, n_repeat // 2)
+
+    assert timeout_buffer.item() == 0, (
+        "Failed to run the benchmark since the block_stream buffer runs into "
+        "timeout even when n_repeat = 1. Consider reducing the number of kernels "
+        "dispatched in a single iteration and run with CUDA_SCALE_LAUNCH_QUEUES=4x"
+    )
+    return n_repeat
+
+
 def do_bench_events(
     fn,
     warmup,
@@ -152,29 +237,14 @@ def do_bench_events(
     # Detect AMD for GPU sleep
     amd_device = is_hip()
 
+    fn_only_bench = grad_to_none is None and skip_cache_clearing
+
     # Get cache for L2 cache clearing
     cache = (
         triton.runtime.driver.active.get_empty_cache_for_benchmark()
         if not skip_cache_clearing
         else None
     )
-
-    # First, estimate the runtime to calculate iterations
-    estimate_ms = triton.testing.do_bench(
-        fn,
-        warmup=warmup,
-        rep=rep,
-        grad_to_none=grad_to_none,
-        return_mode="mean",
-    )
-
-    # Calculate number of iterations based on target rep time
-    if estimate_ms == 0:
-        n_repeat = DEFAULT_N_REP  # Default if function is very fast
-    else:
-        # Run at least 10 iterations to get a reasonable estimate
-        # and maximum of 50 iterations to avoid filling up the kernel queue
-        n_repeat = min(max(10, int(rep / estimate_ms)), 50)
 
     clear_cache_fn = cache.zero_ if not skip_cache_clearing else lambda *args: None
     if grad_to_none is not None:
@@ -185,98 +255,102 @@ def do_bench_events(
     else:
         grad_to_none_fn = lambda *args: None
 
-    # Signal, buffer, and stream for blocking/unblocking the stream
+    # Setup buffer, and stream for blocking/unblocking the stream
     signal = 1
-    signal_buffer = torch.zeros(1, dtype=torch.int32, device="cuda")
-    timeout_buffer = torch.ones(1, dtype=torch.int32, device="cuda")
-    unblocking_stream = _get_unblocking_stream(signal_buffer.device)
+    signal_buffer, timeout_buffer, unblocking_stream = _setup_stream_blocking(
+        signal, is_amd=amd_device
+    )
 
-    # Warm up block and unblock streams
-    _unblock_stream(signal_buffer=signal_buffer, signal=signal)
-    _block_stream(
-        signal_buffer=signal_buffer,
-        timeout_buffer=timeout_buffer,
-        signal=signal,
+    # Initial time events
+    time_events = [torch.cuda.Event(enable_timing=True) for _ in range(2)]
+
+    # Estimate number of iterations based on target rep time
+    if fn_only_bench:
+
+        def _bench_loop_fn(n_repeat: int):
+            time_events[0].record()
+            for _ in range(n_repeat):
+                fn()
+            time_events[1].record()
+    else:
+
+        def _bench_loop_fn(n_repeat: int):
+            time_events[0].record()
+            for _ in range(n_repeat):
+                grad_to_none_fn()
+                fn()
+            time_events[1].record()
+
+    n_repeat = _bench_with_stream_blocking(
+        _bench_loop_fn,
+        unblocking_stream,
+        signal_buffer,
+        timeout_buffer,
+        signal,
+        n_repeat=10,
         is_amd=amd_device,
     )
     torch.cuda.synchronize()
 
+    estimate_ms = time_events[0].elapsed_time(time_events[1]) / n_repeat
+
+    # Calculate number of warmup iterations based on target rep time
+    if estimate_ms == 0:
+        n_warmup = DEFAULT_N_WARMUP  # Default if function is very fast
+    else:
+        n_warmup = max(1, int(warmup / estimate_ms))
+
     # Regular mode warmup
-    n_warmup = (
-        max(1, int(warmup / estimate_ms)) if estimate_ms > 0 else DEFAULT_N_WARMUP
-    )
     for _ in range(n_warmup):
         grad_to_none_fn()
         clear_cache_fn()
         fn()
-    torch.cuda.synchronize()
-    fn_only_bench = grad_to_none is None and skip_cache_clearing
 
-    # Time events
-    num_events = n_repeat + 1 if fn_only_bench else n_repeat * 2
-    time_events = [torch.cuda.Event(enable_timing=True) for _ in range(num_events)]
+    # Calculate number of iterations based on target rep time
+    if estimate_ms == 0:
+        n_repeat = DEFAULT_N_REP  # Default if function is very fast
+    else:
+        # Run at least 10 iterations to get a reasonable estimate
+        n_repeat = max(10, int(rep / estimate_ms))
 
+    if not fn_only_bench:
+        additional_num_events = n_repeat * 2 - len(time_events)
+        time_events += [
+            torch.cuda.Event(enable_timing=True) for _ in range(additional_num_events)
+        ]
+
+    # Run the benchmark
     if fn_only_bench:
 
-        def _bench_fn(i):
-            time_events[i].record()
-            fn()
+        def _bench_loop_fn(n_repeat: int):
+            time_events[0].record()
+            for i in range(n_repeat):
+                fn()
+            time_events[1].record()
     else:
 
-        def _bench_fn(i):
-            grad_to_none_fn()
-            clear_cache_fn()
-            time_events[i * 2].record()
-            fn()
-            time_events[i * 2 + 1].record()
+        def _bench_loop_fn(n_repeat: int):
+            for i in range(n_repeat):
+                grad_to_none_fn()
+                clear_cache_fn()
+                time_events[i * 2].record()
+                fn()
+                time_events[i * 2 + 1].record()
 
-    to_bench = True
-    while to_bench:
-        # Reset the signal and timeout buffers
-        signal_buffer.fill_(0)
-        timeout_buffer.fill_(1)
-        torch.cuda.synchronize()
-
-        # Start benchmarking
-        # Block the stream until the kernel dispatching is complete
-        _block_stream(
-            signal_buffer=signal_buffer,
-            timeout_buffer=timeout_buffer,
-            signal=signal,
-            is_amd=amd_device,
-        )
-
-        # Benchmark
-        for i in range(n_repeat):
-            _bench_fn(i)
-        if fn_only_bench:
-            time_events[n_repeat].record()
-        # Unblock the stream to allow the benchmark to run
-        with torch.cuda.stream(unblocking_stream):
-            _unblock_stream(signal_buffer=signal_buffer, signal=signal)
-
-        # Wait for the events to complete
-        torch.cuda.synchronize()
-
-        # Stop benchmarking even when fail when n_repeat is 1 since we cannot
-        # futher reduce the number of iterations
-        # Rerun the benchmark if timeout occurs in the previous run
-        to_bench = n_repeat != 1 and timeout_buffer.item() != 0
-
-        if to_bench:
-            # Reduce the number of iterations
-            n_repeat = max(1, n_repeat // 2)
-
-    assert timeout_buffer.item() == 0, (
-        "Failed to run the benchmark since the block_stream buffer runs into "
-        "timeout even when n_repeat = 1. Consider reducing the number of kernels "
-        "dispatched in a single iteration and run with CUDA_SCALE_LAUNCH_QUEUES=4x"
+    n_repeat = _bench_with_stream_blocking(
+        _bench_loop_fn,
+        unblocking_stream,
+        signal_buffer,
+        timeout_buffer,
+        signal,
+        n_repeat,
+        is_amd=amd_device,
     )
 
     if fn_only_bench:
-        all_kernel_times = [
-            time_events[i].elapsed_time(time_events[i + 1]) for i in range(n_repeat)
-        ]
+        kernel_time = time_events[0].elapsed_time(time_events[1]) / n_repeat
+        assert kernel_time > 0, "Failed to run the benchmark since the kernel time is 0"
+        all_kernel_times = [kernel_time] * n_repeat
     else:
         all_kernel_times = [
             time_events[i * 2].elapsed_time(time_events[i * 2 + 1])
