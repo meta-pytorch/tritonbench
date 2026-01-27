@@ -674,7 +674,7 @@ class Operator(BenchmarkOperator):
         return numel / metrics.latency * 1e3
 
     @register_metric()
-    def tflops(
+    def flops(
         self, fn_name: str, example_inputs: Any, metrics: BenchmarkOperatorMetrics
     ) -> float:
         a, w, bias = example_inputs
@@ -684,7 +684,7 @@ class Operator(BenchmarkOperator):
             flops = m * k * 2 * n + 2 * m * n
         else:
             flops = m * k * 2 * n
-        return flops / metrics.latency / 1e12 * 1e3
+        return flops
 
     @staticmethod
     def _scaled_randn(*args, scale: float, **kwargs) -> torch.Tensor:

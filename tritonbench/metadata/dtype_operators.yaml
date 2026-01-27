@@ -6,6 +6,7 @@ addmm: fp16
 bf16xint16_gemm: bypass
 blackwell_attentions: bf16
 cross_entropy: bypass
+decoding_attention: bf16
 embedding: bypass
 flash_attention: bf16
 flex_attention: bf16

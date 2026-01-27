@@ -5,6 +5,7 @@
 addmm: aten_addmm
 bf16xint16_gemm: bf16xbf16
 cross_entropy: cross_entropy_loss
+decoding_attention: triton_splitk
 embedding: torch_embedding
 flash_attention: aten
 flex_attention: eager

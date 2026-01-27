@@ -92,6 +92,9 @@ def add_manual_benchmarks(
         if benchmark in run_configs:
             run_configs[benchmark]["disabled"] = True
     for benchmark in extra_args:
+        if not benchmark in run_configs:
+            run_configs[benchmark] = extra_args[benchmark].copy()
+            continue
         run_configs[benchmark]["args"] = extra_args[benchmark]["args"]
     for benchmark, benchmark_config in options.get("enabled", {}).items():
         run_configs[benchmark] = benchmark_config.copy()

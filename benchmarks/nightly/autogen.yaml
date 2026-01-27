@@ -26,10 +26,11 @@ embedding_bwd:
   args: --op embedding --baseline torch_embedding --metrics latency,speedup --only
     liger_embedding,torch_embedding --bwd
 bf16_flash_attention_fwd:
-  args: --op flash_attention --baseline flash_v3 --metrics latency,tflops,speedup --only triton_tutorial_flash_v2,flash_v3
+  args: --op flash_attention --baseline flash_v3 --metrics latency,tflops,speedup
+    --only triton_tutorial_flash_v2,flash_v3
 bf16_flash_attention_bwd:
-  args: --op flash_attention --baseline flash_v3 --metrics latency,tflops,speedup --bwd --only
-    triton_tutorial_flash_v2,flash_v3 --causal
+  args: --op flash_attention --baseline flash_v3 --metrics latency,tflops,speedup
+    --bwd --only triton_tutorial_flash_v2,flash_v3 --causal
 fp8_attention_fwd:
   args: --op fp8_attention --baseline triton_flash_v2 --metrics latency,tflops,speedup
     --only triton_flash_v2,triton_flash_v2_tma,triton_flash_v2_ws
@@ -75,9 +76,9 @@ geglu_bwd:
   args: --op geglu --baseline torch_geglu --metrics latency,speedup --only liger_geglu,torch_geglu
     --bwd
 fp16_gemm_fwd:
-  args: --op gemm --baseline aten_matmul --metrics latency,speedup --only matmul_partition_k,streamk_matmul,triton_ops_matmul,triton_tutorial_matmul,aten_matmul
+  args: --op gemm --baseline aten_matmul --metrics latency,tflops,speedup --only matmul_partition_k,streamk_matmul,triton_ops_matmul,triton_tutorial_matmul,aten_matmul
 fp16_gemm_bwd:
-  args: --op gemm --baseline aten_matmul --metrics latency,speedup --only matmul_partition_k,streamk_matmul,triton_ops_matmul,triton_tutorial_matmul,aten_matmul
+  args: --op gemm --baseline aten_matmul --metrics latency,tflops,speedup --only matmul_partition_k,streamk_matmul,triton_ops_matmul,triton_tutorial_matmul,aten_matmul
     --bwd
 bf16_grouped_gemm_fwd:
   args: --op grouped_gemm --baseline aten_grouped_mm --metrics latency,tflops,speedup

@@ -3,9 +3,9 @@
 # List of operators that support tflops metric
 # =================================================================
 - addmm
-- gemm
 - bf16xint16_gemm
 - blackwell_attentions
+- decoding_attention
 - flash_attention
 - flex_attention
 - fp8_attention
@@ -15,6 +15,7 @@
 - fp8_gemm_rowwise
 - fp8_gemm_rowwise_grouped
 - gdn_fwd_h
+- gemm
 - grouped_gemm
 - int4_gemm
 - mamba2_chunk_scan
