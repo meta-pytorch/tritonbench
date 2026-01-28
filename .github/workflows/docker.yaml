@@ -1,16 +1,14 @@
 name: TritonBench Nightly Docker Build
 on:
   schedule:
-    # Push the nightly docker daily at 3 PM UTC
-    - cron: '0 15 * * *'
+    # Push the docker every weekend
+    - cron: '0 0 * * 6'
   pull_request:
     paths:
       - .github/workflows/docker.yaml
       - docker/tritonbench-nightly.dockerfile
-      - submodules/FBGEMM
       - submodules/ThunderKittens
       - submodules/flash-attention
-      - submodules/aiter
       - install.py
       - tools/**
   workflow_dispatch:

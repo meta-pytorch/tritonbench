@@ -1,9 +1,13 @@
 name: TritonBench Nightly ROCM Docker Build
 on:
+  schedule:
+    # Push the docker every weekend
+    - cron: '0 0 * * 6'
   pull_request:
     paths:
       - .github/workflows/docker-rocm.yaml
       - docker/tritonbench-rocm-nightly.dockerfile
+      - submodules/aiter
   workflow_dispatch:
     inputs:
       nightly_date:
