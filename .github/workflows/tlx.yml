@@ -1,7 +1,7 @@
 name: TritonBench TLX Benchmark
 on:
   schedule:
-    # Test nightly docker daily at 4 PM UTC
+    # Test daily at 4 PM UTC
     - cron: '0 16 * * *'
   workflow_dispatch:
     inputs:
@@ -32,12 +32,12 @@ on:
       - .github/workflows/tlx.yml
 
 jobs:
-  mi350-meta-triton-nightly-benchmark:
-    uses: ./.github/workflows/_linux-benchmark-mi350.yml
+  h100-meta-triton-nightly-benchmark:
+    uses: ./.github/workflows/_linux-benchmark-h100.yml
     if: ${{ inputs.test_type != 'abtest' }}
     with:
       test_type: ${{ inputs.test_type || 'periodic' }}
-      benchmark_name: "nightly"
+      benchmark_name: "tlx"
       venv_name: "meta-triton"
     secrets:
       TRITONBENCH_SCRIBE_GRAPHQL_ACCESS_TOKEN: ${{ secrets.TRITONBENCH_SCRIBE_GRAPHQL_ACCESS_TOKEN }}
