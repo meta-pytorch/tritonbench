@@ -32,7 +32,7 @@ on:
       - .github/workflows/tlx.yml
 
 jobs:
-  h100-meta-triton-nightly-benchmark:
+  h100-meta-triton-tlx-benchmark:
     uses: ./.github/workflows/_linux-benchmark-h100.yml
     if: ${{ inputs.test_type != 'abtest' }}
     with:
