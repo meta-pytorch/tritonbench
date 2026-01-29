@@ -205,11 +205,10 @@ def _process_tile_epilogue_inner(
                 [BLOCK_M_SPLIT, slice_size],
             )
             result = tlx.local_load(acc_tmem_subslice)
+            # Signal MMA consumer after each slice
+            tlx.barrier_arrive(tmem_empty_bars[buf_idx], 1)
             c = result.to(tlx.dtype_of(c_desc))
             c_desc.store([offs_am, offs_bn + slice_id * slice_size], c)
-
-        # Signal MMA consumer
-        tlx.barrier_arrive(tmem_empty_bars[buf_idx], 1)
 
 
 @triton.jit
@@ -235,13 +234,47 @@ def _process_tile_mma_inner(
 ):
     """Process MMA for a single tile. Returns updated smem_accum_cnt."""
 
-    # Wait for epilogue to be done with all TMEM buffers
+    # Peeled first K-iteration: wait for data before acquiring TMEM
+    # This allows previous tile's epilogue to overlap with current tile's TMA load
+    buf, phase = _get_bufidx_phase(smem_accum_cnt, NUM_SMEM_BUFFERS)
+
+    # wait for current phase(round) of load for this buf
+    tlx.barrier_wait(B_smem_full_bars[buf], phase)
+
+    # Process first K iteration (peeled) with use_acc=False
     for group_id in tl.static_range(NUM_MMA_GROUPS):
+        # Calculate buffer indices
+        a_buf = group_id * NUM_SMEM_BUFFERS + buf
+        acc_buf = group_id * NUM_TMEM_BUFFERS + cur_tmem_buf
+
+        # Wait for this A subtile buffer to be loaded
+        tlx.barrier_wait(A_smem_full_bars[a_buf], phase)
+
+        # Wait for epilogue to be done with all TMEM buffers (after data is ready)
         cur_barrier_idx = group_id * NUM_TMEM_BUFFERS + cur_tmem_buf
         tlx.barrier_wait(tmem_empty_bars[cur_barrier_idx], tmem_write_phase ^ 1)
 
-    # now iterate along K to compute result for the block
-    for k in range(0, k_tiles):
+        # CTA0 waits for CTA0 and CTA1 to finish loading A and B before issuing dot op
+        # "Arrive Remote, Wait Local" pattern: all CTAs signal CTA 0's barrier, only CTA 0 waits
+        if PAIR_CTA:
+            tlx.barrier_arrive(cta_bars[a_buf], arrive_count=1, remote_cta_rank=0)
+            tlx.barrier_wait(cta_bars[a_buf], phase=phase, pred=pred_cta0)
+
+        # Perform MMA: use_acc=False for first K iteration (clears accumulator)
+        tlx.async_dot(
+            buffers_A[a_buf],
+            buffers_B[buf],
+            tmem_buffers[acc_buf],
+            use_acc=False,
+            mBarriers=[A_smem_empty_bars[a_buf]],
+            two_ctas=PAIR_CTA,
+            out_dtype=tl.float32,
+        )
+
+    smem_accum_cnt += 1
+
+    # Remaining K iterations with use_acc=True
+    for _ in range(1, k_tiles):
         buf, phase = _get_bufidx_phase(smem_accum_cnt, NUM_SMEM_BUFFERS)
 
         # wait for current phase(round) of load for this buf
@@ -262,12 +295,12 @@ def _process_tile_mma_inner(
                 tlx.barrier_arrive(cta_bars[a_buf], arrive_count=1, remote_cta_rank=0)
                 tlx.barrier_wait(cta_bars[a_buf], phase=phase, pred=pred_cta0)
 
-            # Perform MMA: use_acc=False for first K iteration, True otherwise
+            # Perform MMA: use_acc=True for remaining K iterations
             tlx.async_dot(
                 buffers_A[a_buf],
                 buffers_B[buf],
                 tmem_buffers[acc_buf],
-                use_acc=k > 0,
+                use_acc=True,
                 mBarriers=[A_smem_empty_bars[a_buf]],
                 two_ctas=PAIR_CTA,
                 out_dtype=tl.float32,
@@ -447,7 +480,7 @@ def matmul_kernel_tma_ws_blackwell(
         num_barriers=NUM_TMEM_BUFFERS * NUM_MMA_GROUPS, arrive_count=1
     )
     tmem_empty_bars = tlx.alloc_barriers(
-        num_barriers=NUM_TMEM_BUFFERS * NUM_MMA_GROUPS, arrive_count=1
+        num_barriers=NUM_TMEM_BUFFERS * NUM_MMA_GROUPS, arrive_count=EPILOGUE_SUBTILE
     )
 
     if CLUSTER_LAUNCH_CONTROL:
