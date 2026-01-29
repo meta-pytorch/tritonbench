@@ -42,8 +42,11 @@ def gen_tlx_benchmark_config() -> Dict[str, Any]:
 
     out = _load_benchmarks(os.path.join(CURRENT_DIR, "tlx_benchmarks.yaml"))
     tlx_tutorial_benchmark_metadata = load_tlx_tutorial_backends()
-    metadata_benchmarks = get_benchmark_config_with_tags(
-        tags=["tlx"], runtime_metadata=tlx_tutorial_benchmark_metadata
+    # only load benchmarks from runtime metadata
+    metadata_benchmarks = get_benchmark_config_with_opbackends(
+        tags=["tlx"],
+        runtime_metadata=tlx_tutorial_benchmark_metadata,
+        runtime_only=True
     )
     out.update(metadata_benchmarks)
     return out

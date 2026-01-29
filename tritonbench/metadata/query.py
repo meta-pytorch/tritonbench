@@ -13,17 +13,20 @@ SKIP_DTYPE = ["bypass", "fp8", "int4"]
 
 
 def get_benchmark_config_with_tags(
-    tags: List[str], runtime_metadata: Optional[Dict[str, Any]] = None
+    tags: List[str], runtime_metadata: Optional[Dict[str, Any]] = None, runtime_only: bool = False
 ) -> Dict[str, Any]:
     """Return benchmark config dict with any of these tags"""
-    with open(KERNEL_METADATA_PATH, "r") as f:
-        operators = yaml.safe_load(f)
-        if runtime_metadata is not None:
-            for op in runtime_metadata:
-                if op not in operators:
-                    operators.update({op: runtime_metadata[op]})
-                else:
-                    operators[op].update(runtime_metadata[op])
+    if runtime_only:
+        operators = runtime_metadata
+    else:
+        with open(KERNEL_METADATA_PATH, "r") as f:
+            operators = yaml.safe_load(f)
+            if runtime_metadata is not None:
+                for op in runtime_metadata:
+                    if op not in operators:
+                        operators.update({op: runtime_metadata[op]})
+                    else:
+                        operators[op].update(runtime_metadata[op])
 
     with open(BACKWARD_METADATA_PATH, "r") as f:
         backwards = yaml.safe_load(f)
