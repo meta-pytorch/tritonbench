@@ -23,15 +23,15 @@ from common import setup_tritonbench_cwd
 
 setup_tritonbench_cwd()
 
-TLX_BENCHMARKS = [
-    "gemm": {
+TLX_BENCHMARKS = {
+    "gemm": [
         "tlx_matmul",
         "tlx_matmul_ws",
         "tlx_matmul_clc",
         "tlx_matmul_pipelined",
         "tlx_matmul_2cta",
-    },
-]
+    ],
+}
 
 def gen_tlx_benchmarks():
     acc = {}
