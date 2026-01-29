@@ -694,6 +694,7 @@ def _attn_fwd_ws(
                 kv_tiles[v_bufIdx],
                 acc_tiles[0],
                 use_acc=False,
+                force_async=True,
             )
 
             acc1_init = False
@@ -751,6 +752,7 @@ def _attn_fwd_ws(
                     kv_tiles[v_bufIdx],
                     acc_tiles[0],
                     use_acc=True,
+                    force_async=True,
                 )
 
             tlx.tcgen05_commit(acc_empties[0])
@@ -1323,6 +1325,7 @@ def _attn_fwd_ws_persistent(
                         kv_slice,
                         acc_tiles[0],
                         use_acc=slice_id > 0,
+                        force_async=True,
                     )
 
                 acc1_init = False
@@ -1414,6 +1417,7 @@ def _attn_fwd_ws_persistent(
                             kv_slice,
                             acc_tiles[0],
                             use_acc=True,
+                            force_async=True,
                         )
 
                 tlx.tcgen05_commit(q_empties[q_bufIdx])
