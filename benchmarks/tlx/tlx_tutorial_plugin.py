@@ -37,8 +37,6 @@ def load_symbol_from_module(module, symbol):
 
 runtime_op_list = [
     # op, backend, backend_module, backend_func
-    ("gemm", "tlx_tutorial_matmul", "blackwell-gemm-ws_test", "matmul"),
-    ("gemm", "tlx_tutorial_matmul", "hopper-gemm-ws_test", "matmul"),
     (
         "blackwell_attentions",
         "tlx_tutorial_fa_ws_pipelined_persistent",
