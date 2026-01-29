@@ -13,7 +13,9 @@ SKIP_DTYPE = ["bypass", "fp8", "int4"]
 
 
 def get_benchmark_config_with_tags(
-    tags: List[str], runtime_metadata: Optional[Dict[str, Any]] = None, runtime_only: bool = False
+    tags: List[str],
+    runtime_metadata: Optional[Dict[str, Any]] = None,
+    runtime_only: bool = False,
 ) -> Dict[str, Any]:
     """Return benchmark config dict with any of these tags"""
     if runtime_only:
