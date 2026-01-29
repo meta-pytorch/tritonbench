@@ -245,7 +245,9 @@ def fresh_triton_cache():
 
     with tempfile.TemporaryDirectory() as tmpdir:
         old = os.environ.get("TRITON_CACHE_DIR", None)
+        old_helion_cache = os.environ.get("HELION_CACHE_DIR", None)
         os.environ["TRITON_CACHE_DIR"] = tmpdir
+        os.environ["HELION_CACHE_DIR"] = tmpdir
         old_cache_manager = os.environ.get("TRITON_CACHE_MANAGER", None)
         os.environ.pop("TRITON_CACHE_MANAGER", None)
         yield
@@ -253,6 +255,10 @@ def fresh_triton_cache():
             os.environ["TRITON_CACHE_DIR"] = old
         else:
             del os.environ["TRITON_CACHE_DIR"]
+        if old_helion_cache:
+            os.environ["HELION_CACHE_DIR"] = old_helion_cache
+        else:
+            del os.environ["HELION_CACHE_DIR"]
         if old_cache_manager:
             os.environ["TRITON_CACHE_MANAGER"] = old_cache_manager
 

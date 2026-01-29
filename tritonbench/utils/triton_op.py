@@ -786,8 +786,6 @@ class BenchmarkOperator(metaclass=PostInitProcessor):
                 "Please use '--metrics=latency --latency-measure-mode=profiler' instead, which provides the same "
                 "functionality with L2 cache handling and kernel time measurement.\033[0m"
             )
-        if "compile_time" in self.required_metrics and is_fbcode():
-            self.required_metrics.append("compile_time_by_stage")
         self.extra_args = extra_args
         if self.name not in REGISTERED_X_VALS:
             REGISTERED_X_VALS[self.name] = "x_val"
@@ -1789,7 +1787,7 @@ class BenchmarkOperator(metaclass=PostInitProcessor):
                     )
                 else:
                     metrics.mem_footprint_compression_ratio = None
-            if "walltime" in self.required_metrics:
+            if {"walltime", "compile_time"} & set(self.required_metrics):
                 metrics.walltime = do_bench_walltime(
                     fn,
                     warmup=warmup,
@@ -1825,6 +1823,7 @@ class BenchmarkOperator(metaclass=PostInitProcessor):
                 metrics.compile_time = compile_time
                 if compile_time_by_stage:
                     metrics.compile_time_by_stage = compile_time_by_stage
+                    self.required_metrics.add("compile_time_by_stage")
             if "compile_trace" in self.required_metrics:
                 metrics.compile_trace = self.compile_time(
                     input_id, fn_name, metrics, kineto_trace=True
@@ -1952,6 +1951,14 @@ class BenchmarkOperator(metaclass=PostInitProcessor):
                 )
                 from tritonbench.components.compile_time import do_compile_time_in_task
 
+                metrics.extra_metrics["_compile_time_in_task"] = (
+                    do_compile_time_in_task(
+                        fn, cold_start=self.tb_args.compile_cold_start
+                    )
+                )
+                self._latency_with_compile_in_task = metrics.extra_metrics[
+                    "_compile_time_in_task"
+                ]
                 if is_fbcode():
                     from tritonbench.components.compile_time import (
                         fbcode_do_compile_time_in_task,
@@ -1968,15 +1975,6 @@ class BenchmarkOperator(metaclass=PostInitProcessor):
                         self.triton_hook_latency = (
                             compile_times["total"] / 1_000_000
                         )  # converting from ms to s
-                if "compile_times" not in metrics.extra_metrics:
-                    metrics.extra_metrics["_compile_time_in_task"] = (
-                        do_compile_time_in_task(
-                            fn, cold_start=self.tb_args.compile_cold_start
-                        )
-                    )
-                    self._latency_with_compile_in_task = metrics.extra_metrics[
-                        "_compile_time_in_task"
-                    ]
             if "single_run_in_task" in self.required_metrics:
                 assert (
                     self.required_metrics == ["single_run_in_task"]
@@ -2324,6 +2322,10 @@ class BenchmarkOperator(metaclass=PostInitProcessor):
                 str(1),
                 "--input-id",
                 str(input_id),
+                "--mode",
+                self.tb_args.mode,
+                "--precision",
+                self.tb_args.precision,
                 "--metrics",
                 (
                     "_compile_time_in_task"
@@ -2339,7 +2341,15 @@ class BenchmarkOperator(metaclass=PostInitProcessor):
         output_dir = os.environ.get(
             "TRITONBENCH_COMPILE_TIME_OUTPUT_DIR", "/tmp/tritonbench"
         )
-        op_task = OpTask(name=self.name, save_output_dir=Path(output_dir))
+        op_task = OpTask(
+            name=self.name,
+            save_output_dir=Path(output_dir),
+            extra_env={
+                "TRITON_ALWAYS_COMPILE": "1",
+                "HELION_SKIP_CACHE": "1",
+                "TRITON_LOCAL_BUILD": "1",
+            },
+        )
         op_task.make_operator_instance(args=op_task_args)
         op_task.run()
         if kineto_trace:
@@ -2359,7 +2369,7 @@ class BenchmarkOperator(metaclass=PostInitProcessor):
             return compiled_time, compile_time_by_stage
         latency_with_compile = op_task.get_attribute("_latency_with_compile_in_task")
         del op_task
-        latency_without_compile = metrics.latency
+        latency_without_compile = metrics.walltime
         return latency_with_compile - latency_without_compile, None
 
     def hw_roofline(self) -> float:

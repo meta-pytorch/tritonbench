@@ -1,6 +1,7 @@
 import os
 import random
 import string
+import time
 from datetime import datetime
 from functools import partial
 from typing import Callable, Dict, Optional
@@ -48,14 +49,12 @@ def do_compile_time_in_task(fn: Callable, cold_start: bool = False) -> float:
 
             nop_kernel[1,]()
         torch.cuda.synchronize()
-        start_event = torch.cuda.Event(enable_timing=True)
-        end_event = torch.cuda.Event(enable_timing=True)
-        start_event.record()
+        start_time = time.perf_counter()
         fn()
-        end_event.record()
-        torch.cuda.synchronize()  # Wait for the events to be recorded!
-    latency_with_compile = start_event.elapsed_time(end_event)
-    return latency_with_compile
+        torch.cuda.synchronize()
+        end_time = time.perf_counter()
+    walltime_with_compile = (end_time - start_time) * 1e3
+    return walltime_with_compile
 
 
 def do_compile_kineto_trace_in_task(
