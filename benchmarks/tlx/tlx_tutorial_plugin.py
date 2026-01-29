@@ -80,7 +80,13 @@ def load_tlx_tutorial_backends() -> Dict[str, Any]:
                 bias = input[-1]
                 assert bias is None, "tlx tutorial matmul does not support bias"
                 return lambda: func(a, b)
-            if op == "flash_attention" or op == "blackwell_attentions":
+            if op == "flash_attention":
+                sm_scale = self.sm_scale
+                assert self.causal is False, "causal is not supported"
+                return lambda: func(
+                    *input, sm_scale,
+                )
+            if op == "blackwell_attentions":
                 sm_scale = self.sm_scale
                 causal = self.causal
                 BWD_BLOCK_M1 = 128
