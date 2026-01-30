@@ -1,9 +1,11 @@
-from typing import Any, Callable
+import threading
+from typing import Any, Callable, Optional
 
 import torch
 import triton
 import triton.language as tl
 from tritonbench.utils.constants import DEFAULT_N_REP, DEFAULT_N_WARMUP
+from tritonbench.utils.cudagraph_utils import CudaGraphConfig, CudaGraphError
 from tritonbench.utils.env_utils import is_hip
 from tritonbench.utils.gpu_utils import sleep_amd
 
@@ -158,6 +160,7 @@ def _reset_stream_blocking_flags(
 
 def _bench_with_stream_blocking(
     fn: Callable,
+    compute_stream: torch.cuda.Stream,
     unblocking_stream: torch.cuda.Stream,
     signal_buffer: torch.Tensor,
     timeout_buffer: torch.Tensor,
@@ -171,17 +174,18 @@ def _bench_with_stream_blocking(
         _reset_stream_blocking_flags(signal_buffer, timeout_buffer)
         torch.cuda.synchronize()
 
-        # Start benchmarking
-        # Block the stream until the kernel dispatching is complete
-        _block_stream(
-            signal_buffer=signal_buffer,
-            timeout_buffer=timeout_buffer,
-            signal=signal,
-            is_amd=is_amd,
-        )
+        with torch.cuda.stream(compute_stream):
+            # Start benchmarking
+            # Block the stream until the kernel dispatching is complete
+            _block_stream(
+                signal_buffer=signal_buffer,
+                timeout_buffer=timeout_buffer,
+                signal=signal,
+                is_amd=is_amd,
+            )
 
-        # Benchmark
-        fn(n_repeat)
+            # Benchmark
+            fn(n_repeat)
 
         # Unblock the stream to allow the benchmark to run
         with torch.cuda.stream(unblocking_stream):
@@ -215,6 +219,7 @@ def do_bench_events(
     grad_to_none=None,
     use_cudagraph=False,
     skip_cache_clearing=False,
+    cudagraph_config: Optional[CudaGraphConfig] = None,
 ):
     """Measure GPU kernel execution time using GPU events.
 
@@ -232,12 +237,18 @@ def do_bench_events(
     Returns:
         List of measured kernel times in milliseconds (if return_mode="all") or single value.
     """
-    assert not use_cudagraph, "CUDA graphs are not supported for the gpu_events mode"
+    fn_only_bench = grad_to_none is None and skip_cache_clearing
+    if use_cudagraph:
+        assert fn_only_bench, (
+            "CUDA graphs only support grad_to_none=None and skip_cache_clearing=True"
+        )
+        assert cudagraph_config is not None
+        compute_stream = cudagraph_config.get_stream()
+    else:
+        compute_stream = torch.cuda.current_stream()
 
     # Detect AMD for GPU sleep
     amd_device = is_hip()
-
-    fn_only_bench = grad_to_none is None and skip_cache_clearing
 
     # Get cache for L2 cache clearing
     cache = (
@@ -283,6 +294,7 @@ def do_bench_events(
 
     n_repeat = _bench_with_stream_blocking(
         _bench_loop_fn,
+        compute_stream,
         unblocking_stream,
         signal_buffer,
         timeout_buffer,
@@ -320,7 +332,63 @@ def do_bench_events(
         ]
 
     # Run the benchmark
-    if fn_only_bench:
+    if use_cudagraph:
+        # Need to keep the rep count low for cudagraphs. So, we break the graph
+        # into smaller chunks and replay many times otherwise the replay might
+        # get stuck.
+        max_num_kernels = 512
+        num_kernels = cudagraph_config.get_num_kernels(fn)
+        n_cudagraph_repeat = min(max(max_num_kernels // num_kernels, 1), n_repeat)
+
+        n_replay = max(n_repeat // n_cudagraph_repeat, 1)
+        torch.cuda.synchronize()
+
+        # Capture cudagraph
+        fn_graph = cudagraph_config.get_graph()
+        with torch.cuda.graph(fn_graph, stream=cudagraph_config.get_stream()):
+            for _ in range(n_cudagraph_repeat):
+                fn()
+        torch.cuda.synchronize()
+
+        def run_replay(event):
+            try:
+                with torch.cuda.stream(cudagraph_config.get_stream()):
+                    fn_graph.replay()
+                torch.cuda.synchronize()
+                event.set()
+            except Exception as e:
+                print(f"An error occurred during CudaGraph replay: {e}", flush=True)
+
+        # Warm up CudaGraph replay in another thread
+        replay_event = threading.Event()
+        thread = threading.Thread(target=run_replay, args=(replay_event,))
+        thread.start()
+
+        # Wait for the replay for 10 seconds
+        is_done = replay_event.wait(10)
+        if not is_done:
+            # An attempt to send an interrupt to the replay thread by deleting
+            # the graph when the replay is stuck or there is an error.  This is
+            # unsafe and not gauranteed to work
+            try:
+                print("CudaGraph replay failed. Destroying graph", flush=True)
+                cudagraph_config.reset_graph()
+                thread.join()
+                torch.cuda.synchronize()
+                print("CudaGraph replay thread cleanly terminated", flush=True)
+            except Exception as e:
+                # Raise
+                raise CudaGraphError("CudaGraph capturing error: {}".format(e))
+        else:
+            thread.join()
+
+        def _bench_loop_fn(n_replay: int):
+            time_events[0].record()
+            for i in range(n_replay):
+                fn_graph.replay()
+            time_events[1].record()
+
+    elif fn_only_bench:
 
         def _bench_loop_fn(n_repeat: int):
             time_events[0].record()
@@ -339,13 +407,19 @@ def do_bench_events(
 
     n_repeat = _bench_with_stream_blocking(
         _bench_loop_fn,
+        compute_stream,
         unblocking_stream,
         signal_buffer,
         timeout_buffer,
         signal,
-        n_repeat,
+        n_repeat if not use_cudagraph else n_replay,
         is_amd=amd_device,
     )
+
+    if use_cudagraph:
+        n_repeat = n_repeat * n_cudagraph_repeat
+        # Delete graph
+        cudagraph_config.reset_graph()
 
     if fn_only_bench:
         kernel_time = time_events[0].elapsed_time(time_events[1]) / n_repeat

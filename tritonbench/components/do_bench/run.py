@@ -9,6 +9,7 @@ import triton
 from torch._inductor.runtime.benchmarking import benchmarker
 from tritonbench.components.do_bench.entropy.entropy_criterion import EntropyCriterion
 from tritonbench.utils.constants import DEFAULT_N_REP, DEFAULT_N_WARMUP
+from tritonbench.utils.cudagraph_utils import CudaGraphConfig
 
 from .common import summarize_statistics
 from .gpu_events import do_bench_events
@@ -637,6 +638,7 @@ def do_bench_wrapper(
     entropy_window_size: int = 299,
     entropy_max_samples: int = 10000,
     entropy_min_warmup_samples: int = 20,
+    cudagraph_config: Optional[CudaGraphConfig] = None,
 ) -> Optional[Latency]:
     """Wrapper to triton's do_bench to gain latency.
 
@@ -675,7 +677,7 @@ def do_bench_wrapper(
                     repcnt=repcnt,
                 )
             )
-        elif use_cuda_graphs:
+        elif use_cuda_graphs and latency_measure_mode != "gpu_events":
             with torch.cuda.stream(torch.cuda.Stream()):
                 if latency_measure_mode == "profiler":
                     bench_fn = partial(_do_bench_profiler, warmup=1, use_cudagraph=True)
@@ -712,6 +714,8 @@ def do_bench_wrapper(
                     return_mode="all",
                     grad_to_none=grad_to_none,
                     skip_cache_clearing=skip_cache_clearing,
+                    use_cudagraph=use_cuda_graphs,
+                    cudagraph_config=cudagraph_config,
                 )
             )
         else:
