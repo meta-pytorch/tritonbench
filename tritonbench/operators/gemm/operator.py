@@ -580,7 +580,7 @@ class Operator(BenchmarkOperator):
                     a, b, warp_specialize=False
                 )
 
-        @register_benchmark(enabled=False)
+        @register_benchmark(enabled=has_tlx())
         def tlx_matmul(self, a, b, bias) -> Callable:
             if bias is not None:
                 return lambda: _tlx_matmul(a, b) + bias
