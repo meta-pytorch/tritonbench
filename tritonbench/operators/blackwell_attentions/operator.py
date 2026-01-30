@@ -213,6 +213,21 @@ def unpack_inputs(*args):
     return (t.detach() for t in inputs)
 
 
+def detach_and_requires_grad(t: torch.Tensor):
+    return t.detach().requires_grad_(True)
+
+
+def detach_inputs(*args):
+    inputs = args
+    if len(inputs) == 1 and isinstance(inputs[0], xformers_fmha.Inputs):
+        inp = inputs[0]
+        inp.query = detach_and_requires_grad(inp.query)
+        inp.key = detach_and_requires_grad(inp.key)
+        inp.value = detach_and_requires_grad(inp.value)
+        return (inp,)
+    return [detach_and_requires_grad(t) for t in inputs]
+
+
 def multi_input_wrapper(fn):
     def wrapper(self, *args):
         preproc_fn, benchmark_fn = fn(self, *args)
@@ -223,6 +238,7 @@ def multi_input_wrapper(fn):
         for i in range(0, arg_len, 3):
             q, k, v = args[i : i + 3]
             inp = preproc_fn(q, k, v)
+            inp = detach_inputs(*inp)
             all_inputs += [*unpack_inputs(*inp)]
             inputs.append(inp)
 
@@ -623,14 +639,26 @@ class Operator(BenchmarkOperator):
         return flops
 
     def get_bwd_fn(self, fwd_fn: Callable) -> Callable:
-        o = fwd_fn()
-        outputs = [input_filter(lambda x: isinstance(x, torch.Tensor), o_) for o_ in o]
-        dOs = [torch.rand_like(o_).detach() for o_ in outputs]
-        zero_grad = (
-            self.optims[fwd_fn].zero_grad
-            if fwd_fn in self.optims
-            else lambda set_to_none: None
-        )
+        if self.use_cuda_graphs:
+            stream = self.get_cudagraph_stream()
+            stream.wait_stream(torch.cuda.current_stream())
+        else:
+            stream = torch.cuda.current_stream()
+
+        with torch.cuda.stream(stream):
+            o = fwd_fn()
+            outputs = [
+                input_filter(lambda x: isinstance(x, torch.Tensor), o_) for o_ in o
+            ]
+            dOs = [torch.rand_like(o_).detach() for o_ in outputs]
+            zero_grad = (
+                self.optims[fwd_fn].zero_grad
+                if fwd_fn in self.optims
+                else lambda set_to_none: None
+            )
+
+        if self.use_cuda_graphs:
+            torch.cuda.current_stream().wait_stream(stream)
 
         def fn():
             zero_grad(set_to_none=True)
