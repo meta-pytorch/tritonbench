@@ -192,6 +192,12 @@ def parse_args(args: List[str]) -> argparse.Namespace:
     parser.add_argument("--buffer-ops", action="store_true", default=False)
     parser.add_argument("--layout", type=str, default="tn")
     parser.add_argument(
+        "--template-filter-regex",
+        type=str,
+        default=".*",
+        help="Regex filter for PT2 Templates",
+    )
+    parser.add_argument(
         "--verbose-autotune",
         action="store_true",
         help="Being verbose with autotuning results",
@@ -259,6 +265,7 @@ class Operator(BenchmarkOperator):
                 )
 
         self.use_buffer_ops = gemm_args.buffer_ops
+        self.template_filter_regex = gemm_args.template_filter_regex
 
         if self.use_buffer_ops and torch.version.hip is None:
             raise ValueError("Buffer ops are only supported on AMD GPUs.")
@@ -370,10 +377,13 @@ class Operator(BenchmarkOperator):
     def pt2_triton_matmul(self, a, b, bias) -> Callable:
         torch._dynamo.reset()
         with inductor_config.patch(
-            max_autotune=True,
-            max_autotune_gemm_backends="TRITON",
-            autotune_fallback_to_aten=False,
-            autotune_num_choices_displayed=self.inductor_autotune_num_choices_displayed,
+            {
+                "max_autotune": True,
+                "max_autotune_gemm_backends": "TRITON",
+                "autotune_fallback_to_aten": False,
+                "autotune_num_choices_displayed": self.inductor_autotune_num_choices_displayed,
+                "test_configs.autotune_choice_name_regex": self.template_filter_regex,
+            }
         ):
             if bias is not None:
                 f = lambda a, b: a.matmul(b) + bias
