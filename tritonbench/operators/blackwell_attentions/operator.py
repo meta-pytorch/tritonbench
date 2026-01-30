@@ -692,6 +692,9 @@ class Operator(BenchmarkOperator):
             base_info += f" {self.mode.value}"
         return base_info
 
-    def get_latency_scale(self, example_inputs):
+    def get_num_inputs_per_iter(self, example_inputs) -> int:
         assert len(example_inputs) % 3 == 0
         return len(example_inputs) // 3
+
+    def get_latency_scale(self, example_inputs):
+        return self.get_num_inputs_per_iter(example_inputs)

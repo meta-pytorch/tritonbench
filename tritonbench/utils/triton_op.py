@@ -38,6 +38,7 @@ from tritonbench.utils.constants import (
     DEFAULT_SLEEP,
     DEFAULT_WARMUP,
 )
+from tritonbench.utils.cudagraph_utils import CudaGraphConfig, CudaGraphError
 from tritonbench.utils.diode_utils import setup_diode_model, teardown_diode_model
 from tritonbench.utils.env_utils import (
     apply_precision,
@@ -815,6 +816,7 @@ class BenchmarkOperator(metaclass=PostInitProcessor):
             None  # Updated in _reduce_benchmarks if running the Diode benchmark
         )
         self.old_allow_tf32 = set_allow_tf32(self.tb_args.allow_tf32)
+        self.cudagraph_config = CudaGraphConfig.generate(self.use_cuda_graphs)
 
     # Run the post initialization
     def __post__init__(self):
@@ -1230,6 +1232,9 @@ class BenchmarkOperator(metaclass=PostInitProcessor):
 
     def get_x_val(self, example_inputs) -> Any:
         return self._cur_input_id
+
+    def get_cudagraph_stream(self):
+        return self.cudagraph_config.get_stream()
 
     def get_bwd_fn(self, fwd_fn: Callable) -> Callable:
         # Extract tensors that require gradients from example_inputs
@@ -1742,6 +1747,10 @@ class BenchmarkOperator(metaclass=PostInitProcessor):
             if {"latency", "tflops", "gbps", "speedup", "compile_time"} & set(
                 self.required_metrics
             ):
+                if self.cudagraph_config is not None:
+                    self.cudagraph_config.num_inputs_per_iter = (
+                        self.get_num_inputs_per_iter(self.example_inputs)
+                    )
                 metrics.latency = do_bench_wrapper(
                     fn,
                     warmup,
@@ -1762,8 +1771,10 @@ class BenchmarkOperator(metaclass=PostInitProcessor):
                     entropy_max_samples=getattr(
                         self.tb_args, "entropy_max_samples", 10000
                     ),
+                    cudagraph_config=self.cudagraph_config,
                 )
-                metrics.latency.scale(self.get_latency_scale(self.example_inputs))
+                if metrics.latency is not None:
+                    metrics.latency.scale(self.get_latency_scale(self.example_inputs))
             if {
                 "gpu_peak_mem",
                 "gpu_mem_footprint_compression_ratio",
@@ -2020,6 +2031,8 @@ class BenchmarkOperator(metaclass=PostInitProcessor):
             metrics.error_msg = "CUDA OOM"
         except NotImplementedError as e:
             metrics.error_msg = str(e)
+        except CudaGraphError:
+            metrics.error_msg = "CudaGraph error"
         except Exception as e:
             if not self.tb_args.keep_going:
                 raise
@@ -2481,5 +2494,10 @@ class BenchmarkOperator(metaclass=PostInitProcessor):
         operator_name = cls.name
         return BASELINE_BENCHMARKS.get(operator_name, None)
 
-    def get_latency_scale(self, example_inputs):
+    @classmethod
+    def get_num_inputs_per_iter(cls, example_inputs):
+        return 1
+
+    @classmethod
+    def get_latency_scale(cls, example_inputs):
         return 1
