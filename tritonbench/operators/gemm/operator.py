@@ -582,10 +582,13 @@ class Operator(BenchmarkOperator):
 
         @register_benchmark(enabled=has_tlx())
         def tlx_matmul(self, a, b, bias) -> Callable:
+            # TLX matmul requires contiguous inputs with 16-byte aligned strides
+            a_contig = a.contiguous()
+            b_contig = b.contiguous()
             if bias is not None:
-                return lambda: _tlx_matmul(a, b) + bias
+                return lambda: _tlx_matmul(a_contig, b_contig) + bias
             else:
-                return lambda: _tlx_matmul(a, b)
+                return lambda: _tlx_matmul(a_contig, b_contig)
 
         @register_benchmark(enabled=has_tlx())
         def tlx_matmul_ws(self, a, b, bias) -> Callable:
