@@ -36,9 +36,9 @@ TLX_BENCHMARKS_BLACKWELL = {
 }
 
 def gen_tlx_benchmarks():
-    acc = {}
-    for op in TLX_BENCHMARKS:
-        for backend in TLX_BENCHMARKS[op]:
+    acc: dict[Unknown, Unknown] = {}
+    for op in TLX_BENCHMARKS_BLACKWELL:
+        for backend in TLX_BENCHMARKS_BLACKWELL[op]:
             if op not in acc:
                 acc[op] = {backend: {"tags": ["tlx"]}}
             else:
