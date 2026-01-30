@@ -718,6 +718,8 @@ class Operator(BenchmarkOperator):
             base_info += f" {BenchmarkMode.FWD.value}"
         else:
             base_info += f" {self.mode.value}"
+        if self.deterministic:
+            base_info += " deterministic"
         return base_info
 
     def get_num_inputs_per_iter(self, example_inputs) -> int:
