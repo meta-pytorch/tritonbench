@@ -37,15 +37,16 @@ def gen_tlx_benchmarks():
     acc = {}
     for op in TLX_BENCHMARKS:
         for backend in TLX_BENCHMARKS[op]:
-            acc.update(
-                {
-                    op: {
+            if op not in acc:
+                acc[op] = {backend: {"tags": ["tlx"]}}
+            else:
+                acc[op].update(
+                    {
                         backend: {
                             "tags": ["tlx"],
                         }
                     }
-                }
-            )
+                )
     return acc
 
 
