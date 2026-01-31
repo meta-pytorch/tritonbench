@@ -302,7 +302,7 @@ if is_tile_enabled():
 else:
     # Helper to build config with optional minRegAutoWS/maxRegAutoWS
     def make_standard_config(
-        BM, BN, s, w, subtile, subtile_p, vectmul, add2reduce, maxreg
+        BM, BN, s, w, subtile, subtile_p, vectmul, add2reduce, maxreg, pingpong
     ):
         config_kwargs = {
             "BLOCK_M": BM,
@@ -324,13 +324,13 @@ else:
             extra_kwargs["maxRegAutoWS"] = maxreg
 
         if HAS_PINGPONG_AUTO_WS:
-            extra_kwargs["pingpongAutoWS"] = True
+            extra_kwargs["pingpongAutoWS"] = pingpong
 
         return triton.Config(config_kwargs, **extra_kwargs)
 
     configs = [
         make_standard_config(
-            BM, BN, s, w, subtile, subtile_p, vectmul, add2reduce, maxreg
+            BM, BN, s, w, subtile, subtile_p, vectmul, add2reduce, maxreg, pingpong
         )
         for BM in [256]
         for BN in [64, 128]
@@ -341,6 +341,7 @@ else:
         for vectmul in [1]
         for add2reduce in [False]
         for maxreg in [152, 192]
+        for pingpong in [True, False]
     ]
 
 
