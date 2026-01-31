@@ -1,6 +1,10 @@
 from typing import Any, Callable, Dict, Generator, List, Optional
 
-from tritonbench.utils.triton_op import BenchmarkOperator, BenchmarkOperatorResult
+from tritonbench.utils.triton_op import (
+    BenchmarkOperator,
+    BenchmarkOperatorResult,
+    override_args,
+)
 
 
 def dynamic_run(
@@ -39,7 +43,8 @@ def dynamic_run(
         arg_list.append(key)
         arg_list.append(str(v))
 
-    op = BenchmarkOperator(extra_args=arg_list)
+    tb_args, extra_args = override_args(arg_list)
+    op = BenchmarkOperator(tb_args, extra_args)
 
     op.set_input_iter(input_iter)
 
