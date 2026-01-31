@@ -38,4 +38,5 @@ git rev-parse --verify HEAD
 echo "Running ${BENCHMARK_NAME} benchmark under conda env ${CONDA_ENV}"
 
 . "${SETUP_SCRIPT}"
+
 python "benchmarks/${BENCHMARK_NAME}/run.py" --ci
