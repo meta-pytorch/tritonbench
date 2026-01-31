@@ -108,10 +108,6 @@ jobs:
           mkdir -p benchmark-output
           cp -r ".benchmarks/${{ inputs.benchmark_name }}" benchmark-output/${TRITONBENCH_SIDE_A_ENV}
           sudo rm -rf .benchmarks || true
-          # post-process result.json
-          latest_result_json=$(find ./benchmark-output/${TRITONBENCH_SIDE_A_ENV} -name "result.json"  | sort -r | head -n 1)
-          python3 ./.ci/test_infra/oss_ci_benchmark_v3.py --json ${latest_result_json} \
-            --add-github-env --output ${latest_result_json}
       - name: Compile Triton side B (On Demand)
         if: ${{ inputs.test_type == 'abtest' && inputs.side_b_triton && inputs.side_b_commit }}
         run: |
@@ -127,10 +123,6 @@ jobs:
           mkdir -p benchmark-output
           cp -r ".benchmarks/${{ inputs.benchmark_name }}" benchmark-output/${TRITONBENCH_SIDE_B_ENV}
           sudo rm -rf .benchmarks || true
-          # post-process result.json
-          latest_result_json=$(find ./benchmark-output/${TRITONBENCH_SIDE_B_ENV} -name "result.json"  | sort -r | head -n 1)
-          python3 ./.ci/test_infra/oss_ci_benchmark_v3.py --json ${latest_result_json} \
-            --add-github-env --output ${latest_result_json}
       - name: Upload result to GH Actions Artifact
         uses: actions/upload-artifact@v4
         with:
