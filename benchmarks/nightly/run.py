@@ -108,6 +108,4 @@ def run():
 
 
 if __name__ == "__main__":
-    if not os.environ.get("CONDA_ENV", None):
-        assert False, "Please specify env conda environment."
     run()
