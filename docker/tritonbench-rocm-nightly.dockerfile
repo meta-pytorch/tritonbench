@@ -8,6 +8,8 @@ ENV CONDA_ENV=pytorch
 ENV CONDA_ENV_TRITON_MAIN=triton-main
 ENV WORKSPACE_DIR=/workspace
 ENV SETUP_SCRIPT=/workspace/setup_instance.sh
+# Use UV for Python venv
+ENV UV_VENV_DIR=${WORKSPACE_DIR}/uv_venvs
 ARG TRITONBENCH_BRANCH=${TRITONBENCH_BRANCH:-main}
 ARG FORCE_DATE=${FORCE_DATE}
 
@@ -19,7 +21,7 @@ RUN git clone --recurse-submodules -b "${TRITONBENCH_BRANCH}" --single-branch \
     https://github.com/meta-pytorch/tritonbench /workspace/tritonbench
 
 # Install and setup env
-RUN cd /workspace/tritonbench && bash ./.ci/tritonbench/setup-env.sh --hip
+RUN cd /workspace/tritonbench && bash ./.ci/tritonbench/setup-env.sh --hip --triton-main --meta-triton
 
 # Output setup script for inspection
 RUN cat "${SETUP_SCRIPT}"
