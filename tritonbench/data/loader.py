@@ -13,6 +13,7 @@ SUPPORTED_INPUT_OPS = [
     "bmm",
     "gemm",
     "jagged_dense_dense_sum",
+    "fp8_gemm",
 ]
 
 INPUT_CONFIG_DIR = Path(__file__).parent.joinpath("input_configs")

@@ -8,7 +8,7 @@ import triton
 from torch._inductor.kernel.mm import scaling_pairs, ScalingType
 from tritonbench.data.llama import llama_shapes
 from tritonbench.operators.fp8_gemm.persistent import blackwell_persistent_tma
-from tritonbench.utils.env_utils import IS_BLACKWELL
+from tritonbench.utils.env_utils import IS_BLACKWELL, is_fbcode
 from tritonbench.utils.triton_op import (
     BenchmarkOperator,
     BenchmarkOperatorMetrics,
@@ -268,7 +268,7 @@ class Operator(BenchmarkOperator):
         with inductor_config.patch(
             {
                 "max_autotune": True,
-                "max_autotune_gemm_backends": "TRITON",
+                "max_autotune_gemm_backends": "ATEN,TRITON",
                 "autotune_fallback_to_aten": False,
                 "test_configs.autotune_choice_name_regex": self.extra_args.template_filter_regex,
             }
@@ -284,6 +284,28 @@ class Operator(BenchmarkOperator):
             compiled = torch.compile(f, dynamic=False)
             compiled(a, b)
 
+        return lambda: compiled(a, b)
+
+    @register_benchmark(enabled=is_fbcode())
+    def pt2_fp8_gemm_maxautotune_diode(self, a, b, scale_a, scale_b) -> Callable:
+        torch._dynamo.reset()
+        logger.info(
+            "[DIODE][TritonBench] Run PT2 FP8 GEMM Max-Autotune Diode benchmark"
+        )
+        with inductor_config.patch(
+            max_autotune=True,
+            max_autotune_gemm_backends="ATEN,TRITON",
+        ):
+            f = lambda a, b: torch._scaled_mm(
+                a,
+                b.t(),
+                scale_a,
+                scale_b.t(),
+                use_fast_accum=self.use_fast_accum,
+                out_dtype=self._get_dtype(),
+            )
+            compiled = torch.compile(f, dynamic=False)
+            compiled(a, b)
         return lambda: compiled(a, b)
 
     if IS_BLACKWELL:
