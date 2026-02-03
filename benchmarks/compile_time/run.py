@@ -114,7 +114,7 @@ def main() -> None:
     for op in op_list:
         operator_benchmarks.update(get_common_args(op, TRITON_OPERATORS[op]))
     for op_bench in operator_benchmarks:
-        op_args = operator_benchmarks[op_bench]["args"].split(" ")
+        op_args = operator_benchmarks[op_bench]["args"]
         output_file = output_dir.joinpath(f"{op_bench}.json")
         op_args.extend(["--output-json", str(output_file.absolute())])
         run_in_task(op_args=op_args, benchmark_name=op_bench)
