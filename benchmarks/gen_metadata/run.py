@@ -87,7 +87,9 @@ def run(args: argparse.Namespace):
         DTYPE_OPERATORS[op] = op_bench.DEFAULT_PRECISION
         if baseline := op_bench.has_baseline():
             BASELINE_OPERATORS[op] = baseline
-        if (op_bench.has_metric("flops") or op_bench.has_metric("tflops")) and not op in TFLOPS_SKIP_OPERATORS:
+        if (
+            op_bench.has_metric("flops") or op_bench.has_metric("tflops")
+        ) and not op in TFLOPS_SKIP_OPERATORS:
             TFLOPS_OPERATORS.append(op)
         if op_bench.has_bwd():
             BACKWARD_OPERATORS.append(op)

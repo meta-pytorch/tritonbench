@@ -35,6 +35,7 @@ TLX_BENCHMARKS_BLACKWELL = {
     ],
 }
 
+
 def gen_tlx_benchmarks():
     acc: dict[Unknown, Unknown] = {}
     for op in TLX_BENCHMARKS_BLACKWELL:
@@ -76,7 +77,7 @@ def gen_tlx_benchmark_config() -> Dict[str, Any]:
     metadata_benchmarks = get_benchmark_config_with_tags(
         tags=["tlx"],
         runtime_metadata=tlx_tutorial_benchmark_metadata,
-        runtime_only=True
+        runtime_only=True,
     )
     out.update(metadata_benchmarks)
     return out

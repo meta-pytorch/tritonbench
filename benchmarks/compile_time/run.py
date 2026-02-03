@@ -63,8 +63,10 @@ TRITON_OPERATORS = {
     "welford": ["test_welford"],
 }
 
+
 def get_common_args(op: str, backends: List[str]) -> Dict[str, List[str]]:
     from tritonbench.metadata.query import get_benchmark_dtype
+
     command_args = [
         "--op",
         op,

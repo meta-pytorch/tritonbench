@@ -82,7 +82,8 @@ def load_tlx_tutorial_backends() -> Dict[str, Any]:
                 sm_scale = self.sm_scale
                 assert self.causal is False, "causal is not supported"
                 return lambda: func(
-                    *input, sm_scale,
+                    *input,
+                    sm_scale,
                 )
             if op == "blackwell_attentions":
                 sm_scale = self.sm_scale
@@ -95,9 +96,15 @@ def load_tlx_tutorial_backends() -> Dict[str, Any]:
             return lambda: func(*input)
 
         # gemm tlx is fwd-only
-        register_benchmark(op, backend, func, tags=["tlx"], fwd_only=(op == "gemm"), enabled=True, cls=cls)(
-            _inner
-        )
+        register_benchmark(
+            op,
+            backend,
+            func,
+            tags=["tlx"],
+            fwd_only=(op == "gemm"),
+            enabled=True,
+            cls=cls,
+        )(_inner)
         acc.update(
             {
                 op: {

@@ -19,6 +19,7 @@ def get_benchmark_dtype(op_name: str, runtime_dtype: str):
         dtype_mapping = yaml.safe_load(f)
     return dtype_mapping[op_name]
 
+
 def get_benchmark_config_with_tags(
     tags: List[str],
     runtime_metadata: Optional[Dict[str, Any]] = None,
