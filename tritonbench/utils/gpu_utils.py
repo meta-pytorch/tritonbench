@@ -77,6 +77,7 @@ HW_ROOFLINE_SPECS: Dict[
         "NVIDIA A100-SXM4-40GB": NV_A100,
         "NVIDIA A100-PG509-200": NV_A100,
         "NVIDIA H100": NV_H100,
+        "NVIDIA H100 80GB HBM3": NV_H100,
         "AMD MI300X": AMD_MI300X,
         "NVIDIA B200": NV_B200,
         **MTIA_COMPUTE_SPECS,
@@ -85,6 +86,7 @@ HW_ROOFLINE_SPECS: Dict[
         # https://www.nvidia.com/en-gb/data-center/h100
         # values in gbps
         "NVIDIA H100": 2000,
+        "NVIDIA H100 80GB HBM3": 2000,
         # https://www.amd.com/content/dam/amd/en/documents/instinct-tech-docs/data-sheets/amd-instinct-mi300x-platform-data-sheet.pdf
         "AMD MI300X": 5300,
         **MTIA_MEMORY_SPECS,
