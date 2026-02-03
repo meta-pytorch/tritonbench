@@ -8,9 +8,8 @@ import logging
 import os
 import sys
 from os.path import abspath, exists
-from typing import Dict, List
-
 from pathlib import Path
+from typing import Dict, List
 
 
 logger = logging.getLogger(__name__)
