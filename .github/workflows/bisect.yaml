@@ -14,7 +14,7 @@ on:
         default: 'h100'
         options:
           - 'h100'
-          - 'mi350x'
+          - 'mi350'
       bisect_type:
         type: choice
         default: 'performance'
