@@ -10,6 +10,8 @@ import sys
 from os.path import abspath, exists
 from typing import Dict, List
 
+from pathlib import Path
+
 
 logger = logging.getLogger(__name__)
 logging.basicConfig(level=logging.INFO)
