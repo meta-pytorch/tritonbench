@@ -194,7 +194,7 @@ def parse_args(args: List[str]) -> argparse.Namespace:
     parser.add_argument(
         "--template-filter-regex",
         type=str,
-        default=".*",
+        default=None,
         help="Regex filter for PT2 Templates",
     )
     parser.add_argument(
@@ -376,15 +376,17 @@ class Operator(BenchmarkOperator):
     @register_benchmark()
     def pt2_triton_matmul(self, a, b, bias) -> Callable:
         torch._dynamo.reset()
-        with inductor_config.patch(
-            {
-                "max_autotune": True,
-                "max_autotune_gemm_backends": "TRITON",
-                "autotune_fallback_to_aten": False,
-                "autotune_num_choices_displayed": self.inductor_autotune_num_choices_displayed,
-                "test_configs.autotune_choice_name_regex": self.template_filter_regex,
-            }
-        ):
+        inductor_config_patch = {
+            "max_autotune": True,
+            "max_autotune_gemm_backends": "TRITON",
+            "autotune_fallback_to_aten": False,
+            "autotune_num_choices_displayed": self.inductor_autotune_num_choices_displayed,
+        }
+        if self.template_filter_regex is not None:
+            inductor_config_patch["test_configs.autotune_choice_name_regex"] = (
+                self.template_filter_regex
+            )
+        with inductor_config.patch(inductor_config_patch):
             if bias is not None:
                 f = lambda a, b: a.matmul(b) + bias
             else:
