@@ -83,8 +83,8 @@ def get_common_args(op: str, backends: List[str]) -> Dict[str, List[str]]:
     bwd_command_args.append("--bwd")
     dtype = get_benchmark_dtype(op)
     return {
-        "{dtype}_{op}_fwd": {"op": op, "args": command_args},
-        "{dtype}_{op}_bwd": {"op": op, "args": bwd_command_args},
+        f"{dtype}_{op}_fwd": {"op": op, "args": command_args},
+        f"{dtype}_{op}_bwd": {"op": op, "args": bwd_command_args},
     }
 
 
