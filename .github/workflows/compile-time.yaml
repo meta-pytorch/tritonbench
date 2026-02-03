@@ -27,7 +27,7 @@ on:
         description: 'Side B Triton commit (abtest only)'
   pull_request:
     paths:
-      - benchmarks/nightly/**
+      - benchmarks/compile_time/**
       - .github/workflows/_linux-benchmark-*.yml
       - .github/workflows/compile-time.yml
 
