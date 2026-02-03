@@ -12,6 +12,13 @@ DTYPE_METADATA_PATH = os.path.join(CURRENT_DIR, "dtype_operators.yaml")
 SKIP_DTYPE = ["bypass", "fp8", "int4"]
 
 
+def get_benchmark_dtype(op_name: str, runtime_dtype: str):
+    if runtime_dtype:
+        return runtime_dtype
+    with open(DTYPE_METADATA_PATH, "r") as f:
+        dtype_mapping = yaml.safe_load(f)
+    return dtype_mapping[op_name]
+
 def get_benchmark_config_with_tags(
     tags: List[str],
     runtime_metadata: Optional[Dict[str, Any]] = None,

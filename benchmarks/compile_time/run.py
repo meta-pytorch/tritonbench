@@ -63,8 +63,8 @@ TRITON_OPERATORS = {
     "welford": ["test_welford"],
 }
 
-
 def get_common_args(op: str, backends: List[str]) -> Dict[str, List[str]]:
+    from tritonbench.metadata.query import get_benchmark_dtype
     command_args = [
         "--op",
         op,
@@ -77,27 +77,8 @@ def get_common_args(op: str, backends: List[str]) -> Dict[str, List[str]]:
     ]
     bwd_command_args = command_args.copy()
     bwd_command_args.append("--bwd")
-    return {"fwd": command_args, "bwd": bwd_command_args}
-
-
-def reduce(run_timestamp, output_dir, output_files, args):
-    """aggregate all op benchmark csvs into json file"""
-    from tritonbench.utils.scuba_utils import decorate_benchmark_data, log_benchmark
-
-    # Collecting GitHub environment variables when running in CI environment
-    # Reduce all operator CSV outputs to a single output json
-    benchmark_data = [json.load(open(f, "r")) for f in output_files]
-    aggregated_obj = decorate_benchmark_data(
-        args.name, run_timestamp, args.ci, benchmark_data
-    )
-
-    result_json_path = os.path.join(output_dir, "result.json")
-    with open(result_json_path, "w") as fp:
-        json.dump(aggregated_obj, fp, indent=4)
-    if args.log_scuba:
-        log_benchmark(aggregated_obj)
-        logger.info(f"[{args.name}] logging results to scuba.")
-    return result_json_path
+    dtype = get_benchmark_dtype(op)
+    return {"{dtype}_{op}_fwd": {"op": op, "args": command_args}, {"{dtype}_{op}_bwd": {"op": op, "args": bwd_command_args}}}
 
 
 def main() -> None:
@@ -116,26 +97,48 @@ def main() -> None:
     setup_tritonbench_cwd()
 
     from tritonbench.utils.run_utils import run_in_task, setup_output_dir
+    from tritonbench.utils.scuba_utils import decorate_benchmark_data, log_benchmark
 
     output_files = []
     run_timestamp, output_dir = setup_output_dir("compile_time", ci=args.ci)
-    op_args_list = {}
+    operator_benchmarks = {}
     if args.op:
         op_list = [args.op]
     else:
         op_list = TRITON_OPERATORS.keys()
     for op in op_list:
-        op_args_list[op] = get_common_args(op, TRITON_OPERATORS[op])
-    for op in op_list:
-        for mode in op_args_list[op]:
-            op_args = op_args_list[op][mode]
-            output_file = output_dir.joinpath(f"{op}_{mode}.json")
-            op_args.extend(["--output-json", str(output_file.absolute())])
-            run_in_task(op=op, op_args=op_args)
-            output_files.append(output_file)
+        operator_benchmarks.update(get_common_args(op, TRITON_OPERATORS[op]))
+    for op_bench in operator_benchmarks:
+        op_args = operator_benchmarks[op_bench]
+        output_file = output_dir.joinpath(f"{op_bench}.json")
+        op_args.extend(["--output-json", str(output_file.absolute())])
+        run_in_task(op_args=op_args, benchmark_name=op_bench)
+        # write pass or fail to result json
+        # todo: check every input shape has passed
+        output_file_name = Path(output_file).stem
+        if not os.path.exists(output_file) or os.path.getsize(output_file) == 0:
+            logger.warning(f"[compile_time] Failed to run {output_file_name}.")
+            with open(output_file, "w") as f:
+                json.dump({f"tritonbench_{output_file_name}-pass": 0}, f)
+        else:
+            with open(output_file, "r") as f:
+                obj = json.load(f)
+            obj[f"tritonbench_{output_file_name}-pass"] = 1
+            with open(output_file, "w") as f:
+                json.dump(obj, f, indent=4)
+        output_files.append(output_file)
     # Reduce all operator CSV outputs to a single output json
-    result_json_file = reduce(run_timestamp, output_dir, output_files, args)
+    benchmark_data = [json.load(open(f, "r")) for f in output_files]
+    aggregated_obj = decorate_benchmark_data(
+        args.name, run_timestamp, args.ci, benchmark_data
+    )
+    result_json_file = os.path.join(output_dir, "result.json")
+    with open(result_json_file, "w") as fp:
+        json.dump(aggregated_obj, fp, indent=4)
     logger.info(f"[compile_time] logging result json file to {result_json_file}.")
+    if args.log_scuba:
+        log_benchmark(aggregated_obj)
+        logger.info(f"[compile_time] logging results to scuba.")
 
 
 if __name__ == "__main__":
