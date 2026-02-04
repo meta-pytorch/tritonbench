@@ -5,10 +5,8 @@ Output default metrics.
 """
 
 import argparse
-import json
 import logging
 import os
-from pathlib import Path
 from typing import Any, Dict
 
 import yaml
@@ -18,15 +16,12 @@ CURRENT_DIR = os.path.dirname(os.path.abspath(__file__))
 logger = logging.getLogger(__name__)
 logging.basicConfig(level=logging.INFO)
 
-from ..common import setup_tritonbench_cwd
+from ..common import setup_tritonbench_cwd, run_benchmark_config_ci
 
 setup_tritonbench_cwd()
 
-from tritonbench.utils.run_utils import run_benchmark_config_ci
-
-
 def gen_tlx_benchmark_config() -> Dict[str, Any]:
-    from tlx_tutorial_plugin import load_tlx_tutorial_backends
+    from .tlx_tutorial_plugin import load_tlx_tutorial_backends
     from tritonbench.metadata.query import get_benchmark_config_with_tags
 
     def _load_benchmarks(config_path: str) -> Dict[str, Any]:
