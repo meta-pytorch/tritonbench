@@ -16,7 +16,7 @@ CURRENT_DIR = os.path.dirname(os.path.abspath(__file__))
 logger = logging.getLogger(__name__)
 logging.basicConfig(level=logging.INFO)
 
-from ..common import setup_tritonbench_cwd, run_benchmark_config_ci
+from ..common import setup_tritonbench_cwd, run_benchmark_config_ci, setup_output_dir
 
 setup_tritonbench_cwd()
 
@@ -26,6 +26,7 @@ def gen_tlx_benchmark_config() -> Dict[str, Any]:
 
     def _load_benchmarks(config_path: str) -> Dict[str, Any]:
         out = {}
+        print(config_path)
         with open(config_path, "r") as f:
             obj = yaml.safe_load(f)
         if not obj:
@@ -34,6 +35,7 @@ def gen_tlx_benchmark_config() -> Dict[str, Any]:
             # bypass disabled benchmarks
             if obj[benchmark_name].get("disabled", False):
                 continue
+            out[benchmark_name] = obj[benchmark_name]
         return out
 
     out = _load_benchmarks(os.path.join(CURRENT_DIR, "tlx_benchmarks.yaml"))
@@ -75,6 +77,12 @@ def run():
     tlx_benchmarks = gen_tlx_benchmark_config()
     print(yaml.dump(tlx_benchmarks))
     if args.generate_config:
+        if not args.output_dir:
+            run_timestamp, output_dir = setup_output_dir(
+                args.name, ci=args.ci
+            )
+        else:
+            output_dir = args.output_dir
         with open(os.path.join(output_dir, "tlx_benchmarks_autogen.yaml"), "w") as f:
             yaml.dump(tlx_benchmarks, f)
         logger.info(f"[tlx benchmark] Generated config file to {output_dir}.")

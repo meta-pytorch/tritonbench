@@ -1,33 +1,14 @@
 # Scripts that load operators and generate the metadata
 import logging
 import os
-import sys
 
 logger = logging.getLogger(__name__)
 logging.basicConfig(level=logging.INFO)
 
-
-from os.path import abspath, exists
-
 CURRENT_DIR = os.path.dirname(os.path.abspath(__file__))
 
 
-def setup_tritonbench_cwd():
-    original_dir = abspath(os.getcwd())
-
-    for tritonbench_dir in (
-        ".",
-        "../../../tritonbench",
-    ):
-        if exists(tritonbench_dir):
-            break
-
-    if exists(tritonbench_dir):
-        tritonbench_dir = abspath(tritonbench_dir)
-        os.chdir(tritonbench_dir)
-        sys.path.append(tritonbench_dir)
-    return original_dir
-
+from ..common import setup_tritonbench_cwd
 
 setup_tritonbench_cwd()
 

@@ -39,4 +39,4 @@ echo "Running ${BENCHMARK_NAME} benchmark under conda env ${CONDA_ENV}"
 
 . "${SETUP_SCRIPT}"
 
-CONDA_ENV=${CONDA_ENV} python -m benchmarks.${BENCHMARK_NAME}.run --ci
+CONDA_ENV=${CONDA_ENV} python -m "benchmarks.${BENCHMARK_NAME}.run" --ci

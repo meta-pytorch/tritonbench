@@ -55,8 +55,6 @@ def run_benchmark_config_ci(
     def _filter_benchmark_config_obj_by_device(benchmark_config_obj):
         ret = {}
         for benchmark in benchmark_config_obj:
-            print(benchmark)
-            print(benchmark_config_obj[benchmark])
             if (
                 "disabled" in benchmark_config_obj[benchmark]
                 and benchmark_config_obj[benchmark]["disabled"]
@@ -67,8 +65,7 @@ def run_benchmark_config_ci(
                 assert any(device in CI_SUPPORTED_DEVICES for device in devices), (
                     f"Found unsupported device: {devices}"
                 )
-                predicate = CI_SUPPORTED_DEVICES[device]
-                if predicate():
+                if any(CI_SUPPORTED_DEVICES[device]() for device in devices):
                     ret[benchmark] = benchmark_config_obj[benchmark]
                 else:
                     print(f"skipping by device: {benchmark}")
