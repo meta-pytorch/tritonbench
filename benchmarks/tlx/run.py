@@ -16,13 +16,15 @@ CURRENT_DIR = os.path.dirname(os.path.abspath(__file__))
 logger = logging.getLogger(__name__)
 logging.basicConfig(level=logging.INFO)
 
-from ..common import setup_tritonbench_cwd, run_benchmark_config_ci, setup_output_dir
+from ..common import run_benchmark_config_ci, setup_output_dir, setup_tritonbench_cwd
 
 setup_tritonbench_cwd()
 
+
 def gen_tlx_benchmark_config() -> Dict[str, Any]:
-    from .tlx_tutorial_plugin import load_tlx_tutorial_backends
     from tritonbench.metadata.query import get_benchmark_config_with_tags
+
+    from .tlx_tutorial_plugin import load_tlx_tutorial_backends
 
     def _load_benchmarks(config_path: str) -> Dict[str, Any]:
         out = {}
@@ -78,9 +80,7 @@ def run():
     print(yaml.dump(tlx_benchmarks))
     if args.generate_config:
         if not args.output_dir:
-            run_timestamp, output_dir = setup_output_dir(
-                args.name, ci=args.ci
-            )
+            run_timestamp, output_dir = setup_output_dir(args.name, ci=args.ci)
         else:
             output_dir = args.output_dir
         with open(os.path.join(output_dir, "tlx_benchmarks_autogen.yaml"), "w") as f:

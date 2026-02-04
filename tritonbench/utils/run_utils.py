@@ -7,7 +7,6 @@ import shlex
 import subprocess
 import sys
 import time
-
 from datetime import datetime
 from pathlib import Path
 from typing import Dict, List, Optional
@@ -18,10 +17,7 @@ from tritonbench.operator_loader import get_op_loader_bench_cls_by_name, is_load
 from tritonbench.operators import load_opbench_by_name
 from tritonbench.operators_collection import list_operators_by_collection
 from tritonbench.utils.ab_test import compare_ab_results, run_ab_test
-from tritonbench.utils.env_utils import (
-    is_fbcode,
-    is_hip,
-)
+from tritonbench.utils.env_utils import is_fbcode, is_hip
 from tritonbench.utils.git_utils import get_branch, get_commit_time, get_current_hash
 from tritonbench.utils.gpu_utils import get_amd_device_name, gpu_lockdown
 from tritonbench.utils.list_operator_details import list_operator_details

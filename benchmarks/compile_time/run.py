@@ -14,7 +14,7 @@ logger = logging.getLogger(__name__)
 logging.basicConfig(level=logging.INFO)
 
 
-from ..common import setup_tritonbench_cwd, setup_output_dir
+from ..common import setup_output_dir, setup_tritonbench_cwd
 
 # A list of operators and their Triton backends
 TRITON_OPERATORS = {

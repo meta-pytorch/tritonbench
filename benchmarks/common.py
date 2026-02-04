@@ -1,16 +1,16 @@
-import os
 import json
 import logging
+import os
 import sys
 import time
-
 from datetime import datetime
 from os.path import abspath, exists
-from typing import Dict, List, Any
 from pathlib import Path
+from typing import Any, Dict, List
 
 logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger(__name__)
+
 
 def setup_tritonbench_cwd():
     original_dir = abspath(os.getcwd())
@@ -28,11 +28,17 @@ def setup_tritonbench_cwd():
         sys.path.append(tritonbench_dir)
     return original_dir
 
+
 setup_tritonbench_cwd()
 
-from tritonbench.utils.run_utils import run_in_task
-from tritonbench.utils.env_utils import is_blackwell, is_h100, is_hip_mi300, is_hip_mi350
+from tritonbench.utils.env_utils import (
+    is_blackwell,
+    is_h100,
+    is_hip_mi300,
+    is_hip_mi350,
+)
 from tritonbench.utils.path_utils import REPO_PATH
+from tritonbench.utils.run_utils import run_in_task
 
 BENCHMARKS_OUTPUT_DIR = REPO_PATH.joinpath(".benchmarks")
 
@@ -42,6 +48,7 @@ CI_SUPPORTED_DEVICES = {
     "mi300": is_hip_mi300,
     "mi350": is_hip_mi350,
 }
+
 
 def run_benchmark_config_ci(
     benchmark_group_name: str,
@@ -127,6 +134,7 @@ def run_benchmark_config_ci(
         logger.info(
             f"[{benchmark_group_name}] logging results to scuba table pytorch_user_benchmarks."
         )
+
 
 def setup_output_dir(bm_name: str, ci: bool = False, output_dir: str | None = None):
     current_timestamp = datetime.fromtimestamp(time.time()).strftime("%Y%m%d%H%M%S")

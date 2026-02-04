@@ -65,8 +65,8 @@ def tritonparse_parse(tritonparse_log_path):
     if tritonparse_log_path is not None:
         # capture errors but don't fail the entire script
         try:
-            from tritonparse.structured_logging import clear_logging_config
             from tritonparse.parse.utils import unified_parse
+            from tritonparse.structured_logging import clear_logging_config
 
             clear_logging_config()
 

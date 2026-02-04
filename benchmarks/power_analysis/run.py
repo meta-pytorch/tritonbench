@@ -13,6 +13,7 @@ logging.basicConfig(level=logging.INFO)
 
 
 from ..common import setup_tritonbench_cwd
+
 setup_tritonbench_cwd()
 
 from tritonbench.utils.run_utils import load_operator_by_args

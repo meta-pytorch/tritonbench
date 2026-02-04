@@ -18,7 +18,8 @@ CURRENT_DIR = os.path.dirname(os.path.abspath(__file__))
 logger = logging.getLogger(__name__)
 logging.basicConfig(level=logging.INFO)
 
-from ..common import setup_tritonbench_cwd, setup_output_dir
+from ..common import setup_output_dir, setup_tritonbench_cwd
+
 
 def get_operator_benchmarks() -> Dict[str, Any]:
     def _load_benchmarks(config_path: str) -> Dict[str, Any]:
