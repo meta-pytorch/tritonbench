@@ -58,15 +58,15 @@ AMD_MI300X = {
     "int8": 20900 // 8,
 }
 
-# NVIDIA B200 GPU Datasheet:
-# TODO: Get the B200 data when it is released. This is H100 data copied over to enable the benchmarks.
+# https://www.primeline-solutions.com/media/categories/server/nach-gpu/nvidia-hgx-h200/nvidia-blackwell-b200-datasheet.pdf
+# individual blackwell gpu specs
 NV_B200 = {
-    "fp32": 989 // 2,
-    "tf32": 989 // 2,
-    "bf16": 1979 // 2,
-    "fp16": 1979 // 2,
-    "fp8": 3958 // 2,
-    "int8": 3958 // 2,
+    "fp32": 2200 // 2,
+    "tf32": 2200 // 2,
+    "bf16": 4500 // 2,
+    "fp16": 4500 // 2,
+    "fp8": 9000 // 2,
+    "int8": 9000 // 2,
 }
 
 
@@ -85,10 +85,12 @@ HW_ROOFLINE_SPECS: Dict[
     False: {
         # https://www.nvidia.com/en-gb/data-center/h100
         # values in gbps
-        "NVIDIA H100": 2000,
-        "NVIDIA H100 80GB HBM3": 2000,
+        "NVIDIA H100": 3350,
+        "NVIDIA H100 80GB HBM3": 3350,
         # https://www.amd.com/content/dam/amd/en/documents/instinct-tech-docs/data-sheets/amd-instinct-mi300x-platform-data-sheet.pdf
         "AMD MI300X": 5300,
+        # https://resources.nvidia.com/en-us-dgx-systems/dgx-b200-datasheet
+        "NVIDIA B200": 8000,
         **MTIA_MEMORY_SPECS,
     },
 }
