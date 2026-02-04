@@ -485,7 +485,7 @@ def matmul_kernel_tma_ws_blackwell(
 
     if CLUSTER_LAUNCH_CONTROL:
         # Dynamic tiling setup with CLC
-        clc_context = tlx.clc_create_context(1, 6 if PAIR_CTA else 3)
+        clc_context = tlx.clc_create_context(6 if PAIR_CTA else 3)
 
     with tlx.async_tasks():
         with tlx.async_task("default"):  # epilogue consumer
@@ -505,7 +505,7 @@ def matmul_kernel_tma_ws_blackwell(
             while tile_id != -1:
                 if CLUSTER_LAUNCH_CONTROL:
                     tlx.clc_producer(
-                        clc_context, 0, clc_phase_producer, multi_ctas=PAIR_CTA
+                        clc_context, clc_phase_producer, multi_ctas=PAIR_CTA
                     )
                     clc_phase_producer ^= 1
 
@@ -533,7 +533,7 @@ def matmul_kernel_tma_ws_blackwell(
 
                 if CLUSTER_LAUNCH_CONTROL:
                     tile_id = tlx.clc_consumer(
-                        clc_context, 0, clc_phase_consumer, multi_ctas=PAIR_CTA
+                        clc_context, clc_phase_consumer, multi_ctas=PAIR_CTA
                     )
                     clc_phase_consumer ^= 1
                 else:
@@ -579,7 +579,7 @@ def matmul_kernel_tma_ws_blackwell(
 
                 if CLUSTER_LAUNCH_CONTROL:
                     tile_id = tlx.clc_consumer(
-                        clc_context, 0, clc_phase_consumer, multi_ctas=PAIR_CTA
+                        clc_context, clc_phase_consumer, multi_ctas=PAIR_CTA
                     )
                     clc_phase_consumer ^= 1
                 else:
@@ -621,7 +621,7 @@ def matmul_kernel_tma_ws_blackwell(
                 )
                 if CLUSTER_LAUNCH_CONTROL:
                     tile_id = tlx.clc_consumer(
-                        clc_context, 0, clc_phase_consumer, multi_ctas=PAIR_CTA
+                        clc_context, clc_phase_consumer, multi_ctas=PAIR_CTA
                     )
                     clc_phase_consumer ^= 1
                 else:
