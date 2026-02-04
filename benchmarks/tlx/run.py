@@ -24,6 +24,7 @@ setup_tritonbench_cwd()
 
 from tritonbench.utils.run_utils import run_benchmark_config_ci
 
+
 def gen_tlx_benchmark_config() -> Dict[str, Any]:
     from tlx_tutorial_plugin import load_tlx_tutorial_backends
     from tritonbench.metadata.query import get_benchmark_config_with_tags
@@ -68,7 +69,10 @@ def run():
         "--log-scuba", action="store_true", help="Upload results to Scuba."
     )
     parser.add_argument(
-        "--output-dir", type=str, default=None, help="Output dir, default to .benchmark/tlx/run-<timestamp>"
+        "--output-dir",
+        type=str,
+        default=None,
+        help="Output dir, default to .benchmark/tlx/run-<timestamp>",
     )
     args = parser.parse_args()
 
@@ -90,8 +94,9 @@ def run():
         output_dir=args.output_dir,
         op=args.op,
         ci=args.ci,
-        log_scuba=args.log_scuba
+        log_scuba=args.log_scuba,
     )
+
 
 if __name__ == "__main__":
     run()

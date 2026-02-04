@@ -17,7 +17,14 @@ from tritonbench.operator_loader import get_op_loader_bench_cls_by_name, is_load
 from tritonbench.operators import load_opbench_by_name
 from tritonbench.operators_collection import list_operators_by_collection
 from tritonbench.utils.ab_test import compare_ab_results, run_ab_test
-from tritonbench.utils.env_utils import is_fbcode, is_hip, is_h100, is_blackwell, is_hip_mi300, is_hip_mi350
+from tritonbench.utils.env_utils import (
+    is_blackwell,
+    is_fbcode,
+    is_h100,
+    is_hip,
+    is_hip_mi300,
+    is_hip_mi350,
+)
 from tritonbench.utils.git_utils import get_branch, get_commit_time, get_current_hash
 from tritonbench.utils.gpu_utils import get_amd_device_name, gpu_lockdown
 from tritonbench.utils.list_operator_details import list_operator_details
@@ -420,29 +427,38 @@ def run_in_task(
 def run_benchmark_config_ci(
     benchmark_group_name: str,
     benchmark_config_obj: Dict[str, Any],
-    extra_args: List[str]|None=None,
-    output_dir: str|None=None,
-    op: str|None=None,
-    ci: bool=False,
-    log_scuba: bool=False,
+    extra_args: List[str] | None = None,
+    output_dir: str | None = None,
+    op: str | None = None,
+    ci: bool = False,
+    log_scuba: bool = False,
 ):
     def _filter_benchmark_config_obj_by_device(benchmark_config_obj):
         ret = {}
         for benchmark in benchmark_config_obj:
-            if "disabled" in benchmark_config_obj[benchmark] and benchmark_config_obj[benchmark]["disabled"]:
+            if (
+                "disabled" in benchmark_config_obj[benchmark]
+                and benchmark_config_obj[benchmark]["disabled"]
+            ):
                 continue
             if "device" in benchmark_config_obj[benchmark]:
                 devices = benchmark_config_obj[benchmark]["device"].split()
-                assert any(device in CI_SUPPORTED_DEVICES for device in devices), f"Found unsupported device: {devices}"
+                assert any(device in CI_SUPPORTED_DEVICES for device in devices), (
+                    f"Found unsupported device: {devices}"
+                )
                 predicate = CI_SUPPORTED_DEVICES[device]
                 if predicate():
                     ret[benchmark] = benchmark_config_obj[benchmark]
             else:
                 ret[benchmark] = benchmark_config_obj[benchmark]
         return ret
+
     from tritonbench.utils.scuba_utils import decorate_benchmark_data, log_benchmark
+
     output_files = []
-    run_timestamp, output_dir = setup_output_dir(benchmark_group_name, ci=ci, output_dir=output_dir)
+    run_timestamp, output_dir = setup_output_dir(
+        benchmark_group_name, ci=ci, output_dir=output_dir
+    )
     benchmark_config_obj = _filter_benchmark_config_obj_by_device(benchmark_config_obj)
     for benchmark in benchmark_config_obj:
         if op and f"--op {op}" not in benchmark_config_obj[benchmark]["args"]:
@@ -452,7 +468,9 @@ def run_benchmark_config_ci(
         elif isinstance(benchmark_config_obj[benchmark]["args"], List):
             op_args = benchmark_config_obj[benchmark]["args"]
         else:
-            raise RuntimeError(f"Unexpected benchmark args type: {type(benchmark_config_obj[benchmark]["args"])}")
+            raise RuntimeError(
+                f"Unexpected benchmark args type: {type(benchmark_config_obj[benchmark]['args'])}"
+            )
         if extra_args:
             op_args = op_args.extend(extra_args)
         output_file = output_dir.joinpath(f"{benchmark}.json")
@@ -461,7 +479,9 @@ def run_benchmark_config_ci(
         # write pass or fail to result json
         # todo: check every input shape has passed
         if not os.path.exists(output_file) or os.path.getsize(output_file) == 0:
-            logger.warning(f"[{benchmark_group_name}] Failed to run benchmark {benchmark}.")
+            logger.warning(
+                f"[{benchmark_group_name}] Failed to run benchmark {benchmark}."
+            )
             with open(output_file, "w") as f:
                 json.dump({f"tritonbench_{benchmark}-pass": 0}, f)
         else:
@@ -479,13 +499,17 @@ def run_benchmark_config_ci(
     result_json_file = os.path.join(output_dir, "result.json")
     with open(result_json_file, "w") as fp:
         json.dump(aggregated_obj, fp, indent=4)
-    logger.info(f"[{benchmark_group_name}] logging result json file to {result_json_file}.")
+    logger.info(
+        f"[{benchmark_group_name}] logging result json file to {result_json_file}."
+    )
     if log_scuba:
         log_benchmark(aggregated_obj)
-        logger.info(f"[{benchmark_group_name}] logging results to scuba table pytorch_user_benchmarks.")
+        logger.info(
+            f"[{benchmark_group_name}] logging results to scuba table pytorch_user_benchmarks."
+        )
 
 
-def setup_output_dir(bm_name: str, ci: bool = False, output_dir: str|None=None):
+def setup_output_dir(bm_name: str, ci: bool = False, output_dir: str | None = None):
     current_timestamp = datetime.fromtimestamp(time.time()).strftime("%Y%m%d%H%M%S")
     if output_dir:
         return current_timestamp, output_dir
