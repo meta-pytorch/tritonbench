@@ -923,6 +923,9 @@ class BenchmarkOperator(metaclass=PostInitProcessor):
             bm_func_name,
         )
 
+        if fwd_fn is None:
+            raise NotImplementedError(f"Backend {bm_func_name} returns None.")
+
         backend = REGISTERED_BENCHMARKS[self.name][bm_func_name]
         if self.mode == Mode.FWD:
             setattr(fwd_fn, "_name", bm_func_name)
