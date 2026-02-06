@@ -1,0 +1,415 @@
+"""
+Compare TritonBench benchmarks across operators and evaluation shapes.
+
+Usage:
+    buck2 run @mode/opt //pytorch/tritonbench/benchmarks:compare_benchmarks -- \
+        --ops gemm,addmm --eval-shapes cmf,igctr,omnifm
+
+Assumes 1 GPU type (e.g. H100, MI350). GPU type defined by torchx job.
+
+TODO:
+- Log autotune parser results to Scuba table
+"""
+
+import argparse
+import os
+import sys
+import tempfile
+from dataclasses import dataclass, field
+from pathlib import Path
+from typing import List, Optional
+
+from pytorch.tritonbench.tools.fb.inductor_analyzer.autotune_parser import (
+    compare_benchmark_results,
+    parse_benchmark_results,
+)
+from tritonbench.utils.env_utils import is_fbcode
+
+os.environ["TORCHINDUCTOR_MAX_AUTOTUNE_GEMM"] = "1"
+os.environ["ENABLE_PERSISTENT_TMA_MATMUL"] = "1"
+os.environ["TORCHINDUCTOR_FORCE_DISABLE_CACHES"] = "1"
+os.environ["TRITON_PRINT_AUTOTUNING"] = "1"
+
+import pandas as pd
+import torch
+from tritonbench.utils.path_utils import REPO_PATH
+from tritonbench.utils.run_utils import run_in_task, run_one_operator
+
+DEFAULT_OPS = ["gemm", "addmm", "bmm", "scaled_mm"]
+DEFAULT_METRICS = ["latency", "tflops"]
+DEFAULT_EVAL_SHAPES = ["cmf"]
+
+SUPPORTED_GPU_TYPES = ["A100", "H100", "B200", "GB200", "MI300", "MI350"]
+
+
+def detect_gpu() -> str:
+    if not torch.cuda.is_available():
+        raise RuntimeError("CUDA/ROCm not available - cannot detect GPU type")
+
+    device_name = torch.cuda.get_device_name(0)
+    print(f"[Compare Benchmarks] Detected GPU: {device_name}")
+
+    for gpu in SUPPORTED_GPU_TYPES:
+        if gpu in device_name or f"{gpu}x" in device_name:
+            return gpu.lower()
+
+    raise RuntimeError(f"[Compare Benchmarks] Unknown GPU type: {device_name}")
+
+
+@dataclass
+class BenchmarkConfig:
+    """Configuration for a benchmark run."""
+
+    custom_bench: str = None
+    ops: List[str] = field(default_factory=lambda: DEFAULT_OPS.copy())
+    metrics: List[str] = field(default_factory=lambda: DEFAULT_METRICS.copy())
+    eval_shapes: List[str] = field(default_factory=lambda: DEFAULT_EVAL_SHAPES.copy())
+    benchmark_map: dict[str, tuple[str, str]] = field(default_factory=dict)
+
+@dataclass
+class DiodeBenchmarkConfig(BenchmarkConfig):
+    """Configuration for a Diode benchmark run. Inherits from BenchmarkConfig."""
+
+    custom_bench: str = "diode"
+    diode_version: str = "recommended"
+    diode_topk: int = 1
+
+
+def build_op_args(
+    op: str,
+    config: BenchmarkConfig,
+    benchmark_name: str,
+    input_loader: Optional[str] = None,
+) -> List[str]:
+    """Build command-line arguments for a single operator benchmark."""
+    args = [
+        "--op",
+        op,
+        "--metrics",
+        ",".join(config.metrics),
+        "--only",
+        benchmark_name,
+        "--force",
+        "--input-loader",
+        input_loader,
+    ]
+
+    if config.custom_bench == "diode" and "diode" in benchmark_name:
+        args.extend(
+            [
+                "--allow-tf32",
+                "True",
+                "--diode-version",
+                config.diode_version,
+                "--diode-topk",
+                str(config.diode_topk),
+            ]
+        )
+
+    return args
+
+
+def get_input_loader(
+    gpu: str, eval_shapes: List[str], op: str
+) -> List[tuple[str, str]]:
+    """
+    Get input loader paths for the given GPU type and workloads.
+
+    Args:
+        gpu: GPU type (e.g., "H100", "MI350") - will be lowercased
+        eval_shapes: List of workload names (e.g., ["cmf", "omnifm_v4"]).
+        op: Operator name to find shape files for (e.g., "gemm", "addmm")
+
+    Returns:
+        List of (workload, input_loader_path) tuples
+        (e.g., [("cmf", "fb/cmf/h100/shapes_mm.json")])
+    """
+    gpu_lower = gpu.lower()
+    input_configs_dir = Path(REPO_PATH) / "tritonbench" / "data" / "input_configs" / "fb"
+
+    workloads = eval_shapes if eval_shapes else DEFAULT_EVAL_SHAPES
+
+    input_loaders: List[tuple[str, str]] = []
+
+    for workload in workloads:
+        workload_dir = input_configs_dir / workload / gpu_lower
+
+        if not workload_dir.exists():
+            print(
+                f"[Compare Benchmarks] WARNING: No eval shapes for workload={workload}, gpu={gpu_lower}"
+            )
+            continue
+
+        op_pattern = f"shapes_{op}.json" if op != "gemm" else "shapes_mm.json"
+        shape_file = workload_dir / op_pattern
+        if shape_file.exists():
+            relative_path = f"fb/{workload}/{gpu_lower}/{op_pattern}"
+            input_loaders.append((workload, relative_path))
+            print(f"[Compare Benchmarks] Found input config: {relative_path}")
+        else:
+            print(
+                f"[Compare Benchmarks] WARNING: No shape file {op_pattern} for op={op} in {workload}/{gpu_lower}"
+            )
+
+    return input_loaders
+
+
+def run_benchmark_with_logs(
+    op: str,
+    benchmark_name: str,
+    config: BenchmarkConfig,
+    output_dir: Path,
+    workload: str,
+    input_loader: str,
+) -> Optional[Path]:
+    """
+    Run a benchmark in a subprocess and capture autotune logs for parsing.
+    Uses run_in_task to isolate each operator in its own subprocess.
+    """
+    log_file = output_dir / f"{op}_{benchmark_name}_{workload}.log"
+    op_args = build_op_args(op, config, benchmark_name, input_loader)
+
+    print(f"[Compare Benchmarks] Running {benchmark_name} on {op}")
+    print(f"[Compare Benchmarks] Args: {' '.join(str(arg) for arg in op_args)}")
+
+    stdout_fd = sys.stdout.fileno()
+    stderr_fd = sys.stderr.fileno()
+    saved_stdout_fd = os.dup(stdout_fd)
+    saved_stderr_fd = os.dup(stderr_fd)
+
+    try:
+        with open(log_file, "w") as log_f:
+            log_fd = log_f.fileno()
+            os.dup2(log_fd, stdout_fd)
+            os.dup2(log_fd, stderr_fd)
+
+            try:
+                op_args.append("--run-in-task")
+                run_in_task(
+                    op=op,
+                    op_args=op_args,
+                    benchmark_name=benchmark_name,
+                )
+            finally:
+                sys.stdout.flush()
+                sys.stderr.flush()
+                os.dup2(saved_stdout_fd, stdout_fd)
+                os.dup2(saved_stderr_fd, stderr_fd)
+
+        # Print log contents to stdout for MAST visibility
+        if log_file.exists():
+            with open(log_file, "r") as f:
+                print(f.read())
+
+    except Exception as e:
+        print(f"[Compare Benchmarks] WARNING: Benchmark {op} {benchmark_name} failed: {e}")
+    finally:
+        os.close(saved_stdout_fd)
+        os.close(saved_stderr_fd)
+
+    if log_file.exists() and log_file.stat().st_size > 0:
+        return log_file
+
+    return None
+
+
+def compare_results(
+    lhs_log: Path,
+    rhs_log: Path,
+) -> pd.DataFrame:
+    """
+    Compare LHS vs. RHS benchmark results using autotune parser.
+
+    Args:
+        lhs_log: Path to combined LHS benchmark autotune log
+        rhs_log: Path to combined RHS benchmark autotune log
+
+    Returns a DataFrame with comparison results.
+    """
+    lhs_ops = parse_benchmark_results(str(lhs_log))
+    rhs_ops = parse_benchmark_results(str(rhs_log))
+
+    if not lhs_ops or not rhs_ops:
+        print("[Compare Benchmarks] No valid operations to compare")
+        return pd.DataFrame()
+
+    print(f"[Compare Benchmarks] Parsed {len(lhs_ops)} LHS benchmark, {len(rhs_ops)} RHS benchmark operations")
+    print("[Compare Benchmarks] Generating comparison between LHS and RHS benchmarks")
+
+    return compare_benchmark_results(lhs_ops, rhs_ops)
+
+
+def run(config: BenchmarkConfig) -> pd.DataFrame:
+    """Main benchmark runner."""
+    gpu = detect_gpu()
+
+    print(f"[Compare Benchmarks] GPU: {gpu}")
+    print(f"[Compare Benchmarks] Ops: {config.ops}")
+    print(f"[Compare Benchmarks] Eval shapes: {config.eval_shapes or 'all'}")
+
+    all_dfs: List[pd.DataFrame] = []
+
+    with tempfile.TemporaryDirectory() as tmpdir:
+        output_dir = Path(tmpdir)
+
+        for op in config.ops:
+            if op not in config.benchmark_map:
+                print(f"[Compare Benchmarks] WARNING: Unknown op: {op}, skipping")
+                continue
+
+            lhs_benchmark, rhs_benchmark = config.benchmark_map[op]
+            input_loaders = get_input_loader(gpu, config.eval_shapes, op)
+
+            if not input_loaders:
+                print(f"[Compare Benchmarks] WARNING: No input configs found for op={op}, skipping")
+                continue
+
+            for workload, input_loader in input_loaders:
+                print(
+                    f"[Compare Benchmarks] Running {op} with workload={workload}, input_loader=tritonbench/data/input_configs/{input_loader}, LHS benchmark={lhs_benchmark}, RHS benchmark={rhs_benchmark}"
+                )
+
+                lhs_log = run_benchmark_with_logs(
+                    op, lhs_benchmark, config, output_dir, workload, input_loader
+                )
+                rhs_log = run_benchmark_with_logs(
+                    op, rhs_benchmark, config, output_dir, workload, input_loader
+                )
+
+                if not lhs_log or not rhs_log:
+                    print(
+                        f"[Compare Benchmarks] WARNING: Either lhs_log (exists = {lhs_log is not None}) or rhs_log (exists = {rhs_log is not None}) does not exist"
+                    )
+                    continue
+
+                comparison_df = compare_results(lhs_log, rhs_log)
+
+                if not comparison_df.empty:
+                    comparison_df["workload"] = workload
+                    comparison_df["gpu"] = gpu
+                    comparison_df["op"] = op
+                    all_dfs.append(comparison_df)
+
+    combined_df = pd.concat(all_dfs, ignore_index=True) if all_dfs else pd.DataFrame()
+
+    if not combined_df.empty:  # reorder cols to have gpu, workload, op at the front
+        priority_cols = ["gpu", "workload", "op"]
+        other_cols = [c for c in combined_df.columns if c not in priority_cols]
+        combined_df = combined_df[priority_cols + other_cols]
+
+    return combined_df
+
+
+def parse_args() -> BenchmarkConfig:
+    """Parse command-line arguments."""
+    parser = argparse.ArgumentParser(description="Compare benchmarks across operators, metrics, and evaluation shapes in TritonBench.")
+
+    parser.add_argument(
+        "--custom-bench",
+        type=str,
+        default=None,
+        help=f"Custom benchmarking framework to use (e.g. diode). Default: None"
+    )
+    parser.add_argument(
+        "--ops",
+        type=str,
+        default=",".join(DEFAULT_OPS),
+        help=f"Comma-separated list of operators. Default: {','.join(DEFAULT_OPS)}",
+    )
+    parser.add_argument(
+        "--metrics",
+        type=str,
+        default=",".join(DEFAULT_METRICS),
+        help=f"Comma-separated list of metrics. Default: {','.join(DEFAULT_METRICS)}",
+    )
+    parser.add_argument(
+        "--eval-shapes",
+        type=str,
+        default=None,
+        help=f"Comma-separated list of shapes to evaluate. Default: {','.join(DEFAULT_EVAL_SHAPES)}",
+    )
+    parser.add_argument(
+        "--benchmarks-lhs",
+        type=str,
+        default=None,
+        help=f"Comma-separated list of benchmarks to run on the left-hand side. Default: None",
+    )
+    parser.add_argument(
+        "--benchmarks-rhs",
+        type=str,
+        default=None,
+        help=f"Comma-separated list of benchmarks to run on the right-hand side. Default: None",
+    )
+    parser.add_argument(
+        "--parse-autotune-logs",
+        action="store_true",
+        help="Parse autotune logs and print comparison results to stdout. Omit to skip parsing.",
+    )
+
+    # Diode-specific arguments
+    parser.add_argument(
+        "--diode-version",
+        type=str,
+        default="recommended",
+        help="Diode model version to use. Default: recommended",
+    )
+    parser.add_argument(
+        "--diode-topk",
+        type=int,
+        default=1,
+        help="Top K kernel configs to return from Diode. Default: 1",
+    )
+
+    args = parser.parse_args()
+
+    eval_shapes = args.eval_shapes.split(",") if args.eval_shapes else None
+
+    base_configs = {
+        "ops": args.ops.split(","),
+        "metrics": args.metrics.split(","),
+        "eval_shapes": eval_shapes,
+    }
+
+    if args.custom_bench == "diode":
+        if not is_fbcode():
+            raise RuntimeError("Diode benchmarking is only supported in fbcode")
+
+        benchmark_map = {
+            "gemm": ("pt2_matmul_maxautotune", "pt2_matmul_maxautotune_diode"),
+            "addmm": ("pt2_addmm_maxautotune", "pt2_addmm_maxautotune_diode"),
+            "bmm": ("pt2_bmm_maxautotune", "pt2_bmm_maxautotune_diode"),
+            "scaled_mm": ("pt2_fp8_gemm", "pt2_fp8_gemm_maxautotune_diode"),
+        }
+        return DiodeBenchmarkConfig(
+            **base_configs,
+            benchmark_map=benchmark_map,
+            diode_version=args.diode_version,
+            diode_topk=args.diode_topk,
+        )
+
+    if len(args.ops.split(",")) != len(args.benchmarks_lhs.split(",")) or len(args.ops.split(",")) != len(args.benchmarks_rhs.split(",")):
+        raise ValueError("Number of ops, benchmarks_lhs, and benchmarks_rhs must be equal")
+
+    benchmark_map = {
+        op: (lhs, rhs) for op, lhs, rhs in zip(args.ops.split(","), args.benchmarks_lhs.split(","), args.benchmarks_rhs.split(","))
+    }
+
+    return BenchmarkConfig(
+        **base_configs,
+        benchmark_map=benchmark_map,
+    )
+
+
+if __name__ == "__main__":
+    # run individual operators in separate child processes (via run_in_task)
+    _parser = argparse.ArgumentParser(add_help=False)
+    _parser.add_argument("--run-in-task", action="store_true")
+    _args, extra_args = _parser.parse_known_args()
+
+    if _args.run_in_task:
+        run_one_operator(extra_args)
+        exit(0)
+
+    # initialize operators in main process
+    config = parse_args()
+    run(config)
