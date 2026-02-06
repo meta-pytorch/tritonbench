@@ -170,7 +170,7 @@ class OperatorInputLoader:
                 continue
             op_inps = Counter()
             for inputs in input_config[operator]:
-                cnt = inputs["count"]
+                cnt = inputs["count"] if "count" in inputs else 1
                 inps = inputs["inputs"]
                 op_inps[inps] += cnt
             self.operator_db[operator] = op_inps
