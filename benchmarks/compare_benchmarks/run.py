@@ -1,9 +1,9 @@
 """
-Compare TritonBench benchmarks across operators and evaluation shapes.
+Compare TritonBench benchmarks across operators and workloads.
 
 Usage:
     buck2 run @mode/opt //pytorch/tritonbench/benchmarks:compare_benchmarks -- \
-        --ops gemm,addmm --eval-shapes cmf,igctr,omnifm
+        --ops gemm,addmm --workloads cmf,igctr,omnifm
 
 Assumes 1 GPU type (e.g. H100, MI350). GPU type defined by torchx job.
 
@@ -15,64 +15,28 @@ import argparse
 import os
 import sys
 import tempfile
-from dataclasses import dataclass, field
+import time
 from pathlib import Path
 from typing import List, Optional
 
+from pytorch.tritonbench.benchmarks.compare_benchmarks.utils import (
+    BenchmarkConfig,
+    DEFAULT_METRICS,
+    DEFAULT_OPS,
+    DEFAULT_WORKLOADS,
+    DiodeBenchmarkConfig,
+    detect_gpu,
+    log_benchmark,
+)
 from pytorch.tritonbench.tools.fb.inductor_analyzer.autotune_parser import (
     compare_benchmark_results,
     parse_benchmark_results,
 )
 from tritonbench.utils.env_utils import is_fbcode
 
-os.environ["TORCHINDUCTOR_MAX_AUTOTUNE_GEMM"] = "1"
-os.environ["ENABLE_PERSISTENT_TMA_MATMUL"] = "1"
-os.environ["TORCHINDUCTOR_FORCE_DISABLE_CACHES"] = "1"
-os.environ["TRITON_PRINT_AUTOTUNING"] = "1"
-
 import pandas as pd
-import torch
 from tritonbench.utils.path_utils import REPO_PATH
 from tritonbench.utils.run_utils import run_in_task, run_one_operator
-
-DEFAULT_OPS = ["gemm", "addmm", "bmm", "scaled_mm"]
-DEFAULT_METRICS = ["latency", "tflops"]
-DEFAULT_EVAL_SHAPES = ["cmf"]
-
-SUPPORTED_GPU_TYPES = ["A100", "H100", "B200", "GB200", "MI300", "MI350"]
-
-
-def detect_gpu() -> str:
-    if not torch.cuda.is_available():
-        raise RuntimeError("CUDA/ROCm not available - cannot detect GPU type")
-
-    device_name = torch.cuda.get_device_name(0)
-    print(f"[Compare Benchmarks] Detected GPU: {device_name}")
-
-    for gpu in SUPPORTED_GPU_TYPES:
-        if gpu in device_name or f"{gpu}x" in device_name:
-            return gpu.lower()
-
-    raise RuntimeError(f"[Compare Benchmarks] Unknown GPU type: {device_name}")
-
-
-@dataclass
-class BenchmarkConfig:
-    """Configuration for a benchmark run."""
-
-    custom_bench: str = None
-    ops: List[str] = field(default_factory=lambda: DEFAULT_OPS.copy())
-    metrics: List[str] = field(default_factory=lambda: DEFAULT_METRICS.copy())
-    eval_shapes: List[str] = field(default_factory=lambda: DEFAULT_EVAL_SHAPES.copy())
-    benchmark_map: dict[str, tuple[str, str]] = field(default_factory=dict)
-
-@dataclass
-class DiodeBenchmarkConfig(BenchmarkConfig):
-    """Configuration for a Diode benchmark run. Inherits from BenchmarkConfig."""
-
-    custom_bench: str = "diode"
-    diode_version: str = "recommended"
-    diode_topk: int = 1
 
 
 def build_op_args(
@@ -90,6 +54,8 @@ def build_op_args(
         "--only",
         benchmark_name,
         "--force",
+        "--allow-tf32",
+        "True",
         "--input-loader",
         input_loader,
     ]
@@ -97,8 +63,6 @@ def build_op_args(
     if config.custom_bench == "diode" and "diode" in benchmark_name:
         args.extend(
             [
-                "--allow-tf32",
-                "True",
                 "--diode-version",
                 config.diode_version,
                 "--diode-topk",
@@ -110,14 +74,14 @@ def build_op_args(
 
 
 def get_input_loader(
-    gpu: str, eval_shapes: List[str], op: str
+    gpu: str, workloads: List[str], op: str
 ) -> List[tuple[str, str]]:
     """
     Get input loader paths for the given GPU type and workloads.
 
     Args:
         gpu: GPU type (e.g., "H100", "MI350") - will be lowercased
-        eval_shapes: List of workload names (e.g., ["cmf", "omnifm_v4"]).
+        workloads: List of workload names (e.g., ["cmf", "omnifm_v4"]).
         op: Operator name to find shape files for (e.g., "gemm", "addmm")
 
     Returns:
@@ -127,7 +91,7 @@ def get_input_loader(
     gpu_lower = gpu.lower()
     input_configs_dir = Path(REPO_PATH) / "tritonbench" / "data" / "input_configs" / "fb"
 
-    workloads = eval_shapes if eval_shapes else DEFAULT_EVAL_SHAPES
+    workloads = workloads if workloads else DEFAULT_WORKLOADS
 
     input_loaders: List[tuple[str, str]] = []
 
@@ -239,13 +203,25 @@ def compare_results(
     return compare_benchmark_results(lhs_ops, rhs_ops)
 
 
+def log_scuba(df: pd.DataFrame, config: BenchmarkConfig) -> None:
+    if not config.scuba_eval_id:
+        config.scuba_eval_id = f"{df["gpu"]}_{int(time.time())}"
+    print(f"[Compare Benchmarks] Logging comparison results to Scuba table triton_multi_operator_benchmark_comparisons with eval_id={config.scuba_eval_id}")
+    for op in df["op"].unique():
+        op_df = df[df["op"] == op]
+        log_benchmark(
+            df=op_df,
+            config=config,
+        )
+
+
 def run(config: BenchmarkConfig) -> pd.DataFrame:
     """Main benchmark runner."""
     gpu = detect_gpu()
 
     print(f"[Compare Benchmarks] GPU: {gpu}")
     print(f"[Compare Benchmarks] Ops: {config.ops}")
-    print(f"[Compare Benchmarks] Eval shapes: {config.eval_shapes or 'all'}")
+    print(f"[Compare Benchmarks] Workloads: {config.workloads or 'all'}")
 
     all_dfs: List[pd.DataFrame] = []
 
@@ -258,7 +234,7 @@ def run(config: BenchmarkConfig) -> pd.DataFrame:
                 continue
 
             lhs_benchmark, rhs_benchmark = config.benchmark_map[op]
-            input_loaders = get_input_loader(gpu, config.eval_shapes, op)
+            input_loaders = get_input_loader(gpu, config.workloads, op)
 
             if not input_loaders:
                 print(f"[Compare Benchmarks] WARNING: No input configs found for op={op}, skipping")
@@ -282,27 +258,34 @@ def run(config: BenchmarkConfig) -> pd.DataFrame:
                     )
                     continue
 
-                comparison_df = compare_results(lhs_log, rhs_log)
+                if config.parse_autotune_logs:
+                    print(f"[Compare Benchmarks] Parsing LHS and RHS logs with autotune parser")
+                    comparison_df = compare_results(lhs_log, rhs_log)
 
-                if not comparison_df.empty:
-                    comparison_df["workload"] = workload
-                    comparison_df["gpu"] = gpu
-                    comparison_df["op"] = op
-                    all_dfs.append(comparison_df)
+                    if not comparison_df.empty:
+                        comparison_df["workload"] = workload
+                        comparison_df["gpu"] = gpu
+                        comparison_df["op"] = op
+                        comparison_df["lhs_benchmark_name"] = lhs_benchmark
+                        comparison_df["rhs_benchmark_name"] = rhs_benchmark
+                        all_dfs.append(comparison_df)
 
     combined_df = pd.concat(all_dfs, ignore_index=True) if all_dfs else pd.DataFrame()
 
-    if not combined_df.empty:  # reorder cols to have gpu, workload, op at the front
-        priority_cols = ["gpu", "workload", "op"]
+    if not combined_df.empty:  # reorder cols to have identifying information at the front
+        priority_cols = ["gpu", "workload", "op", "lhs_benchmark_name", "rhs_benchmark_name"]
         other_cols = [c for c in combined_df.columns if c not in priority_cols]
         combined_df = combined_df[priority_cols + other_cols]
+
+    if config.parse_autotune_logs and config.log_scuba:
+        log_scuba(combined_df, config)
 
     return combined_df
 
 
 def parse_args() -> BenchmarkConfig:
     """Parse command-line arguments."""
-    parser = argparse.ArgumentParser(description="Compare benchmarks across operators, metrics, and evaluation shapes in TritonBench.")
+    parser = argparse.ArgumentParser(description="Compare benchmarks across operators, metrics, and workloads in TritonBench.")
 
     parser.add_argument(
         "--custom-bench",
@@ -323,10 +306,10 @@ def parse_args() -> BenchmarkConfig:
         help=f"Comma-separated list of metrics. Default: {','.join(DEFAULT_METRICS)}",
     )
     parser.add_argument(
-        "--eval-shapes",
+        "--workloads",
         type=str,
         default=None,
-        help=f"Comma-separated list of shapes to evaluate. Default: {','.join(DEFAULT_EVAL_SHAPES)}",
+        help=f"Comma-separated list of workloads representing shapes to evaluate. Default: {','.join(DEFAULT_WORKLOADS)}",
     )
     parser.add_argument(
         "--benchmarks-lhs",
@@ -343,7 +326,20 @@ def parse_args() -> BenchmarkConfig:
     parser.add_argument(
         "--parse-autotune-logs",
         action="store_true",
+        default=False,
         help="Parse autotune logs and print comparison results to stdout. Omit to skip parsing.",
+    )
+    parser.add_argument(
+        "--log-scuba",
+        action="store_true",
+        default=False,
+        help="Log comparison results to TritonMultiOperatorBenchmarkComparisons Scuba table. Omit to skip logging.",
+    )
+    parser.add_argument(
+        "--scuba-eval-id",
+        type=str,
+        default=None,
+        help=f"Custom experiment name to log to Scuba. Default: gpu_timestamp (printed at the end of the run)",
     )
 
     # Diode-specific arguments
@@ -362,12 +358,15 @@ def parse_args() -> BenchmarkConfig:
 
     args = parser.parse_args()
 
-    eval_shapes = args.eval_shapes.split(",") if args.eval_shapes else None
+    workloads = args.workloads.split(",") if args.workloads else None
 
     base_configs = {
         "ops": args.ops.split(","),
         "metrics": args.metrics.split(","),
-        "eval_shapes": eval_shapes,
+        "workloads": workloads,
+        "parse_autotune_logs": args.parse_autotune_logs,
+        "log_scuba": args.log_scuba,
+        "scuba_eval_id": args.scuba_eval_id,
     }
 
     if args.custom_bench == "diode":
