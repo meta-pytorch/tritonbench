@@ -57,22 +57,14 @@ bash .ci/tritonbench/install-pytorch-source.sh
 
 if [ -n "${USE_CUDA:-}" ]; then
     python -m tools.cuda_utils --install-torch-nightly --cuda
-    export PYTORCH_FILE_PATH=$(python -c "import torch; print(torch.__file__)")
-    export NVIDIA_LIB_PATH=$(realpath $(dirname ${PYTORCH_FILE_PATH})/../nvidia/cublas/lib)
 
-    if [ -e ${NVIDIA_LIB_PATH} ]; then
-        cd ${NVIDIA_LIB_PATH}
-        ln -s libcublas.so.* libcublas.so && ln -s libcublasLt.so.* libcublasLt.so &&  ln -s libnvblas.so.* libnvblas.so
-        
-        cat <<EOF >> "${SETUP_SCRIPT}"
-export LD_LIBRARY_PATH="${NVIDIA_LIB_PATH}\${LD_LIBRARY_PATH:+:\${LD_LIBRARY_PATH}}"
-EOF
-        cd -
-    fi
+    bash ./.ci/tritonbench/setup-nvidia-path.sh
+
     # Hack: install nvidia compute to get libcuda.so.1
     if [ -n "${TEST_NVIDIA_DRIVER:-}" ]; then
         sudo apt update && sudo apt-get install -y libnvidia-compute-580
     fi
+
 elif [ -n "${USE_HIP:-}" ]; then
     python -m tools.cuda_utils --install-torch-nightly --hip
 else
