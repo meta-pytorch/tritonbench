@@ -89,7 +89,6 @@ jobs:
           # dump setup env script for debugging
           cat "${SETUP_SCRIPT}"
       - name: Compile Triton
-        if: ${{ inputs.side_a_triton && inputs.side_a_commit }}
         run: |
           if [ -z ${{ inputs.side_a_triton}} ] && [ -z ${{ inputs.side_a_commit }} ]; then
             if [ -n ${{ inputs.venv_name }}=="triton-main" ]; then
