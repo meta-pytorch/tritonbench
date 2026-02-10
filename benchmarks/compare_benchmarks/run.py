@@ -35,6 +35,47 @@ import pandas as pd
 from tritonbench.utils.path_utils import REPO_PATH
 from tritonbench.utils.run_utils import run_in_task, run_one_operator
 
+DEFAULT_OPS = ["gemm", "addmm", "bmm", "scaled_mm"]
+DEFAULT_METRICS = ["latency", "tflops"]
+DEFAULT_EVAL_SHAPES = ["cmf"]
+
+SUPPORTED_GPU_TYPES = ["A100", "H100", "B200", "GB200", "MI300", "MI350"]
+
+
+def detect_gpu() -> str:
+    if not torch.cuda.is_available():
+        raise RuntimeError("CUDA/ROCm not available - cannot detect GPU type")
+
+    device_name = torch.cuda.get_device_name(0)
+    print(f"[Compare Benchmarks] Detected GPU: {device_name}")
+
+    for gpu in SUPPORTED_GPU_TYPES:
+        if gpu in device_name or f"{gpu}x" in device_name:
+            return gpu.lower()
+
+    raise RuntimeError(f"[Compare Benchmarks] Unknown GPU type: {device_name}")
+
+
+@dataclass
+class BenchmarkConfig:
+    """Configuration for a benchmark run."""
+
+    custom_bench: str = None
+    ops: List[str] = field(default_factory=lambda: DEFAULT_OPS.copy())
+    metrics: List[str] = field(default_factory=lambda: DEFAULT_METRICS.copy())
+    eval_shapes: List[str] = field(default_factory=lambda: DEFAULT_EVAL_SHAPES.copy())
+    benchmark_map: dict[str, tuple[str, str]] = field(default_factory=dict)
+
+
+@dataclass
+class DiodeBenchmarkConfig(BenchmarkConfig):
+    """Configuration for a Diode benchmark run. Inherits from BenchmarkConfig."""
+
+    custom_bench: str = "diode"
+    diode_version: str = "recommended"
+    diode_topk: int = 1
+
+>>>>>>> 806ed63 (add logging)
 
 def build_op_args(
     op: str,
@@ -86,7 +127,9 @@ def get_input_loader(
         (e.g., [("cmf", "fb/cmf/h100/shapes_mm.json")])
     """
     gpu_lower = gpu.lower()
-    input_configs_dir = Path(REPO_PATH) / "tritonbench" / "data" / "input_configs" / "fb"
+    input_configs_dir = (
+        Path(REPO_PATH) / "tritonbench" / "data" / "input_configs" / "fb"
+    )
 
     workloads = workloads if workloads else DEFAULT_WORKLOADS
 
@@ -163,7 +206,9 @@ def run_benchmark_with_logs(
                 print(f.read())
 
     except Exception as e:
-        print(f"[Compare Benchmarks] WARNING: Benchmark {op} {benchmark_name} failed: {e}")
+        print(
+            f"[Compare Benchmarks] WARNING: Benchmark {op} {benchmark_name} failed: {e}"
+        )
     finally:
         os.close(saved_stdout_fd)
         os.close(saved_stderr_fd)
@@ -194,7 +239,9 @@ def compare_results(
         print("[Compare Benchmarks] No valid operations to compare")
         return pd.DataFrame()
 
-    print(f"[Compare Benchmarks] Parsed {len(lhs_ops)} LHS benchmark, {len(rhs_ops)} RHS benchmark operations")
+    print(
+        f"[Compare Benchmarks] Parsed {len(lhs_ops)} LHS benchmark, {len(rhs_ops)} RHS benchmark operations"
+    )
     print("[Compare Benchmarks] Generating comparison between LHS and RHS benchmarks")
 
     return compare_benchmark_results(lhs_ops, rhs_ops)
@@ -234,7 +281,9 @@ def run(config: BenchmarkConfig) -> pd.DataFrame:
             input_loaders = get_input_loader(gpu, config.workloads, op)
 
             if not input_loaders:
-                print(f"[Compare Benchmarks] WARNING: No input configs found for op={op}, skipping")
+                print(
+                    f"[Compare Benchmarks] WARNING: No input configs found for op={op}, skipping"
+                )
                 continue
 
             for workload, input_loader in input_loaders:
@@ -282,13 +331,15 @@ def run(config: BenchmarkConfig) -> pd.DataFrame:
 
 def parse_args() -> BenchmarkConfig:
     """Parse command-line arguments."""
-    parser = argparse.ArgumentParser(description="Compare benchmarks across operators, metrics, and workloads in TritonBench.")
+    parser = argparse.ArgumentParser(
+        description="Compare benchmarks across operators, metrics, and evaluation shapes in TritonBench."
+    )
 
     parser.add_argument(
         "--custom-bench",
         type=str,
         default=None,
-        help=f"Custom benchmarking framework to use (e.g. diode). Default: None"
+        help=f"Custom benchmarking framework to use (e.g. diode). Default: None",
     )
     parser.add_argument(
         "--ops",
@@ -383,11 +434,20 @@ def parse_args() -> BenchmarkConfig:
             diode_topk=args.diode_topk,
         )
 
-    if len(args.ops.split(",")) != len(args.benchmarks_lhs.split(",")) or len(args.ops.split(",")) != len(args.benchmarks_rhs.split(",")):
-        raise ValueError("Number of ops, benchmarks_lhs, and benchmarks_rhs must be equal")
+    if len(args.ops.split(",")) != len(args.benchmarks_lhs.split(",")) or len(
+        args.ops.split(",")
+    ) != len(args.benchmarks_rhs.split(",")):
+        raise ValueError(
+            "Number of ops, benchmarks_lhs, and benchmarks_rhs must be equal"
+        )
 
     benchmark_map = {
-        op: (lhs, rhs) for op, lhs, rhs in zip(args.ops.split(","), args.benchmarks_lhs.split(","), args.benchmarks_rhs.split(","))
+        op: (lhs, rhs)
+        for op, lhs, rhs in zip(
+            args.ops.split(","),
+            args.benchmarks_lhs.split(","),
+            args.benchmarks_rhs.split(","),
+        )
     }
 
     return BenchmarkConfig(
