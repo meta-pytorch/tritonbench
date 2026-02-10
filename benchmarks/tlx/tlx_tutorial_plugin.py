@@ -40,13 +40,13 @@ runtime_op_list = [
     (
         "blackwell_attentions",
         "tlx_tutorial_fa_ws_pipelined_persistent",
-        "blackwell-fa-ws-pipelined-persistent_test",
+        "blackwell_fa_ws_pipelined_persistent",
         "attention",
     ),
     (
         "flash_attention",
         "tlx_tutorial_fa_ws_pipelined_pingpong",
-        "hopper-fa-ws-pipelined-pingpong_test",
+        "hopper_fa_ws_pipelined_pingpong",
         "attention",
     ),
 ]
