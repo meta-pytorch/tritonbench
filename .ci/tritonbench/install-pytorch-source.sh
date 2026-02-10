@@ -20,6 +20,7 @@ update_pytorch() {
     git pull origin main
     git submodule sync
     git submodule update --init --recursive
+    git fetch origin nightly
 }
 
 
