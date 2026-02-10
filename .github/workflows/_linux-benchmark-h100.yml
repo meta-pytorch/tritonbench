@@ -90,7 +90,7 @@ jobs:
           cat "${SETUP_SCRIPT}"
       - name: Compile Triton
         run: |
-          if [ -z ${{ inputs.side_a_triton}} ] && [ -z ${{ inputs.side_a_commit }} ]; then
+          if [ -z ${{ inputs.side_a_triton}} ] || [ -z ${{ inputs.side_a_commit }} ]; then
             if [ -n ${{ inputs.venv_name }}=="triton-main" ]; then
               bash ./.ci/triton/install-triton-main.sh
             elif [ -n ${{ inputs.venv_name }}=="meta-triton" ]; then
