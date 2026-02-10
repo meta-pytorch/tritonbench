@@ -1,4 +1,5 @@
 import logging
+import os
 import unittest
 from typing import Dict, List
 
@@ -10,6 +11,7 @@ from tritonbench.operators_collection import (
     list_operators_by_collection,  # @manual=//pytorch/tritonbench:tritonbench
 )
 from tritonbench.utils.env_utils import (
+    is_blackwell,  # @manual=//pytorch/tritonbench:tritonbench
     is_fbcode,  # @manual=//pytorch/tritonbench:tritonbench
     is_hip,  # @manual=//pytorch/tritonbench:tritonbench
 )
@@ -18,7 +20,11 @@ from tritonbench.utils.parser import get_parser
 if is_fbcode():
     import importlib
 
-    fbcode_skip_file_path = "fb/skip_tests_h100_fbcode.yaml"
+    # Use B200-specific skip file on Blackwell GPUs
+    if is_blackwell():
+        fbcode_skip_file_path = "fb/skip_tests_b200_fbcode.yaml"
+    else:
+        fbcode_skip_file_path = "fb/skip_tests_h100_fbcode.yaml"
     SKIP_FILE = importlib.resources.files(__package__).joinpath(fbcode_skip_file_path)
 else:
     import triton  # @manual
@@ -31,7 +37,6 @@ else:
             if is_hip()
             else "skip_tests_h100_triton_main.yaml"
         )
-    import os
 
     SKIP_FILE = os.path.abspath(os.path.join(os.path.dirname(__file__), SKIP_FILE_NAME))
 
@@ -45,12 +50,18 @@ logger = logging.getLogger(__name__)
 FWD_ONLY_OPS = skip_tests.get("fwd_only_ops", [])
 # Ops that require special arguments in backwards
 BWD_ARGS_OPS: Dict[str, List[str]] = skip_tests.get("bwd_args", {})
+# B200-only ops: if specified, only run these ops (skip all others)
+B200_ONLY_OPS = skip_tests.get("b200_only_ops", [])
 
 TEST_OPERATORS = (
     set(list_operators_by_collection(op_collection="buck"))
     if is_fbcode()
     else set(list_operators_by_collection(op_collection="default"))
 )
+
+# On B200, filter to only run B200-only operators if specified
+if is_fbcode() and is_blackwell() and B200_ONLY_OPS:
+    TEST_OPERATORS = set(B200_ONLY_OPS) & TEST_OPERATORS
 
 
 def check_ci_output(op):

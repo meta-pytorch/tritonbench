@@ -6,9 +6,6 @@ Usage:
         --ops gemm,addmm --workloads cmf,igctr,omnifm
 
 Assumes 1 GPU type (e.g. H100, MI350). GPU type defined by torchx job.
-
-TODO:
-- Log autotune parser results to Scuba table
 """
 
 import argparse

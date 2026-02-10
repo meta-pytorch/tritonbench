@@ -84,11 +84,25 @@ jobs:
       - name: Install PyTorch Nightly and TritonBench
         run: |
           set -eux
+          bash ./.ci/tritonbench/setup-nvidia-path.sh
           bash ./.ci/tritonbench/install.sh --refresh-pytorch
-      - name: Compile Triton on Demand (Side A)
+          # dump setup env script for debugging
+          cat "${SETUP_SCRIPT}"
+      - name: Compile Triton
         if: ${{ inputs.side_a_triton && inputs.side_a_commit }}
         run: |
-          bash ./.ci/triton/install.sh --repo ${{ inputs.side_a_triton }} --commit ${{ inputs.side_a_commit }} --side a
+          if [ -z ${{ inputs.side_a_triton}} ] && [ -z ${{ inputs.side_a_commit }} ]; then
+            if [ -n ${{ inputs.venv_name }}=="triton-main" ]; then
+              bash ./.ci/triton/install-triton-main.sh
+            elif [ -n ${{ inputs.venv_name }}=="meta-triton" ]; then
+              bash ./.ci/triton/install-meta-triton.sh
+            else
+              echo "Unknown venv name: ${{ inputs.venv_name }}"
+              exit 1
+            fi
+          else
+            bash ./.ci/triton/install.sh --repo ${{ inputs.side_a_triton }} --commit ${{ inputs.side_a_commit }} --side a
+          fi
           export 'TRITONBENCH_SIDE_A_ENV=${{ env.TRITONBENCH_SIDE_A_ENV }}' >> $GITHUB_ENV
       - name: Benchmark Triton (Side A)
         run: |
