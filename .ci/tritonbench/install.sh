@@ -22,6 +22,7 @@ cd ${tritonbench_dir}
 if [ -n "${INSTALL_PYTORCH_NIGHTLY}" ]; then
   uv pip uninstall pytorch torchvision
   python -m tools.cuda_utils --install-torch-nightly --cuda
+  bash ./.ci/tritonbench/install-pytorch-source.sh
 fi
 
 # Install Tritonbench and all its customized packages
