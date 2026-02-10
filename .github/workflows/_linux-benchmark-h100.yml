@@ -86,8 +86,7 @@ jobs:
           set -eux
           bash ./.ci/tritonbench/setup-nvidia-path.sh
           bash ./.ci/tritonbench/install.sh --refresh-pytorch
-          # dump setup env script for debugging
-          cat "${SETUP_SCRIPT}"
+          bash ./.ci/tritonbench/install-pytorch-source.sh
       - name: Compile Triton
         run: |
           if [ -z ${{ inputs.side_a_triton}} ] || [ -z ${{ inputs.side_a_commit }} ]; then
@@ -103,6 +102,8 @@ jobs:
             bash ./.ci/triton/install.sh --repo ${{ inputs.side_a_triton }} --commit ${{ inputs.side_a_commit }} --side a
           fi
           export 'TRITONBENCH_SIDE_A_ENV=${{ env.TRITONBENCH_SIDE_A_ENV }}' >> $GITHUB_ENV
+          # dump setup env script for debugging
+          cat "${SETUP_SCRIPT}"
       - name: Benchmark Triton (Side A)
         run: |
           bash ./.ci/tritonbench/run-benchmark.sh ${{ inputs.benchmark_name }} --conda-env ${TRITONBENCH_SIDE_A_ENV}
