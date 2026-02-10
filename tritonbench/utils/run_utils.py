@@ -85,6 +85,7 @@ def get_run_env(
     for repo in ["triton", "pytorch", "tritonbench"]:
         repo_loc = repo_locs.get(repo, None)
         if not run_env[f"{repo}_commit"] == "unknown" and repo_loc:
+            print("trying to get commit hash for", repo, "from", repo_loc)
             run_env[f"{repo}_branch"] = get_branch(repo_loc, run_env[f"{repo}_commit"])
             run_env[f"{repo}_commit_time"] = get_commit_time(
                 repo_loc, run_env[f"{repo}_commit"]
