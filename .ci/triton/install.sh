@@ -47,6 +47,7 @@ while [[ "$#" -gt 0 ]]; do
         --side) SIDE="$2"; shift ;;
         --nightly) NIGHTLY="1"; ;;
         --no-build) NO_BUILD="1"; ;;
+        --no-clone) NO_CLONE="1"; ;;
         --install-dir) TRITON_INSTALL_DIR="$2"; shift ;;
         *) echo "Unknown parameter passed: $1"; usage ;;
     esac
@@ -96,7 +97,13 @@ TRITONBENCH_DIR=$(dirname "$(readlink -f "$0")")/../..
 
 remove_triton
 
-checkout_triton "${REPO}" "${COMMIT}" "${TRITON_INSTALL_DIR}" "${NIGHTLY}"
+if [ -z "${NO_CLONE:-}" ]; then
+    clone_triton "${REPO}" "${TRITON_INSTALL_DIR}"
+else
+    update_triton "${TRITON_INSTALL_DIR}"
+fi
+
+checkout_triton "${COMMIT}" "${TRITON_INSTALL_DIR}" "${NIGHTLY}"
 
 if [ -z "${NO_BUILD:-}" ]; then
     install_triton "${TRITON_INSTALL_DIR}"

@@ -92,9 +92,9 @@ jobs:
         run: |
           if [ -z ${{ inputs.side_a_triton}} ] || [ -z ${{ inputs.side_a_commit }} ]; then
             if [ -n ${{ inputs.venv_name }}=="triton-main" ]; then
-              bash ./.ci/triton/install-triton-main.sh
+              bash ./.ci/triton/install-triton-main.sh --no-clone
             elif [ -n ${{ inputs.venv_name }}=="meta-triton" ]; then
-              bash ./.ci/triton/install-meta-triton.sh
+              bash ./.ci/triton/install-meta-triton.sh --no-clone
             else
               echo "Unknown venv name: ${{ inputs.venv_name }}"
               exit 1

@@ -12,15 +12,18 @@ fi
 while [[ "$#" -gt 0 ]]; do
     case $1 in
         --no-build) NO_BUILD="1"; ;;
+        --no-clone) NO_CLONE="1"; ;;
         *) echo "Unknown parameter passed: $1"; usage ;;
     esac
     shift
 done
 
+CMD_SUFFIX=""
 if [ -n "${NO_BUILD:-}" ]; then
-    CMD_SUFFIX="--no-build"
-else
-    CMD_SUFFIX=""
+  CMD_SUFFIX="--no-build $CMD_SUFFIX"
+fi
+if [ -n "${NO_CLONE:-}" ]; then
+  CMD_SUFFIX="--no-clone $CMD_SUFFIX"
 fi
 
 VENV_NAME=triton-main
