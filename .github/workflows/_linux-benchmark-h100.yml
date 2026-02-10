@@ -88,10 +88,11 @@ jobs:
           bash ./.ci/tritonbench/install.sh --refresh-pytorch
       - name: Compile Triton
         run: |
+          set -eux
           if [ -z ${{ inputs.side_a_triton}} ] || [ -z ${{ inputs.side_a_commit }} ]; then
-            if [ ${{ inputs.venv_name }}=="triton-main" ]; then
+            if [ "${{ inputs.venv_name }}" = "triton-main" ]; then
               bash ./.ci/triton/install-triton-main.sh --no-clone
-            elif [ ${{ inputs.venv_name }}=="meta-triton" ]; then
+            elif [ "${{ inputs.venv_name }}" = "meta-triton" ]; then
               bash ./.ci/triton/install-meta-triton.sh --no-clone
             else
               echo "Unknown venv name: ${{ inputs.venv_name }}"
