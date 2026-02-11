@@ -36,7 +36,7 @@ jobs:
   h100-triton-main-nightly-benchmark:
     uses: ./.github/workflows/_linux-benchmark-h100.yml
     with:
-      test_type: ${{ inputs.test_type }}
+      test_type: ${{ inputs.test_type || 'periodic' }}
       benchmark_name: "nightly"
       venv_name: "triton-main"
       side_a_triton: ${{ inputs.side_a_triton }}
@@ -49,7 +49,7 @@ jobs:
     uses: ./.github/workflows/_linux-benchmark-h100.yml
     if: ${{ inputs.test_type != 'abtest' }}
     with:
-      test_type: ${{ inputs.test_type }}
+      test_type: ${{ inputs.test_type || 'periodic' }}
       benchmark_name: "nightly"
       venv_name: "meta-triton"
     secrets:
@@ -57,7 +57,7 @@ jobs:
   mi350-triton-main-nightly-benchmark:
     uses: ./.github/workflows/_linux-benchmark-mi350.yml
     with:
-      test_type: ${{ inputs.test_type }}
+      test_type: ${{ inputs.test_type || 'periodic' }}
       benchmark_name: "nightly"
       venv_name: "triton-main"
       side_a_triton: ${{ inputs.side_a_triton }}
@@ -70,7 +70,7 @@ jobs:
     uses: ./.github/workflows/_linux-benchmark-mi350.yml
     if: ${{ inputs.test_type != 'abtest' }}
     with:
-      test_type: ${{ inputs.test_type }}
+      test_type: ${{ inputs.test_type || 'periodic' }}
       benchmark_name: "nightly"
       venv_name: "meta-triton"
     secrets:
