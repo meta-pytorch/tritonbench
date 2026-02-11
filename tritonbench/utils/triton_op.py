@@ -99,6 +99,7 @@ BASELINE_BENCHMARKS: Dict[str, str] = {}
 BASELINE_SKIP_METRICS = {
     "speedup",
     "accuracy",
+    "cosine_similarity",
     "determinism",
     "mem_footprint_compression_ratio",
     "nsys_gpu_speedup",
@@ -227,6 +228,8 @@ class BenchmarkOperatorMetrics:
     speedup: Optional[float] = None
     # accuracy over baseline (only for baseline comparison)
     accuracy: Optional[bool] = None
+    # cosine similarity to baseline output (1.0 = identical direction)
+    cosine_similarity: Optional[float] = None
     # determinism check result (independent of accuracy)
     determinism: Optional[DeterminismResult] = None
     # wall time
@@ -1713,6 +1716,39 @@ class BenchmarkOperator(metaclass=PostInitProcessor):
             logger.warning(f"Exception during accuracy check: {e}")
             return False
 
+    def cosine_similarity(self, fn: Callable, baseline_fn: Callable) -> float:
+        """
+        Compute cosine similarity between the output of fn and baseline_fn.
+        Returns a value between -1 and 1, where 1 means identical direction.
+        """
+        try:
+            output = fn()
+            baseline_output = baseline_fn()
+
+            # Flatten tensors for cosine similarity computation
+            if isinstance(output, torch.Tensor) and isinstance(
+                baseline_output, torch.Tensor
+            ):
+                output_flat = output.flatten().float()
+                baseline_flat = baseline_output.flatten().float()
+
+                # Compute cosine similarity
+                dot_product = torch.dot(output_flat, baseline_flat)
+                norm_output = torch.norm(output_flat)
+                norm_baseline = torch.norm(baseline_flat)
+
+                if norm_output == 0 or norm_baseline == 0:
+                    return 0.0
+
+                cos_sim = dot_product / (norm_output * norm_baseline)
+                return cos_sim.item()
+            else:
+                logger.warning("Cosine similarity only supported for tensor outputs")
+                return 0.0
+        except Exception as e:
+            logger.warning(f"Exception during cosine similarity computation: {e}")
+            return 0.0
+
     def _do_bench(
         self,
         input_id: int,
@@ -1824,6 +1860,12 @@ class BenchmarkOperator(metaclass=PostInitProcessor):
             if not baseline and "accuracy" in self.required_metrics:
                 metrics.accuracy = (
                     self.accuracy(fn, self.baseline_fn) if self.baseline_fn else None
+                )
+            if not baseline and "cosine_similarity" in self.required_metrics:
+                metrics.cosine_similarity = (
+                    self.cosine_similarity(fn, self.baseline_fn)
+                    if self.baseline_fn
+                    else None
                 )
             if "hw_roofline" in self.required_metrics:
                 metrics.hw_roofline = self.hw_roofline()
