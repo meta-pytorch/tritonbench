@@ -147,6 +147,9 @@ class ScribeUploader:
             msg["metric_value"] = bm_data["metrics"][metric]
             formatted_msg = self._format_message(msg)
             messages.append(formatted_msg)
+        if not messages:
+            print("[scribe_loader] warning: no messages to upload")
+            return
         self._upload(messages)
 
 
