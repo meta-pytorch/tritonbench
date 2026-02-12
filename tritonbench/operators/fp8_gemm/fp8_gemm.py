@@ -80,6 +80,8 @@ def get_scaling_recipe(scaling_recipe: str) -> int:
         return ScalingType.BlockWise1x128
     elif scaling_recipe == "BlockWise128x128":
         return ScalingType.BlockWise128x128
+    elif scaling_recipe == "MXFP8":
+        return scaling_recipe
     else:
         raise ValueError(f"Invalid scaling recipe: {scaling_recipe}")
 
@@ -147,8 +149,17 @@ def get_scale(
             return _get_scale_per_block(x, 1, 128)
         case ScalingType.BlockWise128x128:
             return _get_scale_per_block(x, 128, 128)
+        case "MXFP8":
+            return _get_scale_mxfp8(x)
         case _:
             raise AssertionError(f"Unsupported scaling type {scaling_recipe}")
+
+
+def _get_scale_mxfp8(x: torch.Tensor) -> tuple[torch.Tensor, torch.Tensor]:
+    from torch.testing._internal.common_quantized import to_blocked, to_mxfp
+
+    scale_2d, x_fp8 = to_mxfp(x.to(torch.bfloat16), block_size=32, format="mxfp8")
+    return x_fp8, to_blocked(scale_2d)
 
 
 class Operator(BenchmarkOperator):
@@ -165,7 +176,10 @@ class Operator(BenchmarkOperator):
         self.fp8_dtype = get_fp8_dtype()
 
         scaling_recipe_a, scaling_recipe_b = self.extra_args.scaling_pair.split(",")
-        if (scaling_recipe_a, scaling_recipe_b) not in [
+        if scaling_recipe_a == "MXFP8" or scaling_recipe_b == "MXFP8":
+            if scaling_recipe_a != "MXFP8" or scaling_recipe_b != "MXFP8":
+                raise ValueError("MXFP8 scaling must be used for both A and B")
+        elif (scaling_recipe_a, scaling_recipe_b) not in [
             (a.name, b.name) for a, b in scaling_pairs
         ]:
             raise ValueError(
@@ -343,6 +357,31 @@ class Operator(BenchmarkOperator):
                     scale_a,
                     scale_b.t(),
                     use_fast_accum=True,
+                    out_dtype=self._get_dtype(),
+                )
+                compiled = torch.compile(f, dynamic=False)
+                compiled(a, b)
+
+            return lambda: compiled(a, b)
+
+        @register_benchmark(enabled=False)
+        def pt2_nvgemm_fp8_gemm(self, a, b, scale_a, scale_b):
+            # NOTE: NVGEMM currently only supports mxfp8 scaling
+            if self.scaling_recipe_a != "MXFP8" or self.scaling_recipe_b != "MXFP8":
+                raise NotImplementedError(
+                    f"NVGEMM currently only supports mxfp8 scaling but got {self.scaling_recipe_a} and {self.scaling_recipe_b}"
+                )
+            torch._dynamo.reset()
+            with inductor_config.patch(
+                max_autotune=True,
+                max_autotune_gemm_backends="NVGEMM",
+                autotune_fallback_to_aten=False,
+            ):
+                f = lambda a, b: torch._scaled_mm(
+                    a,
+                    b.t(),
+                    scale_a,
+                    scale_b.t(),
                     out_dtype=self._get_dtype(),
                 )
                 compiled = torch.compile(f, dynamic=False)
