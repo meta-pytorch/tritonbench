@@ -39,7 +39,11 @@ from tritonbench.utils.constants import (
     DEFAULT_WARMUP,
 )
 from tritonbench.utils.cudagraph_utils import CudaGraphConfig, CudaGraphError
-from tritonbench.utils.diode_utils import setup_diode_model, teardown_diode_model
+from tritonbench.utils.diode_utils import (
+    deserialize_model_config,
+    setup_diode_model,
+    teardown_diode_model,
+)
 from tritonbench.utils.env_utils import (
     apply_precision,
     is_fbcode,
@@ -1157,9 +1161,15 @@ class BenchmarkOperator(metaclass=PostInitProcessor):
                         else False
                     )
                     if "diode" in bm_name:
+                        diode_model_config = None
+                        if getattr(self.tb_args, "diode_model_config", None):
+                            diode_model_config = deserialize_model_config(
+                                self.tb_args.diode_model_config
+                            )
                         self.old_diode_configs = setup_diode_model(
                             self.tb_args.diode_version,
                             topk=self.tb_args.diode_topk,
+                            model_config=diode_model_config,
                         )
                     acc[bm_name] = self._do_bench(
                         input_id=input_id,

@@ -402,6 +402,16 @@ def get_parser(args=None):
             help="Version of diode to use. Default: recommended version in MODEL_CONFIGS (~/fbsource/fbcode/diode/torch_diode/models/triton_gemm/model.py)",
         )
         parser.add_argument(
+            "--diode-model-config",
+            type=str,
+            default=None,
+            help="JSON-serialized Diode ModelConfig. Advanced option that allows testing of Diode models "
+            "that are not registered in the Diode codebase. If provided, this takes precedence over "
+            '--diode-version. Example: \'{"model_name": "v5/my_test_model", "n_hidden_layers": 6, '
+            '"dropout_rate": 0.05, "template_op_pairs": [["triton::mm", "mm"], ["triton::bmm", "bmm"], ...], '
+            '"supported_devices": ["NVIDIA H100", ...], "feature_version": "v5", "is_production": false}\'',
+        )
+        parser.add_argument(
             "--diode-topk",
             type=int,
             default=1,

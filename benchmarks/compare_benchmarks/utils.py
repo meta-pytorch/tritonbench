@@ -47,6 +47,7 @@ class DiodeBenchmarkConfig(BenchmarkConfig):
 
     custom_bench: str = "diode"
     diode_version: str = "recommended"
+    diode_model_config: Optional[str] = None
     diode_topk: int = 1
 
 

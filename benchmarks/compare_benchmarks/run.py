@@ -66,6 +66,8 @@ def build_op_args(
                 str(config.diode_topk),
             ]
         )
+        if config.diode_model_config is not None:
+            args.extend(["--diode-model-config", config.diode_model_config])
 
     return args
 
@@ -357,6 +359,12 @@ def parse_args(args: List[str] = None) -> BenchmarkConfig:
         help="Diode model version to use. Default: recommended",
     )
     parser.add_argument(
+        "--diode-model-config",
+        type=str,
+        default=None,
+        help="JSON-serialized Diode ModelConfig. Overrides --diode-version.",
+    )
+    parser.add_argument(
         "--diode-topk",
         type=int,
         default=1,
@@ -391,6 +399,7 @@ def parse_args(args: List[str] = None) -> BenchmarkConfig:
             **base_configs,
             benchmark_map=benchmark_map,
             diode_version=args.diode_version,
+            diode_model_config=args.diode_model_config,
             diode_topk=args.diode_topk,
         )
 
