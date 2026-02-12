@@ -32,6 +32,7 @@ class BenchmarkConfig:
     """Configuration for a benchmark run."""
 
     custom_bench: str = None
+    gpu: str = None
     ops: List[str] = field(default_factory=lambda: DEFAULT_OPS.copy())
     metrics: List[str] = field(default_factory=lambda: DEFAULT_METRICS.copy())
     workloads: List[str] = field(default_factory=lambda: DEFAULT_WORKLOADS.copy())

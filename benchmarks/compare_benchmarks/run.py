@@ -145,6 +145,12 @@ def run_benchmark_with_logs(
             os.dup2(log_fd, stderr_fd)
 
             try:
+                # Only add --launch if running via MAST launcher (not direct compare_benchmarks binary)
+                if "compare_benchmarks" not in sys.argv[0]:
+                    op_args.extend([
+                        "--launch",
+                        "pytorch.tritonbench.benchmarks.compare_benchmarks.run",
+                    ])
                 op_args.append("--run-in-task")
                 run_in_task(
                     op=op,
@@ -212,9 +218,9 @@ def log_scuba(df: pd.DataFrame, config: BenchmarkConfig) -> None:
         )
 
 
-def run(config: BenchmarkConfig) -> pd.DataFrame:
+def run_benchmarks(config: BenchmarkConfig) -> None:
     """Main benchmark runner."""
-    gpu = detect_gpu()
+    gpu = config.gpu if config.gpu else detect_gpu()
 
     print(f"[Compare Benchmarks] GPU: {gpu}")
     print(f"[Compare Benchmarks] Ops: {config.ops}")
@@ -274,13 +280,11 @@ def run(config: BenchmarkConfig) -> pd.DataFrame:
         other_cols = [c for c in combined_df.columns if c not in priority_cols]
         combined_df = combined_df[priority_cols + other_cols]
 
-    if config.parse_autotune_logs and config.log_scuba:
-        log_scuba(combined_df, config)
-
-    return combined_df
+        if config.parse_autotune_logs and config.log_scuba:
+            log_scuba(combined_df, config)
 
 
-def parse_args() -> BenchmarkConfig:
+def parse_args(args: List[str] = None) -> BenchmarkConfig:
     """Parse command-line arguments."""
     parser = argparse.ArgumentParser(description="Compare benchmarks across operators, metrics, and workloads in TritonBench.")
 
@@ -289,6 +293,12 @@ def parse_args() -> BenchmarkConfig:
         type=str,
         default=None,
         help=f"Custom benchmarking framework to use (e.g. diode). Default: None"
+    )
+    parser.add_argument(
+        "--gpu",
+        type=str,
+        default=None,
+        help=f"GPU type override (e.g. h100). Auto-detected if not provided.",
     )
     parser.add_argument(
         "--ops",
@@ -353,11 +363,12 @@ def parse_args() -> BenchmarkConfig:
         help="Top K kernel configs to return from Diode. Default: 1",
     )
 
-    args = parser.parse_args()
+    args = parser.parse_args(args)
 
     workloads = args.workloads.split(",") if args.workloads else None
 
     base_configs = {
+        "gpu": args.gpu,
         "ops": args.ops.split(","),
         "metrics": args.metrics.split(","),
         "workloads": workloads,
@@ -396,16 +407,19 @@ def parse_args() -> BenchmarkConfig:
     )
 
 
-if __name__ == "__main__":
-    # run individual operators in separate child processes (via run_in_task)
+def run(args: List[str] = None) -> None:
+    """Entry point for running compare_benchmarks."""
     _parser = argparse.ArgumentParser(add_help=False)
     _parser.add_argument("--run-in-task", action="store_true")
-    _args, extra_args = _parser.parse_known_args()
+    _args, extra_args = _parser.parse_known_args(args)
 
     if _args.run_in_task:
         run_one_operator(extra_args)
         exit(0)
 
-    # initialize operators in main process
-    config = parse_args()
-    run(config)
+    config = parse_args(args)
+    run_benchmarks(config)
+
+
+if __name__ == "__main__":
+    run()
