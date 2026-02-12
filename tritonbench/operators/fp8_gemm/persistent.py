@@ -3,9 +3,9 @@ from typing import Optional
 
 import torch
 import triton
-from triton import knobs
 import triton.language as tl
 from torch._inductor.kernel.mm import ScalingType
+from triton import knobs
 from tritonbench.utils.env_utils import is_cuda
 from tritonbench.utils.triton_utils import has_experimental_descriptor
 
@@ -28,7 +28,7 @@ if is_cuda():
 def is_hip_async_copy_enabled():
     if is_cuda():
         return False
-    
+
     # default is enabled
     if knobs.amd.use_async_copy is None:
         return True
@@ -146,7 +146,7 @@ def matmul_persistent(a, b):
             "BLOCK_SIZE_N": 256,
             "BLOCK_SIZE_K": 128,
             "GROUP_SIZE_M": 8,
-            "num_stages": 3 if is_hip_async_copy_enabled()  else 4,
+            "num_stages": 3 if is_hip_async_copy_enabled() else 4,
             "num_warps": 8,
         },
         torch.float16: {

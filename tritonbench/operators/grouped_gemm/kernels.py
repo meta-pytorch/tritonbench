@@ -54,7 +54,7 @@ def num_sms():
 def is_hip_async_copy_enabled():
     if is_cuda():
         return False
-    
+
     # default is enabled
     if knobs.amd.use_async_copy is None:
         return True

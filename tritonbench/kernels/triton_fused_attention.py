@@ -19,7 +19,6 @@ import triton
 import triton.language as tl
 from triton import knobs
 
-
 from .attention_utils import (
     HAS_EXPLICIT_WS,  # guard new tuning configs such as num_consumer_groups
     HAS_TMA_DESC,
@@ -37,7 +36,7 @@ def is_cuda():
 def is_hip_async_copy_enabled():
     if is_cuda():
         return False
-    
+
     # default is enabled
     if knobs.amd.use_async_copy is None:
         return True
