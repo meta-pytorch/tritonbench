@@ -77,7 +77,6 @@ cd "${TRITONBENCH_DIR}"
 # Run the baseline commit first!
 BISECT_LOG_DIR="${TRITONBENCH_DIR}/bisect_logs"
 BASELINE_LOG="${BISECT_LOG_DIR}/baseline.log"
-BAD_COMMIT_LOG="${BISECT_LOG_DIR}/bad_commit.log"
 mkdir -p "${BISECT_LOG_DIR}"
 . .ci/triton/triton_install_utils.sh
 # install triton of the good commit
