@@ -91,13 +91,19 @@ install_triton "${TRITON_SRC_DIR}"
 cd "${TRITONBENCH_DIR}"
 # allow the regression detector to exit with error code
 set +e
-python ./.ci/bisect/regression_detector.py
-# if no regression, exit early and report error: this shouldn't happen
-if [ $? -eq 0 ]; then
-    echo "ERROR: Regression not detected on bad commit"
-    exit 1
-fi
+BASELINE_LOG="${BASELINE_LOG}" python ./.ci/bisect/regression_detector.py
+PREFLIGHT_RC=$?
 set -e
+# if no regression, exit early and report error: this shouldn't happen
+if [ ${PREFLIGHT_RC} -eq 0 ]; then
+    echo "ERROR: No regression detected on bad commit (${BAD_COMMIT}) relative to good commit (${GOOD_COMMIT})."
+    echo "The regression detector exited with 0, meaning the bad commit behaves the same as the good commit."
+    echo "Please verify that your good_commit and bad_commit are correct, or adjust the REGRESSION_THRESHOLD (currently ${REGRESSION_THRESHOLD}%)."
+    exit 1
+elif [ ${PREFLIGHT_RC} -ne 1 ] && [ ${FUNCTIONAL} -ne 1 ]; then
+    echo "WARNING: Pre-flight regression check exited with unexpected code ${PREFLIGHT_RC}."
+    echo "This may indicate a build or environment issue. Proceeding with bisect anyway."
+fi
 
 # kick off the bisect!
 BASELINE_LOG="${BASELINE_LOG}" PER_COMMIT_LOG=1 USE_UV=1 CONDA_DIR="${WORKSPACE_DIR}/uv_venvs/${CONDA_ENV}" \
