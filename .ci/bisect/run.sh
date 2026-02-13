@@ -77,6 +77,7 @@ cd "${TRITONBENCH_DIR}"
 # Run the baseline commit first!
 BISECT_LOG_DIR="${TRITONBENCH_DIR}/bisect_logs"
 BASELINE_LOG="${BISECT_LOG_DIR}/baseline.log"
+BAD_COMMIT_LOG="${BISECT_LOG_DIR}/bad_commit.log"
 mkdir -p "${BISECT_LOG_DIR}"
 . .ci/triton/triton_install_utils.sh
 # install triton of the good commit
@@ -84,6 +85,17 @@ checkout_triton_commit "${TRITON_SRC_DIR}" "${GOOD_COMMIT}"
 install_triton "${TRITON_SRC_DIR}"
 cd "${TRITONBENCH_DIR}"
 eval ${REPRO_CMDLINE} 2>&1 | tee "${BASELINE_LOG}"
+
+# pre-flight check: install and run on the bad commit to validate regression exists
+checkout_triton_commit "${TRITON_SRC_DIR}" "${BAD_COMMIT}"
+install_triton "${TRITON_SRC_DIR}"
+cd "${TRITONBENCH_DIR}"
+python ./.ci/bisect/regression_detector.py
+# if no regression, exit early and report error: this shouldn't happen
+if [ $? -eq 0 ]; then
+    echo "ERROR: Regression not detected on bad commit"
+    exit 1
+fi
 
 # kick off the bisect!
 BASELINE_LOG="${BASELINE_LOG}" PER_COMMIT_LOG=1 USE_UV=1 CONDA_DIR="${WORKSPACE_DIR}/uv_venvs/${CONDA_ENV}" \
