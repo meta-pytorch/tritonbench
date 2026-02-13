@@ -89,12 +89,15 @@ eval ${REPRO_CMDLINE} 2>&1 | tee "${BASELINE_LOG}"
 checkout_triton_commit "${TRITON_SRC_DIR}" "${BAD_COMMIT}"
 install_triton "${TRITON_SRC_DIR}"
 cd "${TRITONBENCH_DIR}"
+# allow the regression detector to exit with error code
+set +e
 python ./.ci/bisect/regression_detector.py
 # if no regression, exit early and report error: this shouldn't happen
 if [ $? -eq 0 ]; then
     echo "ERROR: Regression not detected on bad commit"
     exit 1
 fi
+set -e
 
 # kick off the bisect!
 BASELINE_LOG="${BASELINE_LOG}" PER_COMMIT_LOG=1 USE_UV=1 CONDA_DIR="${WORKSPACE_DIR}/uv_venvs/${CONDA_ENV}" \
