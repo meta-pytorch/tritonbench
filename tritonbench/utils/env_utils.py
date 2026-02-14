@@ -17,6 +17,7 @@ import triton
 from tritonbench.utils.path_utils import REPO_PATH
 
 log = logging.getLogger(__name__)
+log.setLevel(logging.INFO)
 
 MAIN_RANDOM_SEED = 1337
 AVAILABLE_PRECISIONS = [
@@ -306,3 +307,14 @@ def get_logger(name, level: int = logging.INFO):
     logger = logging.getLogger(name)
     logger.setLevel(level)
     return logger
+
+
+def set_torchrun_env():
+    """Set the environment variables that are relevant to running TritonBench with torchrun (torch.distributed.run)."""
+    if "TORCHELASTIC_RUN_ID" in os.environ and "LOCAL_RANK" in os.environ:
+        os.environ["CUDA_VISIBLE_DEVICES"] = os.environ["LOCAL_RANK"]
+        torch.cuda.set_device(int(os.environ["LOCAL_RANK"]))
+        log.info(
+            f"[distributed] Found TORCHELASTIC_RUN_ID={os.environ['TORCHELASTIC_RUN_ID']} and LOCAL_RANK={os.environ['LOCAL_RANK']}. "
+            f"Set current device to: {torch.cuda.current_device()}"
+        )
