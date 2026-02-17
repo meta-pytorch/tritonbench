@@ -67,6 +67,7 @@ jobs:
       - name: Install Tritonbench env
         run: |
           set -eux
+          sudo ldconfig
           if [[ "${CONDA_ENV}" == "meta-triton" ]]; then
             CMD_SUFFIX=" --meta-triton"
           elif [[ "${CONDA_ENV}" == "triton-main" ]]; then
