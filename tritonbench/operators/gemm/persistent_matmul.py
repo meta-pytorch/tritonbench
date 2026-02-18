@@ -11,14 +11,17 @@ from .triton_matmul_configs import get_full_amd_config_space, get_tileir_configs
 if not is_fbcode():
     import triton.tools.experimental_descriptor
 
-    if is_cuda():
-        from triton._C.libtriton import nvidia
+    try:
+        if is_cuda():
+            from triton._C.libtriton import nvidia
 
-        cublas_workspace = torch.empty(
-            32 * 1024 * 1024, device="cuda", dtype=torch.uint8
-        )
-        cublas = nvidia.cublas.CublasLt(cublas_workspace)
-    else:
+            cublas_workspace = torch.empty(
+                32 * 1024 * 1024, device="cuda", dtype=torch.uint8
+            )
+            cublas = nvidia.cublas.CublasLt(cublas_workspace)
+        else:
+            cublas = None
+    except RuntimeError:
         cublas = None
 
 

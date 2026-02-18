@@ -21,7 +21,7 @@ if is_cuda():
             32 * 1024 * 1024, device="cuda", dtype=torch.uint8
         )
         cublas = nvidia.cublas.CublasLt(cublas_workspace)
-    except (ImportError, IOError, AttributeError):
+    except (ImportError, IOError, AttributeError, RuntimeError):
         pass
 
 
