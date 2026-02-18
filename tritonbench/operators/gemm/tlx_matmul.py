@@ -21,7 +21,6 @@ def get_cuda_autotune_config():
                 "NUM_MMA_GROUPS": m,
                 "EPILOGUE_SUBTILE": subtile,
                 "PAIR_CTA": pairCTA,
-                "CLUSTER_LAUNCH_CONTROL": enableCLC,
             },
             num_warps=4,
             num_stages=1,
@@ -36,7 +35,6 @@ def get_cuda_autotune_config():
         for m in [1, 2]
         for subtile in [1, 2, 4, 8]
         for pairCTA in [True, False]
-        for enableCLC in [True, False]
     ]
 
 
@@ -73,7 +71,6 @@ def preprocess_configs(configs, named_args, **kwargs):
     MAX_TENSOR_MEMORY = 256 * 1024  # bytes (256KB TMEM per SM)
 
     MBARRIER_SIZE = 8  # bytes
-    CLC_RESPONSE_SIZE = 16  # bytes
 
     pruned_configs = []
     for conf in configs:
@@ -85,7 +82,6 @@ def preprocess_configs(configs, named_args, **kwargs):
         NUM_SMEM_BUFFERS = conf.kwargs["NUM_SMEM_BUFFERS"]
         NUM_TMEM_BUFFERS = conf.kwargs["NUM_TMEM_BUFFERS"]
         PAIR_CTA = conf.kwargs["PAIR_CTA"]
-        CLUSTER_LAUNCH_CONTROL = conf.kwargs["CLUSTER_LAUNCH_CONTROL"]
         NUM_MMA_GROUPS = conf.kwargs["NUM_MMA_GROUPS"]
 
         # Filter out invalid config that causes wrong hardware MMA
@@ -123,11 +119,7 @@ def preprocess_configs(configs, named_args, **kwargs):
         # tmem_full_bars
         smem_barriers += NUM_TMEM_BUFFERS
 
-        smem_clc = (
-            (CLC_RESPONSE_SIZE + MBARRIER_SIZE * 2) if CLUSTER_LAUNCH_CONTROL else 0
-        )
-
-        total_smem = smem_a + smem_b + smem_epilog + smem_barriers + smem_clc
+        total_smem = smem_a + smem_b + smem_epilog + smem_barriers
         # Prune configs that exceed memory limits
         if total_smem > MAX_SHARED_MEMORY:
             continue
@@ -426,7 +418,7 @@ def matmul_kernel_tma_ws_blackwell(
     NUM_MMA_GROUPS: tl.constexpr,
     EPILOGUE_SUBTILE: tl.constexpr,
     PAIR_CTA: tl.constexpr,
-    CLUSTER_LAUNCH_CONTROL: tl.constexpr,
+    NUM_SMS: tl.constexpr,
 ):
     # allocate NUM_SMEM_BUFFERS buffers
     BLOCK_M_SPLIT: tl.constexpr = BLOCK_SIZE_M // NUM_MMA_GROUPS
@@ -483,10 +475,6 @@ def matmul_kernel_tma_ws_blackwell(
         num_barriers=NUM_TMEM_BUFFERS * NUM_MMA_GROUPS, arrive_count=EPILOGUE_SUBTILE
     )
 
-    if CLUSTER_LAUNCH_CONTROL:
-        # Dynamic tiling setup with CLC
-        clc_context = tlx.clc_create_context(6 if PAIR_CTA else 3)
-
     with tlx.async_tasks():
         with tlx.async_task("default"):  # epilogue consumer
             start_pid, num_pid_m, num_pid_n, num_pid_in_group, num_tiles, k_tiles = (
@@ -498,17 +486,7 @@ def matmul_kernel_tma_ws_blackwell(
             tmem_accum_cnt = 0
             tile_id = start_pid
 
-            # If not using CLC, compiler will clean up the unused phases
-            clc_phase_producer = 1
-            clc_phase_consumer = 0
-
-            while tile_id != -1:
-                if CLUSTER_LAUNCH_CONTROL:
-                    tlx.clc_producer(
-                        clc_context, clc_phase_producer, multi_ctas=PAIR_CTA
-                    )
-                    clc_phase_producer ^= 1
-
+            while tile_id < num_tiles:
                 cur_tmem_buf, tmem_read_phase = _get_bufidx_phase(
                     tmem_accum_cnt, NUM_TMEM_BUFFERS
                 )
@@ -530,14 +508,7 @@ def matmul_kernel_tma_ws_blackwell(
                     tmem_read_phase=tmem_read_phase,
                 )
                 tmem_accum_cnt += 1
-
-                if CLUSTER_LAUNCH_CONTROL:
-                    tile_id = tlx.clc_consumer(
-                        clc_context, clc_phase_consumer, multi_ctas=PAIR_CTA
-                    )
-                    clc_phase_consumer ^= 1
-                else:
-                    tile_id = -1  # no more tiles to process to stop the loop
+                tile_id += NUM_SMS
 
         with tlx.async_task(num_warps=1, num_regs=24):  # MMA consumer
             start_pid, num_pid_m, num_pid_n, num_pid_in_group, num_tiles, k_tiles = (
@@ -549,9 +520,8 @@ def matmul_kernel_tma_ws_blackwell(
             tmem_accum_cnt = 0
             smem_accum_cnt = 0
             tile_id = start_pid
-            clc_phase_consumer = 0
 
-            while tile_id != -1:
+            while tile_id < num_tiles:
                 cur_tmem_buf, tmem_write_phase = _get_bufidx_phase(
                     tmem_accum_cnt, NUM_TMEM_BUFFERS
                 )
@@ -576,14 +546,7 @@ def matmul_kernel_tma_ws_blackwell(
                     pred_cta0=pred_cta0,
                 )
                 tmem_accum_cnt += 1
-
-                if CLUSTER_LAUNCH_CONTROL:
-                    tile_id = tlx.clc_consumer(
-                        clc_context, clc_phase_consumer, multi_ctas=PAIR_CTA
-                    )
-                    clc_phase_consumer ^= 1
-                else:
-                    tile_id = -1  # no more tiles to process to stop the loop
+                tile_id += NUM_SMS
 
         with tlx.async_task(num_warps=1, num_regs=24):  # producer, TMA load
             start_pid, num_pid_m, num_pid_n, num_pid_in_group, num_tiles, k_tiles = (
@@ -594,9 +557,8 @@ def matmul_kernel_tma_ws_blackwell(
 
             smem_accum_cnt = 0
             tile_id = start_pid
-            clc_phase_consumer = 0
 
-            while tile_id != -1:
+            while tile_id < num_tiles:
                 smem_accum_cnt = _process_tile_producer_inner(
                     tile_id=tile_id,
                     num_pid_in_group=num_pid_in_group,
@@ -619,13 +581,7 @@ def matmul_kernel_tma_ws_blackwell(
                     PAIR_CTA=PAIR_CTA,
                     cluster_cta_rank=cluster_cta_rank,
                 )
-                if CLUSTER_LAUNCH_CONTROL:
-                    tile_id = tlx.clc_consumer(
-                        clc_context, clc_phase_consumer, multi_ctas=PAIR_CTA
-                    )
-                    clc_phase_consumer ^= 1
-                else:
-                    tile_id = -1  # no more tiles to process to stop the loop
+                tile_id += NUM_SMS
 
 
 def tlx_matmul(a, b):
@@ -643,12 +599,13 @@ def tlx_matmul(a, b):
     b_desc = TensorDescriptor(b, b.shape, b.stride(), dummy_block)
     c_desc = TensorDescriptor(c, c.shape, c.stride(), dummy_block)
 
-    # We don't cap grid size by NUM_SMS here because we use CLC by default
+    NUM_SMS = torch.cuda.get_device_properties("cuda").multi_processor_count
+
     def grid(META):
         total_tiles = triton.cdiv(M, META["BLOCK_SIZE_M"]) * triton.cdiv(
             N, META["BLOCK_SIZE_N"]
         )
-        return (total_tiles,)
+        return (min(NUM_SMS, total_tiles),)
 
     matmul_kernel_tma_ws_blackwell[grid](
         a_desc,
@@ -657,5 +614,6 @@ def tlx_matmul(a, b):
         M,
         N,
         K,
+        NUM_SMS=NUM_SMS,
     )
     return c
