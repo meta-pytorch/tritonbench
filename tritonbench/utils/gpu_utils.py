@@ -287,6 +287,19 @@ def get_amd_device_name() -> str:
     return AMD_DEVICE_NAME_MAPPING[(gcn_arch_major, gcn_arch_minor)]
 
 
+def get_gpu_device_name() -> str:
+    try:
+        import torch
+        from tritonbench.utils.env_utils import is_hip
+        from tritonbench.utils.gpu_utils import get_amd_device_name
+
+        if is_hip():
+            return get_amd_device_name()
+        return torch.cuda.get_device_name()
+    except Exception:
+        return "None"
+
+
 @triton.jit
 def sleep_amd(sleep_ns: tl.constexpr = 1000000):
     """

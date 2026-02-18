@@ -10,8 +10,8 @@ from tritonbench.utils.constants import (
     DEFAULT_REP,
     DEFAULT_WARMUP,
 )
-from tritonbench.utils.env_utils import AVAILABLE_PRECISIONS, is_fbcode, is_hip
-from tritonbench.utils.gpu_utils import get_amd_device_name
+from tritonbench.utils.env_utils import AVAILABLE_PRECISIONS, is_fbcode
+from tritonbench.utils.gpu_utils import get_gpu_device_name
 
 
 def get_parser(args=None):
@@ -398,7 +398,7 @@ def get_parser(args=None):
         parser.add_argument(
             "--hardware",
             type=str,
-            default=get_amd_device_name() if is_hip() else torch.cuda.get_device_name(),
+            default=get_gpu_device_name(),
             help="Specify the hardware target (e.g., H100, B200, MI300) for Scuba logging.",
         )
         # Diode args (Diode not available in OSS)
