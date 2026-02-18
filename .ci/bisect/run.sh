@@ -82,12 +82,14 @@ mkdir -p "${BISECT_LOG_DIR}"
 # install triton of the good commit
 checkout_triton_commit "${TRITON_SRC_DIR}" "${GOOD_COMMIT}"
 install_triton "${TRITON_SRC_DIR}"
+sudo ldconfig
 cd "${TRITONBENCH_DIR}"
 eval ${REPRO_CMDLINE} 2>&1 | tee "${BASELINE_LOG}"
 
 # pre-flight check: install and run on the bad commit to validate regression exists
 checkout_triton_commit "${TRITON_SRC_DIR}" "${BAD_COMMIT}"
 install_triton "${TRITON_SRC_DIR}"
+sudo ldconfig
 cd "${TRITONBENCH_DIR}"
 # allow the regression detector to exit with error code
 set +e
