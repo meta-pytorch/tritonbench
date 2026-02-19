@@ -1,4 +1,5 @@
 import argparse
+import csv
 import itertools
 from typing import Any, Callable, Generator, List, Optional, Tuple
 
@@ -88,6 +89,20 @@ BATCH_SCALING_SHAPES = [(1 << i, 512, 512, False) for i in range(6, 21)]
 logger = get_logger(__name__)
 
 
+def read_shapes_from_csv(csv_path: str) -> List[Tuple[int, int, int, bool]]:
+    """Read addmm shapes from a CSV file with columns M, K, N, Bias_1D_Y."""
+    shapes = []
+    with open(csv_path, "r") as f:
+        reader = csv.DictReader(f)
+        for row in reader:
+            m = int(row["M"])
+            k = int(row["K"])
+            n = int(row["N"])
+            bias_1d_y = row.get("Bias_1D_Y", "").strip().lower() in ("true", "1")
+            shapes.append((m, k, n, bias_1d_y))
+    return shapes
+
+
 class Operator(BenchmarkOperator):
     DEFAULT_METRICS = ["tflops", "best_config"]
     DEFAULT_PRECISION = "fp16"
@@ -100,6 +115,8 @@ class Operator(BenchmarkOperator):
         prod_shapes = get_prod_shapes(addmm_args.config)
         if prod_shapes:
             self.shapes = prod_shapes
+        elif addmm_args.input:
+            self.shapes = read_shapes_from_csv(addmm_args.input)
         elif addmm_args.m and addmm_args.n and addmm_args.k:
             self.shapes = [(addmm_args.m, addmm_args.k, addmm_args.n, False)]
         elif addmm_args.large_k_shapes:
