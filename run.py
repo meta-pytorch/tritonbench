@@ -21,7 +21,7 @@ def run(args: Optional[List[str]] = None):
         if launch_idx + 1 >= len(args):
             raise ValueError("--launch requires a module path argument")
         launch_module = args[launch_idx + 1]
-        extra_args = args[:launch_idx] + args[launch_idx + 2:]
+        extra_args = args[:launch_idx] + args[launch_idx + 2 :]
         module = importlib.import_module(launch_module)
         if not hasattr(module, "run"):
             raise ValueError(f"Module {launch_module} has no 'run' function")

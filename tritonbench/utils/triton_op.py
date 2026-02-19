@@ -422,8 +422,10 @@ class BenchmarkOperatorResult:
                     new_avg_row.append(str(x / len(self.result)))
                 elif isinstance(x, Latency):
                     new_avg_row.append(str(x.to_float() / len(self.result)))
+                elif isinstance(x, str):
+                    new_avg_row.append(x)
                 else:
-                    new_avg_row.append(None)
+                    new_avg_row.append("")
             avg_row = [",".join(new_avg_row)]
         else:
             avg_row = ["average"] + [
@@ -1323,7 +1325,7 @@ class BenchmarkOperator(metaclass=PostInitProcessor):
 
         if autotuner is not None:
             return autotuner.best_config.all_kwargs()
-        return None
+        return "unknown"
 
     def all_configs(self, fn):
         from unittest import mock
