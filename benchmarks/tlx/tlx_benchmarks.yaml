@@ -2,5 +2,10 @@
 # Add or disable TLX benchmarks that are not covered by the static analyzer
 bf16_gemm_fwd:
   op: gemm
-  args: --op gemm --only tlx_matmul,tlx_matmul_ws,tlx_matmul_clc,tlx_matmul_2cta,tlx_matmul_pipelined
+  args: --op gemm --only tlx_matmul_ws,tlx_matmul_clc,tlx_matmul_2cta,tlx_matmul_pipelined --precision bf16
+  device: b200
+
+fp16_gemm_fwd:
+  op: gemm
+  args: --op gemm --only tlx_matmul_ws,tlx_matmul_clc,tlx_matmul_2cta,tlx_matmul_pipelined --precision fp16
   device: b200

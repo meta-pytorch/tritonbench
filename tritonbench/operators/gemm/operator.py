@@ -33,7 +33,6 @@ if has_tlx():
     from triton.language.extra.tlx.tutorials.blackwell_gemm_ws import (
         matmul as _tlx_matmul_ws,
     )
-    from tritonbench.operators.gemm.tlx_matmul import tlx_matmul as _tlx_matmul
 else:
 
     def _tlx_matmul_clc(*args, **kwargs):
@@ -46,9 +45,6 @@ else:
         raise RuntimeError("TLX not available in this Triton version")
 
     def _tlx_matmul_pipelined(*args, **kwargs):
-        raise RuntimeError("TLX not available in this Triton version")
-
-    def _tlx_matmul(*args, **kwargs):
         raise RuntimeError("TLX not available in this Triton version")
 
 
@@ -593,54 +589,59 @@ class Operator(BenchmarkOperator):
                 )
 
         @register_benchmark(enabled=has_tlx())
-        def tlx_matmul(self, a, b, bias) -> Callable:
-            # TLX matmul requires contiguous inputs with 16-byte aligned strides
-            a_contig = a.contiguous()
-            b_contig = b.contiguous()
-            if bias is not None:
-                return lambda: _tlx_matmul(a_contig, b_contig) + bias
-            else:
-                return lambda: _tlx_matmul(a_contig, b_contig)
-
-        @register_benchmark(enabled=has_tlx())
         def tlx_matmul_ws(self, a, b, bias) -> Callable:
             # TLX matmul requires contiguous inputs with 16-byte aligned strides
             a_contig = a.contiguous()
             b_contig = b.contiguous()
+            target_dtype = a.dtype
             if bias is not None:
-                return lambda: _tlx_matmul_ws(a_contig, b_contig) + bias
+                return (
+                    lambda: _tlx_matmul_ws(a_contig, b_contig).to(target_dtype) + bias
+                )
             else:
-                return lambda: _tlx_matmul_ws(a_contig, b_contig)
+                return lambda: _tlx_matmul_ws(a_contig, b_contig).to(target_dtype)
 
         @register_benchmark(enabled=has_tlx())
         def tlx_matmul_clc(self, a, b, bias) -> Callable:
             # TLX matmul requires contiguous inputs with 16-byte aligned strides
             a_contig = a.contiguous()
             b_contig = b.contiguous()
+            target_dtype = a.dtype
             if bias is not None:
-                return lambda: _tlx_matmul_clc(a_contig, b_contig) + bias
+                return (
+                    lambda: _tlx_matmul_clc(a_contig, b_contig).to(target_dtype) + bias
+                )
             else:
-                return lambda: _tlx_matmul_clc(a_contig, b_contig)
+                return lambda: _tlx_matmul_clc(a_contig, b_contig).to(target_dtype)
 
         @register_benchmark(enabled=has_tlx())
         def tlx_matmul_pipelined(self, a, b, bias) -> Callable:
             # TLX matmul requires contiguous inputs with 16-byte aligned strides
             a_contig = a.contiguous()
             b_contig = b.contiguous()
+            target_dtype = a.dtype
             if bias is not None:
-                return lambda: _tlx_matmul_pipelined(a_contig, b_contig) + bias
+                return (
+                    lambda: _tlx_matmul_pipelined(a_contig, b_contig).to(target_dtype)
+                    + bias
+                )
             else:
-                return lambda: _tlx_matmul_pipelined(a_contig, b_contig)
+                return lambda: _tlx_matmul_pipelined(a_contig, b_contig).to(
+                    target_dtype
+                )
 
         @register_benchmark(enabled=has_tlx())
         def tlx_matmul_2cta(self, a, b, bias) -> Callable:
             # TLX matmul requires contiguous inputs with 16-byte aligned strides
             a_contig = a.contiguous()
             b_contig = b.contiguous()
+            target_dtype = a.dtype
             if bias is not None:
-                return lambda: _tlx_matmul_2cta(a_contig, b_contig) + bias
+                return (
+                    lambda: _tlx_matmul_2cta(a_contig, b_contig).to(target_dtype) + bias
+                )
             else:
-                return lambda: _tlx_matmul_2cta(a_contig, b_contig)
+                return lambda: _tlx_matmul_2cta(a_contig, b_contig).to(target_dtype)
 
         @register_benchmark(enabled=HAS_TILELANG and is_cu130())
         def tilelang_blackwell_matmul(self, a, b, bias) -> Callable:
