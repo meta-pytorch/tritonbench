@@ -158,11 +158,11 @@ def compare_outputs(dir_a: str, dir_b: str) -> Tuple[bool, List[str]]:
     else:
         print(f"[ptxas-check] {stderr_files_a}: configs match ✓")
 
-    pkl_files_a = set(find_pkl_files(dir_a))
-    pkl_files_b = set(find_pkl_files(dir_b))
-    common_pkl = pkl_files_a & pkl_files_b
-    only_in_a = pkl_files_a - pkl_files_b
-    only_in_b = pkl_files_b - pkl_files_a
+    pt_files_a = set(find_pt_files(dir_a))
+    pt_files_b = set(find_pt_files(dir_b))
+    common_pkl = pt_files_a & pt_files_b
+    only_in_a = pt_files_a - pt_files_b
+    only_in_b = pt_files_b - pt_files_a
 
     if only_in_a:
         issues.append(f"PKL files only in run with PTXAS_OPTIONS: {sorted(only_in_a)}")
@@ -174,8 +174,8 @@ def compare_outputs(dir_a: str, dir_b: str) -> Tuple[bool, List[str]]:
     for pkl_file in sorted(common_pkl):
         path_a = os.path.join(dir_a, pkl_file)
         path_b = os.path.join(dir_b, pkl_file)
-        data_a = load_pickle(path_a)
-        data_b = load_pickle(path_b)
+        data_a = load_pt(path_a)
+        data_b = load_pt(path_b)
         if not check_tensor_numeric(data_a, data_b):
             issues.append(f"Numeric mismatch in {pkl_file}")
         else:
