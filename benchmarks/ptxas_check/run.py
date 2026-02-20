@@ -204,11 +204,13 @@ def compare_outputs(dir_a: str, dir_b: str) -> Tuple[bool, List[str]]:
     only_in_b = pt_files_b - pt_files_a
 
     if only_in_a:
-        issues.append(f"PKL files only in run with PTXAS_OPTIONS: {sorted(only_in_a)}")
+        issues.append(f"PT files only in run with PTXAS_OPTIONS: {sorted(only_in_a)}")
     if only_in_b:
         issues.append(
-            f"PKL files only in run without PTXAS_OPTIONS: {sorted(only_in_b)}"
+            f"PT files only in run without PTXAS_OPTIONS: {sorted(only_in_b)}"
         )
+    if not common_pkl:
+        issues.append("Numeric files are missing.")
 
     for pkl_file in sorted(common_pkl):
         path_a = os.path.join(dir_a, pkl_file)
