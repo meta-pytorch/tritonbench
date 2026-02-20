@@ -234,23 +234,29 @@ def main() -> int:
         description="PTXAS Options Compatibility Check",
         usage="%(prog)s [options] -- <tritonbench args>",
     )
-    parser.add_argument("--config-file", type=str, help="Config file to use")
     args, extra_args = parser.parse_known_args()
 
     if "--" in extra_args:
         extra_args.remove("--")
 
-    ptxas_options = os.environ.get("PTXAS_OPTIONS")
+    ptxas_options = os.environ.get("PTXAS_OPTIONS", None)
     if ptxas_options is None:
         print("[ptxas-check] ERROR: PTXAS_OPTIONS environment variable is not set.")
         print("[ptxas-check] Please set PTXAS_OPTIONS before running this benchmark.")
-        print("[ptxas-check] Example: PTXAS_OPTIONS='-v' buck2 run ... -- --op gemm")
+        print("[ptxas-check] Example: PTXAS_OPTIONS='-v' python -m benchmarks.ptxas_check.run")
+        return 1
+
+    config_file = os.environ.get("TRITONBENCH_RUN_CONFIG", None)
+    if config_file is None:
+        print("[ptxas-check] ERROR: TRITONBENCH_RUN_CONFIG environment variable is not set.")
+        print("[ptxas-check] Please set TRITONBENCH_RUN_CONFIG before running this benchmark.")
+        print("[ptxas-check] Example: TRITONBENCH_RUN_CONFIG='benchmarks/run_config/....yaml' python -m benchmarks.ptxas_check.run")
         return 1
 
     print("[ptxas-check] PTXAS Options Compatibility Check")
     print(f"[ptxas-check] PTXAS_OPTIONS: {ptxas_options}")
     print(
-        f"[ptxas-check] Config file: {args.config_file if args.config_file else '<not set>'}"
+        f"[ptxas-check] Config file: {config_file if config_file else '<not set>'}"
     )
     print(f"[ptxas-check] Extra args: {extra_args}")
     print()
@@ -261,7 +267,7 @@ def main() -> int:
     output_dir_with = os.path.join(output_dir, "with_ptxas_options")
     os.mkdir(output_dir_with)
     env_with = os.environ.copy()
-    rc1 = run_tritonbench(args.config_file, extra_args, output_dir_with, env_with)
+    rc1 = run_tritonbench(config_file, extra_args, output_dir_with, env_with)
     print()
 
     print("[ptxas-check] === Run 2: WITHOUT PTXAS_OPTIONS ===")
@@ -269,7 +275,7 @@ def main() -> int:
     os.mkdir(output_dir_without)
     env_without = os.environ.copy()
     env_without.pop("PTXAS_OPTIONS", None)
-    rc2 = run_tritonbench(args.config_file, extra_args, output_dir_without, env_without)
+    rc2 = run_tritonbench(config_file, extra_args, output_dir_without, env_without)
     print()
 
     if rc1 != 0:
