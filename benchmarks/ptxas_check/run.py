@@ -37,7 +37,7 @@ def find_pt_files(path: str) -> List[str]:
     ]
 
 
-def find_file_with_suffix(path: str, suffix: str="stderr.log") -> str:
+def find_file_with_suffix(path: str, suffix: str = "stderr.log") -> str:
     abs_path = os.path.abspath(path)
     if not os.path.exists(abs_path):
         raise FileNotFoundError(f"Directory {path} does not exist")
@@ -179,9 +179,13 @@ def compare_outputs(dir_a: str, dir_b: str) -> Tuple[bool, List[str]]:
     if perf_a and perf_b:
         print(f"[ptxas-check] perf check: {perf_b} -> {perf_a} ✓")
     elif perf_a and not perf_b:
-        issues.append(f"Perf results mismatch: only found in run with PTXAS_OPTIONS: {perf_a}")
+        issues.append(
+            f"Perf results mismatch: only found in run with PTXAS_OPTIONS: {perf_a}"
+        )
     elif not perf_a and perf_b:
-        issues.append(f"Perf results mismatch: only found in run without PTXAS_OPTIONS: {perf_b}")
+        issues.append(
+            f"Perf results mismatch: only found in run without PTXAS_OPTIONS: {perf_b}"
+        )
     else:
         issues.append("Perf results are missing.")
 
