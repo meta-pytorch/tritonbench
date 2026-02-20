@@ -16,13 +16,14 @@ import time
 from pathlib import Path
 from typing import List, Optional
 
+import pandas as pd
 from pytorch.tritonbench.benchmarks.compare_benchmarks.utils import (
     BenchmarkConfig,
     DEFAULT_METRICS,
     DEFAULT_OPS,
     DEFAULT_WORKLOADS,
-    DiodeBenchmarkConfig,
     detect_gpu,
+    DiodeBenchmarkConfig,
     log_benchmark,
 )
 from pytorch.tritonbench.tools.fb.inductor_analyzer.autotune_parser import (
@@ -30,8 +31,6 @@ from pytorch.tritonbench.tools.fb.inductor_analyzer.autotune_parser import (
     parse_benchmark_results,
 )
 from tritonbench.utils.env_utils import is_fbcode
-
-import pandas as pd
 from tritonbench.utils.path_utils import REPO_PATH
 from tritonbench.utils.run_utils import run_in_task, run_one_operator
 
@@ -72,9 +71,7 @@ def build_op_args(
     return args
 
 
-def get_input_loader(
-    gpu: str, workloads: List[str], op: str
-) -> List[tuple[str, str]]:
+def get_input_loader(gpu: str, workloads: List[str], op: str) -> List[tuple[str, str]]:
     """
     Get input loader paths for the given GPU type and workloads.
 
@@ -88,7 +85,9 @@ def get_input_loader(
         (e.g., [("cmf", "fb/cmf/h100/shapes_mm.json")])
     """
     gpu_lower = gpu.lower()
-    input_configs_dir = Path(REPO_PATH) / "tritonbench" / "data" / "input_configs" / "fb"
+    input_configs_dir = (
+        Path(REPO_PATH) / "tritonbench" / "data" / "input_configs" / "fb"
+    )
 
     workloads = workloads if workloads else DEFAULT_WORKLOADS
 
@@ -149,10 +148,12 @@ def run_benchmark_with_logs(
             try:
                 # Only add --launch if running via MAST launcher (not direct compare_benchmarks binary)
                 if "compare_benchmarks" not in sys.argv[0]:
-                    op_args.extend([
-                        "--launch",
-                        "pytorch.tritonbench.benchmarks.compare_benchmarks.run",
-                    ])
+                    op_args.extend(
+                        [
+                            "--launch",
+                            "pytorch.tritonbench.benchmarks.compare_benchmarks.run",
+                        ]
+                    )
                 op_args.append("--run-in-task")
                 run_in_task(
                     op=op,
@@ -171,7 +172,9 @@ def run_benchmark_with_logs(
                 print(f.read())
 
     except Exception as e:
-        print(f"[Compare Benchmarks] WARNING: Benchmark {op} {benchmark_name} failed: {e}")
+        print(
+            f"[Compare Benchmarks] WARNING: Benchmark {op} {benchmark_name} failed: {e}"
+        )
     finally:
         os.close(saved_stdout_fd)
         os.close(saved_stderr_fd)
@@ -202,7 +205,9 @@ def compare_results(
         print("[Compare Benchmarks] No valid operations to compare")
         return pd.DataFrame()
 
-    print(f"[Compare Benchmarks] Parsed {len(lhs_ops)} LHS benchmark, {len(rhs_ops)} RHS benchmark operations")
+    print(
+        f"[Compare Benchmarks] Parsed {len(lhs_ops)} LHS benchmark, {len(rhs_ops)} RHS benchmark operations"
+    )
     print("[Compare Benchmarks] Generating comparison between LHS and RHS benchmarks")
 
     return compare_benchmark_results(lhs_ops, rhs_ops)
@@ -210,8 +215,10 @@ def compare_results(
 
 def log_scuba(df: pd.DataFrame, config: BenchmarkConfig) -> None:
     if not config.scuba_eval_id:
-        config.scuba_eval_id = f"{df["gpu"]}_{int(time.time())}"
-    print(f"[Compare Benchmarks] Logging comparison results to Scuba table triton_multi_operator_benchmark_comparisons with eval_id={config.scuba_eval_id}")
+        config.scuba_eval_id = f"{df['gpu']}_{int(time.time())}"
+    print(
+        f"[Compare Benchmarks] Logging comparison results to Scuba table triton_multi_operator_benchmark_comparisons with eval_id={config.scuba_eval_id}"
+    )
     for op in df["op"].unique():
         op_df = df[df["op"] == op]
         log_benchmark(
@@ -242,7 +249,9 @@ def run_benchmarks(config: BenchmarkConfig) -> None:
             input_loaders = get_input_loader(gpu, config.workloads, op)
 
             if not input_loaders:
-                print(f"[Compare Benchmarks] WARNING: No input configs found for op={op}, skipping")
+                print(
+                    f"[Compare Benchmarks] WARNING: No input configs found for op={op}, skipping"
+                )
                 continue
 
             for workload, input_loader in input_loaders:
@@ -264,7 +273,9 @@ def run_benchmarks(config: BenchmarkConfig) -> None:
                     continue
 
                 if config.parse_autotune_logs:
-                    print(f"[Compare Benchmarks] Parsing LHS and RHS logs with autotune parser")
+                    print(
+                        f"[Compare Benchmarks] Parsing LHS and RHS logs with autotune parser"
+                    )
                     comparison_df = compare_results(lhs_log, rhs_log)
 
                     if not comparison_df.empty:
@@ -277,8 +288,16 @@ def run_benchmarks(config: BenchmarkConfig) -> None:
 
     combined_df = pd.concat(all_dfs, ignore_index=True) if all_dfs else pd.DataFrame()
 
-    if not combined_df.empty:  # reorder cols to have identifying information at the front
-        priority_cols = ["gpu", "workload", "op", "lhs_benchmark_name", "rhs_benchmark_name"]
+    if (
+        not combined_df.empty
+    ):  # reorder cols to have identifying information at the front
+        priority_cols = [
+            "gpu",
+            "workload",
+            "op",
+            "lhs_benchmark_name",
+            "rhs_benchmark_name",
+        ]
         other_cols = [c for c in combined_df.columns if c not in priority_cols]
         combined_df = combined_df[priority_cols + other_cols]
 
@@ -288,13 +307,15 @@ def run_benchmarks(config: BenchmarkConfig) -> None:
 
 def parse_args(args: List[str] = None) -> BenchmarkConfig:
     """Parse command-line arguments."""
-    parser = argparse.ArgumentParser(description="Compare benchmarks across operators, metrics, and workloads in TritonBench.")
+    parser = argparse.ArgumentParser(
+        description="Compare benchmarks across operators, metrics, and workloads in TritonBench."
+    )
 
     parser.add_argument(
         "--custom-bench",
         type=str,
         default=None,
-        help=f"Custom benchmarking framework to use (e.g. diode). Default: None"
+        help=f"Custom benchmarking framework to use (e.g. diode). Default: None",
     )
     parser.add_argument(
         "--gpu",
@@ -403,11 +424,20 @@ def parse_args(args: List[str] = None) -> BenchmarkConfig:
             diode_topk=args.diode_topk,
         )
 
-    if len(args.ops.split(",")) != len(args.benchmarks_lhs.split(",")) or len(args.ops.split(",")) != len(args.benchmarks_rhs.split(",")):
-        raise ValueError("Number of ops, benchmarks_lhs, and benchmarks_rhs must be equal")
+    if len(args.ops.split(",")) != len(args.benchmarks_lhs.split(",")) or len(
+        args.ops.split(",")
+    ) != len(args.benchmarks_rhs.split(",")):
+        raise ValueError(
+            "Number of ops, benchmarks_lhs, and benchmarks_rhs must be equal"
+        )
 
     benchmark_map = {
-        op: (lhs, rhs) for op, lhs, rhs in zip(args.ops.split(","), args.benchmarks_lhs.split(","), args.benchmarks_rhs.split(","))
+        op: (lhs, rhs)
+        for op, lhs, rhs in zip(
+            args.ops.split(","),
+            args.benchmarks_lhs.split(","),
+            args.benchmarks_rhs.split(","),
+        )
     }
 
     return BenchmarkConfig(

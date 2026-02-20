@@ -14,7 +14,6 @@ os.environ["TRITON_PRINT_AUTOTUNING"] = "1"
 import pandas as pd
 import torch
 import triton
-
 from dsi.logger.configs.TritonMultiOperatorBenchmarkComparisonsLoggerConfig.logger import (
     TritonMultiOperatorBenchmarkComparisonsLogEntry,
 )
@@ -41,6 +40,7 @@ class BenchmarkConfig:
     log_scuba: bool = False
     scuba_eval_id: str = None
 
+
 @dataclass
 class DiodeBenchmarkConfig(BenchmarkConfig):
     """Configuration for a Diode benchmark run. Inherits from BenchmarkConfig."""
@@ -53,7 +53,9 @@ class DiodeBenchmarkConfig(BenchmarkConfig):
 
 def detect_gpu() -> str:
     if not torch.cuda.is_available():
-        raise RuntimeError("[Compare Benchmarks] CUDA/ROCm not available - cannot detect GPU type")
+        raise RuntimeError(
+            "[Compare Benchmarks] CUDA/ROCm not available - cannot detect GPU type"
+        )
 
     device_name = torch.cuda.get_device_name(0)
     print(f"[Compare Benchmarks] Detected GPU: {device_name}")
@@ -188,24 +190,39 @@ def log_benchmark(
                 dtype=safe_str(row.get("Dtype")),
                 a_stride=safe_str(row.get("A Stride")),
                 b_stride=safe_str(row.get("B Stride")),
-                bias_stride=safe_str(row.get("C Stride")) if row.get("C Stride") else None,
+                bias_stride=safe_str(row.get("C Stride"))
+                if row.get("C Stride")
+                else None,
                 lhs_best_aten_kernel=safe_str(row.get("A: Best Aten Kernel")) or None,
-                lhs_best_aten_runtime_ms=safe_float(row.get("A: Best Aten Runtime (ms)")),
-                lhs_best_triton_kernel=safe_str(row.get("A: Best Triton Kernel")) or None,
-                lhs_best_triton_runtime_ms=safe_float(row.get("A: Best Triton Runtime (ms)")),
+                lhs_best_aten_runtime_ms=safe_float(
+                    row.get("A: Best Aten Runtime (ms)")
+                ),
+                lhs_best_triton_kernel=safe_str(row.get("A: Best Triton Kernel"))
+                or None,
+                lhs_best_triton_runtime_ms=safe_float(
+                    row.get("A: Best Triton Runtime (ms)")
+                ),
                 lhs_winner=safe_str(row.get("A: Winner")) or None,
                 lhs_speedup_pct=parse_pct(row.get("A: Speedup (%)")),
                 rhs_best_aten_kernel=safe_str(row.get("B: Best Aten Kernel")) or None,
-                rhs_best_aten_runtime_ms=safe_float(row.get("B: Best Aten Runtime (ms)")),
-                rhs_best_triton_kernel=safe_str(row.get("B: Best Triton Kernel")) or None,
-                rhs_best_triton_runtime_ms=safe_float(row.get("B: Best Triton Runtime (ms)")),
+                rhs_best_aten_runtime_ms=safe_float(
+                    row.get("B: Best Aten Runtime (ms)")
+                ),
+                rhs_best_triton_kernel=safe_str(row.get("B: Best Triton Kernel"))
+                or None,
+                rhs_best_triton_runtime_ms=safe_float(
+                    row.get("B: Best Triton Runtime (ms)")
+                ),
                 rhs_winner=safe_str(row.get("B: Winner")) or None,
                 rhs_speedup_pct=parse_pct(row.get("B: Speedup (%)")),
                 aten_improvement_pct=parse_pct(row.get("Aten Improvement (A vs B)")),
-                triton_improvement_pct=parse_pct(row.get("Triton Improvement (A vs B)")),
+                triton_improvement_pct=parse_pct(
+                    row.get("Triton Improvement (A vs B)")
+                ),
                 winner_change=safe_str(row.get("Winner Change (A→B)")) or None,
                 lhs_acc_type=safe_str(row.get("A: Triton Metadata ACC_TYPE")),
-                lhs_allow_tf32=safe_bool(row.get("A: Triton Metadata ALLOW_TF32")) or False,
+                lhs_allow_tf32=safe_bool(row.get("A: Triton Metadata ALLOW_TF32"))
+                or False,
                 lhs_a_row_major=safe_bool(row.get("A: Triton Metadata A_ROW_MAJOR")),
                 lhs_block_k=safe_int(row.get("A: Triton Metadata BLOCK_K")),
                 lhs_block_m=safe_int(row.get("A: Triton Metadata BLOCK_M")),
@@ -213,14 +230,24 @@ def log_benchmark(
                 lhs_b_row_major=safe_bool(row.get("A: Triton Metadata B_ROW_MAJOR")),
                 lhs_even_k=safe_bool(row.get("A: Triton Metadata EVEN_K")) or False,
                 lhs_group_m=safe_int(row.get("A: Triton Metadata GROUP_M")),
-                lhs_num_sms=safe_int(row.get("A: Triton Metadata NUM_SMS"), default=None),
-                lhs_tma_experimental_api=safe_bool(row.get("A: Triton Metadata TMA_EXPERIMENTAL_API")),
-                lhs_tma_size=safe_int(row.get("A: Triton Metadata TMA_SIZE"), default=None),
-                lhs_use_fast_accum=safe_bool(row.get("A: Triton Metadata USE_FAST_ACCUM")) or False,
+                lhs_num_sms=safe_int(
+                    row.get("A: Triton Metadata NUM_SMS"), default=None
+                ),
+                lhs_tma_experimental_api=safe_bool(
+                    row.get("A: Triton Metadata TMA_EXPERIMENTAL_API")
+                ),
+                lhs_tma_size=safe_int(
+                    row.get("A: Triton Metadata TMA_SIZE"), default=None
+                ),
+                lhs_use_fast_accum=safe_bool(
+                    row.get("A: Triton Metadata USE_FAST_ACCUM")
+                )
+                or False,
                 lhs_num_stages=safe_int(row.get("A: Triton Metadata num_stages")),
                 lhs_num_warps=safe_int(row.get("A: Triton Metadata num_warps")),
                 rhs_acc_type=safe_str(row.get("B: Triton Metadata ACC_TYPE")),
-                rhs_allow_tf32=safe_bool(row.get("B: Triton Metadata ALLOW_TF32")) or False,
+                rhs_allow_tf32=safe_bool(row.get("B: Triton Metadata ALLOW_TF32"))
+                or False,
                 rhs_a_row_major=safe_bool(row.get("B: Triton Metadata A_ROW_MAJOR")),
                 rhs_block_k=safe_int(row.get("B: Triton Metadata BLOCK_K")),
                 rhs_block_m=safe_int(row.get("B: Triton Metadata BLOCK_M")),
@@ -228,10 +255,19 @@ def log_benchmark(
                 rhs_b_row_major=safe_bool(row.get("B: Triton Metadata B_ROW_MAJOR")),
                 rhs_even_k=safe_bool(row.get("B: Triton Metadata EVEN_K")) or False,
                 rhs_group_m=safe_int(row.get("B: Triton Metadata GROUP_M")),
-                rhs_num_sms=safe_int(row.get("B: Triton Metadata NUM_SMS"), default=None),
-                rhs_tma_experimental_api=safe_bool(row.get("B: Triton Metadata TMA_EXPERIMENTAL_API")),
-                rhs_tma_size=safe_int(row.get("B: Triton Metadata TMA_SIZE"), default=None),
-                rhs_use_fast_accum=safe_bool(row.get("B: Triton Metadata USE_FAST_ACCUM")) or False,
+                rhs_num_sms=safe_int(
+                    row.get("B: Triton Metadata NUM_SMS"), default=None
+                ),
+                rhs_tma_experimental_api=safe_bool(
+                    row.get("B: Triton Metadata TMA_EXPERIMENTAL_API")
+                ),
+                rhs_tma_size=safe_int(
+                    row.get("B: Triton Metadata TMA_SIZE"), default=None
+                ),
+                rhs_use_fast_accum=safe_bool(
+                    row.get("B: Triton Metadata USE_FAST_ACCUM")
+                )
+                or False,
                 rhs_num_stages=safe_int(row.get("B: Triton Metadata num_stages")),
                 rhs_num_warps=safe_int(row.get("B: Triton Metadata num_warps")),
                 triton_type=triton_type,
