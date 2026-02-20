@@ -27,14 +27,14 @@ setup_tritonbench_cwd()
 from tritonbench.utils.run_utils import run_config, run_in_task
 
 
-def find_pkl_files(path: str) -> List[str]:
+def find_pt_files(path: str) -> List[str]:
     abs_path = os.path.abspath(path)
     if not os.path.exists(abs_path):
         return []
     return [
         f
         for f in os.listdir(abs_path)
-        if os.path.isfile(os.path.join(abs_path, f)) and f.endswith(".pkl")
+        if os.path.isfile(os.path.join(abs_path, f)) and f.endswith(".pt")
     ]
 
 
@@ -54,9 +54,9 @@ def find_stderr_file(path: str) -> str:
     return stderr_files[0]
 
 
-def load_pickle(filepath: str) -> Any:
+def load_pt(filepath: str) -> Any:
     with open(filepath, "rb") as f:
-        return pickle.load(f)
+        return torch.load(f)
 
 
 def check_tensor_numeric(a: Any, b: Any) -> bool:
