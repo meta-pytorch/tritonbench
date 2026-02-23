@@ -172,6 +172,27 @@ def set_env_variable(key, value):
             del os.environ[key]
 
 
+def parse_shapes(shapes_str: str) -> List[Tuple[int, int, int, Optional[int]]]:
+    """Parse shapes string in format 'MxNxK,MxNxK,...' or 'M_N_K,M_N_K,...'"""
+    shapes = []
+    # Split by comma to get individual shapes
+    for shape_str in shapes_str.split(","):
+        shape_str = shape_str.strip()
+        if not shape_str:
+            continue
+        # Try different separators: 'x', 'X', '_'
+        if "x" in shape_str.lower():
+            parts = shape_str.lower().split("x")
+        elif "_" in shape_str:
+            parts = shape_str.split("_")
+        else:
+            continue
+        if len(parts) == 3:
+            m, n, k = int(parts[0]), int(parts[1]), int(parts[2])
+            shapes.append((m, n, k, None))
+    return shapes
+
+
 def parse_args(args: List[str]) -> argparse.Namespace:
     parser = argparse.ArgumentParser(description="TritonBench Gemm operator Benchmark")
     parser.add_argument("--m", type=int)
@@ -179,6 +200,12 @@ def parse_args(args: List[str]) -> argparse.Namespace:
     parser.add_argument("--n", type=int)
     parser.add_argument("--bias", type=int)
     parser.add_argument("--input", type=str)
+    parser.add_argument(
+        "--shapes",
+        type=str,
+        default=None,
+        help="Comma or semicolon separated shapes in MxNxK format, e.g., '1024_2048_512,2048x4096x1024'",
+    )
     parser.add_argument("--splitk", action="store_true", default=False)
     parser.add_argument("--non-square", action="store_true", default=False)
     parser.add_argument(
@@ -234,6 +261,8 @@ class Operator(BenchmarkOperator):
         )
         if gemm_args.input:
             self.shapes = read_shapes_from_csv(gemm_args.input)
+        elif gemm_args.shapes:
+            self.shapes = parse_shapes(gemm_args.shapes)
         elif gemm_args.splitk:
             self.shapes = SPLIT_K_SHAPES
         elif gemm_args.non_square:
