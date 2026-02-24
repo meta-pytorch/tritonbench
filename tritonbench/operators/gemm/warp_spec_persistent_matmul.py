@@ -207,9 +207,16 @@ def blackwell_matmul_tma(a, b, warp_specialize: bool):
     # 1. Load in the K stride 1 (2 and 4)
     # 2. Load in the N stride 1 (1 and 3)
     transpose_a = a.stride()[-1] != 1
-    transpose_b = (a.shape[1] != b.shape[1] and b.stride()[-1] != 1) or (
-        a.shape[1] == b.shape[1] and b.stride()[-1] == 1
-    )
+    # Determine if b needs transposed TMA descriptor.
+    # TMA requires the last descriptor dimension to be contiguous (stride 1).
+    # If b's first physical dim is contiguous (column-major), we need transpose_b=True
+    # so the descriptor shape becomes [N, K] with K (contiguous) as the last dim.
+    if a.shape[1] != b.shape[1]:
+        # K != N: can infer layout from shape
+        transpose_b = b.stride()[-1] != 1
+    else:
+        # K == N: shapes are ambiguous, use stride to determine layout
+        transpose_b = b.stride()[0] == 1 and b.stride()[-1] != 1
     assert a.dtype == b.dtype, "Incompatible dtypes"
 
     M, K = a.shape
@@ -311,7 +318,7 @@ def matmul_tma_persistent_get_configs(pre_hook=None):
             for BK in bk_range  #
             for s in tma_persistent_s_range  #
             for w in [4, 8]  #
-            for SUBTILE in [True, False]  #
+            for SUBTILE in [False]  #
         ]
 
 
@@ -352,7 +359,7 @@ def matmul_kernel_tma_persistent(
     # FIXME: This only works on Blackwell right now. On older GPUs, this will
     # use software pipelining.
     for tile_id in tl.range(
-        start_pid, num_tiles, NUM_SMS, flatten=True, warp_specialize=WARP_SPECIALIZE
+        start_pid, num_tiles, NUM_SMS, flatten=False, warp_specialize=WARP_SPECIALIZE
     ):
         pid_m, pid_n = _compute_pid(
             tile_id, num_pid_in_group, num_pid_m, GROUP_SIZE_M, NUM_SMS
@@ -412,9 +419,16 @@ def blackwell_matmul_tma_persistent(a, b, warp_specialize: bool):
     # 1. Load in the K stride 1 (2 and 4)
     # 2. Load in the N stride 1 (1 and 3)
     transpose_a = a.stride()[-1] != 1
-    transpose_b = (a.shape[1] != b.shape[1] and b.stride()[-1] != 1) or (
-        a.shape[1] == b.shape[1] and b.stride()[-1] == 1
-    )
+    # Determine if b needs transposed TMA descriptor.
+    # TMA requires the last descriptor dimension to be contiguous (stride 1).
+    # If b's first physical dim is contiguous (column-major), we need transpose_b=True
+    # so the descriptor shape becomes [N, K] with K (contiguous) as the last dim.
+    if a.shape[1] != b.shape[1]:
+        # K != N: can infer layout from shape
+        transpose_b = b.stride()[-1] != 1
+    else:
+        # K == N: shapes are ambiguous, use stride to determine layout
+        transpose_b = b.stride()[0] == 1 and b.stride()[-1] != 1
     assert a.dtype == b.dtype, "Incompatible dtypes"
 
     M, K = a.shape
@@ -616,9 +630,16 @@ def blackwell_matmul_descriptor_persistent(a, b, warp_specialize: bool):
     # 1. Load in the K stride 1 (2 and 4)
     # 2. Load in the N stride 1 (1 and 3)
     transpose_a = a.stride()[-1] != 1
-    transpose_b = (a.shape[1] != b.shape[1] and b.stride()[-1] != 1) or (
-        a.shape[1] == b.shape[1] and b.stride()[-1] == 1
-    )
+    # Determine if b needs transposed TMA descriptor.
+    # TMA requires the last descriptor dimension to be contiguous (stride 1).
+    # If b's first physical dim is contiguous (column-major), we need transpose_b=True
+    # so the descriptor shape becomes [N, K] with K (contiguous) as the last dim.
+    if a.shape[1] != b.shape[1]:
+        # K != N: can infer layout from shape
+        transpose_b = b.stride()[-1] != 1
+    else:
+        # K == N: shapes are ambiguous, use stride to determine layout
+        transpose_b = b.stride()[0] == 1 and b.stride()[-1] != 1
     assert a.dtype == b.dtype, "Incompatible dtypes"
 
     M, K = a.shape
