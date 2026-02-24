@@ -376,7 +376,7 @@ def run_config(
                 op_args,
                 config_extra_envs,
                 override_envs=override_envs,
-                capture_output=capture_output
+                capture_output=capture_output,
             )
         else:
             op_name = get_cmd_parameter(op_args, "--op")

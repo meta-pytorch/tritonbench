@@ -14,7 +14,7 @@ import argparse
 import json
 import os
 import sys
-from typing import Any, Dict, List, Tuple, Optional
+from typing import Any, Dict, List, Optional, Tuple
 
 import torch
 
@@ -250,21 +250,27 @@ def main() -> int:
     if ptxas_options is None:
         print("[ptxas-check] ERROR: PTXAS_OPTIONS environment variable is not set.")
         print("[ptxas-check] Please set PTXAS_OPTIONS before running this benchmark.")
-        print("[ptxas-check] Example: PTXAS_OPTIONS='-v' python -m benchmarks.ptxas_check.run")
+        print(
+            "[ptxas-check] Example: PTXAS_OPTIONS='-v' python -m benchmarks.ptxas_check.run"
+        )
         return 1
 
     config_file = os.environ.get("TRITONBENCH_RUN_CONFIG", None)
     if config_file is None:
-        print("[ptxas-check] ERROR: TRITONBENCH_RUN_CONFIG environment variable is not set.")
-        print("[ptxas-check] Please set TRITONBENCH_RUN_CONFIG before running this benchmark.")
-        print("[ptxas-check] Example: TRITONBENCH_RUN_CONFIG='benchmarks/run_config/....yaml' python -m benchmarks.ptxas_check.run")
+        print(
+            "[ptxas-check] ERROR: TRITONBENCH_RUN_CONFIG environment variable is not set."
+        )
+        print(
+            "[ptxas-check] Please set TRITONBENCH_RUN_CONFIG before running this benchmark."
+        )
+        print(
+            "[ptxas-check] Example: TRITONBENCH_RUN_CONFIG='benchmarks/run_config/....yaml' python -m benchmarks.ptxas_check.run"
+        )
         return 1
 
     print("[ptxas-check] PTXAS Options Compatibility Check")
     print(f"[ptxas-check] PTXAS_OPTIONS: {ptxas_options}")
-    print(
-        f"[ptxas-check] Config file: {config_file if config_file else '<not set>'}"
-    )
+    print(f"[ptxas-check] Config file: {config_file if config_file else '<not set>'}")
     print(f"[ptxas-check] Extra args: {extra_args}")
     print()
 
