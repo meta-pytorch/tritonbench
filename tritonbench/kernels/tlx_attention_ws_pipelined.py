@@ -50,7 +50,7 @@ configs_fwd = [
             "NUM_BUFFERS_QK": 1,
             "NUM_MMA_GROUPS": 2,
         },
-        num_stages=0,
+        num_stages=1,
         num_warps=4,
         pre_hook=_fwd_host_descriptor_pre_hook,
     ),
@@ -67,17 +67,60 @@ configs_fwd_persistent = [
             "NUM_BUFFERS_QK": 1,
             "NUM_MMA_GROUPS": 2,
             "NUM_MMA_SLICES": 2,
-            "GROUP_SIZE_N": grp_n,
-            "RESCALE_OPT": rescale_opt,
-            "USE_WHERE": where,
+            "GROUP_SIZE_N": 1,
         },
         num_stages=1,
         num_warps=4,
         pre_hook=_fwd_host_descriptor_pre_hook,
-    )
-    for kv in [3, 6]
-    for grp_n in [1, 4]
-    for (rescale_opt, where) in [(False, False), (True, False), (True, True)]
+    ),
+    # H-DIM = 128 configs, causal
+    triton.Config(
+        {
+            "BLOCK_M": 256,
+            "BLOCK_N": 128,
+            "NUM_BUFFERS_Q": 1,
+            "NUM_BUFFERS_KV": 3,
+            "NUM_BUFFERS_QK": 1,
+            "NUM_MMA_GROUPS": 2,
+            "NUM_MMA_SLICES": 2,
+            "GROUP_SIZE_N": 4,
+        },
+        num_stages=1,
+        num_warps=4,
+        pre_hook=_fwd_host_descriptor_pre_hook,
+    ),
+    # H-DIM = 64 configs, non-causal
+    triton.Config(
+        {
+            "BLOCK_M": 256,
+            "BLOCK_N": 128,
+            "NUM_BUFFERS_Q": 1,
+            "NUM_BUFFERS_KV": 6,
+            "NUM_BUFFERS_QK": 1,
+            "NUM_MMA_GROUPS": 2,
+            "NUM_MMA_SLICES": 2,
+            "GROUP_SIZE_N": 1,
+        },
+        num_stages=1,
+        num_warps=4,
+        pre_hook=_fwd_host_descriptor_pre_hook,
+    ),
+    # H-DIM = 64 configs, causal
+    triton.Config(
+        {
+            "BLOCK_M": 256,
+            "BLOCK_N": 128,
+            "NUM_BUFFERS_Q": 1,
+            "NUM_BUFFERS_KV": 6,
+            "NUM_BUFFERS_QK": 1,
+            "NUM_MMA_GROUPS": 2,
+            "NUM_MMA_SLICES": 2,
+            "GROUP_SIZE_N": 4,
+        },
+        num_stages=1,
+        num_warps=4,
+        pre_hook=_fwd_host_descriptor_pre_hook,
+    ),
 ]
 
 configs_bwd_persistent = [
@@ -1069,54 +1112,16 @@ def _attn_fwd_ws_persistent(
                         # Use alpha[0] for cid=0, and alpha[BLOCK_N] for cid=1
                         alpha_1 = tlx.local_load(alpha_tiles[cid * BLOCK_N])
                         tlx.barrier_arrive(alpha_empties[cid])
-                        # Perform warp-level ballot vote to check if any thread needs rescaling
-                        # 0xFFFFFFFF means all 32 threads in the warp participate
-                        if RESCALE_OPT:
-                            pred = alpha_1 < 1.0
-                            # ballot_result is a tensor with the same shape as pred
-                            # All elements contain the same warp-level ballot value
-                            # Non-zero means at least one thread has alpha_1 < 1.0
-                            ballot_result = tlx.vote_ballot_sync(0xFFFFFFFF, pred)
-                            should_rescale = ballot_result != 0
-
-                        # option 1: use tl.where
-                        if USE_WHERE:
-                            for slice_id in tl.static_range(0, NUM_MMA_SLICES):
-                                subslice = tlx.subslice(
-                                    acc_tiles[cid],
-                                    HEAD_DIM * slice_id // NUM_MMA_SLICES,
-                                    HEAD_DIM // NUM_MMA_SLICES,
-                                )
-                                acc = tlx.local_load(subslice)
-                                # Use tl.where to conditionally apply rescaling
-                                # acc = acc * alpha_1 where should_rescale, else acc unchanged
-                                if RESCALE_OPT:
-                                    scaled_acc = _mul_f32x2(acc, alpha_1)
-                                    acc = tl.where(should_rescale, scaled_acc, acc)
-                                else:
-                                    acc = _mul_f32x2(acc, alpha_1)
-                                tlx.local_store(subslice, acc)
-                        else:
-                            # option 2: use a single scalar IfOp
-                            if RESCALE_OPT:
-                                should_rescale_red = tl.reduce(
-                                    should_rescale, axis=0, combine_fn=_reduce_or
-                                )
-                                should_rescale_scalar = tl.reshape(
-                                    should_rescale_red, ()
-                                )
-                            if not RESCALE_OPT or (
-                                RESCALE_OPT and should_rescale_scalar
-                            ):
-                                for slice_id in tl.static_range(0, NUM_MMA_SLICES):
-                                    subslice = tlx.subslice(
-                                        acc_tiles[cid],
-                                        HEAD_DIM * slice_id // NUM_MMA_SLICES,
-                                        HEAD_DIM // NUM_MMA_SLICES,
-                                    )
-                                    acc = tlx.local_load(subslice)
-                                    acc = _mul_f32x2(acc, alpha_1)
-                                    tlx.local_store(subslice, acc)
+                        for slice_id in tl.static_range(0, NUM_MMA_SLICES):
+                            subslice = tlx.subslice(
+                                acc_tiles[cid],
+                                HEAD_DIM * slice_id // NUM_MMA_SLICES,
+                                HEAD_DIM // NUM_MMA_SLICES,
+                            )
+                            acc = tlx.local_load(subslice)
+                            # acc = acc * alpha_1
+                            acc = _mul_f32x2(acc, alpha_1)
+                            tlx.local_store(subslice, acc)
                         tlx.barrier_arrive(acc_fulls[cid])
                     accum_cnt += 1
 
