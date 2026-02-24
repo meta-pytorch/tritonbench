@@ -318,7 +318,7 @@ def matmul_tma_persistent_get_configs(pre_hook=None):
             for BK in bk_range  #
             for s in tma_persistent_s_range  #
             for w in [4, 8]  #
-            for SUBTILE in [False]  #
+            for SUBTILE in [True, False]  #
         ]
 
 
