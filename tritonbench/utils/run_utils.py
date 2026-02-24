@@ -110,7 +110,12 @@ def _env_get_str(var_name: str, default: str) -> str:
     return value.strip() or default
 
 
-def run_in_helion(op_args: Dict[str, str], extra_envs: Dict[str, str]):
+def run_in_helion(
+    op_args: Dict[str, str],
+    extra_envs: Dict[str, str],
+    override_envs: bool = False,
+    capture_output: Optional[str] = None,
+):
     # Allow override via TRITONBENCH_HELION_PATH; fallback to the current default.
     default_helion = REPO_PATH.joinpath(".install", "helion")
     helion_root = (
@@ -132,11 +137,40 @@ def run_in_helion(op_args: Dict[str, str], extra_envs: Dict[str, str]):
         f"[tritonbench] Running helion benchmark: " + " ".join(cmd),
     )
 
-    subprocess.check_call(
-        cmd,
-        cwd=helion_root,
-        env=environ,
-    )
+    if override_envs:
+        subprocess_env = extra_envs.copy()
+    else:
+        subprocess_env = os.environ.copy()
+        subprocess_env.update(extra_envs or {})
+    if capture_output:
+        assert os.path.isdir(capture_output), (
+            f"specified capture output dir {capture_output} must exist"
+        )
+    try:
+        if capture_output:
+            with (
+                open(os.path.join(capture_output, "stdout.log"), "w") as stdout,
+                open(os.path.join(capture_output, "stderr.log"), "w") as stderr,
+            ):
+                subprocess.check_call(
+                    cmd,
+                    stdout=stdout,
+                    stderr=stderr,
+                    cwd=helion_root,
+                    env=subprocess_env,
+                )
+        else:
+            subprocess.check_call(
+                cmd,
+                stdout=sys.stdout,
+                stderr=sys.stderr,
+                cwd=helion_root,
+                env=subprocess_env,
+            )
+        return 0
+    except subprocess.CalledProcessError as e:
+        # By default, we will continue on the failed operators
+        return e.returncode
 
 
 def tritonbench_run(args: Optional[List[str]] = None):
@@ -338,7 +372,12 @@ def run_config(
             logger.info(f"Skipping disabled benchmark {benchmark_name}.")
             continue
         if runner == "helion":
-            run_in_helion(op_args, config_extra_envs)
+            run_in_helion(
+                op_args,
+                config_extra_envs,
+                override_envs=override_envs,
+                capture_output=capture_output
+            )
         else:
             op_name = get_cmd_parameter(op_args, "--op")
             run_in_task(

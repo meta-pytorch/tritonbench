@@ -14,7 +14,7 @@ import argparse
 import json
 import os
 import sys
-from typing import Any, Dict, List, Tuple
+from typing import Any, Dict, List, Tuple, Optional
 
 import torch
 
@@ -89,9 +89,12 @@ def load_best_config_from_stderr(file_path: str) -> str | None:
             if "best config selected:" in line:
                 config = line[len("best config selected: ") :].strip()
                 config_type = "triton"
+            if "@helion.kernel" in line:
+                config = line.strip()
+                config_type = "helion"
     if not config_type:
         return None
-    elif config_type == "triton":
+    elif config_type == "triton" or config_type == "helion":
         # triton style autotune config
         return config
     else:
@@ -113,9 +116,9 @@ def load_perf_results(stdout_file: str) -> Tuple[Any] | None:
     return tuple(results)
 
 
-def compare_configs(config_a: Any, config_b: Any) -> bool:
+def compare_configs(config_a: Any, config_b: Any) -> Optional[bool]:
     if config_a is None and config_b is None:
-        return True
+        return None
     if config_a is None or config_b is None:
         return False
     if isinstance(config_a, dict) and isinstance(config_b, dict):
@@ -194,10 +197,13 @@ def compare_outputs(dir_a: str, dir_b: str) -> Tuple[bool, List[str]]:
     data_a = load_best_config_from_stderr(path_a)
     data_b = load_best_config_from_stderr(path_b)
 
-    if not compare_configs(data_a, data_b):
-        issues.append(f"Autotune config mismatch in {stderr_files_a}")
-        issues.append(f"  With PTXAS_OPTIONS: {data_a}")
-        issues.append(f"  Without PTXAS_OPTIONS: {data_b}")
+    compare_configs_result = compare_configs(data_a, data_b)
+    if compare_configs_result is None:
+        issues.append(f"[ptxas-check] Autotune config missing in stderr.log files")
+    elif not compare_configs(data_a, data_b):
+        issues.append(f"[ptxas-check] Autotune config mismatch in {stderr_files_a}")
+        issues.append(f"[ptxas-check]   With PTXAS_OPTIONS: {data_a}")
+        issues.append(f"[ptxas-check]   Without PTXAS_OPTIONS: {data_b}")
     else:
         print(f"[ptxas-check] {stderr_files_a}: configs match ✓")
 
