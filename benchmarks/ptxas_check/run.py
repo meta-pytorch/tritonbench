@@ -143,6 +143,7 @@ def run_tritonbench(
 
     env["TRITON_ALWAYS_COMPILE"] = "1"
     env["TRITON_PRINT_AUTOTUNING"] = "1"
+    env["HELION_BENCHMARK_DISABLE_LOGGING"] = "0"
 
     if config_file:
         result = run_config(
