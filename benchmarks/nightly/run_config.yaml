@@ -1,21 +1,28 @@
-# This file is for manually disable or annotate benchmarks
-# It will be merged when generating benchmarks/nightly/autogen.yaml
+# Run config file for nightly benchmark
+# First, collect all ops and backends with tags "triton"
+# Measure latency, flops, and speedup metrics in the best effort
+# Some operators might not support flops or speedup metrics
+run_config:
+  tags:
+    - triton
+  metrics:
+    - latency
+    - flops
+    - speedup
+# disable some ops
 disabled:
-  # fp8_attention uses async_task which is not available in Triton main
-  - fp8_attention_fwd
-  # fp8_gemm_* operators are using the old Triton TMA API which is not supported in Triton main
-  - fp8_gemm_fwd
-  - fp8_gemm_rowwise_fwd
-  - fp8_gemm_rowwise_grouped_fwd
   # FB-Only kernel
   - fp8_fused_quant_gemm_rowwise_fwd
-  # blackwell only
-  - bf16_blackwell_attentions_fwd
-  - bf16_blackwell_attentions_bwd
-enabled:
+# override some ops
+overrides:
   launch_latency_fwd:
     args: --op launch_latency --metrics walltime
-extra_args:
+  bf16_blackwell_attentions_fwd:
+    args: --op blackwell_attentions --metrics latency,tflops
+    device: b200
+  bf16_blackwell_attentions_bwd:
+    args: --op blackwell_attentions --metrics latency,tflops --bwd
+    device: b200
   # triton_tutorial_flash_v2_opt does not work on Triton main branch
   bf16_flash_attention_fwd:
     args: --op flash_attention --baseline flash_v3 --metrics latency,tflops,speedup --only triton_tutorial_flash_v2,flash_v3

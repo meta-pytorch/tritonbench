@@ -3,9 +3,11 @@ import os
 from pathlib import Path
 from typing import Any, Dict, List
 
-import yaml
+from ..common import setup_tritonbench_cwd, REPO_PATH
 
-REPO_PATH = Path(os.path.abspath(__file__)).parent.parent.parent
+setup_tritonbench_cwd()
+
+import yaml
 
 METADATA_PATH = REPO_PATH.joinpath("tritonbench/metadata/")
 CURRENT_PATH = Path(os.path.abspath(__file__)).parent
