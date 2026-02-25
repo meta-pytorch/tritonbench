@@ -1,6 +1,6 @@
 # Generate the TRITONBENCH_CONFIG autogen.yaml for nightly benchmark
-import os
 import logging
+import os
 from pathlib import Path
 from typing import Any, Dict
 
@@ -11,9 +11,8 @@ from ..common import setup_tritonbench_cwd
 
 setup_tritonbench_cwd()
 
-from tritonbench.metadata.query import get_benchmark_config_with_tags
-
 import yaml
+from tritonbench.metadata.query import get_benchmark_config_with_tags
 
 CURRENT_PATH = Path(os.path.abspath(__file__)).parent
 OUTPUT_PATH = CURRENT_PATH.joinpath("autogen.yaml")
@@ -28,7 +27,7 @@ def get_metadata(name: str, path: Path = CURRENT_PATH) -> Any:
 NIGHTLY_RUN_CONFIG = get_metadata("run_config", path=CURRENT_PATH)
 
 
-def gen_run_from_config(config: Dict[str, Any]=NIGHTLY_RUN_CONFIG) -> Dict[str, Any]:
+def gen_run_from_config(config: Dict[str, Any] = NIGHTLY_RUN_CONFIG) -> Dict[str, Any]:
     tritonbench_run_configs = get_benchmark_config_with_tags(
         tags=config["run_config"]["tags"],
         with_backwards=config["run_config"]["with_backwards"],

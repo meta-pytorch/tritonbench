@@ -18,13 +18,18 @@ def load_metadata(metadata_path: str) -> Any:
     with open(metadata_path, "r") as f:
         return yaml.safe_load(f)
 
-def _has_meaningful_baseline(op: str, baseline_metadata: Dict[str, Any], kernel_metadata: Dict[str, Any]) -> bool    :
+
+def _has_meaningful_baseline(
+    op: str, baseline_metadata: Dict[str, Any], kernel_metadata: Dict[str, Any]
+) -> bool:
     return op in baseline_metadata and not (
         baseline_metadata[op] in kernel_metadata[op] and len(kernel_metadata[op]) == 1
     )
 
 
-def get_metric_args(op: str, required_metrics: List[str], kernel_metadata: Dict[str, Any]) -> str:
+def get_metric_args(
+    op: str, required_metrics: List[str], kernel_metadata: Dict[str, Any]
+) -> str:
     special_metrics = ["flops", "tflops", "speedup"]
     valid_metrics = [m for m in required_metrics if m not in special_metrics]
     # do basic sanity checks
@@ -123,4 +128,26 @@ def get_benchmark_config_with_tags(
                     ["--op", op, "--only"]
                     + [",".join(backend_names_with_tags), "--bwd"]
                 )
+        benchmark_prefix = f"{dtype_prefix}{op}"
+        benchmark_name = f"{benchmark_prefix}_fwd"
+        result_dict[benchmark_name] = {}
+        metric_args = (
+            get_metric_args(op, metrics, kernel_metadata=operators) if metrics else ""
+        )
+        result_dict[benchmark_name]["args"] = (
+            " ".join(["--op", op, "--only"] + [",".join(backend_names_with_tags)])
+            + " "
+            + metric_args
+        )
+        if with_backwards and op in backwards:
+            benchmark_name = f"{benchmark_prefix}_bwd"
+            result_dict[benchmark_name] = {}
+            result_dict[benchmark_name]["args"] = (
+                " ".join(
+                    ["--op", op, "--only"]
+                    + [",".join(backend_names_with_tags), "--bwd"]
+                )
+                + " "
+                + metric_args
+            )
     return result_dict
