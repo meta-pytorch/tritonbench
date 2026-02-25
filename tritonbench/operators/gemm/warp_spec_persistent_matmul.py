@@ -725,8 +725,6 @@ def blackwell_matmul_descriptor_persistent(a, b, warp_specialize: bool):
         c_stride,  #
         NUM_SMS=NUM_SMS,  #
         WARP_SPECIALIZE=warp_specialize,  #
-        # Note: This assumes blackwell.
-        FLATTEN=True,
         TRANSPOSE_A=transpose_a,
         TRANSPOSE_B=transpose_b,
     )
