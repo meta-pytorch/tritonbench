@@ -3,6 +3,7 @@
 # Measure latency, flops, and speedup metrics in the best effort
 # Some operators might not support flops or speedup metrics
 run_config:
+  with_backwards: true
   tags:
     - triton
   metrics:

@@ -8,8 +8,17 @@ CURRENT_DIR = os.path.dirname(os.path.abspath(__file__))
 KERNEL_METADATA_PATH = os.path.join(CURRENT_DIR, "oss_cuda_kernels.yaml")
 BACKWARD_METADATA_PATH = os.path.join(CURRENT_DIR, "backward_operators.yaml")
 DTYPE_METADATA_PATH = os.path.join(CURRENT_DIR, "dtype_operators.yaml")
+TFLOPS_OPS_PATH: List[str] = os.path.join(CURRENT_DIR, "tflops_operators.yaml")
+BASELINE_OPS: Dict[str, str] = os.path.join(CURRENT_DIR, "baseline_operators.yaml")
 
 SKIP_DTYPE = ["bypass", "fp8", "int4", "bf16xint16"]
+
+
+def _has_meaningful_baseline(op: str):
+    return op in BASELINE_OPS and not (
+        BASELINE_OPS[op] in TRITON_OPS[op] and len(TRITON_OPS[op]) == 1
+    )
+
 
 
 def get_benchmark_dtype(op_name: str, runtime_dtype: str | None = None):
@@ -25,6 +34,8 @@ def get_benchmark_config_with_tags(
     runtime_metadata: Optional[Dict[str, Any]] = None,
     runtime_only: bool = False,
     per_backend: bool = False,
+    with_backwards: bool = True,
+    metrics: Optional[List[str]] = None,
 ) -> Dict[str, Any]:
     """Return benchmark config dict with any of these tags"""
     if runtime_only:
@@ -39,8 +50,9 @@ def get_benchmark_config_with_tags(
                     else:
                         operators[op].update(runtime_metadata[op])
 
-    with open(BACKWARD_METADATA_PATH, "r") as f:
-        backwards = yaml.safe_load(f)
+    if with_backwards:
+        with open(BACKWARD_METADATA_PATH, "r") as f:
+            backwards = yaml.safe_load(f)
     with open(DTYPE_METADATA_PATH, "r") as f:
         dtype = yaml.safe_load(f)
 
