@@ -533,21 +533,10 @@ def blackwell_matmul_tma_persistent(a, b, warp_specialize: bool):
     return c
 
 
-def prune_invalid_configs(configs, named_args, **kwargs):
-    FLATTEN = kwargs["FLATTEN"]
-    # Filter out configs where EPILOGUE_SUBTILE is true and HOPPER is true
-    configs = [
-        conf
-        for conf in configs
-        if not (conf.kwargs.get("EPILOGUE_SUBTILE", True) and FLATTEN is False)
-    ]
-    return _prune_warp_specialize_configs(configs, named_args, **kwargs)
-
-
 @triton.autotune(
     configs=matmul_tma_persistent_get_configs(),
     key=["M", "N", "K", "WARP_SPECIALIZE", "FLATTEN"],
-    prune_configs_by={"early_config_prune": prune_invalid_configs},
+    prune_configs_by={"early_config_prune": _prune_tma_persistent_configs},
 )
 @triton.jit(launch_metadata=_matmul_launch_metadata)
 def matmul_kernel_descriptor_persistent(
