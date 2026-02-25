@@ -1,11 +1,17 @@
 # Generate the TRITONBENCH_CONFIG autogen.yaml for nightly benchmark
 import os
+import logging
 from pathlib import Path
 from typing import Any, Dict
 
-from ..common import setup_tritonbench_cwd, REPO_PATH
+logger = logging.getLogger(__name__)
+logger.setLevel(logging.INFO)
+
+from ..common import setup_tritonbench_cwd
 
 setup_tritonbench_cwd()
+
+from tritonbench.metadata.query import get_benchmark_config_with_tags
 
 import yaml
 
@@ -30,15 +36,12 @@ def gen_run_from_config(config: Dict[str, Any]=NIGHTLY_RUN_CONFIG) -> Dict[str, 
     )
     # add manual benchmarks
     disabled = config.get("disabled", [])
-    overridden = config.get("overridden", {})
+    overrides = config.get("overrides", {})
     for benchmark in disabled:
-        if benchmark in run_configs:
+        if benchmark in tritonbench_run_configs:
             tritonbench_run_configs[benchmark]["disabled"] = True
-    for benchmark in overridden:
-        if not benchmark in overridden:
-            tritonbench_run_configs[benchmark] = overridden[benchmark].copy()
-            continue
-        tritonbench_run_configs[benchmark]["args"] = overridden[benchmark]["args"]
+    for benchmark in overrides:
+        tritonbench_run_configs[benchmark] = overrides[benchmark].copy()
     return tritonbench_run_configs
 
 
@@ -46,6 +49,7 @@ def run():
     runs = gen_run_from_config()
     with open(OUTPUT_PATH, "w") as f:
         yaml.safe_dump(runs, f, sort_keys=False)
+    logger.info(f"Generated nightly run config at {OUTPUT_PATH}")
 
 
 if __name__ == "__main__":

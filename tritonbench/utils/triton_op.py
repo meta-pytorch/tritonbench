@@ -1120,6 +1120,12 @@ class BenchmarkOperator(metaclass=PostInitProcessor):
                         only_benchmarks = list(
                             dict.fromkeys(self._only)
                         )  # remove duplicates while preserving order
+                        # append baseline if it is not in the list of only_benchmarks yet
+                        if (set(self.required_metrics) & BASELINE_SKIP_METRICS 
+                            and self.name in BASELINE_BENCHMARKS
+                            and BASELINE_BENCHMARKS[self.name] not in only_benchmarks
+                        ):
+                            only_benchmarks.append(BASELINE_BENCHMARKS[self.name])
                         enabled_benchmarks = find_enabled_benchmarks(
                             self.mode, REGISTERED_BENCHMARKS[self.name], []
                         )

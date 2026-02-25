@@ -1,30 +1,26 @@
 fp16_addmm_fwd:
-  args: --op addmm --baseline aten_addmm --metrics latency,tflops,speedup --only streamk_addmm,triton_addmm,aten_addmm
+  args: --op addmm --only streamk_addmm,triton_addmm --metrics tflops,speedup,latency
 fp16_addmm_bwd:
-  args: --op addmm --baseline aten_addmm --metrics latency,tflops,speedup --only streamk_addmm,triton_addmm,aten_addmm
-    --bwd
+  args: --op addmm --only streamk_addmm,triton_addmm --bwd --metrics tflops,speedup,latency
 bf16xint16_gemm_fwd:
-  args: --op bf16xint16_gemm --baseline bf16xbf16 --metrics latency,tflops,speedup
-    --only bf16xbf16,bf16xint16,bf16xint16_casted
+  args: --op bf16xint16_gemm --only bf16xint16,bf16xbf16,bf16xint16_casted --metrics
+    tflops,speedup,latency
 bf16_blackwell_attentions_fwd:
-  args: --op blackwell_attentions --metrics latency,tflops --only triton_tutorial_flash_dp_blackwell,triton_tutorial_flash_dp_persistent_blackwell,triton_tutorial_flash_v2_blackwell,triton_tutorial_flash_v2_persistent_blackwell,triton_tutorial_flash_v2_tma_ws_persistent_blackwell
-  disabled: true
+  args: --op blackwell_attentions --only triton_tutorial_flash_v2_blackwell,triton_tutorial_flash_dp_persistent_blackwell,triton_tutorial_flash_dp_blackwell,triton_tutorial_flash_v2_tma_ws_persistent_blackwell,triton_tutorial_flash_v2_persistent_blackwell
+    --metrics tflops,latency
+  device: b200
 bf16_blackwell_attentions_bwd:
-  args: --op blackwell_attentions --metrics latency,tflops --only triton_tutorial_flash_dp_blackwell,triton_tutorial_flash_dp_persistent_blackwell,triton_tutorial_flash_v2_blackwell,triton_tutorial_flash_v2_persistent_blackwell,triton_tutorial_flash_v2_tma_ws_persistent_blackwell
-    --bwd
-  disabled: true
+  args: --op blackwell_attentions --only triton_tutorial_flash_v2_blackwell,triton_tutorial_flash_dp_persistent_blackwell,triton_tutorial_flash_dp_blackwell,triton_tutorial_flash_v2_tma_ws_persistent_blackwell,triton_tutorial_flash_v2_persistent_blackwell
+    --bwd --metrics tflops,latency
+  device: b200
 cross_entropy_fwd:
-  args: --op cross_entropy --baseline cross_entropy_loss --metrics latency,speedup
-    --only liger_cross_entropy_loss,cross_entropy_loss
+  args: --op cross_entropy --only liger_cross_entropy_loss --metrics speedup,latency
 cross_entropy_bwd:
-  args: --op cross_entropy --baseline cross_entropy_loss --metrics latency,speedup
-    --only liger_cross_entropy_loss,cross_entropy_loss --bwd
+  args: --op cross_entropy --only liger_cross_entropy_loss --bwd --metrics speedup,latency
 embedding_fwd:
-  args: --op embedding --baseline torch_embedding --metrics latency,speedup --only
-    liger_embedding,torch_embedding
+  args: --op embedding --only liger_embedding --metrics speedup,latency
 embedding_bwd:
-  args: --op embedding --baseline torch_embedding --metrics latency,speedup --only
-    liger_embedding,torch_embedding --bwd
+  args: --op embedding --only liger_embedding --bwd --metrics speedup,latency
 bf16_flash_attention_fwd:
   args: --op flash_attention --baseline flash_v3 --metrics latency,tflops,speedup
     --only triton_tutorial_flash_v2,flash_v3
@@ -32,130 +28,106 @@ bf16_flash_attention_bwd:
   args: --op flash_attention --baseline flash_v3 --metrics latency,tflops,speedup
     --bwd --only triton_tutorial_flash_v2,flash_v3 --causal
 fp8_attention_fwd:
-  args: --op fp8_attention --baseline triton_flash_v2 --metrics latency,tflops,speedup
-    --only triton_flash_v2,triton_flash_v2_tma,triton_flash_v2_ws
-  disabled: true
+  args: --op fp8_attention --only triton_flash_v2,triton_flash_v2_tma,triton_flash_v2_ws
+    --metrics tflops,speedup,latency
 fp8_gemm_fwd:
-  args: --op fp8_gemm --baseline torch_fp8_gemm --metrics latency,tflops,speedup --only
-    triton_fp8_gemm,triton_persistent_fp8_gemm,triton_tma_persistent_fp8_gemm,torch_fp8_gemm
-  disabled: true
+  args: --op fp8_gemm --only triton_persistent_fp8_gemm,triton_tma_persistent_fp8_gemm,triton_fp8_gemm
+    --metrics tflops,speedup,latency
 fp8_gemm_blockwise_fwd:
-  args: --op fp8_gemm_blockwise --baseline _cutlass --metrics latency,tflops,speedup
-    --only _triton,_cutlass
+  args: --op fp8_gemm_blockwise --only _triton --metrics tflops,speedup,latency
 fp8_gemm_rowwise_fwd:
-  args: --op fp8_gemm_rowwise --baseline _cutlass_or_ck --metrics latency,tflops,speedup
-    --only _aoti_fp8_triton_mm,_triton,_cutlass_or_ck
-  disabled: true
+  args: --op fp8_gemm_rowwise --only _aoti_fp8_triton_mm,_triton --metrics tflops,speedup,latency
 fp8_gemm_rowwise_grouped_fwd:
-  args: --op fp8_gemm_rowwise_grouped --baseline eager_fp8_gemm_rowwise_grouped --metrics
-    latency,tflops,speedup --only _triton,eager_fp8_gemm_rowwise_grouped
-  disabled: true
+  args: --op fp8_gemm_rowwise_grouped --only _triton --metrics tflops,speedup,latency
 fused_linear_cross_entropy_fwd:
-  args: --op fused_linear_cross_entropy --baseline torch_lm_head_ce --metrics latency,speedup
-    --only liger_lm_head_ce,torch_lm_head_ce
+  args: --op fused_linear_cross_entropy --only liger_lm_head_ce --metrics speedup,latency
 fused_linear_cross_entropy_bwd:
-  args: --op fused_linear_cross_entropy --baseline torch_lm_head_ce --metrics latency,speedup
-    --only liger_lm_head_ce,torch_lm_head_ce --bwd
+  args: --op fused_linear_cross_entropy --only liger_lm_head_ce --bwd --metrics speedup,latency
 fused_linear_jsd_fwd:
-  args: --op fused_linear_jsd --baseline torch_lm_head_jsd --metrics latency,speedup
-    --only liger_lm_head_jsd,torch_lm_head_jsd
+  args: --op fused_linear_jsd --only liger_lm_head_jsd --metrics speedup,latency
 fused_linear_jsd_bwd:
-  args: --op fused_linear_jsd --baseline torch_lm_head_jsd --metrics latency,speedup
-    --only liger_lm_head_jsd,torch_lm_head_jsd --bwd
+  args: --op fused_linear_jsd --only liger_lm_head_jsd --bwd --metrics speedup,latency
 gather_gemv_fwd:
-  args: --op gather_gemv --baseline eager_gather_gemv --metrics latency,speedup --only
-    triton_gather_gemv,eager_gather_gemv
+  args: --op gather_gemv --only triton_gather_gemv --metrics speedup,latency
 bf16_gdpa_fwd:
-  args: --op gdpa --baseline eager_gdpa --metrics latency,speedup --only gdpa,gdpa_opt,gdpa_opt_sorted,eager_gdpa
+  args: --op gdpa --only gdpa,gdpa_opt,gdpa_opt_sorted --metrics speedup,latency
 bf16_gdpa_bwd:
-  args: --op gdpa --baseline eager_gdpa --metrics latency,speedup --only gdpa,gdpa_opt,gdpa_opt_sorted,eager_gdpa
-    --bwd
+  args: --op gdpa --only gdpa,gdpa_opt,gdpa_opt_sorted --bwd --metrics speedup,latency
 geglu_fwd:
-  args: --op geglu --baseline torch_geglu --metrics latency,speedup --only liger_geglu,torch_geglu
+  args: --op geglu --only liger_geglu --metrics speedup,latency
 geglu_bwd:
-  args: --op geglu --baseline torch_geglu --metrics latency,speedup --only liger_geglu,torch_geglu
-    --bwd
+  args: --op geglu --only liger_geglu --bwd --metrics speedup,latency
 fp16_gemm_fwd:
-  args: --op gemm --baseline aten_matmul --metrics latency,tflops,speedup --only matmul_partition_k,streamk_matmul,triton_ops_matmul,triton_tutorial_matmul,aten_matmul
+  args: --op gemm --only matmul_partition_k,triton_tutorial_matmul,streamk_matmul,triton_ops_matmul
+    --metrics tflops,speedup,latency
 fp16_gemm_bwd:
-  args: --op gemm --baseline aten_matmul --metrics latency,tflops,speedup --only matmul_partition_k,streamk_matmul,triton_ops_matmul,triton_tutorial_matmul,aten_matmul
-    --bwd
+  args: --op gemm --only matmul_partition_k,triton_tutorial_matmul,streamk_matmul,triton_ops_matmul
+    --bwd --metrics tflops,speedup,latency
 bf16_grouped_gemm_fwd:
-  args: --op grouped_gemm --baseline aten_grouped_mm --metrics latency,tflops,speedup
-    --only precompiled_cutedsl_grouped_mm_tuned,tlx_grouped_gemm,triton_grouped_gemm,aten_grouped_mm
+  args: --op grouped_gemm --only triton_grouped_gemm,tlx_grouped_gemm,precompiled_cutedsl_grouped_mm_tuned
+    --metrics tflops,speedup,latency
 int4_gemm_fwd:
-  args: --op int4_gemm --baseline eager_int4_gemm --metrics latency,tflops,speedup
-    --only preprocessed_triton_int4_gemm,triton_int4_gemm,eager_int4_gemm
+  args: --op int4_gemm --only preprocessed_triton_int4_gemm,triton_int4_gemm --metrics
+    tflops,speedup,latency
 fp32_jagged_mean_fwd:
-  args: --op jagged_mean --baseline torch_jagged_mean_torch_sum --metrics latency,speedup
-    --only triton_jagged_mean_simple_fused,triton_jagged_mean_variable_length_loop,torch_jagged_mean_torch_sum
+  args: --op jagged_mean --only triton_jagged_mean_simple_fused,triton_jagged_mean_variable_length_loop
+    --metrics speedup,latency
 fp32_jagged_softmax_fwd:
-  args: --op jagged_softmax --baseline torch_jagged_softmax_unbind_torch_softmax --metrics
-    latency,speedup --only triton_jagged_softmax_simple_fused,triton_jagged_softmax_variable_length_loop,torch_jagged_softmax_unbind_torch_softmax
+  args: --op jagged_softmax --only triton_jagged_softmax_variable_length_loop,triton_jagged_softmax_simple_fused
+    --metrics speedup,latency
 fp32_jagged_sum_fwd:
-  args: --op jagged_sum --baseline torch_jagged_sum_no_pad --metrics latency,speedup
-    --only triton_jagged_sum_no_pad_simple_fused,triton_jagged_sum_no_pad_variable_length_loop,torch_jagged_sum_no_pad
+  args: --op jagged_sum --only triton_jagged_sum_no_pad_simple_fused,triton_jagged_sum_no_pad_variable_length_loop
+    --metrics speedup,latency
 jsd_fwd:
-  args: --op jsd --baseline torch_jsd --metrics latency,speedup --only liger_jsd,torch_jsd
+  args: --op jsd --only liger_jsd --metrics speedup,latency
 jsd_bwd:
-  args: --op jsd --baseline torch_jsd --metrics latency,speedup --only liger_jsd,torch_jsd
-    --bwd
+  args: --op jsd --only liger_jsd --bwd --metrics speedup,latency
 kl_div_fwd:
-  args: --op kl_div --baseline torch_kl_div --metrics latency,speedup --only liger_kl_div,torch_kl_div
+  args: --op kl_div --only liger_kl_div --metrics speedup,latency
 kl_div_bwd:
-  args: --op kl_div --baseline torch_kl_div --metrics latency,speedup --only liger_kl_div,torch_kl_div
-    --bwd
+  args: --op kl_div --only liger_kl_div --bwd --metrics speedup,latency
 launch_latency_fwd:
   args: --op launch_latency --metrics walltime
 layer_norm_fwd:
-  args: --op layer_norm --baseline torch_layer_norm --metrics latency,speedup --only
-    liger_layer_norm,triton_fused_layer_norm,triton_layer_norm,torch_layer_norm
+  args: --op layer_norm --only triton_layer_norm,triton_fused_layer_norm,liger_layer_norm
+    --metrics speedup,latency
 layer_norm_bwd:
-  args: --op layer_norm --baseline torch_layer_norm --metrics latency,speedup --only
-    liger_layer_norm,triton_fused_layer_norm,triton_layer_norm,torch_layer_norm --bwd
+  args: --op layer_norm --only triton_layer_norm,triton_fused_layer_norm,liger_layer_norm
+    --bwd --metrics speedup,latency
 low_mem_dropout_fwd:
-  args: --op low_mem_dropout --baseline eager_dropout --metrics latency,speedup --only
-    seeded_dropout,triton_dropout,eager_dropout
+  args: --op low_mem_dropout --only seeded_dropout,triton_dropout --metrics speedup,latency
 bf16_ragged_attention_fwd:
-  args: --op ragged_attention --metrics latency,tflops --only hstu
+  args: --op ragged_attention --only hstu --metrics tflops,speedup,latency
 bf16_ragged_attention_bwd:
-  args: --op ragged_attention --metrics latency,tflops --only hstu --bwd
+  args: --op ragged_attention --only hstu --bwd --metrics tflops,speedup,latency
 rms_norm_fwd:
-  args: --op rms_norm --baseline llama_rms --metrics latency,speedup --only liger_rms,triton_fused_rmsnorm,llama_rms
+  args: --op rms_norm --only triton_fused_rmsnorm,liger_rms --metrics speedup,latency
 rms_norm_bwd:
-  args: --op rms_norm --baseline llama_rms --metrics latency,speedup --only liger_rms,triton_fused_rmsnorm,llama_rms
-    --bwd
+  args: --op rms_norm --only triton_fused_rmsnorm,liger_rms --bwd --metrics speedup,latency
 rope_fwd:
-  args: --op rope --baseline apply_rotary_pos_emb --metrics latency,speedup --only
-    liger_rotary_pos_emb,apply_rotary_pos_emb
+  args: --op rope --only liger_rotary_pos_emb --metrics speedup,latency
 rope_bwd:
-  args: --op rope --baseline apply_rotary_pos_emb --metrics latency,speedup --only
-    liger_rotary_pos_emb,apply_rotary_pos_emb --bwd
+  args: --op rope --only liger_rotary_pos_emb --bwd --metrics speedup,latency
 fp16_softmax_fwd:
-  args: --op softmax --baseline naive_softmax --metrics latency,speedup --only triton_softmax,naive_softmax
+  args: --op softmax --only triton_softmax --metrics speedup,latency
 fp16_softmax_bwd:
-  args: --op softmax --baseline naive_softmax --metrics latency,speedup --only triton_softmax,naive_softmax
-    --bwd
+  args: --op softmax --only triton_softmax --bwd --metrics speedup,latency
 sum_fwd:
-  args: --op sum --baseline torch_sum --metrics latency,speedup --only triton_sum,torch_sum
+  args: --op sum --only triton_sum --metrics speedup,latency
 swiglu_fwd:
-  args: --op swiglu --baseline torch_swiglu --metrics latency,speedup --only liger_swiglu,torch_swiglu
+  args: --op swiglu --only liger_swiglu --metrics speedup,latency
 swiglu_bwd:
-  args: --op swiglu --baseline torch_swiglu --metrics latency,speedup --only liger_swiglu,torch_swiglu
-    --bwd
+  args: --op swiglu --only liger_swiglu --bwd --metrics speedup,latency
 template_attention_fwd:
-  args: --op template_attention --baseline test_no_exp2 --metrics latency,speedup
-    --only test_no_exp2,test_with_exp2
+  args: --op template_attention --only test_no_exp2,test_with_exp2 --metrics speedup,latency
 vector_add_fwd:
-  args: --op vector_add --baseline torch_add --metrics latency,speedup --only triton_add,torch_add
+  args: --op vector_add --only triton_add --metrics speedup,latency
 vector_exp_fwd:
-  args: --op vector_exp --baseline torch_exp --metrics latency,speedup --only triton_exp,torch_exp
+  args: --op vector_exp --only triton_exp --metrics speedup,latency
 vector_exp_bwd:
-  args: --op vector_exp --baseline torch_exp --metrics latency,speedup --only triton_exp,torch_exp
-    --bwd
+  args: --op vector_exp --only triton_exp --bwd --metrics speedup,latency
 welford_fwd:
-  args: --op welford --baseline eager_layer_norm --metrics latency,speedup --only
-    test_no_welford,triton_welford,eager_layer_norm
+  args: --op welford --only triton_welford,test_no_welford --metrics speedup,latency
 bf16_flex_attention_fwd:
   args: --op flex_attention --metrics latency,tflops --only compiled
 bf16_flex_attention_bwd:
