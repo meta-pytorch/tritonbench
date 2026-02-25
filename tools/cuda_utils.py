@@ -9,7 +9,7 @@ from .torch_utils import install_pytorch_nightly
 
 # defines the default CUDA version to compile against
 DEFAULT_CUDA_VERSION = "12.8"
-DEFAULT_HIP_VERSION = "7.0"
+DEFAULT_HIP_VERSION = "7.1"
 
 # the key is the value of `torch.version.cuda`
 CUDA_VERSION_MAP = {
@@ -25,8 +25,8 @@ CUDA_VERSION_MAP = {
 
 # the key is the value of `torch.version.hip`
 HIP_VERSION_MAP = {
-    "7.0": {
-        "pytorch_url": "rocm7.0",
+    "7.1": {
+        "pytorch_url": "rocm7.1",
     }
 }
 
