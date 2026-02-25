@@ -230,14 +230,14 @@ def print_summary_table(results: Dict[str, MethodStats], operation_name: str):
     print(f"SUMMARY: Latency Noise Comparison for '{operation_name}'")
     print("=" * 120)
 
-    header = f"{'Method':<25} | {'Benchmark Time':<25} | {'Min (ms)':<10} | {'Median (ms)':<12} | {'Intra-Std (ms)':<14} | {'Intra-CV':<10} | {'Inter-CV':<10} | {'Inter-Std (ms)':<14}"
+    header = f"{'Method':<25} | {'Benchmark Time (s)':<25} | {'Min (ms)':<10} | {'Median (ms)':<12} | {'Intra-Std (ms)':<14} | {'Intra-CV':<10} | {'Inter-CV':<10} | {'Inter-Std (ms)':<14}"
     print(header)
     print("-" * 120)
 
     for method_name, stats in sorted(results.items(), key=lambda x: x[1].inter_test_cv):
         print(
             f"{method_name:<25} | "
-            f"{stats.benchmark_time:<10.4f} | "
+            f"{stats.benchmark_time:<10.1f} | "
             f"{stats.inter_test_min:<10.4f} | "
             f"{stats.inter_test_median:<12.4f} | "
             f"{stats.avg_intra_test_std:<14.4f} | "
@@ -310,7 +310,7 @@ def _run(args: argparse.Namespace, tb_args: argparse.Namespace, extra_args: List
 
     operation_name = f"{tb_args.op}:{backend_name} (input_id={tb_args.input_id})"
     logger.info(
-        f"Device: {device_name}, Op: {tb_args.op}, Backend: {backend_name}, Tests: {args.n_tests}, Warmup: {tb_args.warmup}, Reps: {tb_args.rep}\n"
+        f"[timing_accuracy] Device: {device_name}, Op: {tb_args.op}, Backend: {backend_name}, Tests: {args.n_tests}, Warmup: {tb_args.warmup}, Reps: {tb_args.rep}\n"
     )
 
     # Determine methods to run
@@ -395,19 +395,17 @@ def main():
 
     # run all triton operators
     if args.sweep:
-        output_dir, timestamp = setup_output_dir("timing_accuracy")
+        timestamp, output_dir = setup_output_dir("timing_accuracy")
         sweep_configs = get_benchmark_config_with_tags(tags = ["triton"])
         logger.info(f"Found {len(sweep_configs)} operators to sweep")
         for config in sweep_configs:
             args.output = os.path.join(output_dir, f"results_{config}.json")
-            print(sweep_configs[config])
             tb_args, extra_args = tb_parser.parse_known_args(sweep_configs[config]["args"].split(" "))
             # run each backend individually
             if "," in tb_args.only:
                 for backend in tb_args.only.split(","):
                     tb_args.only = backend
                     _run(args, tb_args, extra_args)
-            exit(1)
         return 0
 
     tb_args, extra_args = tb_parser.parse_known_args(extra_args)
