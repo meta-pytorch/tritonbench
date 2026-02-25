@@ -24,7 +24,8 @@ def supports_float8_fnuz(throw_on_hip_incompatibility: bool = True) -> bool:
                 logging.error(msg)
                 return False
 
-        elif device_capability == (9, 4):
+        elif device_capability >= (9, 4):
+            # gfx942 (MI300) reports (9, 4), gfx950 (MI350) reports (9, 5)
             return True
 
     return False
