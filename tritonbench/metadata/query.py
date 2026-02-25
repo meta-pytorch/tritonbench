@@ -25,9 +25,11 @@ def _has_meaningful_baseline(op: str, baseline_metadata: Dict[str, Any], kernel_
 
 
 def get_metric_args(op: str, required_metrics: List[str], kernel_metadata: Dict[str, Any]) -> str:
-    valid_metrics = []
+    special_metrics = ["flops", "tflops", "speedup"]
+    valid_metrics = [m for m in required_metrics if m not in special_metrics]
     # do basic sanity checks
     # only add tflops/flops/speedup if the op supports it
+    baseline_prefix = ""
     if "tflops" in required_metrics or "flops" in required_metrics:
         tflops_ops = load_metadata(TFLOPS_OPS_PATH)
         if op in tflops_ops:
@@ -36,10 +38,8 @@ def get_metric_args(op: str, required_metrics: List[str], kernel_metadata: Dict[
         baseline_metadata = load_metadata(BASELINE_OPS_PATH)
         if _has_meaningful_baseline(op, baseline_metadata, kernel_metadata):
             valid_metrics.append("speedup")
-    special_metrics = ["flops", "tflops", "speedup"]
-    required_metrics = [m for m in required_metrics if m not in special_metrics]
-    valid_metrics.extend(required_metrics)
-    return "--metrics " + ",".join(valid_metrics)
+            baseline_prefix = f"--baseline {baseline_metadata[op]} "
+    return baseline_prefix + "--metrics " + ",".join(valid_metrics)
 
 
 def get_benchmark_dtype(op_name: str, runtime_dtype: str | None = None):
