@@ -329,7 +329,7 @@ def matmul_tma_persistent_get_configs(pre_hook=None):
                     "BLOCK_SIZE_K": BK,
                     "GROUP_SIZE_M": 8,
                     "EPILOGUE_SUBTILE": SUBTILE,
-                    **({"FLATTEN": FLATTEN} if FLATTEN is not None else {}),
+                    "FLATTEN": FLATTEN,
                 },
                 num_stages=s,
                 num_warps=w,
