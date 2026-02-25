@@ -8,17 +8,39 @@ CURRENT_DIR = os.path.dirname(os.path.abspath(__file__))
 KERNEL_METADATA_PATH = os.path.join(CURRENT_DIR, "oss_cuda_kernels.yaml")
 BACKWARD_METADATA_PATH = os.path.join(CURRENT_DIR, "backward_operators.yaml")
 DTYPE_METADATA_PATH = os.path.join(CURRENT_DIR, "dtype_operators.yaml")
-TFLOPS_OPS_PATH: List[str] = os.path.join(CURRENT_DIR, "tflops_operators.yaml")
-BASELINE_OPS: Dict[str, str] = os.path.join(CURRENT_DIR, "baseline_operators.yaml")
+TFLOPS_OPS_PATH = os.path.join(CURRENT_DIR, "tflops_operators.yaml")
+BASELINE_OPS_PATH: Dict[str, str] = os.path.join(CURRENT_DIR, "baseline_operators.yaml")
 
 SKIP_DTYPE = ["bypass", "fp8", "int4", "bf16xint16"]
 
 
-def _has_meaningful_baseline(op: str):
-    return op in BASELINE_OPS and not (
-        BASELINE_OPS[op] in TRITON_OPS[op] and len(TRITON_OPS[op]) == 1
+def load_metadata(metadata_path: str) -> Any:
+    with open(metadata_path, "r") as f:
+        return yaml.safe_load(f)
+
+def _has_meaningful_baseline(op: str, baseline_metadata: Dict[str, Any], kernel_metadata: Dict[str, Any]) -> bool    :
+    return op in baseline_metadata and not (
+        baseline_metadata[op] in kernel_metadata[op] and len(kernel_metadata[op]) == 1
     )
 
+
+def get_metric_args(op: str, required_metrics: List[str]) -> List[str]:
+    valid_metrics = []
+    # do basic sanity checks
+    # only add tflops/flops/speedup if the op supports it
+    if "tflops" in required_metrics or "flops" in required_metrics:
+        tflops_ops = load_metadata(TFLOPS_OPS_PATH)
+        if op in tflops_ops:
+            valid_metrics.append("tflops")
+    if "speedup" in required_metrics:
+        baseline_metadata = load_metadata(BASELINE_OPS_PATH)
+        if _has_meaningful_baseline(op, baseline_metadata):
+            valid_metrics.append("speedup")
+    required_metrics.remove("tflops")
+    required_metrics.remove("flops")
+    required_metrics.remove("speedup")
+    valid_metrics.extend(required_metrics)
+    return valid_metrics
 
 
 def get_benchmark_dtype(op_name: str, runtime_dtype: str | None = None):
@@ -37,7 +59,12 @@ def get_benchmark_config_with_tags(
     with_backwards: bool = True,
     metrics: Optional[List[str]] = None,
 ) -> Dict[str, Any]:
-    """Return benchmark config dict with any of these tags"""
+    """Return benchmark config dict with any of these tags.
+    runtime_metadata: runtime metadata to override the default metadata
+    runtime_only: whether to only include runtime metadata, not built-in metadata
+    with_backwards: whether to include backward run
+    metrics: list of metrics to include in the benchmark config with best efforts
+    """
     if runtime_only:
         operators = runtime_metadata
     else:
