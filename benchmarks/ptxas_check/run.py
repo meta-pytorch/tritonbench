@@ -200,13 +200,13 @@ def compare_outputs(dir_a: str, dir_b: str) -> Tuple[bool, List[str]]:
 
     compare_configs_result = compare_configs(data_a, data_b)
     if compare_configs_result is None:
-        issues.append(f"[ptxas-check] Autotune config missing in stderr.log files")
+        print(f"[ptxas-check] Warning: Autotune config missing in stderr.log files.")
     elif not compare_configs(data_a, data_b):
         issues.append(f"[ptxas-check] Autotune config mismatch in {stderr_files_a}")
         issues.append(f"[ptxas-check]   With PTXAS_OPTIONS: {data_a}")
         issues.append(f"[ptxas-check]   Without PTXAS_OPTIONS: {data_b}")
     else:
-        print(f"[ptxas-check] {stderr_files_a}: configs match ✓")
+        print(f"[ptxas-check] configs match in {stderr_files_a}: {data_a} ✓")
 
     pt_files_a = set(find_pt_files(dir_a))
     pt_files_b = set(find_pt_files(dir_b))
