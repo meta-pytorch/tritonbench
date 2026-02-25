@@ -367,9 +367,7 @@ def _prune_tma_persistent_configs(configs, named_args, **kwargs):
 
 
 @triton.autotune(
-    configs=matmul_tma_persistent_get_configs(
-        pre_hook=matmul_tma_set_block_size_hook
-    ),
+    configs=matmul_tma_persistent_get_configs(pre_hook=matmul_tma_set_block_size_hook),
     key=["M", "N", "K", "WARP_SPECIALIZE"],
     prune_configs_by={"early_config_prune": _prune_tma_persistent_configs},
 )
