@@ -38,7 +38,7 @@ except ModuleNotFoundError:
 
 import triton.language as tl
 
-from .attention_utils import HAS_TMA_DESC, TmaAutoTuneHelper, WITH_TMA
+from .attention_utils import HAS_TMA_DESC, WITH_TMA
 
 if HAS_TMA_DESC:
     logging.info(
@@ -481,77 +481,11 @@ class _attention_opt(torch.autograd.Function):
 
         BATCH, H, N_CTX = q.shape[0], q.shape[1], q.shape[2]
 
-        # no autotune with fixed BLOCK_N
-        if HAS_TMA_DESC is True and torch.version.hip is None:
-            desc_helper = TmaAutoTuneHelper()
-            desc_helper.init_tma_descriptor("k")
-            desc_helper.init_tma_descriptor("v")
-            desc_helper.init_tma_descriptor("q")
-            desc_helper.init_tma_descriptor("o")
-        else:
-            desc_helper = None
-
         def grid_tma(META):
-            if META["ENABLE_TMA"] is False or HAS_TMA_DESC is False:
-                return (
-                    # grid partitioning: num_consumer_groups * BLOCK_M
-                    # data partitioning: BLOCK_M
-                    triton.cdiv(q.shape[2], META["BLOCK_M"]),  # num_consumer_groups
-                    q.shape[0] * q.shape[1],
-                    1,
-                )
-            nonlocal desc_helper
-            desc_helper.fill_2d_tma_descriptor(
-                "k",
-                k.data_ptr(),
-                BATCH * H * N_CTX,
-                HEAD_DIM_Q,
-                META["BLOCK_N"],
-                HEAD_DIM_Q,
-                k.element_size(),
-            )
-            if v.dtype == torch.float8_e5m2:
-                desc_helper.fill_2d_tma_descriptor(
-                    "v",
-                    v.data_ptr(),
-                    BATCH * H * HEAD_DIM_Q,
-                    N_CTX,
-                    HEAD_DIM_Q,
-                    META["BLOCK_N"],
-                    v.element_size(),
-                )
-            else:
-                desc_helper.fill_2d_tma_descriptor(
-                    "v",
-                    v.data_ptr(),
-                    BATCH * H * N_CTX,
-                    HEAD_DIM_Q,
-                    META["BLOCK_N"],
-                    HEAD_DIM_Q,
-                    v.element_size(),
-                )
-            desc_helper.fill_2d_tma_descriptor(
-                "q",
-                q.data_ptr(),
-                BATCH * H * N_CTX,
-                HEAD_DIM_Q,
-                META["BLOCK_M"]
-                // (2 if META["ENABLE_WS"] else 1),  # data partitioning: halve
-                HEAD_DIM_Q,
-                q.element_size(),
-            )
-            desc_helper.fill_2d_tma_descriptor(
-                "o",
-                o.data_ptr(),
-                BATCH * H * N_CTX,
-                HEAD_DIM_Q,
-                META["BLOCK_M"]
-                // (2 if META["ENABLE_WS"] else 1),  # data partitioning: halve
-                HEAD_DIM_Q,
-                o.element_size(),
-            )
             return (
-                triton.cdiv(q.shape[2], META["BLOCK_M"]),
+                # grid partitioning: num_consumer_groups * BLOCK_M
+                # data partitioning: BLOCK_M
+                triton.cdiv(q.shape[2], META["BLOCK_M"]),  # num_consumer_groups
                 q.shape[0] * q.shape[1],
                 1,
             )

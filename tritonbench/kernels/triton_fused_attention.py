@@ -23,10 +23,18 @@ from .attention_utils import (
     HAS_EXPLICIT_WS,  # guard new tuning configs such as num_consumer_groups
     HAS_TMA_DESC,
     PEEL_LAST,
-    TmaAutoTuneHelper,
     WITH_COMPPIPE,
     WITH_TMA,
 )
+
+# Import TensorDescriptor for the official TMA approach (Triton 3.0+)
+try:
+    from triton.tools.tensor_descriptor import TensorDescriptor
+
+    HAS_TENSOR_DESCRIPTOR = True
+except ImportError:
+    HAS_TENSOR_DESCRIPTOR = False
+    TensorDescriptor = None
 
 
 def is_cuda():
@@ -53,6 +61,39 @@ else:
         "TMA benchmarks will be running without grid constant TMA descriptor.",
         file=sys.stderr,
     )
+
+
+def supports_host_descriptor():
+    """Check if the current device supports host TensorDescriptor (SM90+)."""
+    return is_cuda() and torch.cuda.get_device_capability()[0] >= 9
+
+
+def _host_descriptor_pre_hook(nargs):
+    """Pre-hook for autotune to set TensorDescriptor block shapes based on config."""
+    if not HAS_TENSOR_DESCRIPTOR:
+        return
+    BLOCK_M = nargs["BLOCK_M"]
+    BLOCK_N = nargs["BLOCK_N"]
+    HEAD_DIM = nargs["HEAD_DIM"]
+    if not isinstance(nargs.get("desc_q"), TensorDescriptor):
+        return
+    nargs["desc_q"].block_shape = [BLOCK_M, HEAD_DIM]
+    nargs["desc_v"].block_shape = [BLOCK_N, HEAD_DIM]
+    nargs["desc_k"].block_shape = [BLOCK_N, HEAD_DIM]
+    nargs["desc_o"].block_shape = [BLOCK_M, HEAD_DIM]
+
+
+@triton.jit
+def _maybe_make_tensor_desc(desc_or_ptr, shape, strides, block_shape):
+    """
+    Helper to handle both TensorDescriptor (host descriptor) and raw pointers.
+    If a TensorDescriptor is passed, return it directly.
+    Otherwise, create a device tensor descriptor from the pointer.
+    """
+    if isinstance(desc_or_ptr, tl.tensor_descriptor):
+        return desc_or_ptr
+    else:
+        return tl.make_tensor_descriptor(desc_or_ptr, shape, strides, block_shape)
 
 
 @triton.jit
@@ -497,6 +538,10 @@ def get_fwd_config_space(
     bnList = [64, 128]  # To handle hDim of 64, we need BLOCK_N to be <= 64
     wList = [4] if enable_ws else [4, 8]
     stageList = [2] if enable_ws else [3] if is_hip_async_copy_enabled() else [3, 4, 7]
+    # Use pre_hook for TMA-enabled configs to support official TensorDescriptor approach
+    pre_hook = (
+        _host_descriptor_pre_hook if enable_tma and HAS_TENSOR_DESCRIPTOR else None
+    )
     for BM in bmList:
         for BN in bnList:
             for sched in schedList:  # set in global scope
@@ -530,6 +575,7 @@ def get_fwd_config_space(
                                             num_consumer_groups=2,
                                             reg_dec_producer=24,
                                             reg_inc_consumer=240,
+                                            pre_hook=pre_hook,
                                         )
                                     )
                                 else:
@@ -540,6 +586,7 @@ def get_fwd_config_space(
                                             num_stages=stage,
                                             num_buffers_warp_spec=0,
                                             num_consumer_groups=0,
+                                            pre_hook=pre_hook,
                                         )
                                     )
                             else:
@@ -548,6 +595,7 @@ def get_fwd_config_space(
                                         config_dict,
                                         num_warps=w,
                                         num_stages=stage,
+                                        pre_hook=pre_hook,
                                     )
                                 )
     return configs
@@ -1241,10 +1289,6 @@ def _attn_fwd_ws(
     sm_scale,
     M,
     Out,  #
-    desc_q,
-    desc_k,
-    desc_v,
-    desc_o,
     stride_qz,
     stride_qh,
     stride_qm,
@@ -1276,6 +1320,9 @@ def _attn_fwd_ws(
     tl.static_assert(BLOCK_N <= HEAD_DIM)
     pid = tl.program_id(0)
     off_hz = tl.program_id(1)
+    # Note: This kernel uses configs with ENABLE_TMA=False (configsWS),
+    # so TMA descriptors are never used. Passing None avoids creating
+    # unnecessary TMA descriptor objects on the host side.
     if HAS_EXPLICIT_WS:
         _attn_fwd_compute_ws(
             Q,
@@ -1284,10 +1331,10 @@ def _attn_fwd_ws(
             sm_scale,
             M,
             Out,  #
-            desc_q,
-            desc_k,
-            desc_v,
-            desc_o,
+            None,  # desc_q - not used since ENABLE_TMA=False
+            None,  # desc_k - not used since ENABLE_TMA=False
+            None,  # desc_v - not used since ENABLE_TMA=False
+            None,  # desc_o - not used since ENABLE_TMA=False
             stride_qz,
             stride_qh,
             stride_qm,
@@ -1317,6 +1364,8 @@ def _attn_fwd_ws(
             LOOP_SCHEDULE,
         )
     else:
+        # Note: This else branch also uses ENABLE_TMA=False configs,
+        # so TMA descriptors are never used.
         _attn_fwd_compute(
             Q,
             K,
@@ -1324,10 +1373,10 @@ def _attn_fwd_ws(
             sm_scale,
             M,
             Out,  #
-            desc_q,
-            desc_k,
-            desc_v,
-            desc_o,
+            None,  # desc_q - not used since ENABLE_TMA=False
+            None,  # desc_k - not used since ENABLE_TMA=False
+            None,  # desc_v - not used since ENABLE_TMA=False
+            None,  # desc_o - not used since ENABLE_TMA=False
             stride_qz,
             stride_qh,
             stride_qm,
@@ -1368,10 +1417,6 @@ def _attn_fwd_base_opt(
     sm_scale,
     M,
     Out,
-    desc_q,
-    desc_k,
-    desc_v,
-    desc_o,
     stride_qz,
     stride_qh,
     stride_qm,
@@ -1422,7 +1467,10 @@ def _attn_fwd_base_opt(
     start_m = tl.program_id(0)
     off_hz = tl.program_id(1)
 
-    # Both base and opt use the same compute function
+    # Note: This kernel uses configs with ENABLE_TMA=False (configsOrig + configsOpt),
+    # so TMA descriptors are never used inside _attn_fwd_compute. Passing None avoids
+    # creating unnecessary TMA descriptor objects on the host side.
+    # For TMA-enabled kernels (e.g., _attn_fwd_tma_unified), real descriptors are passed.
     _attn_fwd_compute(
         Q,
         K,
@@ -1430,10 +1478,10 @@ def _attn_fwd_base_opt(
         sm_scale,
         M,
         Out,
-        desc_q,
-        desc_k,
-        desc_v,
-        desc_o,
+        None,  # desc_q - not used since ENABLE_TMA=False
+        None,  # desc_k - not used since ENABLE_TMA=False
+        None,  # desc_v - not used since ENABLE_TMA=False
+        None,  # desc_o - not used since ENABLE_TMA=False
         stride_qz,
         stride_qh,
         stride_qm,
@@ -1488,6 +1536,10 @@ def _attn_fwd_tma_unified(
     sm_scale,
     M,
     Out,
+    desc_q,
+    desc_k,
+    desc_v,
+    desc_o,
     stride_qz,
     stride_qh,
     stride_qm,
@@ -1520,46 +1572,47 @@ def _attn_fwd_tma_unified(
     pid = tl.program_id(0)
     off_hz = tl.program_id(1)
 
-    # TMA descriptor creation - shared for both WS and non-WS paths
-    desc_q = None
-    desc_k = None
-    desc_v = None
-    desc_o = None
-
+    # Use _maybe_make_tensor_desc to handle both host TensorDescriptors and raw pointers
+    # This follows the official Triton TMA approach from the tutorial
     if ENABLE_TMA:
-        desc_k = tl.make_tensor_descriptor(
-            K,
+        desc_k = _maybe_make_tensor_desc(
+            desc_k,
             shape=[Z * H * N_CTX, HEAD_DIM],
             strides=[HEAD_DIM, 1],
             block_shape=[BLOCK_N, HEAD_DIM],
         )
         if V.dtype == torch.float8_e5m2:
-            desc_v = tl.make_tensor_descriptor(
-                V,
+            desc_v = _maybe_make_tensor_desc(
+                desc_v,
                 shape=[Z * H * HEAD_DIM, N_CTX],
                 strides=[N_CTX, 1],
                 block_shape=[HEAD_DIM, BLOCK_N],
             )
         else:
-            desc_v = tl.make_tensor_descriptor(
-                V,
+            desc_v = _maybe_make_tensor_desc(
+                desc_v,
                 shape=[Z * H * N_CTX, HEAD_DIM],
                 strides=[HEAD_DIM, 1],
                 block_shape=[BLOCK_N, HEAD_DIM],
             )
 
-        desc_q = tl.make_tensor_descriptor(
-            Q,
+        desc_q = _maybe_make_tensor_desc(
+            desc_q,
             shape=[Z * H * N_CTX, HEAD_DIM],
             strides=[HEAD_DIM, 1],
             block_shape=[BLOCK_M, HEAD_DIM],
         )
-        desc_o = tl.make_tensor_descriptor(
-            Out,
+        desc_o = _maybe_make_tensor_desc(
+            desc_o,
             shape=[Z * H * N_CTX, HEAD_DIM],
             strides=[HEAD_DIM, 1],
             block_shape=[BLOCK_M, HEAD_DIM],
         )
+    else:
+        desc_q = None
+        desc_k = None
+        desc_v = None
+        desc_o = None
 
     # Call appropriate compute function based on ENABLE_WS
     if ENABLE_WS:
@@ -1696,6 +1749,10 @@ def _attn_fwd_tma_ws_persistent(  # Q, V, desc_k, desc_v, sm_scale, M, Out,  #
     sm_scale,
     M,
     Out,  #
+    desc_q,
+    desc_k,
+    desc_v,
+    desc_o,
     stride_qz,
     stride_qh,
     stride_qm,
@@ -1740,46 +1797,47 @@ def _attn_fwd_tma_ws_persistent(  # Q, V, desc_k, desc_v, sm_scale, M, Out,  #
 
     tile_idx = prog_id
 
-    # Initialize descriptors as None
-    desc_q = None
-    desc_k = None
-    desc_v = None
-    desc_o = None
-
+    # Use _maybe_make_tensor_desc to handle both host TensorDescriptors and raw pointers
+    # This follows the official Triton TMA approach from the tutorial
     if ENABLE_TMA:
-        desc_k = tl.make_tensor_descriptor(
-            K,
+        desc_k = _maybe_make_tensor_desc(
+            desc_k,
             shape=[Z * H * N_CTX, HEAD_DIM],
             strides=[HEAD_DIM, 1],
             block_shape=[BLOCK_N, HEAD_DIM],
         )
         if V.dtype == torch.float8_e5m2:
-            desc_v = tl.make_tensor_descriptor(
-                V,
+            desc_v = _maybe_make_tensor_desc(
+                desc_v,
                 shape=[Z * H * HEAD_DIM, N_CTX],
                 strides=[N_CTX, 1],
                 block_shape=[HEAD_DIM, BLOCK_N],
             )
         else:
-            desc_v = tl.make_tensor_descriptor(
-                V,
+            desc_v = _maybe_make_tensor_desc(
+                desc_v,
                 shape=[Z * H * N_CTX, HEAD_DIM],
                 strides=[HEAD_DIM, 1],
                 block_shape=[BLOCK_N, HEAD_DIM],
             )
 
-        desc_q = tl.make_tensor_descriptor(
-            Q,
+        desc_q = _maybe_make_tensor_desc(
+            desc_q,
             shape=[Z * H * N_CTX, HEAD_DIM],
             strides=[HEAD_DIM, 1],
             block_shape=[BLOCK_M, HEAD_DIM],
         )
-        desc_o = tl.make_tensor_descriptor(
-            Out,
+        desc_o = _maybe_make_tensor_desc(
+            desc_o,
             shape=[Z * H * N_CTX, HEAD_DIM],
             strides=[HEAD_DIM, 1],
             block_shape=[BLOCK_M, HEAD_DIM],
         )
+    else:
+        desc_q = None
+        desc_k = None
+        desc_v = None
+        desc_o = None
 
     for _ in range(0, tiles_per_sm):
         # This has much better cache locality than
@@ -1954,6 +2012,10 @@ def _attn_fwd_tma_ws_persistent_with_dp(  # Q, V, desc_k, desc_v, sm_scale, M, O
     sm_scale,
     M,
     Out,  #
+    desc_q,
+    desc_k,
+    desc_v,
+    desc_o,
     stride_qz,
     stride_qh,
     stride_qm,
@@ -2009,35 +2071,38 @@ def _attn_fwd_tma_ws_persistent_with_dp(  # Q, V, desc_k, desc_v, sm_scale, M, O
 
     tile_idx = prog_id
 
-    desc_k = tl.make_tensor_descriptor(
-        K,
+    # Use _maybe_make_tensor_desc to handle both host TensorDescriptors and raw pointers
+    # This follows the official Triton TMA approach from the tutorial
+    # Note: For this kernel with data partitioning, BLOCK_M_HALF is used for q and o
+    desc_k = _maybe_make_tensor_desc(
+        desc_k,
         shape=[Z * H * N_CTX, HEAD_DIM],
         strides=[HEAD_DIM, 1],
         block_shape=[BLOCK_N, HEAD_DIM],
     )
     if V.dtype == torch.float8_e5m2:
-        desc_v = tl.make_tensor_descriptor(
-            V,
+        desc_v = _maybe_make_tensor_desc(
+            desc_v,
             shape=[Z * H * HEAD_DIM, N_CTX],
             strides=[N_CTX, 1],
             block_shape=[HEAD_DIM, BLOCK_N],
         )
     else:
-        desc_v = tl.make_tensor_descriptor(
-            V,
+        desc_v = _maybe_make_tensor_desc(
+            desc_v,
             shape=[Z * H * N_CTX, HEAD_DIM],
             strides=[HEAD_DIM, 1],
             block_shape=[BLOCK_N, HEAD_DIM],
         )
 
-    desc_q = tl.make_tensor_descriptor(
-        Q,
+    desc_q = _maybe_make_tensor_desc(
+        desc_q,
         shape=[Z * H * N_CTX, HEAD_DIM],
         strides=[HEAD_DIM, 1],
         block_shape=[BLOCK_M_HALF, HEAD_DIM],
     )
-    desc_o = tl.make_tensor_descriptor(
-        Out,
+    desc_o = _maybe_make_tensor_desc(
+        desc_o,
         shape=[Z * H * N_CTX, HEAD_DIM],
         strides=[HEAD_DIM, 1],
         block_shape=[BLOCK_M_HALF, HEAD_DIM],
@@ -2463,77 +2528,11 @@ class _attention_opt(torch.autograd.Function):
         TMA_SIZE = 128
         BATCH, H, N_CTX = q.shape[0], q.shape[1], q.shape[2]
 
-        # no autotune with fixed BLOCK_N
-        if HAS_TMA_DESC is True and torch.version.hip is None:
-            desc_helper = TmaAutoTuneHelper()
-            desc_helper.init_tma_descriptor("k")
-            desc_helper.init_tma_descriptor("v")
-            desc_helper.init_tma_descriptor("q")
-            desc_helper.init_tma_descriptor("o")
-        else:
-            desc_helper = None
-
         def grid_tma(META):
-            if META["ENABLE_TMA"] is False or HAS_TMA_DESC is False:
-                return (
-                    # grid partitioning: num_consumer_groups * BLOCK_M
-                    # data partitioning: BLOCK_M
-                    triton.cdiv(q.shape[2], META["BLOCK_M"]),  # num_consumer_groups
-                    q.shape[0] * q.shape[1],
-                    1,
-                )
-            nonlocal desc_helper
-            desc_helper.fill_2d_tma_descriptor(
-                "k",
-                k.data_ptr(),
-                BATCH * H * N_CTX,
-                HEAD_DIM_Q,
-                META["BLOCK_N"],
-                HEAD_DIM_Q,
-                k.element_size(),
-            )
-            if v.dtype == torch.float8_e5m2:
-                desc_helper.fill_2d_tma_descriptor(
-                    "v",
-                    v.data_ptr(),
-                    BATCH * H * HEAD_DIM_Q,
-                    N_CTX,
-                    HEAD_DIM_Q,
-                    META["BLOCK_N"],
-                    v.element_size(),
-                )
-            else:
-                desc_helper.fill_2d_tma_descriptor(
-                    "v",
-                    v.data_ptr(),
-                    BATCH * H * N_CTX,
-                    HEAD_DIM_Q,
-                    META["BLOCK_N"],
-                    HEAD_DIM_Q,
-                    v.element_size(),
-                )
-            desc_helper.fill_2d_tma_descriptor(
-                "q",
-                q.data_ptr(),
-                BATCH * H * N_CTX,
-                HEAD_DIM_Q,
-                META["BLOCK_M"]
-                // (2 if META["ENABLE_WS"] else 1),  # data partitioning: halve
-                HEAD_DIM_Q,
-                q.element_size(),
-            )
-            desc_helper.fill_2d_tma_descriptor(
-                "o",
-                o.data_ptr(),
-                BATCH * H * N_CTX,
-                HEAD_DIM_Q,
-                META["BLOCK_M"]
-                // (2 if META["ENABLE_WS"] else 1),  # data partitioning: halve
-                HEAD_DIM_Q,
-                o.element_size(),
-            )
             return (
-                triton.cdiv(q.shape[2], META["BLOCK_M"]),
+                # grid partitioning: num_consumer_groups * BLOCK_M
+                # data partitioning: BLOCK_M
+                triton.cdiv(q.shape[2], META["BLOCK_M"]),  # num_consumer_groups
                 q.shape[0] * q.shape[1],
                 1,
             )
@@ -2541,67 +2540,6 @@ class _attention_opt(torch.autograd.Function):
         NUM_SMS = torch.cuda.get_device_properties("cuda").multi_processor_count
 
         def grid_tma_persistent(META):
-            if META["ENABLE_TMA"] is False or HAS_TMA_DESC is False:
-                return (
-                    min(
-                        NUM_SMS * META["GRID_MULTIPLE"],
-                        triton.cdiv(q.shape[2], META["BLOCK_M"])
-                        * q.shape[0]
-                        * q.shape[1],
-                    ),
-                    1,
-                    1,
-                )
-            nonlocal desc_helper
-            desc_helper.fill_2d_tma_descriptor(
-                "k",
-                k.data_ptr(),
-                BATCH * H * N_CTX,
-                HEAD_DIM_Q,
-                META["BLOCK_N"],
-                HEAD_DIM_Q,
-                k.element_size(),
-            )
-            if v.dtype == torch.float8_e5m2:
-                desc_helper.fill_2d_tma_descriptor(
-                    "v",
-                    v.data_ptr(),
-                    BATCH * H * HEAD_DIM_Q,
-                    N_CTX,
-                    HEAD_DIM_Q,
-                    META["BLOCK_N"],
-                    v.element_size(),
-                )
-            else:
-                desc_helper.fill_2d_tma_descriptor(
-                    "v",
-                    v.data_ptr(),
-                    BATCH * H * N_CTX,
-                    HEAD_DIM_Q,
-                    META["BLOCK_N"],
-                    HEAD_DIM_Q,
-                    v.element_size(),
-                )
-            desc_helper.fill_2d_tma_descriptor(
-                "q",
-                q.data_ptr(),
-                BATCH * H * N_CTX,
-                HEAD_DIM_Q,
-                META["BLOCK_M"]
-                // (2 if META["ENABLE_WS"] else 1),  # data partitioning: halve
-                HEAD_DIM_Q,
-                q.element_size(),
-            )
-            desc_helper.fill_2d_tma_descriptor(
-                "o",
-                o.data_ptr(),
-                BATCH * H * N_CTX,
-                HEAD_DIM_Q,
-                META["BLOCK_M"]
-                // (2 if META["ENABLE_WS"] else 1),  # data partitioning: halve
-                HEAD_DIM_Q,
-                o.element_size(),
-            )
             return (
                 min(
                     NUM_SMS * META["GRID_MULTIPLE"],
@@ -2610,16 +2548,6 @@ class _attention_opt(torch.autograd.Function):
                 1,
                 1,
             )
-
-        desc_q = None
-        desc_k = None
-        desc_v = None
-        desc_o = None
-        if desc_helper is not None:
-            desc_q = desc_helper.get_tma_descriptor_kernel_param("q")
-            desc_k = desc_helper.get_tma_descriptor_kernel_param("k")
-            desc_v = desc_helper.get_tma_descriptor_kernel_param("v")
-            desc_o = desc_helper.get_tma_descriptor_kernel_param("o")
 
         M = torch.empty(
             (q.shape[0], q.shape[1], q.shape[2]), device=q.device, dtype=torch.float32
@@ -2632,6 +2560,49 @@ class _attention_opt(torch.autograd.Function):
         if HAS_NEW_TMA:
             triton.set_allocator(alloc_fn)
 
+        # Create host TensorDescriptors for TMA-enabled variants using the official approach
+        # This follows the pattern from the Triton tutorial (06-fused-attention.py)
+        use_host_descriptors = (
+            HAS_TENSOR_DESCRIPTOR
+            and supports_host_descriptor()
+            and baseVariant
+            in ("tma", "tma_ws", "tma_ws_persistent", "tma_ws_persistent_blackwell")
+        )
+        if use_host_descriptors:
+            y_dim = q.shape[0] * q.shape[1] * q.shape[2]
+            dummy_block = [1, 1]  # Will be set by pre_hook based on config
+            desc_q = TensorDescriptor(
+                q,
+                shape=[y_dim, HEAD_DIM_K],
+                strides=[HEAD_DIM_K, 1],
+                block_shape=dummy_block,
+            )
+            desc_v = TensorDescriptor(
+                v,
+                shape=[y_dim, HEAD_DIM_K],
+                strides=[HEAD_DIM_K, 1],
+                block_shape=dummy_block,
+            )
+            desc_k = TensorDescriptor(
+                k,
+                shape=[y_dim, HEAD_DIM_K],
+                strides=[HEAD_DIM_K, 1],
+                block_shape=dummy_block,
+            )
+            desc_o = TensorDescriptor(
+                o,
+                shape=[y_dim, HEAD_DIM_K],
+                strides=[HEAD_DIM_K, 1],
+                block_shape=dummy_block,
+            )
+        else:
+            # For non-TMA variants or when host descriptors not available,
+            # pass raw tensors (device-side TMA will be created in kernel if needed)
+            desc_q = q
+            desc_k = k
+            desc_v = v
+            desc_o = o
+
         if baseVariant == "base_opt":
             _attn_fwd_base_opt[grid_tma](
                 q,
@@ -2640,10 +2611,6 @@ class _attention_opt(torch.autograd.Function):
                 sm_scale,
                 M,
                 o,
-                desc_q,
-                desc_k,
-                desc_v,
-                desc_o,
                 q.stride(0),
                 q.stride(1),
                 q.stride(2),
@@ -2676,10 +2643,6 @@ class _attention_opt(torch.autograd.Function):
                 sm_scale,
                 M,
                 o,
-                desc_q,
-                desc_k,
-                desc_v,
-                desc_o,  #
                 q.stride(0),
                 q.stride(1),
                 q.stride(2),
@@ -2713,6 +2676,10 @@ class _attention_opt(torch.autograd.Function):
                 sm_scale,
                 M,
                 o,
+                desc_q,
+                desc_k,
+                desc_v,
+                desc_o,
                 q.stride(0),
                 q.stride(1),
                 q.stride(2),
@@ -2746,6 +2713,10 @@ class _attention_opt(torch.autograd.Function):
                 sm_scale,
                 M,
                 o,
+                desc_q,
+                desc_k,
+                desc_v,
+                desc_o,
                 q.stride(0),
                 q.stride(1),
                 q.stride(2),
@@ -2779,6 +2750,10 @@ class _attention_opt(torch.autograd.Function):
                 sm_scale,
                 M,
                 o,
+                desc_q,
+                desc_k,
+                desc_v,
+                desc_o,
                 q.stride(0),
                 q.stride(1),
                 q.stride(2),
