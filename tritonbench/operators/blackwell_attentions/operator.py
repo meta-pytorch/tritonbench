@@ -558,6 +558,23 @@ class Operator(BenchmarkOperator):
 
         return preproc_noop, fn
 
+    @register_benchmark(enabled=False and is_blackwell() and HAS_BLACKWELL_AUTOWS)
+    @multi_input_wrapper
+    def triton_tutorial_flash_persistent_blackwell(
+        self, *args
+    ) -> Tuple[Callable, Callable]:
+        def fn(q, k, v):
+            return blackwell_triton_tutorial_FA2_opt(
+                q,
+                k,
+                v,
+                self.causal,
+                self.sm_scale,
+                "ws_persistent",
+            )
+
+        return preproc_noop, fn
+
     # Only works with triton main, forward only.
     @register_benchmark(enabled=SUPPORT_GLUON)
     @multi_input_wrapper
