@@ -1099,7 +1099,7 @@ class _attention_opt(torch.autograd.Function):
         dummy_block = [1, 1]
         HEAD_DIM = ctx.HEAD_DIM
 
-        if (not FORCE_ON_DEVICE and supports_host_descriptor()):
+        if not FORCE_ON_DEVICE and supports_host_descriptor():
             desc_k = TensorDescriptor(
                 arg_k,
                 shape=[BATCH * N_HEAD * N_CTX, HEAD_DIM],
