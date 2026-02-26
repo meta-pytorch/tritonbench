@@ -338,9 +338,8 @@ class Operator(BenchmarkOperator):
         else:
             return lambda: matmul_tma_persistent(a, b)
 
-    @register_benchmark(
-        enabled=not is_fbcode() and HAS_PERSISTENT and supports_tma(), fwd_only=True
-    )
+    # TODO fix cached TMA backend
+    @register_benchmark(enabled=False, fwd_only=True)
     def triton_tma_persistent_cached_matmul(self, a, b, bias) -> Callable:
         b = b.T.contiguous()
         if bias is not None:
