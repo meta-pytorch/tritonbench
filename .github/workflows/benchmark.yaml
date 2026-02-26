@@ -1,0 +1,52 @@
+name: TritonBench Benchmarks
+on:
+  workflow_dispatch:
+    inputs:
+      venv_name:
+        default: 'triton-main'
+        description: 'Venv Name'
+        choices:
+          - triton-main
+          - meta-triton
+      device:
+        default: 'h100'
+        description: 'Device Name'
+        choices:
+          - h100
+          - mi350
+      benchmark_name:
+        default: 'nightly'
+        description: 'Benchmark Name'
+      benchmark_args:
+        default: ''
+        description: 'Benchmark Args'
+  pull_request:
+    branches:
+      - xz9/timing_accuracy_sweep
+
+jobs:
+  h100-benchmark:
+    uses: ./.github/workflows/_linux-benchmark-h100.yml
+    if: ${{ inputs.device == 'h100' }}
+    with:
+      test_type: "bypass"
+      benchmark_name: ${{ inputs.benchmark_name }}
+      benchmark_args: ${{ inputs.benchmark_args }}
+      venv_name: "${{ inputs.venv_name }}"
+    secrets:
+      TRITONBENCH_SCRIBE_GRAPHQL_ACCESS_TOKEN: ${{ secrets.TRITONBENCH_SCRIBE_GRAPHQL_ACCESS_TOKEN }}
+  mi350-benchmark:
+    uses: ./.github/workflows/_linux-benchmark-mi350.yml
+    if: ${{ inputs.device == 'mi350' }}
+    with:
+      test_type: "bypass"
+      benchmark_name: ${{ inputs.benchmark_name }}
+      benchmark_args: ${{ inputs.benchmark_args }}
+      venv_name: "${{ inputs.venv_name }}"
+    secrets:
+      TRITONBENCH_SCRIBE_GRAPHQL_ACCESS_TOKEN: ${{ secrets.TRITONBENCH_SCRIBE_GRAPHQL_ACCESS_TOKEN }}
+
+
+concurrency:
+  group: ${{ github.workflow }}-${{ github.event.pull_request.number || github.sha }}-${{ github.event_name == 'workflow_dispatch' }}
+  cancel-in-progress: true
