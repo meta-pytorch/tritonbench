@@ -64,9 +64,9 @@ def parse_args(args: Optional[List[str]] = None) -> argparse.Namespace:
         help="Generate separate benchmark entries for each backend",
     )
     parser.add_argument(
-        "--dump-only",
+        "--run",
         action="store_true",
-        help="Only dump the generated config file, do not run the benchmark",
+        help="Run the benchmark after generating the config file",
     )
     parser.add_argument(
         "--output-dir",
@@ -152,7 +152,7 @@ def run(args: Optional[List[str]] = None) -> None:
     write_run_config(run_config, output_path)
     logger.info(f"Generated config written to: {output_path}")
 
-    if parsed_args.dump_only:
+    if not parsed_args.run:
         return
 
     env = os.environ.copy()
