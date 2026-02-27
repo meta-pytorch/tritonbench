@@ -1,5 +1,5 @@
 # Example sweep configuration file for tritonbench sweep runner
-# Collect all ops and backends with tags "triton"
+# Generate run config with all backends tagged "triton"
 run_config:
   with_backwards: true
   tags:

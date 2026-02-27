@@ -345,7 +345,10 @@ def _run(args: argparse.Namespace, tb_args: argparse.Namespace, extra_args: List
 
     print_summary_table(results, operation_name)
 
-    if args.output:
+    if args.dump_json or args.output:
+        if not args.output:
+            timestamp, output_dir = setup_output_dir(bm_name="timing_accuracy")
+            args.output = os.path.join(output_dir, f"{operation_name}.json")
         output_data = {
             "config": {
                 "device": device_name,
@@ -365,7 +368,7 @@ def _run(args: argparse.Namespace, tb_args: argparse.Namespace, extra_args: List
         logger.info(f"Results saved to: {args.output}")
 
 
-def run(args: Optional[List[str]]=None):
+def run(args: Optional[List[str]] = None):
     if not args:
         args = sys.argv[1:]
     parser = argparse.ArgumentParser(
@@ -382,6 +385,9 @@ def run(args: Optional[List[str]]=None):
         default="all",
         dest="methods",
         help=f"Methods: {','.join(BENCHMARK_METHODS.keys())},all",
+    )
+    parser.add_argument(
+        "--dump-json", action="store_true", help="Output results as JSON"
     )
     parser.add_argument("--output", type=str, default=None, help="Output JSON path")
     parser.add_argument("--quiet", action="store_true")

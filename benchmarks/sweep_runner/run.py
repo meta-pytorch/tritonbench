@@ -14,7 +14,7 @@ run_config:
 
 Usage:
     python -m benchmarks.sweep_runner.run \
-        --config-file example_sweep.yaml --sweep-target timing_accuracy \
+        --sweep-config-file triton.yaml --sweep-target timing_accuracy \
         --separate-backends
 """
 
@@ -46,14 +46,14 @@ def parse_args(args: Optional[List[str]] = None) -> argparse.Namespace:
         description="Generate and run tritonbench sweep configurations"
     )
     parser.add_argument(
-        "--config-file",
+        "--sweep-config-file",
         type=str,
         required=True,
         default="triton.yaml",
         help="Path to the YAML config file specifying operators and backends",
     )
     parser.add_argument(
-        "--target",
+        "--sweep-target",
         type=str,
         required=True,
         help="The sweep target to run (e.g., timing_accuracy)",
@@ -61,21 +61,21 @@ def parse_args(args: Optional[List[str]] = None) -> argparse.Namespace:
     parser.add_argument(
         "--separate-backends",
         action="store_true",
-        help="Generate separate benchmark entries for each backend",
+        help="Whether to separate benchmark entries for each backend",
     )
     parser.add_argument(
-        "--run",
+        "--sweep-run",
         action="store_true",
         help="Run the benchmark after generating the config file",
     )
     parser.add_argument(
-        "--output",
+        "--sweep-output-file",
         type=str,
         default=None,
         help="Output generated config file.",
     )
     parser.add_argument(
-        "--num-configs",
+        "--sweep-num-configs",
         default=None,
         type=int,
         help="Maximum number of configs to generate.",
@@ -144,37 +144,35 @@ def run(args: Optional[List[str]] = None) -> None:
     """Main entry point for the sweep runner."""
     parsed_args = parse_args(args)
 
-    if not parsed_args.output:
+    if not parsed_args.sweep_output_file:
         default_output_name = f"sweep_{parsed_args.target}.yaml"
         timestamp, output_dir = setup_output_dir(bm_name=parsed_args.target)
-        parsed_args.output = output_dir.join(default_output_name)
-
-    config = load_config(parsed_args.config_file)
+        parsed_args.sweep_output_file = output_dir.join(default_output_name)
 
     run_config = generate_run_config(
-        sweep_runner_config=config,
-        target=parsed_args.target,
+        sweep_runner_config=load_config(parsed_args.sweep_config_file),
+        target=parsed_args.sweep_target,
         extra_args=parsed_args.extra_args,
         separate_backends=parsed_args.separate_backends,
-        num_configs=parsed_args.num_configs,
+        num_configs=parsed_args.sweep_num_configs,
     )
 
-    write_run_config(run_config, parsed_args.output)
-    logger.info(f"Generated config written to: {parsed_args.output}")
+    write_run_config(run_config, parsed_args.sweep_output_file)
+    logger.info(f"Generated config written to: {parsed_args.sweep_output_file}")
 
-    if not parsed_args.run:
+    if not parsed_args.sweep_run:
         return
 
     env = os.environ.copy()
-    env["TRITONBENCH_RUN_CONFIG"] = parsed_args.output
+    env["TRITONBENCH_RUN_CONFIG"] = parsed_args.sweep_output_file
 
     run_py_path = REPO_PATH / "run.py"
 
     cmd = [sys.executable, str(run_py_path)]
 
-    logger.info(f"Running tritonbench with generated config: {parsed_args.output}")
+    logger.info(f"Running tritonbench with generated config: {parsed_args.sweep_output_file}")
     logger.info(f"Command: {' '.join(cmd)}")
-    logger.info(f"TRITONBENCH_RUN_CONFIG={parsed_args.output}")
+    logger.info(f"TRITONBENCH_RUN_CONFIG={parsed_args.sweep_output_file}")
 
     subprocess.run(cmd, env=env, cwd=str(REPO_PATH), check=True)
 
