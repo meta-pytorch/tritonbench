@@ -170,7 +170,9 @@ def run(args: Optional[List[str]] = None) -> None:
 
     cmd = [sys.executable, str(run_py_path)]
 
-    logger.info(f"Running tritonbench with generated config: {parsed_args.sweep_output_file}")
+    logger.info(
+        f"Running tritonbench with generated config: {parsed_args.sweep_output_file}"
+    )
     logger.info(f"Command: {' '.join(cmd)}")
     logger.info(f"TRITONBENCH_RUN_CONFIG={parsed_args.sweep_output_file}")
 

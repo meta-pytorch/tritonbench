@@ -54,7 +54,9 @@ def get_benchmark_config_with_tags(
         backend_names_with_tags = [b for b in backend_with_wanted_tags]
         if not backend_names_with_tags:
             continue
-        dtype_prefix = f"{dtype[op]}_" if op in dtype and dtype[op] not in SKIP_DTYPE else ""
+        dtype_prefix = (
+            f"{dtype[op]}_" if op in dtype and dtype[op] not in SKIP_DTYPE else ""
+        )
         if per_backend:
             for backend_name in backend_names_with_tags:
                 benchmark_prefix = f"{dtype_prefix}{op}_{backend_name}"
@@ -80,6 +82,7 @@ def get_benchmark_config_with_tags(
                 benchmark_name = f"{benchmark_prefix}_bwd"
                 result_dict[benchmark_name] = {}
                 result_dict[benchmark_name]["args"] = " ".join(
-                    ["--op", op, "--only"] + [",".join(backend_names_with_tags), "--bwd"]
+                    ["--op", op, "--only"]
+                    + [",".join(backend_names_with_tags), "--bwd"]
                 )
     return result_dict

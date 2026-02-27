@@ -1,4 +1,3 @@
-import sys
 import argparse
 import json
 import logging
@@ -12,7 +11,7 @@ from typing import Any, Callable, Dict, List, Optional
 import torch
 import triton
 
-from ..common import setup_tritonbench_cwd, setup_output_dir
+from ..common import setup_output_dir, setup_tritonbench_cwd
 
 setup_tritonbench_cwd()
 
@@ -20,6 +19,7 @@ from tritonbench.utils.parser import get_parser
 
 logger = logging.getLogger(__name__)
 logger.setLevel(logging.INFO)
+
 
 @dataclass
 class MethodStats:
@@ -181,7 +181,13 @@ def benchmark_method(
     sleep_between_tests: float = 0.5,
     verbose: bool = True,
 ) -> MethodStats:
-    stats = MethodStats(method_name=method_name, benchmark_time=0.0, n_tests=n_tests, warmup=warmup, rep=rep)
+    stats = MethodStats(
+        method_name=method_name,
+        benchmark_time=0.0,
+        n_tests=n_tests,
+        warmup=warmup,
+        rep=rep,
+    )
 
     start_ts = time.time_ns()
     for test_idx in range(n_tests):
@@ -308,7 +314,9 @@ def _run(args: argparse.Namespace, tb_args: argparse.Namespace, extra_args: List
     else:
         kernel_fn = bench_fn_factory(*example_inputs)
 
-    operation_name = f"{tb_args.op}_{tb_args.mode}:{backend_name} (input_id={tb_args.input_id})"
+    operation_name = (
+        f"{tb_args.op}_{tb_args.mode}:{backend_name} (input_id={tb_args.input_id})"
+    )
     logger.info(
         f"[timing_accuracy] Device: {device_name}, Op: {tb_args.op}, Backend: {backend_name}, Tests: {args.n_tests}, Warmup: {tb_args.warmup}, Reps: {tb_args.rep}\n"
     )
