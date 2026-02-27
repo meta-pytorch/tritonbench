@@ -69,10 +69,16 @@ def parse_args(args: Optional[List[str]] = None) -> argparse.Namespace:
         help="Run the benchmark after generating the config file",
     )
     parser.add_argument(
-        "--output-dir",
+        "--output",
         type=str,
         default=None,
-        help="Output directory for the generated config file.",
+        help="Output generated config file.",
+    )
+    parser.add_argument(
+        "--num-configs",
+        default=None,
+        type=int,
+        help="Maximum number of configs to generate.",
     )
 
     parsed_args, extra_args = parser.parse_known_args(args)
@@ -99,6 +105,7 @@ def generate_run_config(
     target: str,
     extra_args: List[str],
     separate_backends: bool = False,
+    num_configs: Optional[int] = None,
 ) -> Dict[str, Any]:
     """
     Generate a TRITONBENCH_RUN_CONFIG file from the sweep runner config and target.
@@ -116,11 +123,15 @@ def generate_run_config(
         tags=sweep_runner_config["run_config"]["tags"],
         per_backend=separate_backends,
     )
-    for c in run_config:
+    result_configs = {}
+    for cid, c in enumerate(run_config):
+        if num_configs is not None and cid >= num_configs:
+            break
         per_config_args = ["--launch", f"benchmarks.{target}.run"]
         per_config_args.extend(extra_args)
         run_config[c]["args"] += " " + " ".join(per_config_args)
-    return run_config
+        result_configs[c] = run_config[c].copy()
+    return result_configs
 
 
 def write_run_config(run_config: Dict[str, Any], output_path: str) -> None:
@@ -133,9 +144,10 @@ def run(args: Optional[List[str]] = None) -> None:
     """Main entry point for the sweep runner."""
     parsed_args = parse_args(args)
 
-    if not parsed_args.output_dir:
+    if not parsed_args.output:
+        default_output_name = f"sweep_{parsed_args.target}.yaml"
         timestamp, output_dir = setup_output_dir(bm_name=parsed_args.target)
-        parsed_args.output_dir = output_dir
+        parsed_args.output = output_dir.join(default_output_name)
 
     config = load_config(parsed_args.config_file)
 
@@ -144,27 +156,25 @@ def run(args: Optional[List[str]] = None) -> None:
         target=parsed_args.target,
         extra_args=parsed_args.extra_args,
         separate_backends=parsed_args.separate_backends,
+        num_configs=parsed_args.num_configs,
     )
 
-    output_dir = Path(parsed_args.output_dir)
-    output_dir.mkdir(parents=True, exist_ok=True)
-    output_path = output_dir / "generated_run_config.yaml"
-    write_run_config(run_config, output_path)
-    logger.info(f"Generated config written to: {output_path}")
+    write_run_config(run_config, parsed_args.output)
+    logger.info(f"Generated config written to: {parsed_args.output}")
 
     if not parsed_args.run:
         return
 
     env = os.environ.copy()
-    env["TRITONBENCH_RUN_CONFIG"] = output_path
+    env["TRITONBENCH_RUN_CONFIG"] = parsed_args.output
 
     run_py_path = REPO_PATH / "run.py"
 
     cmd = [sys.executable, str(run_py_path)]
 
-    logger.info(f"Running tritonbench with generated config: {output_path}")
+    logger.info(f"Running tritonbench with generated config: {parsed_args.output}")
     logger.info(f"Command: {' '.join(cmd)}")
-    logger.info(f"TRITONBENCH_RUN_CONFIG={output_path}")
+    logger.info(f"TRITONBENCH_RUN_CONFIG={parsed_args.output}")
 
     subprocess.run(cmd, env=env, cwd=str(REPO_PATH), check=True)
 

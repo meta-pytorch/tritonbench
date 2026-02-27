@@ -1,0 +1,6 @@
+fp16_addmm_triton_addmm_fwd:
+  args: --op addmm --only triton_addmm --launch benchmarks.timing_accuracy.run
+fp16_addmm_triton_addmm_bwd:
+  args: --op addmm --only triton_addmm --bwd --launch benchmarks.timing_accuracy.run
+fp16_addmm_streamk_addmm_fwd:
+  args: --op addmm --only streamk_addmm --launch benchmarks.timing_accuracy.run
