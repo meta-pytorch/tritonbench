@@ -11,6 +11,13 @@ from typing import Generator, List, Optional, Tuple
 
 import torch
 
+try:
+    from tritonbench.utils.fb import attention_shapes as fbcode_attention_shapes
+
+    HAS_FBCODE_ATTENTION_SHAPES = True
+except ImportError:
+    HAS_FBCODE_ATTENTION_SHAPES = False
+
 
 @dataclass
 class AttentionShape:
@@ -386,7 +393,12 @@ def customized_inputs(
     Yields:
         Tuple of (tensors, shape) for each attention shape
     """
-    if custom_shapes_file:
+    if custom_shapes_file == "USE_FBCODE_ATTENTION_SHAPES":
+        if not HAS_FBCODE_ATTENTION_SHAPES:
+            raise ImportError("fbcode attention shapes not available.")
+        shapes_data = getattr(fbcode_attention_shapes, custom_shapes_attr)
+        shapes = _convert_to_attention_shapes(shapes_data)
+    elif custom_shapes_file:
         shapes = load_shapes_from_file(custom_shapes_file, custom_shapes_attr)
     else:
         shapes = ATTENTION_SHAPES
