@@ -80,7 +80,7 @@ HAS_TRITON = False
 HAS_CUTLASS_OR_CK = False
 HAS_CUBLAS = False
 
-from tritonbench.utils.fp8_utils import get_fp8_constants
+from mslk.utils.triton.fp8_utils import get_fp8_constants
 
 try:
     from mslk.gemm.triton.fp8_gemm import matmul_fp8_row as triton_fp8_row
