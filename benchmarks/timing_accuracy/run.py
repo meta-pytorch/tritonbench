@@ -308,7 +308,7 @@ def _run(args: argparse.Namespace, tb_args: argparse.Namespace, extra_args: List
     else:
         kernel_fn = bench_fn_factory(*example_inputs)
 
-    operation_name = f"{tb_args.op}:{backend_name} (input_id={tb_args.input_id})"
+    operation_name = f"{tb_args.op}_{tb_args.mode}:{backend_name} (input_id={tb_args.input_id})"
     logger.info(
         f"[timing_accuracy] Device: {device_name}, Op: {tb_args.op}, Backend: {backend_name}, Tests: {args.n_tests}, Warmup: {tb_args.warmup}, Reps: {tb_args.rep}\n"
     )
