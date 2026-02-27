@@ -103,7 +103,7 @@ jobs:
       - name: Benchmark Triton (Side A)
         run: |
           set -eux
-          CONDA_ENV="${TRITONBENCH_SIDE_A_ENV}" bash .ci/tritonbench/run-benchmark.sh ${{ inputs.benchmark_name }} ${{ inputs.benchmark_args }}
+          bash .ci/tritonbench/run-benchmark.sh ${{ inputs.benchmark_name }} --conda-env ${TRITONBENCH_SIDE_A_ENV}
           mkdir -p benchmark-output
           cp -r ".benchmarks/${{ inputs.benchmark_name }}" benchmark-output/${TRITONBENCH_SIDE_A_ENV}
           sudo rm -rf .benchmarks || true
@@ -117,7 +117,7 @@ jobs:
         if: ${{ inputs.test_type == 'abtest' && inputs.side_b_triton && inputs.side_b_commit }}
         run: |
           set -eux
-          CONDA_ENV="${TRITONBENCH_SIDE_B_ENV}" bash .ci/tritonbench/run-benchmark.sh ${{ inputs.benchmark_name }} ${{ inputs.benchmark_args }}
+          bash .ci/tritonbench/run-benchmark.sh ${{ inputs.benchmark_name }} --conda-env ${TRITONBENCH_SIDE_B_ENV}
           mkdir -p benchmark-output
           cp -r ".benchmarks/${{ inputs.benchmark_name }}" benchmark-output/${TRITONBENCH_SIDE_B_ENV}
           sudo rm -rf .benchmarks || true

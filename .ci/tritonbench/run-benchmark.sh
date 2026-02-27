@@ -14,6 +14,15 @@ fi
 BENCHMARK_NAME=$1
 shift
 
+# Parse arguments
+while [[ "$#" -gt 0 ]]; do
+    case $1 in
+        --conda-env) CONDA_ENV="$2"; shift ;;
+        *) echo "Unknown parameter passed: $1"; usage ;;
+    esac
+    shift
+done
+
 if [ -z "${CONDA_ENV}" ]; then
   echo "ERROR: CONDA_ENV is not set"
   exit 1
@@ -30,4 +39,4 @@ echo "Running ${BENCHMARK_NAME} benchmark under conda env ${CONDA_ENV}"
 
 . "${SETUP_SCRIPT}"
 
-CONDA_ENV=${CONDA_ENV} python -m "benchmarks.${BENCHMARK_NAME}.run" --ci $@
+CONDA_ENV=${CONDA_ENV} python -m "benchmarks.${BENCHMARK_NAME}.run" --ci
