@@ -1,3 +1,4 @@
+import sys
 import argparse
 import json
 import logging
@@ -6,7 +7,7 @@ import statistics
 import sys
 import time
 from dataclasses import dataclass, field
-from typing import Any, Callable, Dict, List
+from typing import Any, Callable, Dict, List, Optional
 
 import torch
 import triton
@@ -15,7 +16,6 @@ from ..common import setup_tritonbench_cwd, setup_output_dir
 
 setup_tritonbench_cwd()
 
-from tritonbench.metadata.query import get_benchmark_config_with_tags
 from tritonbench.utils.parser import get_parser
 
 logger = logging.getLogger(__name__)
@@ -365,12 +365,13 @@ def _run(args: argparse.Namespace, tb_args: argparse.Namespace, extra_args: List
         logger.info(f"Results saved to: {args.output}")
 
 
-def main():
+def run(args: Optional[List[str]]=None):
+    if not args:
+        args = sys.argv[1:]
     parser = argparse.ArgumentParser(
         description="Compare latency noise across benchmarking methods",
         allow_abbrev=False,
     )
-    parser.add_argument("--sweep", action="store_true", help="Sweep over all operators")
     parser.add_argument(
         "--n-tests", type=int, default=10, help="Benchmark runs per method"
     )
@@ -385,32 +386,16 @@ def main():
     parser.add_argument("--output", type=str, default=None, help="Output JSON path")
     parser.add_argument("--quiet", action="store_true")
 
-
     if not torch.cuda.is_available():
         print("ERROR: CUDA is not available!")
         sys.exit(1)
 
     tb_parser = get_parser()
-    args, extra_args = parser.parse_known_args()
-
-    # run all triton operators
-    if args.sweep:
-        timestamp, output_dir = setup_output_dir("timing_accuracy")
-        sweep_configs = get_benchmark_config_with_tags(tags = ["triton"])
-        logger.info(f"Found {len(sweep_configs)} operators to sweep")
-        for config in sweep_configs:
-            args.output = os.path.join(output_dir, f"results_{config}.json")
-            tb_args, extra_args = tb_parser.parse_known_args(sweep_configs[config]["args"].split(" "))
-            # run each backend individually
-            if "," in tb_args.only:
-                for backend in tb_args.only.split(","):
-                    tb_args.only = backend
-                    _run(args, tb_args, extra_args)
-        return 0
+    args, extra_args = parser.parse_known_args(args)
 
     tb_args, extra_args = tb_parser.parse_known_args(extra_args)
     _run(args, tb_args, extra_args)
 
 
 if __name__ == "__main__":
-    main()
+    run()
