@@ -2,11 +2,14 @@
 Get input generator for TritonBench addmm type inputs.
 """
 
+import logging
 from typing import Any, Callable
 
 import torch
 from tritonbench.operator_loader.aten.input_loader import OperatorInputLoader
 from tritonbench.utils.triton_op import PRECISION_DTYPE_MAPPING
+
+logger = logging.getLogger(__name__)
 
 
 class InputLoader(OperatorInputLoader):
@@ -25,12 +28,19 @@ class InputLoader(OperatorInputLoader):
             K = int(entry["K"])
             strides = eval(entry["strides"])
             dtype = entry["dtype"]
-            assert len(strides) == 3, (
-                f"Can only have 3 strides from input, get: {strides}"
-            )
-            assert (
-                len(strides[0]) == 2 and len(strides[1]) == 2 and len(strides[2]) == 2
-            ), f"Can only deal with 2D strides, get: {strides}"
+            if len(strides) != 3:
+                logger.warning(
+                    "Skipping input with %d strides (expected 3): %s",
+                    len(strides),
+                    strides,
+                )
+                continue
+            if len(strides[0]) != 2 or len(strides[1]) != 2 or len(strides[2]) != 2:
+                logger.warning(
+                    "Skipping input with non-2D strides: %s",
+                    strides,
+                )
+                continue
             inputs.append(
                 {
                     "shapes": (M, K, N),
