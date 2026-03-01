@@ -59,10 +59,6 @@ TEST_OPERATORS = (
     else set(list_operators_by_collection(op_collection="default"))
 )
 
-# On B200, filter to only run B200-only operators if specified
-if is_fbcode() and is_blackwell() and B200_ONLY_OPS:
-    TEST_OPERATORS = set(B200_ONLY_OPS) & TEST_OPERATORS
-
 
 def check_ci_output(op):
     from tritonbench.utils.triton_op import (
@@ -139,6 +135,12 @@ def _run_operator_in_task(op: str, args: List[str]):
 
 def make_test(operator):
     def test_case(self):
+        # On B200, skip operators not in B200_ONLY_OPS
+        if is_fbcode() and is_blackwell() and B200_ONLY_OPS:
+            if operator not in B200_ONLY_OPS:
+                self.skipTest(
+                    f"Skipping {operator} on Blackwell: not in B200_ONLY_OPS"
+                )
         # Add `--test-only` to disable Triton autotune in tests
         args = [
             "--op",
