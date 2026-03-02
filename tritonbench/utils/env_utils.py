@@ -4,6 +4,7 @@ Requires PyTorch
 """
 
 import argparse
+import importlib
 import logging
 import os
 import shutil
@@ -36,6 +37,16 @@ AVAILABLE_PRECISIONS = [
 
 def is_fbcode() -> bool:
     return not hasattr(torch.version, "git_version")
+
+
+def is_triton_beta() -> bool:
+    return "fb.beta" in triton.__version__
+
+
+def is_meta_triton() -> bool:
+    tlx_module = "triton.language.extra.tlx"
+    spec = importlib.util.find_spec(tlx_module)
+    return spec is not None
 
 
 def is_cuda() -> bool:
@@ -132,6 +143,15 @@ def supports_tma():
         return torch.cuda.get_device_capability()[0] >= 9
     except Exception:
         return False
+
+
+def triton_support_ws():
+    import triton.language as tl
+
+    HAS_TMA_DESC = "nv_tma_desc_type" in dir(tl)
+    if not hasattr(tl, "async_task"):
+        return False
+    return HAS_TMA_DESC
 
 
 def is_cu130():

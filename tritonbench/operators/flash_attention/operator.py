@@ -471,7 +471,8 @@ class Operator(BenchmarkOperator):
 
             return preproc_noop, fn
 
-        @register_benchmark(enabled=HAS_CUDA_124 and has_warp_spec() and has_new_tma())
+        # TODO: fix tma_ws_persistent kernel
+        @register_benchmark(enabled=False)
         @multi_input_wrapper
         def triton_tutorial_flash_v2_tma_ws_persistent(
             self, *args

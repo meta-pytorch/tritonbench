@@ -1,0 +1,46 @@
+# Test skip list in tritonbench OSS CI
+# Usage:
+#  op: to skip an entire operator
+#    extra_args: <extra args to pass to the test>
+#    extra_bwd_args: <extra args to pass to the backward test>
+#    devices: <list of devices> (options: "cuda", "hip", "h100", "mi350", "b200", default: ["h100", "mi350"])
+#    channels: <list of triton channels> (options: "triton-main", "meta-triton", default: ["triton-main", "meta-triton"])
+# to override the default, specify devices and channels to limit combinations
+# we rely on the code to determine specific backends to skip
+flash_attention:
+  extra_args: --skip pallas,triton_tutorial_flash_v2_tma,triton_tutorial_flash_v2_ws,triton_tutorial_flash_v2_tma_ws,triton_tutorial_flash_v2_tma_ws_persistent
+  extra_bwd_args: --causal
+fp8_attention:
+  extra_args: --skip colfax_fmha,triton_flash_v2_tma
+gemm:
+  # hstu_triton_matmul is internal-only
+  # pt2_cutlass_matmul is not supported on triton main
+  extra_args: --skip hstu_triton_matmul,pt2_cutlass_matmul
+# fb-only ops
+fp8_fused_quant_gemm_rowwise:
+int4_gemm:
+# slow tests
+jagged_layer_norm:
+jagged_mean:
+jagged_softmax:
+jagged_sum:
+# Device specific tests
+blackwell_attentions:
+  devices:
+    - b200
+fp32_to_mx4:
+  devices:
+    - cuda
+mx4_to_fp32:
+  devices:
+    - cuda
+# cpu-op for testing
+test_op:
+# TODO: errors in CI
+## torch.AcceleratorError: CUDA error: unspecified launch failure
+decoding_attention:
+# TODO: MSLK does not work with meta-triton
+# TypeError: failed to specialize argument of type: KernelParamWrapper
+fp8_gemm_rowwise:
+  channels:
+    - triton-main
