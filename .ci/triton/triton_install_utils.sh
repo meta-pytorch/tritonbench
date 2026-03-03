@@ -15,15 +15,27 @@ remove_triton() {
     rm -rf "${TRITON_PKG_DIR}"
 }
 
-checkout_triton() {
+clone_triton() {
     REPO=$1
-    COMMIT=$2
-    TRITON_INSTALL_DIR=$3
-    NIGHTLY=$4
+    TRITON_INSTALL_DIR=$2
     TRITON_INSTALL_DIRNAME=$(basename "${TRITON_INSTALL_DIR}")
     TRITON_INSTALL_BASEDIR=$(dirname "${TRITON_INSTALL_DIR}")
     cd "${TRITON_INSTALL_BASEDIR}"
     git clone "https://github.com/${REPO}.git" "${TRITON_INSTALL_DIRNAME}"
+}
+
+update_triton() {
+    TRITON_INSTALL_DIR=$1
+    cd "${TRITON_INSTALL_DIR}"
+    git checkout main
+    git pull origin main
+    git submodule update --init --recursive
+}
+
+checkout_triton() {
+    COMMIT=$1
+    TRITON_INSTALL_DIR=$2
+    NIGHTLY=$3
     cd "${TRITON_INSTALL_DIR}"
     git checkout "${COMMIT}"
     if [ "${NIGHTLY}" == "1" ]; then

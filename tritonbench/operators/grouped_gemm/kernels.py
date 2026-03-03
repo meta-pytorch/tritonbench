@@ -32,6 +32,7 @@ from typing import Optional
 import torch
 import triton
 import triton.language as tl
+from triton import knobs
 
 try:
     # @manual=//triton:triton
@@ -47,9 +48,17 @@ def is_cuda():
 
 
 def num_sms():
+    return torch.cuda.get_device_properties("cuda").multi_processor_count
+
+
+def is_hip_async_copy_enabled():
     if is_cuda():
-        return torch.cuda.get_device_properties("cuda").multi_processor_count
-    return 148
+        return False
+
+    # default is enabled
+    if knobs.amd.use_async_copy is None:
+        return True
+    return knobs.amd.use_async_copy
 
 
 def torch_dtype_to_triton_dtype(dtype):
@@ -73,7 +82,8 @@ def torch_dtype_to_triton_dtype(dtype):
                 "BLOCK_SIZE_N": BLOCK_N,
                 "BLOCK_SIZE_K": BLOCK_K,
                 "NUM_SMS": num_sms(),
-            }
+            },
+            num_stages=2 if is_hip_async_copy_enabled() else 3,
         )
         for BLOCK_M, BLOCK_N, BLOCK_K in itertools.product([128, 256], repeat=3)
     ],

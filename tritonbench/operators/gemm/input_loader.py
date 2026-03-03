@@ -2,10 +2,13 @@
 Get input generator for TritonBench gemm type inputs.
 """
 
+import logging
 from typing import Any, Callable
 
 from tritonbench.operator_loader.aten.input_loader import OperatorInputLoader
 from tritonbench.utils.triton_op import PRECISION_DTYPE_MAPPING
+
+logger = logging.getLogger(__name__)
 
 
 class InputLoader(OperatorInputLoader):
@@ -24,12 +27,19 @@ class InputLoader(OperatorInputLoader):
             K = int(entry["K"])
             strides = eval(entry["strides"])
             dtype = entry["dtype"]
-            assert len(strides) == 2, (
-                f"Can only have 2 strides from input, get: {strides}"
-            )
-            assert len(strides[0]) == 2 and len(strides[1]) == 2, (
-                f"Can only deal with 2D strides, get: {strides}"
-            )
+            if len(strides) != 2:
+                logger.warning(
+                    "Skipping input with %d strides (expected 2): %s",
+                    len(strides),
+                    strides,
+                )
+                continue
+            if len(strides[0]) != 2 or len(strides[1]) != 2:
+                logger.warning(
+                    "Skipping input with non-2D strides: %s",
+                    strides,
+                )
+                continue
             inputs.append(
                 {
                     "shapes": (M, K, N),

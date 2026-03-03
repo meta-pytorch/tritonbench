@@ -9,7 +9,7 @@ KERNEL_METADATA_PATH = os.path.join(CURRENT_DIR, "oss_cuda_kernels.yaml")
 BACKWARD_METADATA_PATH = os.path.join(CURRENT_DIR, "backward_operators.yaml")
 DTYPE_METADATA_PATH = os.path.join(CURRENT_DIR, "dtype_operators.yaml")
 
-SKIP_DTYPE = ["bypass", "fp8", "int4"]
+SKIP_DTYPE = ["bypass", "fp8", "int4", "bf16xint16"]
 
 
 def get_benchmark_dtype(op_name: str, runtime_dtype: str | None = None):
@@ -24,6 +24,7 @@ def get_benchmark_config_with_tags(
     tags: List[str],
     runtime_metadata: Optional[Dict[str, Any]] = None,
     runtime_only: bool = False,
+    per_backend: bool = False,
 ) -> Dict[str, Any]:
     """Return benchmark config dict with any of these tags"""
     if runtime_only:
@@ -53,17 +54,35 @@ def get_benchmark_config_with_tags(
         backend_names_with_tags = [b for b in backend_with_wanted_tags]
         if not backend_names_with_tags:
             continue
-        dtype_prefix = dtype[op] if op in dtype and dtype[op] not in SKIP_DTYPE else ""
-        benchmark_prefix = f"{dtype_prefix}_{op}"
-        benchmark_name = f"{benchmark_prefix}_fwd"
-        result_dict[benchmark_name] = {}
-        result_dict[benchmark_name]["args"] = " ".join(
-            ["--op", op, "--only"] + [",".join(backend_names_with_tags)]
+        dtype_prefix = (
+            f"{dtype[op]}_" if op in dtype and dtype[op] not in SKIP_DTYPE else ""
         )
-        if op in backwards:
-            benchmark_name = f"{benchmark_prefix}_bwd"
+        if per_backend:
+            for backend_name in backend_names_with_tags:
+                benchmark_prefix = f"{dtype_prefix}{op}_{backend_name}"
+                benchmark_name = f"{benchmark_prefix}_fwd"
+                result_dict[benchmark_name] = {}
+                result_dict[benchmark_name]["args"] = " ".join(
+                    ["--op", op, "--only", backend_name]
+                )
+                if op in backwards:
+                    benchmark_name = f"{benchmark_prefix}_bwd"
+                    result_dict[benchmark_name] = {}
+                    result_dict[benchmark_name]["args"] = " ".join(
+                        ["--op", op, "--only", backend_name, "--bwd"]
+                    )
+        else:
+            benchmark_prefix = f"{dtype_prefix}_{op}"
+            benchmark_name = f"{benchmark_prefix}_fwd"
             result_dict[benchmark_name] = {}
             result_dict[benchmark_name]["args"] = " ".join(
-                ["--op", op, "--only"] + [",".join(backend_names_with_tags), "--bwd"]
+                ["--op", op, "--only"] + [",".join(backend_names_with_tags)]
             )
+            if op in backwards:
+                benchmark_name = f"{benchmark_prefix}_bwd"
+                result_dict[benchmark_name] = {}
+                result_dict[benchmark_name]["args"] = " ".join(
+                    ["--op", op, "--only"]
+                    + [",".join(backend_names_with_tags), "--bwd"]
+                )
     return result_dict

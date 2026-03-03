@@ -112,6 +112,23 @@ def matmul_get_configs(pre_hook=None):
         ]
 
 
+def _use_meta_ws():
+    """Check if the Meta warp specialization pipeline is enabled."""
+    try:
+        return triton.knobs.nvidia.use_meta_ws
+    except AttributeError:
+        return False
+
+
+def _prune_warp_specialize_configs(configs, named_args, **kwargs):
+    """When warp specialization is enabled with the Meta WS pipeline,
+    only num_warps=4 is supported."""
+    ws = kwargs.get("WARP_SPECIALIZE", False)
+    if not ws or not _use_meta_ws():
+        return configs
+    return [c for c in configs if c.num_warps == 4]
+
+
 def matmul_tma_set_block_size_hook(nargs):
     EPILOGUE_SUBTILE = nargs.get("EPILOGUE_SUBTILE", False)
     BLOCK_M = nargs["BLOCK_SIZE_M"]
@@ -136,6 +153,7 @@ def matmul_tma_set_block_size_hook(nargs):
 @triton.autotune(
     configs=matmul_get_configs(pre_hook=matmul_tma_set_block_size_hook),
     key=["M", "N", "K", "WARP_SPECIALIZE"],
+    prune_configs_by={"early_config_prune": _prune_warp_specialize_configs},
 )
 @triton.jit(launch_metadata=_matmul_launch_metadata)
 def matmul_kernel_tma(
@@ -207,9 +225,16 @@ def blackwell_matmul_tma(a, b, warp_specialize: bool):
     # 1. Load in the K stride 1 (2 and 4)
     # 2. Load in the N stride 1 (1 and 3)
     transpose_a = a.stride()[-1] != 1
-    transpose_b = (a.shape[1] != b.shape[1] and b.stride()[-1] != 1) or (
-        a.shape[1] == b.shape[1] and b.stride()[-1] == 1
-    )
+    # Determine if b needs transposed TMA descriptor.
+    # TMA requires the last descriptor dimension to be contiguous (stride 1).
+    # If b's first physical dim is contiguous (column-major), we need transpose_b=True
+    # so the descriptor shape becomes [N, K] with K (contiguous) as the last dim.
+    if a.shape[1] != b.shape[1]:
+        # K != N: can infer layout from shape
+        transpose_b = b.stride()[-1] != 1
+    else:
+        # K == N: shapes are ambiguous, use stride to determine layout
+        transpose_b = b.stride()[0] == 1 and b.stride()[-1] != 1
     assert a.dtype == b.dtype, "Incompatible dtypes"
 
     M, K = a.shape
@@ -279,18 +304,21 @@ def matmul_tma_persistent_get_configs(pre_hook=None):
             new_kwargs["BLOCK_SIZE_K"] = new_kwargs.pop("BLOCK_K")
             new_kwargs["GROUP_SIZE_M"] = new_kwargs.pop("GROUP_M")
             for SUBTILE in [True, False]:
-                configs.append(
-                    triton.Config(
-                        {
-                            "EPILOGUE_SUBTILE": SUBTILE,
-                            **new_kwargs,
-                        },
-                        pre_hook=pre_hook,
-                        num_stages=config.num_stages,
-                        num_ctas=config.num_ctas,
-                        num_warps=config.num_warps,
+                for FLATTEN in [True, False]:
+                    kwargs = {
+                        "EPILOGUE_SUBTILE": SUBTILE,
+                        **new_kwargs,
+                    }
+                    kwargs["FLATTEN"] = FLATTEN
+                    configs.append(
+                        triton.Config(
+                            kwargs,
+                            pre_hook=pre_hook,
+                            num_stages=config.num_stages,
+                            num_ctas=config.num_ctas,
+                            num_warps=config.num_warps,
+                        )
                     )
-                )
         return configs
     else:
         return [
@@ -301,6 +329,7 @@ def matmul_tma_persistent_get_configs(pre_hook=None):
                     "BLOCK_SIZE_K": BK,
                     "GROUP_SIZE_M": 8,
                     "EPILOGUE_SUBTILE": SUBTILE,
+                    "FLATTEN": FLATTEN,
                 },
                 num_stages=s,
                 num_warps=w,
@@ -312,12 +341,35 @@ def matmul_tma_persistent_get_configs(pre_hook=None):
             for s in tma_persistent_s_range  #
             for w in [4, 8]  #
             for SUBTILE in [True, False]  #
+            for FLATTEN in [True, False]  #
         ]
+
+
+def _prune_tma_persistent_configs(configs, named_args, **kwargs):
+    """Prune configs for the TMA persistent kernel based on FLATTEN/WS rules.
+
+    - WARP_SPECIALIZE=False: require FLATTEN=False
+    - WARP_SPECIALIZE=True + meta WS: any FLATTEN allowed
+    - WARP_SPECIALIZE=True + no meta WS: require FLATTEN=True
+    """
+    ws = kwargs.get("WARP_SPECIALIZE", False)
+    kept = []
+    for c in configs:
+        flatten = c.kwargs.get("FLATTEN", False)
+        if not ws:
+            if flatten:
+                continue
+        elif not _use_meta_ws():
+            if not flatten:
+                continue
+        kept.append(c)
+    return _prune_warp_specialize_configs(kept, named_args, **kwargs)
 
 
 @triton.autotune(
     configs=matmul_tma_persistent_get_configs(pre_hook=matmul_tma_set_block_size_hook),
     key=["M", "N", "K", "WARP_SPECIALIZE"],
+    prune_configs_by={"early_config_prune": _prune_tma_persistent_configs},
 )
 @triton.jit(launch_metadata=_matmul_launch_metadata)
 def matmul_kernel_tma_persistent(
@@ -334,6 +386,7 @@ def matmul_kernel_tma_persistent(
     EPILOGUE_SUBTILE: tl.constexpr,  #
     NUM_SMS: tl.constexpr,  #
     WARP_SPECIALIZE: tl.constexpr,  #
+    FLATTEN: tl.constexpr,  #
     DTYPE: tl.constexpr,
     TRANSPOSE_A: tl.constexpr,
     TRANSPOSE_B: tl.constexpr,
@@ -352,7 +405,7 @@ def matmul_kernel_tma_persistent(
     # FIXME: This only works on Blackwell right now. On older GPUs, this will
     # use software pipelining.
     for tile_id in tl.range(
-        start_pid, num_tiles, NUM_SMS, flatten=True, warp_specialize=WARP_SPECIALIZE
+        start_pid, num_tiles, NUM_SMS, flatten=FLATTEN, warp_specialize=WARP_SPECIALIZE
     ):
         pid_m, pid_n = _compute_pid(
             tile_id, num_pid_in_group, num_pid_m, GROUP_SIZE_M, NUM_SMS
@@ -412,9 +465,16 @@ def blackwell_matmul_tma_persistent(a, b, warp_specialize: bool):
     # 1. Load in the K stride 1 (2 and 4)
     # 2. Load in the N stride 1 (1 and 3)
     transpose_a = a.stride()[-1] != 1
-    transpose_b = (a.shape[1] != b.shape[1] and b.stride()[-1] != 1) or (
-        a.shape[1] == b.shape[1] and b.stride()[-1] == 1
-    )
+    # Determine if b needs transposed TMA descriptor.
+    # TMA requires the last descriptor dimension to be contiguous (stride 1).
+    # If b's first physical dim is contiguous (column-major), we need transpose_b=True
+    # so the descriptor shape becomes [N, K] with K (contiguous) as the last dim.
+    if a.shape[1] != b.shape[1]:
+        # K != N: can infer layout from shape
+        transpose_b = b.stride()[-1] != 1
+    else:
+        # K == N: shapes are ambiguous, use stride to determine layout
+        transpose_b = b.stride()[0] == 1 and b.stride()[-1] != 1
     assert a.dtype == b.dtype, "Incompatible dtypes"
 
     M, K = a.shape
@@ -471,20 +531,10 @@ def blackwell_matmul_tma_persistent(a, b, warp_specialize: bool):
     return c
 
 
-def prune_invalid_configs(configs, named_args, **kwargs):
-    FLATTEN = kwargs["FLATTEN"]
-    # Filter out configs where EPILOGUE_SUBTILE is true and HOPPER is true
-    return [
-        conf
-        for conf in configs
-        if not (conf.kwargs.get("EPILOGUE_SUBTILE", True) and FLATTEN is False)
-    ]
-
-
 @triton.autotune(
     configs=matmul_tma_persistent_get_configs(),
     key=["M", "N", "K", "WARP_SPECIALIZE", "FLATTEN"],
-    prune_configs_by={"early_config_prune": prune_invalid_configs},
+    prune_configs_by={"early_config_prune": _prune_tma_persistent_configs},
 )
 @triton.jit(launch_metadata=_matmul_launch_metadata)
 def matmul_kernel_descriptor_persistent(
@@ -616,9 +666,16 @@ def blackwell_matmul_descriptor_persistent(a, b, warp_specialize: bool):
     # 1. Load in the K stride 1 (2 and 4)
     # 2. Load in the N stride 1 (1 and 3)
     transpose_a = a.stride()[-1] != 1
-    transpose_b = (a.shape[1] != b.shape[1] and b.stride()[-1] != 1) or (
-        a.shape[1] == b.shape[1] and b.stride()[-1] == 1
-    )
+    # Determine if b needs transposed TMA descriptor.
+    # TMA requires the last descriptor dimension to be contiguous (stride 1).
+    # If b's first physical dim is contiguous (column-major), we need transpose_b=True
+    # so the descriptor shape becomes [N, K] with K (contiguous) as the last dim.
+    if a.shape[1] != b.shape[1]:
+        # K != N: can infer layout from shape
+        transpose_b = b.stride()[-1] != 1
+    else:
+        # K == N: shapes are ambiguous, use stride to determine layout
+        transpose_b = b.stride()[0] == 1 and b.stride()[-1] != 1
     assert a.dtype == b.dtype, "Incompatible dtypes"
 
     M, K = a.shape
@@ -668,8 +725,6 @@ def blackwell_matmul_descriptor_persistent(a, b, warp_specialize: bool):
         c_stride,  #
         NUM_SMS=NUM_SMS,  #
         WARP_SPECIALIZE=warp_specialize,  #
-        # Note: This assumes blackwell.
-        FLATTEN=True,
         TRANSPOSE_A=transpose_a,
         TRANSPOSE_B=transpose_b,
     )

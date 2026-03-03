@@ -141,11 +141,8 @@ def _matmul_partition_k(
     # `a_ptrs` is a block of [BLOCK_SIZE_M, BLOCK_SIZE_K] pointers
     # `b_ptrs` is a block of [BLOCK_SIZE_K, BLOCK_SIZE_N] pointers
     # See above `Pointer Arithmetic` section for details
-    offs_am = (pid_m * BLOCK_SIZE_M + tl.arange(0, BLOCK_SIZE_M)) % M
-    offs_bn = (pid_n * BLOCK_SIZE_N + tl.arange(0, BLOCK_SIZE_N)) % N
-    offs_k = (pid_pk * BLOCK_SIZE_K + tl.arange(0, BLOCK_SIZE_K)) % K
-    a_ptrs = a_ptr + (offs_am[:, None] * stride_am + offs_k[None, :] * stride_ak)
-    b_ptrs = b_ptr + (offs_k[:, None] * stride_bk + offs_bn[None, :] * stride_bn)
+    offs_am = pid_m * BLOCK_SIZE_M + tl.arange(0, BLOCK_SIZE_M)
+    offs_bn = pid_n * BLOCK_SIZE_N + tl.arange(0, BLOCK_SIZE_N)
 
     # -----------------------------------------------------------
     # Iterate to compute a block of the C matrix.
@@ -156,13 +153,15 @@ def _matmul_partition_k(
     for k in range(0, tl.cdiv(PK_SIZE, BLOCK_SIZE_K)):
         # Load the next block of A and B, generate a mask by checking the K dimension.
         # If it is out of bounds, set it to 0.
-        # a = tl.load(a_ptrs, mask=offs_k[None, :] < K - k * BLOCK_SIZE_K, other=0.0)
-        # b = tl.load(b_ptrs, mask=offs_k[:, None] < K - k * BLOCK_SIZE_K, other=0.0)
-        a = tl.load(a_ptrs)
-        b = tl.load(b_ptrs)
+        offs_k = pid_pk * PK_SIZE + k * BLOCK_SIZE_K + tl.arange(0, BLOCK_SIZE_K)
+        a_ptrs = a_ptr + (offs_am[:, None] * stride_am + offs_k[None, :] * stride_ak)
+        b_ptrs = b_ptr + (offs_k[:, None] * stride_bk + offs_bn[None, :] * stride_bn)
+        k_mask = offs_k < K
+        a_mask = (offs_am[:, None] < M) & k_mask[None, :]
+        b_mask = k_mask[:, None] & (offs_bn[None, :] < N)
+        a = tl.load(a_ptrs, mask=a_mask, other=0.0)
+        b = tl.load(b_ptrs, mask=b_mask, other=0.0)
         accumulator += tl.dot(a, b)
-        a_ptrs += PK_SIZE * stride_ak
-        b_ptrs += PK_SIZE * stride_bk
 
     offs_cm = pid_m * BLOCK_SIZE_M + tl.arange(0, BLOCK_SIZE_M)
     offs_cn = pid_n * BLOCK_SIZE_N + tl.arange(0, BLOCK_SIZE_N)
@@ -173,7 +172,8 @@ def _matmul_partition_k(
         + stride_cb_n * offs_cn[None, :, None]
         + stride_cb_k * offs_ck[None, None, :]
     )
-    tl.store(c_buf_ptrs, accumulator[:, :, None])
+    c_mask = (offs_cm[:, None] < M) & (offs_cn[None, :] < N)
+    tl.store(c_buf_ptrs, accumulator[:, :, None], mask=c_mask[:, :, None])
 
 
 @triton.jit
@@ -192,24 +192,24 @@ def _reduce(
     BLOCK_SIZE_N: tl.constexpr,
 ):
     pid = tl.program_id(0)
-    num_pid_m = tl.cdiv(M, BLOCK_SIZE_M)
     num_pid_n = tl.cdiv(N, BLOCK_SIZE_N)
-    pid_m = pid // num_pid_m
+    pid_m = pid // num_pid_n
     pid_n = pid % num_pid_n
 
-    offs_m = (pid_m * BLOCK_SIZE_M + tl.arange(0, BLOCK_SIZE_M)) % M
-    offs_n = (pid_n * BLOCK_SIZE_N + tl.arange(0, BLOCK_SIZE_N)) % N
+    offs_m = pid_m * BLOCK_SIZE_M + tl.arange(0, BLOCK_SIZE_M)
+    offs_n = pid_n * BLOCK_SIZE_N + tl.arange(0, BLOCK_SIZE_N)
     offs_k = tl.arange(0, PK)
     c_buf_ptrs = c_buf_ptr + (
         offs_m[:, None, None] * stride_cb_m
         + offs_n[None, :, None] * stride_cb_n
         + offs_k[None, None, :] * stride_cb_k
     )
-    c_buf = tl.load(c_buf_ptrs)
+    c_mask = (offs_m[:, None] < M) & (offs_n[None, :] < N)
+    c_buf = tl.load(c_buf_ptrs, mask=c_mask[:, :, None], other=0.0)
     reduced_k = tl.sum(c_buf, axis=2)
 
     c_ptrs = c_ptr + (offs_m[:, None] * stride_cm + offs_n[None, :] * stride_cn)
-    tl.store(c_ptrs, reduced_k)
+    tl.store(c_ptrs, reduced_k, mask=c_mask)
 
 
 def torch_reduction(c_buf, a):
@@ -219,19 +219,25 @@ def torch_reduction(c_buf, a):
 compiled_reduction = torch.compile(torch_reduction)
 
 
+def _select_partition_k(m: int, n: int, requested: int = 32) -> int:
+    # Cap partitionK to avoid oversized c_buf and 32-bit index overflow
+    # when M*N is large.
+    max_partition_k = max(1, (2**31 - 1) // (m * n))
+    return min(requested, max_partition_k)
+
+
 def _matmul_partition_k_impl(a, b, triton_reduce=False):
     # Check constraints.
     assert a.shape[1] == b.shape[0], "Incompatible dimensions"
     assert a.is_contiguous(), "Matrix A must be contiguous"
     assert b.is_contiguous(), "Matrix B must be contiguous"
 
-    # TODO: Tune on this parameter, currently 32 is best performing
-    partitionK = 32
-
     M, K = a.shape
     K, N = b.shape
+    # TODO: Tune on this parameter, currently 32 is best performing
+    partitionK = _select_partition_k(M, N, requested=32)
     # Allocates output.
-    partitionK_SIZE = K // partitionK
+    partitionK_SIZE = (K + partitionK - 1) // partitionK
 
     # Enforce accumulation in float32 for accuracy
     c_buf = torch.empty((M, N, partitionK), device=a.device, dtype=torch.float32)

@@ -1,13 +1,24 @@
 import argparse
 import json
+import logging
+import os
 import statistics
 import sys
 import time
 from dataclasses import dataclass, field
-from typing import Any, Callable, Dict, List
+from typing import Any, Callable, Dict, List, Optional
 
 import torch
 import triton
+
+from ..common import setup_output_dir, setup_tritonbench_cwd
+
+setup_tritonbench_cwd()
+
+from tritonbench.utils.parser import get_parser
+
+logger = logging.getLogger(__name__)
+logger.setLevel(logging.INFO)
 
 
 @dataclass
@@ -16,7 +27,9 @@ class MethodStats:
 
     method_name: str
     n_tests: int
-    reps_per_test: int
+    warmup: int
+    rep: int
+    benchmark_time: float
     intra_test_medians: List[float] = field(default_factory=list)
     intra_test_stds: List[float] = field(default_factory=list)
     intra_test_cvs: List[float] = field(default_factory=list)
@@ -61,7 +74,8 @@ class MethodStats:
         return {
             "method_name": self.method_name,
             "n_tests": self.n_tests,
-            "reps_per_test": self.reps_per_test,
+            "warmup": self.warmup,
+            "rep": self.rep,
             "intra_test": {
                 "avg_median_ms": statistics.mean(self.intra_test_medians)
                 if self.intra_test_medians
@@ -167,11 +181,18 @@ def benchmark_method(
     sleep_between_tests: float = 0.5,
     verbose: bool = True,
 ) -> MethodStats:
-    stats = MethodStats(method_name=method_name, n_tests=n_tests, reps_per_test=rep)
+    stats = MethodStats(
+        method_name=method_name,
+        benchmark_time=0.0,
+        n_tests=n_tests,
+        warmup=warmup,
+        rep=rep,
+    )
 
+    start_ts = time.time_ns()
     for test_idx in range(n_tests):
         if verbose:
-            print(f"  Test {test_idx + 1}/{n_tests}...", end=" ", flush=True)
+            logger.info(f"  Testing {test_idx + 1}/{n_tests}...")
 
         if test_idx > 0 and sleep_between_tests > 0:
             time.sleep(sleep_between_tests)
@@ -179,7 +200,7 @@ def benchmark_method(
         try:
             samples = method_fn(kernel_fn, warmup=warmup, rep=rep)
             if not samples:
-                print("WARNING: No samples returned!")
+                logger.warn("WARNING: No samples returned!")
                 continue
 
             median = statistics.median(samples)
@@ -195,15 +216,17 @@ def benchmark_method(
             stats.all_samples.append(samples)
 
             if verbose:
-                print(
+                logger.info(
                     f"median={median:.4f}ms, mean={mean:.4f}ms, std={std:.4f}ms, cv={cv:.4f}"
                 )
 
         except Exception as e:
-            print(f"ERROR: {e}")
+            logger.error(f"ERROR: {e}")
             import traceback
 
             traceback.print_exc()
+    end_ts = time.time_ns()
+    stats.benchmark_time = (end_ts - start_ts) / 1e9
 
     return stats
 
@@ -213,13 +236,14 @@ def print_summary_table(results: Dict[str, MethodStats], operation_name: str):
     print(f"SUMMARY: Latency Noise Comparison for '{operation_name}'")
     print("=" * 120)
 
-    header = f"{'Method':<25} | {'Min (ms)':<10} | {'Median (ms)':<12} | {'Intra-Std (ms)':<14} | {'Intra-CV':<10} | {'Inter-CV':<10} | {'Inter-Std (ms)':<14}"
+    header = f"{'Method':<25} | {'Benchmark Time (s)':<25} | {'Min (ms)':<10} | {'Median (ms)':<12} | {'Intra-Std (ms)':<14} | {'Intra-CV':<10} | {'Inter-CV':<10} | {'Inter-Std (ms)':<14}"
     print(header)
     print("-" * 120)
 
     for method_name, stats in sorted(results.items(), key=lambda x: x[1].inter_test_cv):
         print(
             f"{method_name:<25} | "
+            f"{stats.benchmark_time:<10.1f} | "
             f"{stats.inter_test_min:<10.4f} | "
             f"{stats.inter_test_median:<12.4f} | "
             f"{stats.avg_intra_test_std:<14.4f} | "
@@ -234,88 +258,52 @@ def print_summary_table(results: Dict[str, MethodStats], operation_name: str):
     )
 
 
-def main():
-    parser = argparse.ArgumentParser(
-        description="Compare latency noise across benchmarking methods",
-        allow_abbrev=False,
-    )
-
-    parser.add_argument("--op", type=str, required=True, help="TritonBench operator")
-    parser.add_argument(
-        "--only", type=str, default=None, help="Kernel implementation(s)"
-    )
-    parser.add_argument("--input-id", type=str, default="0", help="Input config ID")
-    parser.add_argument(
-        "--mode", choices=["fwd", "bwd", "fwd_bwd", "fwd_no_grad"], default="fwd"
-    )
-    parser.add_argument("--precision", type=str, default="fp16")
-    parser.add_argument(
-        "--n-tests", type=int, default=10, help="Benchmark runs per method"
-    )
-    parser.add_argument("--reps-per-test", type=int, default=100, help="Reps per run")
-    parser.add_argument("--warmup", type=int, default=25, help="Warmup (ms)")
-    parser.add_argument("--sleep-between-tests", type=float, default=0.5)
-    parser.add_argument(
-        "--bench-methods",
-        type=str,
-        default="all",
-        dest="methods",
-        help=f"Methods: {','.join(BENCHMARK_METHODS.keys())},all",
-    )
-    parser.add_argument("--output", type=str, default=None, help="Output JSON path")
-    parser.add_argument("--quiet", action="store_true")
-
-    args, extra_args = parser.parse_known_args()
-
-    if not torch.cuda.is_available():
-        print("ERROR: CUDA is not available!")
-        sys.exit(1)
-
+def _run(args: argparse.Namespace, tb_args: argparse.Namespace, extra_args: List[str]):
     device_name = torch.cuda.get_device_name()
-    print(f"\nLoading operator: {args.op}")
+    logger.info(f"Loading operator: {tb_args.op}")
 
     # Use existing tritonbench infrastructure to load operator
     from tritonbench.utils.run_utils import load_operator_by_args
 
     tb_arg_list = [
         "--op",
-        args.op,
+        tb_args.op,
         "--mode",
-        args.mode,
+        tb_args.mode,
         "--precision",
-        args.precision,
+        tb_args.precision,
         "--device",
-        "cuda",
+        tb_args.device,
         "--input-id",
-        args.input_id,
+        tb_args.input_id,
         "--num-inputs",
         "1",
-        "--test-only",
     ]
-    if args.only:
-        tb_arg_list.extend(["--only", args.only])
+    if tb_args.only:
+        tb_arg_list.extend(["--only", tb_args.only])
     tb_arg_list.extend(extra_args)
 
     opbench = load_operator_by_args(tb_arg_list)
     opbench.example_inputs = opbench.get_example_inputs()
 
     if opbench.example_inputs is None:
-        print(f"ERROR: No example inputs for operator '{args.op}'")
+        logger.error(f"ERROR: No example inputs for operator '{args.op}'")
         sys.exit(1)
 
     # Get the benchmark function
-    if args.only:
-        backend_name = args.only.split(",")[0]
+    if tb_args.only:
+        assert "," not in tb_args.only, "ERROR: Only one backend can be specified."
+        backend_name = tb_args.only
         bench_fn_factory = getattr(opbench, backend_name, None)
         if bench_fn_factory is None:
-            print(f"ERROR: Backend '{backend_name}' not found")
+            logger.error(f"ERROR: Backend '{backend_name}' not found")
             sys.exit(1)
     else:
         from tritonbench.utils.triton_op import REGISTERED_BENCHMARKS
 
         registered = REGISTERED_BENCHMARKS.get(opbench.name, {})
         if not registered:
-            print(f"ERROR: No benchmarks registered for '{args.op}'")
+            logger.error(f"ERROR: No benchmarks registered for '{args.op}'")
             sys.exit(1)
         backend_name = list(registered.keys())[0]
         bench_fn_factory = getattr(opbench, backend_name)
@@ -326,9 +314,11 @@ def main():
     else:
         kernel_fn = bench_fn_factory(*example_inputs)
 
-    operation_name = f"{args.op}:{backend_name} (input_id={args.input_id})"
-    print(
-        f"Device: {device_name}, Backend: {backend_name}, Tests: {args.n_tests}, Reps: {args.reps_per_test}\n"
+    operation_name = (
+        f"{tb_args.op}_{tb_args.mode}:{backend_name} (input_id={tb_args.input_id})"
+    )
+    logger.info(
+        f"[timing_accuracy] Device: {device_name}, Op: {tb_args.op}, Backend: {backend_name}, Tests: {args.n_tests}, Warmup: {tb_args.warmup}, Reps: {tb_args.rep}\n"
     )
 
     # Determine methods to run
@@ -338,30 +328,24 @@ def main():
         methods_to_run = [m.strip() for m in args.methods.split(",")]
         for m in methods_to_run:
             if m not in BENCHMARK_METHODS:
-                print(
+                logger.error(
                     f"ERROR: Unknown method '{m}'. Available: {', '.join(BENCHMARK_METHODS.keys())}"
                 )
                 sys.exit(1)
-
-    # Warmup
-    print("GPU warmup...")
-    for _ in range(10):
-        kernel_fn()
-    torch.cuda.synchronize()
 
     # Run benchmarks
     results: Dict[str, MethodStats] = {}
     for method_key in methods_to_run:
         method_display_name, method_fn = BENCHMARK_METHODS[method_key]
-        print(f"\n{'=' * 60}\nBenchmarking: {method_display_name}\n{'=' * 60}")
+        logger.info(f"\n{'=' * 60}\nBenchmarking: {method_display_name}\n{'=' * 60}")
 
         stats = benchmark_method(
             method_name=method_display_name,
             method_fn=method_fn,
             kernel_fn=kernel_fn,
             n_tests=args.n_tests,
-            warmup=args.warmup,
-            rep=args.reps_per_test,
+            warmup=tb_args.warmup,
+            rep=tb_args.rep,
             sleep_between_tests=args.sleep_between_tests,
             verbose=not args.quiet,
         )
@@ -369,25 +353,63 @@ def main():
 
     print_summary_table(results, operation_name)
 
-    if args.output:
+    if args.dump_json or args.output:
+        if not args.output:
+            timestamp, output_dir = setup_output_dir(bm_name="timing_accuracy")
+            args.output = os.path.join(output_dir, f"{operation_name}.json")
         output_data = {
             "config": {
                 "device": device_name,
-                "operator": args.op,
+                "operator": tb_args.op,
                 "backend": backend_name,
-                "input_id": args.input_id,
-                "mode": args.mode,
-                "precision": args.precision,
+                "input_id": tb_args.input_id,
+                "mode": tb_args.mode,
+                "precision": tb_args.precision,
                 "n_tests": args.n_tests,
-                "reps_per_test": args.reps_per_test,
-                "warmup": args.warmup,
+                "rep": tb_args.rep,
+                "warmup": tb_args.warmup,
             },
             "results": {name: stats.to_dict() for name, stats in results.items()},
         }
         with open(args.output, "w") as f:
             json.dump(output_data, f, indent=2)
-        print(f"Results saved to: {args.output}")
+        logger.info(f"Results saved to: {args.output}")
+
+
+def run(args: Optional[List[str]] = None):
+    if not args:
+        args = sys.argv[1:]
+    parser = argparse.ArgumentParser(
+        description="Compare latency noise across benchmarking methods",
+        allow_abbrev=False,
+    )
+    parser.add_argument(
+        "--n-tests", type=int, default=10, help="Benchmark runs per method"
+    )
+    parser.add_argument("--sleep-between-tests", type=float, default=0.5)
+    parser.add_argument(
+        "--bench-methods",
+        type=str,
+        default="all",
+        dest="methods",
+        help=f"Methods: {','.join(BENCHMARK_METHODS.keys())},all",
+    )
+    parser.add_argument(
+        "--dump-json", action="store_true", help="Output results as JSON"
+    )
+    parser.add_argument("--output", type=str, default=None, help="Output JSON path")
+    parser.add_argument("--quiet", action="store_true")
+
+    if not torch.cuda.is_available():
+        print("ERROR: CUDA is not available!")
+        sys.exit(1)
+
+    tb_parser = get_parser()
+    args, extra_args = parser.parse_known_args(args)
+
+    tb_args, extra_args = tb_parser.parse_known_args(extra_args)
+    _run(args, tb_args, extra_args)
 
 
 if __name__ == "__main__":
-    main()
+    run()

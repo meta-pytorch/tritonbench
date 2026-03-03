@@ -95,15 +95,14 @@ jobs:
           CONDA_ENV=${TRITONBENCH_SIDE_A_ENV} . "${SETUP_SCRIPT}"
           uv pip install -r .ci/upload/requirements.txt
       - name: Compile Triton side A (On Demand)
-        if: ${{ inputs.side_a_triton && inputs.side_a_commit }}
+        if: ${{ inputs.test_type != 'periodic' }}
         run: |
           set -eux
           bash ./.ci/triton/install.sh --repo ${{ inputs.side_a_triton }} --commit ${{ inputs.side_a_commit }} --side a
-          export 'TRITONBENCH_SIDE_A_ENV="${{ env.TRITONBENCH_SIDE_A_ENV }}"' >> ${GITHUB_ENV}
+          export 'TRITONBENCH_SIDE_A_ENV="triton-side-a"' >> ${GITHUB_ENV}
       - name: Benchmark Triton (Side A)
         run: |
           set -eux
-          CONDA_ENV=${TRITONBENCH_SIDE_A_ENV} . "${SETUP_SCRIPT}"
           bash .ci/tritonbench/run-benchmark.sh ${{ inputs.benchmark_name }} --conda-env ${TRITONBENCH_SIDE_A_ENV}
           mkdir -p benchmark-output
           cp -r ".benchmarks/${{ inputs.benchmark_name }}" benchmark-output/${TRITONBENCH_SIDE_A_ENV}
@@ -118,7 +117,6 @@ jobs:
         if: ${{ inputs.test_type == 'abtest' && inputs.side_b_triton && inputs.side_b_commit }}
         run: |
           set -eux
-          CONDA_ENV=${TRITONBENCH_SIDE_B_ENV} . "${SETUP_SCRIPT}"
           bash .ci/tritonbench/run-benchmark.sh ${{ inputs.benchmark_name }} --conda-env ${TRITONBENCH_SIDE_B_ENV}
           mkdir -p benchmark-output
           cp -r ".benchmarks/${{ inputs.benchmark_name }}" benchmark-output/${TRITONBENCH_SIDE_B_ENV}

@@ -33,7 +33,6 @@ if has_tlx():
     from triton.language.extra.tlx.tutorials.blackwell_gemm_ws import (
         matmul as _tlx_matmul_ws,
     )
-    from tritonbench.operators.gemm.tlx_matmul import tlx_matmul as _tlx_matmul
 else:
 
     def _tlx_matmul_clc(*args, **kwargs):
@@ -46,9 +45,6 @@ else:
         raise RuntimeError("TLX not available in this Triton version")
 
     def _tlx_matmul_pipelined(*args, **kwargs):
-        raise RuntimeError("TLX not available in this Triton version")
-
-    def _tlx_matmul(*args, **kwargs):
         raise RuntimeError("TLX not available in this Triton version")
 
 
@@ -176,6 +172,27 @@ def set_env_variable(key, value):
             del os.environ[key]
 
 
+def parse_shapes(shapes_str: str) -> List[Tuple[int, int, int, Optional[int]]]:
+    """Parse shapes string in format 'MxNxK,MxNxK,...' or 'M_N_K,M_N_K,...'"""
+    shapes = []
+    # Split by comma to get individual shapes
+    for shape_str in shapes_str.split(","):
+        shape_str = shape_str.strip()
+        if not shape_str:
+            continue
+        # Try different separators: 'x', 'X', '_'
+        if "x" in shape_str.lower():
+            parts = shape_str.lower().split("x")
+        elif "_" in shape_str:
+            parts = shape_str.split("_")
+        else:
+            continue
+        if len(parts) == 3:
+            m, n, k = int(parts[0]), int(parts[1]), int(parts[2])
+            shapes.append((m, n, k, None))
+    return shapes
+
+
 def parse_args(args: List[str]) -> argparse.Namespace:
     parser = argparse.ArgumentParser(description="TritonBench Gemm operator Benchmark")
     parser.add_argument("--m", type=int)
@@ -183,6 +200,12 @@ def parse_args(args: List[str]) -> argparse.Namespace:
     parser.add_argument("--n", type=int)
     parser.add_argument("--bias", type=int)
     parser.add_argument("--input", type=str)
+    parser.add_argument(
+        "--shapes",
+        type=str,
+        default=None,
+        help="Comma or semicolon separated shapes in MxNxK format, e.g., '1024_2048_512,2048x4096x1024'",
+    )
     parser.add_argument("--splitk", action="store_true", default=False)
     parser.add_argument("--non-square", action="store_true", default=False)
     parser.add_argument(
@@ -238,6 +261,8 @@ class Operator(BenchmarkOperator):
         )
         if gemm_args.input:
             self.shapes = read_shapes_from_csv(gemm_args.input)
+        elif gemm_args.shapes:
+            self.shapes = parse_shapes(gemm_args.shapes)
         elif gemm_args.splitk:
             self.shapes = SPLIT_K_SHAPES
         elif gemm_args.non_square:
@@ -313,9 +338,8 @@ class Operator(BenchmarkOperator):
         else:
             return lambda: matmul_tma_persistent(a, b)
 
-    @register_benchmark(
-        enabled=not is_fbcode() and HAS_PERSISTENT and supports_tma(), fwd_only=True
-    )
+    # TODO fix cached TMA backend
+    @register_benchmark(enabled=False, fwd_only=True)
     def triton_tma_persistent_cached_matmul(self, a, b, bias) -> Callable:
         b = b.T.contiguous()
         if bias is not None:
@@ -593,54 +617,59 @@ class Operator(BenchmarkOperator):
                 )
 
         @register_benchmark(enabled=has_tlx())
-        def tlx_matmul(self, a, b, bias) -> Callable:
-            # TLX matmul requires contiguous inputs with 16-byte aligned strides
-            a_contig = a.contiguous()
-            b_contig = b.contiguous()
-            if bias is not None:
-                return lambda: _tlx_matmul(a_contig, b_contig) + bias
-            else:
-                return lambda: _tlx_matmul(a_contig, b_contig)
-
-        @register_benchmark(enabled=has_tlx())
         def tlx_matmul_ws(self, a, b, bias) -> Callable:
             # TLX matmul requires contiguous inputs with 16-byte aligned strides
             a_contig = a.contiguous()
             b_contig = b.contiguous()
+            target_dtype = a.dtype
             if bias is not None:
-                return lambda: _tlx_matmul_ws(a_contig, b_contig) + bias
+                return (
+                    lambda: _tlx_matmul_ws(a_contig, b_contig).to(target_dtype) + bias
+                )
             else:
-                return lambda: _tlx_matmul_ws(a_contig, b_contig)
+                return lambda: _tlx_matmul_ws(a_contig, b_contig).to(target_dtype)
 
         @register_benchmark(enabled=has_tlx())
         def tlx_matmul_clc(self, a, b, bias) -> Callable:
             # TLX matmul requires contiguous inputs with 16-byte aligned strides
             a_contig = a.contiguous()
             b_contig = b.contiguous()
+            target_dtype = a.dtype
             if bias is not None:
-                return lambda: _tlx_matmul_clc(a_contig, b_contig) + bias
+                return (
+                    lambda: _tlx_matmul_clc(a_contig, b_contig).to(target_dtype) + bias
+                )
             else:
-                return lambda: _tlx_matmul_clc(a_contig, b_contig)
+                return lambda: _tlx_matmul_clc(a_contig, b_contig).to(target_dtype)
 
         @register_benchmark(enabled=has_tlx())
         def tlx_matmul_pipelined(self, a, b, bias) -> Callable:
             # TLX matmul requires contiguous inputs with 16-byte aligned strides
             a_contig = a.contiguous()
             b_contig = b.contiguous()
+            target_dtype = a.dtype
             if bias is not None:
-                return lambda: _tlx_matmul_pipelined(a_contig, b_contig) + bias
+                return (
+                    lambda: _tlx_matmul_pipelined(a_contig, b_contig).to(target_dtype)
+                    + bias
+                )
             else:
-                return lambda: _tlx_matmul_pipelined(a_contig, b_contig)
+                return lambda: _tlx_matmul_pipelined(a_contig, b_contig).to(
+                    target_dtype
+                )
 
         @register_benchmark(enabled=has_tlx())
         def tlx_matmul_2cta(self, a, b, bias) -> Callable:
             # TLX matmul requires contiguous inputs with 16-byte aligned strides
             a_contig = a.contiguous()
             b_contig = b.contiguous()
+            target_dtype = a.dtype
             if bias is not None:
-                return lambda: _tlx_matmul_2cta(a_contig, b_contig) + bias
+                return (
+                    lambda: _tlx_matmul_2cta(a_contig, b_contig).to(target_dtype) + bias
+                )
             else:
-                return lambda: _tlx_matmul_2cta(a_contig, b_contig)
+                return lambda: _tlx_matmul_2cta(a_contig, b_contig).to(target_dtype)
 
         @register_benchmark(enabled=HAS_TILELANG and is_cu130())
         def tilelang_blackwell_matmul(self, a, b, bias) -> Callable:

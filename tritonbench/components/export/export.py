@@ -2,10 +2,10 @@
 Serialize pickled tensors to directory.
 """
 
-import pickle
 from pathlib import Path
 from typing import Any, Callable
 
+import torch
 from tritonbench.utils.input import input_cast
 
 
@@ -31,10 +31,10 @@ def export_data(
     export_path = Path(export_dir)
     assert export_path.exists(), f"Export path {export_dir} must exist."
     if export_type == "input" or export_type == "both":
-        input_file_name = f"x_{x_val}-input.pkl"
+        input_file_name = f"x_{x_val}-input.pt"
         input_file_path = export_path.joinpath(input_file_name)
         with open(input_file_path, "wb") as ifp:
-            pickle.dump(inputs, ifp)
+            torch.save(inputs, ifp)
     if export_type == "output" or export_type == "both":
         if fn_mode == "fwd":
             output_type = "output"
@@ -43,7 +43,7 @@ def export_data(
             output_type = "grad"
             # output of the backward pass are the input gradients
             output = get_input_gradients(inputs)
-        output_file_name = f"x_{x_val}-{fn._name}-{fn_mode}-{output_type}.pkl"
+        output_file_name = f"x_{x_val}-{fn._name}-{fn_mode}-{output_type}.pt"
         output_file_path = export_path.joinpath(output_file_name)
         with open(output_file_path, "wb") as ofp:
-            pickle.dump(output, ofp)
+            torch.save(output, ofp)

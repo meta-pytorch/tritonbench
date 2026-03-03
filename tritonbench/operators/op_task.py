@@ -204,6 +204,12 @@ class OpTask(base_task.TaskBase):
             f"output impls: {output_impls} != ci_enabled impls: {ci_enabled_impls}"
         )
 
+    # =========================================================================
+    # == Check if operator has backward =======================================
+    # =========================================================================
+    def has_bwd(self) -> None:
+        return self.get_attribute("has_bwd", method=True)
+
     def del_op_instance(self):
         self.worker.run(
             """

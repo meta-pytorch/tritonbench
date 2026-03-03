@@ -16,7 +16,11 @@ def has_new_tma():
     import triton
     import triton.language as tl
 
-    return hasattr(triton, "set_allocator") and hasattr(tl, "make_tensor_descriptor")
+    # Check basic TMA API availability
+    if not (hasattr(triton, "set_allocator") and hasattr(tl, "make_tensor_descriptor")):
+        return False
+
+    return True
 
 
 @functools.lru_cache

@@ -175,7 +175,7 @@ class Operator(BenchmarkOperator):
         self.head = args.head
         self.kv_len = args.kv_len
 
-    @register_benchmark(enabled=has_tlx())
+    @register_benchmark(enabled=has_tlx() and is_blackwell())
     def tlx_gdpa(
         self,
         _config_name,
@@ -334,7 +334,7 @@ class Operator(BenchmarkOperator):
 
         return _inner
 
-    @register_benchmark()
+    @register_benchmark(enabled=not is_hip())
     def torch_compile_gdpa(
         self,
         _config_name,

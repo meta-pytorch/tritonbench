@@ -17,7 +17,7 @@ from tritonbench.operator_loader import get_op_loader_bench_cls_by_name, is_load
 from tritonbench.operators import load_opbench_by_name
 from tritonbench.operators_collection import list_operators_by_collection
 from tritonbench.utils.ab_test import compare_ab_results, run_ab_test
-from tritonbench.utils.env_utils import is_fbcode, is_hip
+from tritonbench.utils.env_utils import is_fbcode, is_hip, set_torchrun_env
 from tritonbench.utils.git_utils import get_branch, get_commit_time, get_current_hash
 from tritonbench.utils.gpu_utils import get_amd_device_name, gpu_lockdown
 from tritonbench.utils.list_operator_details import list_operator_details
@@ -85,6 +85,14 @@ def get_run_env(
     for repo in ["triton", "pytorch", "tritonbench"]:
         repo_loc = repo_locs.get(repo, None)
         if not run_env[f"{repo}_commit"] == "unknown" and repo_loc:
+            print(
+                "trying to get commit branch for",
+                repo,
+                "from",
+                repo_loc,
+                " commit hash: ",
+                run_env[f"{repo}_commit"],
+            )
             run_env[f"{repo}_branch"] = get_branch(repo_loc, run_env[f"{repo}_commit"])
             run_env[f"{repo}_commit_time"] = get_commit_time(
                 repo_loc, run_env[f"{repo}_commit"]
@@ -102,7 +110,12 @@ def _env_get_str(var_name: str, default: str) -> str:
     return value.strip() or default
 
 
-def run_in_helion(op_args: Dict[str, str], extra_envs: Dict[str, str]):
+def run_in_helion(
+    op_args: Dict[str, str],
+    extra_envs: Dict[str, str],
+    override_envs: bool = False,
+    capture_output: Optional[str] = None,
+):
     # Allow override via TRITONBENCH_HELION_PATH; fallback to the current default.
     default_helion = REPO_PATH.joinpath(".install", "helion")
     helion_root = (
@@ -124,11 +137,40 @@ def run_in_helion(op_args: Dict[str, str], extra_envs: Dict[str, str]):
         f"[tritonbench] Running helion benchmark: " + " ".join(cmd),
     )
 
-    subprocess.check_call(
-        cmd,
-        cwd=helion_root,
-        env=environ,
-    )
+    if override_envs:
+        subprocess_env = extra_envs.copy()
+    else:
+        subprocess_env = os.environ.copy()
+        subprocess_env.update(extra_envs or {})
+    if capture_output:
+        assert os.path.isdir(capture_output), (
+            f"specified capture output dir {capture_output} must exist"
+        )
+    try:
+        if capture_output:
+            with (
+                open(os.path.join(capture_output, "stdout.log"), "w") as stdout,
+                open(os.path.join(capture_output, "stderr.log"), "w") as stderr,
+            ):
+                subprocess.check_call(
+                    cmd,
+                    stdout=stdout,
+                    stderr=stderr,
+                    cwd=helion_root,
+                    env=subprocess_env,
+                )
+        else:
+            subprocess.check_call(
+                cmd,
+                stdout=sys.stdout,
+                stderr=sys.stderr,
+                cwd=helion_root,
+                env=subprocess_env,
+            )
+        return 0
+    except subprocess.CalledProcessError as e:
+        # By default, we will continue on the failed operators
+        return e.returncode
 
 
 def tritonbench_run(args: Optional[List[str]] = None):
@@ -137,6 +179,8 @@ def tritonbench_run(args: Optional[List[str]] = None):
     if config := os.environ.get("TRITONBENCH_RUN_CONFIG", None):
         run_config(config, args)
         return
+
+    set_torchrun_env()
 
     # Log the tool usage
     usage_report_logger(benchmark_name="tritonbench")
@@ -286,7 +330,13 @@ def _run(args: argparse.Namespace, extra_args: List[str]) -> BenchmarkOperatorRe
         return metrics
 
 
-def run_config(config_file: str, args: List[str]):
+def run_config(
+    config_file: str,
+    args: List[str],
+    extra_envs: Optional[Dict[str, str]] = None,
+    override_envs: bool = False,
+    capture_output: Optional[str] = None,
+):
     assert Path(config_file).exists(), (
         f"Config file {config_file} must exist. Current working directory {os.getcwd()}"
     )  # Fbcode only: need to run from fbsource root directory
@@ -300,7 +350,7 @@ def run_config(config_file: str, args: List[str]):
         runner = benchmark_config.get("runner", None)
         op_args = benchmark_config["args"].split(" ") + args
         env_string = benchmark_config.get("envs", None)
-        extra_envs = {}
+        config_extra_envs = {}
         forbidden_list = [";", "$", "&"]
         if env_string:
             _ASSIGN_RE = re.compile(r"^[A-Za-z_][A-Za-z0-9_]*=")
@@ -314,20 +364,29 @@ def run_config(config_file: str, args: List[str]):
                         f"Env string must be in the form of key=value, get {env_part}"
                     )
                 key, val = env_part.split("=", 1)
-                extra_envs[key] = val
+                config_extra_envs[key] = val
+        if extra_envs:
+            config_extra_envs.update(extra_envs)
         disabled = benchmark_config.get("disabled", False)
         if disabled:
             logger.info(f"Skipping disabled benchmark {benchmark_name}.")
             continue
         if runner == "helion":
-            run_in_helion(op_args, extra_envs)
+            run_in_helion(
+                op_args,
+                config_extra_envs,
+                override_envs=override_envs,
+                capture_output=capture_output,
+            )
         else:
             op_name = get_cmd_parameter(op_args, "--op")
             run_in_task(
                 op=op_name,
                 op_args=op_args,
                 benchmark_name=benchmark_name,
-                extra_envs=extra_envs,
+                extra_envs=config_extra_envs,
+                override_envs=override_envs,
+                capture_output=capture_output,
             )
 
 
@@ -346,7 +405,7 @@ def run_one_operator(task_args: List[str], with_bwd: bool = False):
         del op
         if op_name in BWD_ARGS_OPS:
             task_args = copy.deepcopy(task_args)
-            task_args.extend(BWD_ARGS_OPS[tb_args.op])
+            task_args.extend(BWD_ARGS_OPS[op_name])
         task_args.extend(["--mode", "bwd"])
         op = load_operator_by_args(task_args)
         op.run()
@@ -357,6 +416,8 @@ def run_in_task(
     op_args: Optional[List[str]] = None,
     benchmark_name: Optional[str] = None,
     extra_envs: Optional[Dict[str, str]] = None,
+    override_envs: bool = False,
+    capture_output: Optional[str] = None,
 ) -> None:
     op_task_cmd = [] if is_fbcode() else [sys.executable]
     if not op_args:
@@ -388,22 +449,43 @@ def run_in_task(
             logger.setLevel(logging.ERROR)
         start_time = time.perf_counter()
         logger.info(f"[tritonbench] Start {benchmark_name}: " + " ".join(op_task_cmd))
-        subprocess_env = os.environ.copy()
-        subprocess_env.update(extra_envs or {})
-        subprocess.check_call(
-            op_task_cmd,
-            stdout=sys.stdout,
-            stderr=sys.stderr,
-            cwd=REPO_PATH,
-            env=subprocess_env,
-        )
+        if override_envs:
+            subprocess_env = extra_envs.copy()
+        else:
+            subprocess_env = os.environ.copy()
+            subprocess_env.update(extra_envs or {})
+        if capture_output:
+            assert os.path.isdir(capture_output), (
+                f"specified capture output dir {capture_output} must exist"
+            )
+        if capture_output:
+            with (
+                open(os.path.join(capture_output, "stdout.log"), "w") as stdout,
+                open(os.path.join(capture_output, "stderr.log"), "w") as stderr,
+            ):
+                subprocess.check_call(
+                    op_task_cmd,
+                    stdout=stdout,
+                    stderr=stderr,
+                    cwd=REPO_PATH,
+                    env=subprocess_env,
+                )
+        else:
+            subprocess.check_call(
+                op_task_cmd,
+                stdout=sys.stdout,
+                stderr=sys.stderr,
+                cwd=REPO_PATH,
+                env=subprocess_env,
+            )
         benchmark_time = time.perf_counter() - start_time
         logger.info(
             f"[tritonbench] Finish {benchmark_name} in {benchmark_time:.3f} seconds."
         )
-    except subprocess.CalledProcessError:
+        return 0
+    except subprocess.CalledProcessError as e:
         # By default, we will continue on the failed operators
-        pass
+        return e.returncode
     except KeyboardInterrupt:
         logger.warning("[tritonbench] KeyboardInterrupt received, exiting...")
         sys.exit(1)

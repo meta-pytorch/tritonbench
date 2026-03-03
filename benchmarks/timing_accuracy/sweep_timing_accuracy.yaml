@@ -1,0 +1,303 @@
+fp16_addmm_streamk_addmm_fwd:
+  args: --op addmm --only streamk_addmm --launch benchmarks.timing_accuracy.run --dump-json
+fp16_addmm_streamk_addmm_bwd:
+  args: --op addmm --only streamk_addmm --bwd --launch benchmarks.timing_accuracy.run
+    --dump-json
+fp16_addmm_triton_addmm_fwd:
+  args: --op addmm --only triton_addmm --launch benchmarks.timing_accuracy.run --dump-json
+fp16_addmm_triton_addmm_bwd:
+  args: --op addmm --only triton_addmm --bwd --launch benchmarks.timing_accuracy.run
+    --dump-json
+bf16xint16_gemm_bf16xint16_casted_fwd:
+  args: --op bf16xint16_gemm --only bf16xint16_casted --launch benchmarks.timing_accuracy.run
+    --dump-json
+bf16xint16_gemm_bf16xbf16_fwd:
+  args: --op bf16xint16_gemm --only bf16xbf16 --launch benchmarks.timing_accuracy.run
+    --dump-json
+bf16xint16_gemm_bf16xint16_fwd:
+  args: --op bf16xint16_gemm --only bf16xint16 --launch benchmarks.timing_accuracy.run
+    --dump-json
+bf16_blackwell_attentions_triton_tutorial_flash_dp_persistent_blackwell_fwd:
+  args: --op blackwell_attentions --only triton_tutorial_flash_dp_persistent_blackwell
+    --launch benchmarks.timing_accuracy.run --dump-json
+bf16_blackwell_attentions_triton_tutorial_flash_dp_persistent_blackwell_bwd:
+  args: --op blackwell_attentions --only triton_tutorial_flash_dp_persistent_blackwell
+    --bwd --launch benchmarks.timing_accuracy.run --dump-json
+bf16_blackwell_attentions_triton_tutorial_flash_v2_persistent_blackwell_fwd:
+  args: --op blackwell_attentions --only triton_tutorial_flash_v2_persistent_blackwell
+    --launch benchmarks.timing_accuracy.run --dump-json
+bf16_blackwell_attentions_triton_tutorial_flash_v2_persistent_blackwell_bwd:
+  args: --op blackwell_attentions --only triton_tutorial_flash_v2_persistent_blackwell
+    --bwd --launch benchmarks.timing_accuracy.run --dump-json
+bf16_blackwell_attentions_triton_tutorial_flash_dp_blackwell_fwd:
+  args: --op blackwell_attentions --only triton_tutorial_flash_dp_blackwell --launch
+    benchmarks.timing_accuracy.run --dump-json
+bf16_blackwell_attentions_triton_tutorial_flash_dp_blackwell_bwd:
+  args: --op blackwell_attentions --only triton_tutorial_flash_dp_blackwell --bwd
+    --launch benchmarks.timing_accuracy.run --dump-json
+bf16_blackwell_attentions_triton_tutorial_flash_v2_tma_ws_persistent_blackwell_fwd:
+  args: --op blackwell_attentions --only triton_tutorial_flash_v2_tma_ws_persistent_blackwell
+    --launch benchmarks.timing_accuracy.run --dump-json
+bf16_blackwell_attentions_triton_tutorial_flash_v2_tma_ws_persistent_blackwell_bwd:
+  args: --op blackwell_attentions --only triton_tutorial_flash_v2_tma_ws_persistent_blackwell
+    --bwd --launch benchmarks.timing_accuracy.run --dump-json
+bf16_blackwell_attentions_triton_tutorial_flash_v2_blackwell_fwd:
+  args: --op blackwell_attentions --only triton_tutorial_flash_v2_blackwell --launch
+    benchmarks.timing_accuracy.run --dump-json
+bf16_blackwell_attentions_triton_tutorial_flash_v2_blackwell_bwd:
+  args: --op blackwell_attentions --only triton_tutorial_flash_v2_blackwell --bwd
+    --launch benchmarks.timing_accuracy.run --dump-json
+cross_entropy_liger_cross_entropy_loss_fwd:
+  args: --op cross_entropy --only liger_cross_entropy_loss --launch benchmarks.timing_accuracy.run
+    --dump-json
+cross_entropy_liger_cross_entropy_loss_bwd:
+  args: --op cross_entropy --only liger_cross_entropy_loss --bwd --launch benchmarks.timing_accuracy.run
+    --dump-json
+embedding_liger_embedding_fwd:
+  args: --op embedding --only liger_embedding --launch benchmarks.timing_accuracy.run
+    --dump-json
+embedding_liger_embedding_bwd:
+  args: --op embedding --only liger_embedding --bwd --launch benchmarks.timing_accuracy.run
+    --dump-json
+bf16_flash_attention_triton_tutorial_flash_v2_tma_ws_fwd:
+  args: --op flash_attention --only triton_tutorial_flash_v2_tma_ws --launch benchmarks.timing_accuracy.run
+    --dump-json
+bf16_flash_attention_triton_tutorial_flash_v2_tma_ws_bwd:
+  args: --op flash_attention --only triton_tutorial_flash_v2_tma_ws --bwd --launch
+    benchmarks.timing_accuracy.run --dump-json
+bf16_flash_attention_triton_tutorial_flash_v2_ws_fwd:
+  args: --op flash_attention --only triton_tutorial_flash_v2_ws --launch benchmarks.timing_accuracy.run
+    --dump-json
+bf16_flash_attention_triton_tutorial_flash_v2_ws_bwd:
+  args: --op flash_attention --only triton_tutorial_flash_v2_ws --bwd --launch benchmarks.timing_accuracy.run
+    --dump-json
+bf16_flash_attention_triton_tutorial_flash_v2_fwd:
+  args: --op flash_attention --only triton_tutorial_flash_v2 --launch benchmarks.timing_accuracy.run
+    --dump-json
+bf16_flash_attention_triton_tutorial_flash_v2_bwd:
+  args: --op flash_attention --only triton_tutorial_flash_v2 --bwd --launch benchmarks.timing_accuracy.run
+    --dump-json
+bf16_flash_attention_triton_tutorial_flash_v2_tma_ws_persistent_fwd:
+  args: --op flash_attention --only triton_tutorial_flash_v2_tma_ws_persistent --launch
+    benchmarks.timing_accuracy.run --dump-json
+bf16_flash_attention_triton_tutorial_flash_v2_tma_ws_persistent_bwd:
+  args: --op flash_attention --only triton_tutorial_flash_v2_tma_ws_persistent --bwd
+    --launch benchmarks.timing_accuracy.run --dump-json
+bf16_flash_attention_triton_tutorial_flash_v2_tma_fwd:
+  args: --op flash_attention --only triton_tutorial_flash_v2_tma --launch benchmarks.timing_accuracy.run
+    --dump-json
+bf16_flash_attention_triton_tutorial_flash_v2_tma_bwd:
+  args: --op flash_attention --only triton_tutorial_flash_v2_tma --bwd --launch benchmarks.timing_accuracy.run
+    --dump-json
+fp8_attention_triton_flash_v2_fwd:
+  args: --op fp8_attention --only triton_flash_v2 --launch benchmarks.timing_accuracy.run
+    --dump-json
+fp8_attention_triton_flash_v2_ws_fwd:
+  args: --op fp8_attention --only triton_flash_v2_ws --launch benchmarks.timing_accuracy.run
+    --dump-json
+fp8_attention_triton_flash_v2_tma_fwd:
+  args: --op fp8_attention --only triton_flash_v2_tma --launch benchmarks.timing_accuracy.run
+    --dump-json
+fp8_gemm_triton_persistent_fp8_gemm_fwd:
+  args: --op fp8_gemm --only triton_persistent_fp8_gemm --launch benchmarks.timing_accuracy.run
+    --dump-json
+fp8_gemm_triton_tma_persistent_fp8_gemm_fwd:
+  args: --op fp8_gemm --only triton_tma_persistent_fp8_gemm --launch benchmarks.timing_accuracy.run
+    --dump-json
+fp8_gemm_triton_fp8_gemm_fwd:
+  args: --op fp8_gemm --only triton_fp8_gemm --launch benchmarks.timing_accuracy.run
+    --dump-json
+fp8_gemm_blockwise__triton_fwd:
+  args: --op fp8_gemm_blockwise --only _triton --launch benchmarks.timing_accuracy.run
+    --dump-json
+fp8_gemm_rowwise__aoti_fp8_triton_mm_fwd:
+  args: --op fp8_gemm_rowwise --only _aoti_fp8_triton_mm --launch benchmarks.timing_accuracy.run
+    --dump-json
+fp8_gemm_rowwise__triton_fwd:
+  args: --op fp8_gemm_rowwise --only _triton --launch benchmarks.timing_accuracy.run
+    --dump-json
+fp8_gemm_rowwise_grouped__triton_fwd:
+  args: --op fp8_gemm_rowwise_grouped --only _triton --launch benchmarks.timing_accuracy.run
+    --dump-json
+fused_linear_cross_entropy_liger_lm_head_ce_fwd:
+  args: --op fused_linear_cross_entropy --only liger_lm_head_ce --launch benchmarks.timing_accuracy.run
+    --dump-json
+fused_linear_cross_entropy_liger_lm_head_ce_bwd:
+  args: --op fused_linear_cross_entropy --only liger_lm_head_ce --bwd --launch benchmarks.timing_accuracy.run
+    --dump-json
+fused_linear_jsd_liger_lm_head_jsd_fwd:
+  args: --op fused_linear_jsd --only liger_lm_head_jsd --launch benchmarks.timing_accuracy.run
+    --dump-json
+fused_linear_jsd_liger_lm_head_jsd_bwd:
+  args: --op fused_linear_jsd --only liger_lm_head_jsd --bwd --launch benchmarks.timing_accuracy.run
+    --dump-json
+gather_gemv_triton_gather_gemv_fwd:
+  args: --op gather_gemv --only triton_gather_gemv --launch benchmarks.timing_accuracy.run
+    --dump-json
+bf16_gdpa_gdpa_opt_sorted_fwd:
+  args: --op gdpa --only gdpa_opt_sorted --launch benchmarks.timing_accuracy.run --dump-json
+bf16_gdpa_gdpa_opt_sorted_bwd:
+  args: --op gdpa --only gdpa_opt_sorted --bwd --launch benchmarks.timing_accuracy.run
+    --dump-json
+bf16_gdpa_gdpa_opt_fwd:
+  args: --op gdpa --only gdpa_opt --launch benchmarks.timing_accuracy.run --dump-json
+bf16_gdpa_gdpa_opt_bwd:
+  args: --op gdpa --only gdpa_opt --bwd --launch benchmarks.timing_accuracy.run --dump-json
+bf16_gdpa_gdpa_fwd:
+  args: --op gdpa --only gdpa --launch benchmarks.timing_accuracy.run --dump-json
+bf16_gdpa_gdpa_bwd:
+  args: --op gdpa --only gdpa --bwd --launch benchmarks.timing_accuracy.run --dump-json
+geglu_liger_geglu_fwd:
+  args: --op geglu --only liger_geglu --launch benchmarks.timing_accuracy.run --dump-json
+geglu_liger_geglu_bwd:
+  args: --op geglu --only liger_geglu --bwd --launch benchmarks.timing_accuracy.run
+    --dump-json
+fp16_gemm_matmul_partition_k_fwd:
+  args: --op gemm --only matmul_partition_k --launch benchmarks.timing_accuracy.run
+    --dump-json
+fp16_gemm_matmul_partition_k_bwd:
+  args: --op gemm --only matmul_partition_k --bwd --launch benchmarks.timing_accuracy.run
+    --dump-json
+fp16_gemm_triton_tutorial_matmul_fwd:
+  args: --op gemm --only triton_tutorial_matmul --launch benchmarks.timing_accuracy.run
+    --dump-json
+fp16_gemm_triton_tutorial_matmul_bwd:
+  args: --op gemm --only triton_tutorial_matmul --bwd --launch benchmarks.timing_accuracy.run
+    --dump-json
+fp16_gemm_triton_ops_matmul_fwd:
+  args: --op gemm --only triton_ops_matmul --launch benchmarks.timing_accuracy.run
+    --dump-json
+fp16_gemm_triton_ops_matmul_bwd:
+  args: --op gemm --only triton_ops_matmul --bwd --launch benchmarks.timing_accuracy.run
+    --dump-json
+fp16_gemm_streamk_matmul_fwd:
+  args: --op gemm --only streamk_matmul --launch benchmarks.timing_accuracy.run --dump-json
+fp16_gemm_streamk_matmul_bwd:
+  args: --op gemm --only streamk_matmul --bwd --launch benchmarks.timing_accuracy.run
+    --dump-json
+bf16_grouped_gemm_precompiled_cutedsl_grouped_mm_tuned_fwd:
+  args: --op grouped_gemm --only precompiled_cutedsl_grouped_mm_tuned --launch benchmarks.timing_accuracy.run
+    --dump-json
+bf16_grouped_gemm_triton_grouped_gemm_fwd:
+  args: --op grouped_gemm --only triton_grouped_gemm --launch benchmarks.timing_accuracy.run
+    --dump-json
+bf16_grouped_gemm_tlx_grouped_gemm_fwd:
+  args: --op grouped_gemm --only tlx_grouped_gemm --launch benchmarks.timing_accuracy.run
+    --dump-json
+int4_gemm_triton_int4_gemm_fwd:
+  args: --op int4_gemm --only triton_int4_gemm --launch benchmarks.timing_accuracy.run
+    --dump-json
+int4_gemm_preprocessed_triton_int4_gemm_fwd:
+  args: --op int4_gemm --only preprocessed_triton_int4_gemm --launch benchmarks.timing_accuracy.run
+    --dump-json
+fp32_jagged_mean_triton_jagged_mean_simple_fused_fwd:
+  args: --op jagged_mean --only triton_jagged_mean_simple_fused --launch benchmarks.timing_accuracy.run
+    --dump-json
+fp32_jagged_mean_triton_jagged_mean_variable_length_loop_fwd:
+  args: --op jagged_mean --only triton_jagged_mean_variable_length_loop --launch benchmarks.timing_accuracy.run
+    --dump-json
+fp32_jagged_softmax_triton_jagged_softmax_variable_length_loop_fwd:
+  args: --op jagged_softmax --only triton_jagged_softmax_variable_length_loop --launch
+    benchmarks.timing_accuracy.run --dump-json
+fp32_jagged_softmax_triton_jagged_softmax_simple_fused_fwd:
+  args: --op jagged_softmax --only triton_jagged_softmax_simple_fused --launch benchmarks.timing_accuracy.run
+    --dump-json
+fp32_jagged_sum_triton_jagged_sum_no_pad_simple_fused_fwd:
+  args: --op jagged_sum --only triton_jagged_sum_no_pad_simple_fused --launch benchmarks.timing_accuracy.run
+    --dump-json
+fp32_jagged_sum_triton_jagged_sum_no_pad_variable_length_loop_fwd:
+  args: --op jagged_sum --only triton_jagged_sum_no_pad_variable_length_loop --launch
+    benchmarks.timing_accuracy.run --dump-json
+jsd_liger_jsd_fwd:
+  args: --op jsd --only liger_jsd --launch benchmarks.timing_accuracy.run --dump-json
+jsd_liger_jsd_bwd:
+  args: --op jsd --only liger_jsd --bwd --launch benchmarks.timing_accuracy.run --dump-json
+kl_div_liger_kl_div_fwd:
+  args: --op kl_div --only liger_kl_div --launch benchmarks.timing_accuracy.run --dump-json
+kl_div_liger_kl_div_bwd:
+  args: --op kl_div --only liger_kl_div --bwd --launch benchmarks.timing_accuracy.run
+    --dump-json
+launch_latency_nop_triton_kernel_fwd:
+  args: --op launch_latency --only nop_triton_kernel --launch benchmarks.timing_accuracy.run
+    --dump-json
+layer_norm_triton_layer_norm_fwd:
+  args: --op layer_norm --only triton_layer_norm --launch benchmarks.timing_accuracy.run
+    --dump-json
+layer_norm_triton_layer_norm_bwd:
+  args: --op layer_norm --only triton_layer_norm --bwd --launch benchmarks.timing_accuracy.run
+    --dump-json
+layer_norm_triton_fused_layer_norm_fwd:
+  args: --op layer_norm --only triton_fused_layer_norm --launch benchmarks.timing_accuracy.run
+    --dump-json
+layer_norm_triton_fused_layer_norm_bwd:
+  args: --op layer_norm --only triton_fused_layer_norm --bwd --launch benchmarks.timing_accuracy.run
+    --dump-json
+layer_norm_liger_layer_norm_fwd:
+  args: --op layer_norm --only liger_layer_norm --launch benchmarks.timing_accuracy.run
+    --dump-json
+layer_norm_liger_layer_norm_bwd:
+  args: --op layer_norm --only liger_layer_norm --bwd --launch benchmarks.timing_accuracy.run
+    --dump-json
+low_mem_dropout_seeded_dropout_fwd:
+  args: --op low_mem_dropout --only seeded_dropout --launch benchmarks.timing_accuracy.run
+    --dump-json
+low_mem_dropout_triton_dropout_fwd:
+  args: --op low_mem_dropout --only triton_dropout --launch benchmarks.timing_accuracy.run
+    --dump-json
+bf16_ragged_attention_hstu_fwd:
+  args: --op ragged_attention --only hstu --launch benchmarks.timing_accuracy.run
+    --dump-json
+bf16_ragged_attention_hstu_bwd:
+  args: --op ragged_attention --only hstu --bwd --launch benchmarks.timing_accuracy.run
+    --dump-json
+rms_norm_triton_fused_rmsnorm_fwd:
+  args: --op rms_norm --only triton_fused_rmsnorm --launch benchmarks.timing_accuracy.run
+    --dump-json
+rms_norm_triton_fused_rmsnorm_bwd:
+  args: --op rms_norm --only triton_fused_rmsnorm --bwd --launch benchmarks.timing_accuracy.run
+    --dump-json
+rms_norm_liger_rms_fwd:
+  args: --op rms_norm --only liger_rms --launch benchmarks.timing_accuracy.run --dump-json
+rms_norm_liger_rms_bwd:
+  args: --op rms_norm --only liger_rms --bwd --launch benchmarks.timing_accuracy.run
+    --dump-json
+rope_liger_rotary_pos_emb_fwd:
+  args: --op rope --only liger_rotary_pos_emb --launch benchmarks.timing_accuracy.run
+    --dump-json
+rope_liger_rotary_pos_emb_bwd:
+  args: --op rope --only liger_rotary_pos_emb --bwd --launch benchmarks.timing_accuracy.run
+    --dump-json
+fp16_softmax_triton_softmax_fwd:
+  args: --op softmax --only triton_softmax --launch benchmarks.timing_accuracy.run
+    --dump-json
+fp16_softmax_triton_softmax_bwd:
+  args: --op softmax --only triton_softmax --bwd --launch benchmarks.timing_accuracy.run
+    --dump-json
+sum_triton_sum_fwd:
+  args: --op sum --only triton_sum --launch benchmarks.timing_accuracy.run --dump-json
+swiglu_liger_swiglu_fwd:
+  args: --op swiglu --only liger_swiglu --launch benchmarks.timing_accuracy.run --dump-json
+swiglu_liger_swiglu_bwd:
+  args: --op swiglu --only liger_swiglu --bwd --launch benchmarks.timing_accuracy.run
+    --dump-json
+template_attention_test_with_exp2_fwd:
+  args: --op template_attention --only test_with_exp2 --launch benchmarks.timing_accuracy.run
+    --dump-json
+template_attention_test_no_exp2_fwd:
+  args: --op template_attention --only test_no_exp2 --launch benchmarks.timing_accuracy.run
+    --dump-json
+vector_add_triton_add_fwd:
+  args: --op vector_add --only triton_add --launch benchmarks.timing_accuracy.run
+    --dump-json
+vector_exp_triton_exp_fwd:
+  args: --op vector_exp --only triton_exp --launch benchmarks.timing_accuracy.run
+    --dump-json
+vector_exp_triton_exp_bwd:
+  args: --op vector_exp --only triton_exp --bwd --launch benchmarks.timing_accuracy.run
+    --dump-json
+welford_test_no_welford_fwd:
+  args: --op welford --only test_no_welford --launch benchmarks.timing_accuracy.run
+    --dump-json
+welford_triton_welford_fwd:
+  args: --op welford --only triton_welford --launch benchmarks.timing_accuracy.run
+    --dump-json

@@ -27,6 +27,7 @@ import tabulate
 import torch
 import triton
 from torch.utils._pytree import tree_map
+from triton.runtime.errors import OutOfResources as TritonOutOfResources
 from tritonbench.components.do_bench import do_bench_wrapper, Latency
 from tritonbench.components.export import export_data
 from tritonbench.components.power import PowerManagerTask
@@ -39,7 +40,11 @@ from tritonbench.utils.constants import (
     DEFAULT_WARMUP,
 )
 from tritonbench.utils.cudagraph_utils import CudaGraphConfig, CudaGraphError
-from tritonbench.utils.diode_utils import setup_diode_model, teardown_diode_model
+from tritonbench.utils.diode_utils import (
+    deserialize_model_config,
+    setup_diode_model,
+    teardown_diode_model,
+)
 from tritonbench.utils.env_utils import (
     apply_precision,
     is_fbcode,
@@ -99,6 +104,7 @@ BASELINE_BENCHMARKS: Dict[str, str] = {}
 BASELINE_SKIP_METRICS = {
     "speedup",
     "accuracy",
+    "cosine_similarity",
     "determinism",
     "mem_footprint_compression_ratio",
     "nsys_gpu_speedup",
@@ -227,6 +233,8 @@ class BenchmarkOperatorMetrics:
     speedup: Optional[float] = None
     # accuracy over baseline (only for baseline comparison)
     accuracy: Optional[bool] = None
+    # cosine similarity to baseline output (1.0 = identical direction)
+    cosine_similarity: Optional[float] = None
     # determinism check result (independent of accuracy)
     determinism: Optional[DeterminismResult] = None
     # wall time
@@ -414,8 +422,10 @@ class BenchmarkOperatorResult:
                     new_avg_row.append(str(x / len(self.result)))
                 elif isinstance(x, Latency):
                     new_avg_row.append(str(x.to_float() / len(self.result)))
+                elif isinstance(x, str):
+                    new_avg_row.append(x)
                 else:
-                    new_avg_row.append(None)
+                    new_avg_row.append("")
             avg_row = [",".join(new_avg_row)]
         else:
             avg_row = ["average"] + [
@@ -1154,9 +1164,15 @@ class BenchmarkOperator(metaclass=PostInitProcessor):
                         else False
                     )
                     if "diode" in bm_name:
+                        diode_model_config = None
+                        if getattr(self.tb_args, "diode_model_config", None):
+                            diode_model_config = deserialize_model_config(
+                                self.tb_args.diode_model_config
+                            )
                         self.old_diode_configs = setup_diode_model(
                             self.tb_args.diode_version,
                             topk=self.tb_args.diode_topk,
+                            model_config=diode_model_config,
                         )
                     acc[bm_name] = self._do_bench(
                         input_id=input_id,
@@ -1309,7 +1325,7 @@ class BenchmarkOperator(metaclass=PostInitProcessor):
 
         if autotuner is not None:
             return autotuner.best_config.all_kwargs()
-        return None
+        return "unknown"
 
     def all_configs(self, fn):
         from unittest import mock
@@ -1713,6 +1729,39 @@ class BenchmarkOperator(metaclass=PostInitProcessor):
             logger.warning(f"Exception during accuracy check: {e}")
             return False
 
+    def cosine_similarity(self, fn: Callable, baseline_fn: Callable) -> float:
+        """
+        Compute cosine similarity between the output of fn and baseline_fn.
+        Returns a value between -1 and 1, where 1 means identical direction.
+        """
+        try:
+            output = fn()
+            baseline_output = baseline_fn()
+
+            # Flatten tensors for cosine similarity computation
+            if isinstance(output, torch.Tensor) and isinstance(
+                baseline_output, torch.Tensor
+            ):
+                output_flat = output.flatten().float()
+                baseline_flat = baseline_output.flatten().float()
+
+                # Compute cosine similarity
+                dot_product = torch.dot(output_flat, baseline_flat)
+                norm_output = torch.norm(output_flat)
+                norm_baseline = torch.norm(baseline_flat)
+
+                if norm_output == 0 or norm_baseline == 0:
+                    return 0.0
+
+                cos_sim = dot_product / (norm_output * norm_baseline)
+                return cos_sim.item()
+            else:
+                logger.warning("Cosine similarity only supported for tensor outputs")
+                return 0.0
+        except Exception as e:
+            logger.warning(f"Exception during cosine similarity computation: {e}")
+            return 0.0
+
     def _do_bench(
         self,
         input_id: int,
@@ -1824,6 +1873,12 @@ class BenchmarkOperator(metaclass=PostInitProcessor):
             if not baseline and "accuracy" in self.required_metrics:
                 metrics.accuracy = (
                     self.accuracy(fn, self.baseline_fn) if self.baseline_fn else None
+                )
+            if not baseline and "cosine_similarity" in self.required_metrics:
+                metrics.cosine_similarity = (
+                    self.cosine_similarity(fn, self.baseline_fn)
+                    if self.baseline_fn
+                    else None
                 )
             if "hw_roofline" in self.required_metrics:
                 metrics.hw_roofline = self.hw_roofline()
@@ -2030,6 +2085,8 @@ class BenchmarkOperator(metaclass=PostInitProcessor):
                 self.dump_ir(input_id, fn, self.tb_args.dump_ir)
         except torch.cuda.OutOfMemoryError:
             metrics.error_msg = "CUDA OOM"
+        except TritonOutOfResources as e:
+            metrics.error_msg = f"Triton OOR: {e}"
         except NotImplementedError as e:
             metrics.error_msg = str(e)
         except CudaGraphError:

@@ -11,6 +11,7 @@ from tritonbench.utils.constants import (
     DEFAULT_WARMUP,
 )
 from tritonbench.utils.env_utils import AVAILABLE_PRECISIONS, is_fbcode
+from tritonbench.utils.gpu_utils import get_gpu_device_name
 
 
 def get_parser(args=None):
@@ -394,12 +395,28 @@ def get_parser(args=None):
             type=str,
             help="Set what version of Triton we are using for logging purposes.",
         )
+        parser.add_argument(
+            "--hardware",
+            type=str,
+            default=get_gpu_device_name(),
+            help="Specify the hardware target (e.g., H100, B200, MI300) for Scuba logging.",
+        )
         # Diode args (Diode not available in OSS)
         parser.add_argument(
             "--diode-version",
             type=str,
             default="recommended",
             help="Version of diode to use. Default: recommended version in MODEL_CONFIGS (~/fbsource/fbcode/diode/torch_diode/models/triton_gemm/model.py)",
+        )
+        parser.add_argument(
+            "--diode-model-config",
+            type=str,
+            default=None,
+            help="JSON-serialized Diode ModelConfig. Advanced option that allows testing of Diode models "
+            "that are not registered in the Diode codebase. If provided, this takes precedence over "
+            '--diode-version. Example: \'{"model_name": "v5/my_test_model", "n_hidden_layers": 6, '
+            '"dropout_rate": 0.05, "template_op_pairs": [["triton::mm", "mm"], ["triton::bmm", "bmm"], ...], '
+            '"supported_devices": ["NVIDIA H100", ...], "feature_version": "v5", "is_production": false}\'',
         )
         parser.add_argument(
             "--diode-topk",

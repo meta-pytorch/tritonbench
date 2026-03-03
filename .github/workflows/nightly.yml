@@ -9,10 +9,11 @@ on:
         type: choice
         required: true
         description: 'Choose advanced testing options'
-        default: 'single'
+        default: 'periodic'
         options:
           - 'single'
           - 'abtest'
+          - 'periodic'
       side_a_triton:
         default: 'triton-lang/triton'
         description: 'Side A Triton repo'

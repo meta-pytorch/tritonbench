@@ -74,7 +74,10 @@ except SystemError as e:
 
 # [Optional] OSS Flash Attention v4
 try:
-    from flash_attn.cute import flash_attn_func as oss_fa4_flash_attn_func
+    from flash_attn.cute import (
+        flash_attn_func as oss_fa4_flash_attn_func,
+        flash_attn_varlen_func as oss_fa4_flash_attn_varlen_func,
+    )
 
     HAS_OSS_FA4 = True
 except (ImportError, IOError, AttributeError):
@@ -182,11 +185,15 @@ def unpack_inputs(*args):
     if len(args) == 1 and isinstance(args[0], xformers_fmha.Inputs):
         inp = args[0]
         inputs = (inp.query, inp.key, inp.value)
-    return (t.detach() for t in inputs)
+    return (t.detach() if isinstance(t, torch.Tensor) else t for t in inputs)
 
 
-def detach_and_requires_grad(t: torch.Tensor):
-    return t.detach().requires_grad_(True)
+def detach_and_requires_grad(t):
+    if not isinstance(t, torch.Tensor):
+        return t
+    if t.is_floating_point():
+        return t.detach().requires_grad_(True)
+    return t.detach()
 
 
 def detach_inputs(*args):
@@ -204,12 +211,24 @@ def multi_input_wrapper(fn):
     def wrapper(self, *args):
         preproc_fn, benchmark_fn = fn(self, *args)
         arg_len = len(args)
-        assert arg_len % 3 == 0
+        # Determine input group size:
+        # - 8 for paged attention (q, k_cache, v_cache, cu_seqlens_q, max_seqlen_q, max_seqlen_k, page_table, seqused_k)
+        # - 3 for regular attention (q, k, v)
+        if self._is_paged_attention():
+            group_size = 8
+            assert arg_len % group_size == 0, (
+                f"Expected {group_size} inputs per group for paged attention, got {arg_len} total"
+            )
+        else:
+            group_size = 3
+            assert arg_len % group_size == 0, (
+                f"Expected {group_size} inputs per group for regular attention, got {arg_len} total"
+            )
         inputs = []
         all_inputs = []
-        for i in range(0, arg_len, 3):
-            q, k, v = args[i : i + 3]
-            inp = preproc_fn(q, k, v)
+        for i in range(0, arg_len, group_size):
+            group_args = args[i : i + group_size]
+            inp = preproc_fn(*group_args)
             inp = detach_inputs(*inp)
             all_inputs += [*unpack_inputs(*inp)]
             inputs.append(inp)
@@ -220,7 +239,12 @@ def multi_input_wrapper(fn):
                 outputs.append(benchmark_fn(*i))
             return outputs
 
-        self.optims[multi_input_fn] = torch.optim.SGD(all_inputs)
+        # Filter out non-tensor inputs (e.g., max_seqlen_q, max_seqlen_k are integers)
+        tensor_inputs = [
+            t for t in all_inputs if isinstance(t, torch.Tensor) and t.requires_grad
+        ]
+        if tensor_inputs:
+            self.optims[multi_input_fn] = torch.optim.SGD(tensor_inputs)
 
         return multi_input_fn
 
@@ -232,8 +256,40 @@ def preproc_noop(*args):
     return args
 
 
-def preproc_permute(q, k, v):
+def preproc_permute(*args):
+    # Regular attention: q, k, v (BHSD -> BSHD for flash_attn_func)
+    q, k, v = args
     return [t.contiguous() for t in permute_qkv(q, k, v, perm=(0, 2, 1, 3))]
+
+
+def preproc_paged_attention(
+    q, k_cache, v_cache, cu_seqlens_q, max_seqlen_q, max_seqlen_k, page_table, seqused_k
+):
+    """
+    Preprocess paged attention inputs for flash_attn_varlen_func.
+
+    Input shapes:
+    - q: [total_q, num_heads, head_dim] - already in correct format
+    - k_cache: [total_blocks, block_size, num_heads_kv, head_dim]
+    - v_cache: [total_blocks, block_size, num_heads_kv, head_dim]
+    - cu_seqlens_q: [batch + 1]
+    - max_seqlen_q: int
+    - max_seqlen_k: int
+    - page_table: [batch, max_num_blocks_per_seq]
+    - seqused_k: [batch]
+
+    Returns tuple ready for flash_attn_varlen_func.
+    """
+    return (
+        q.contiguous(),
+        k_cache.contiguous(),
+        v_cache.contiguous(),
+        cu_seqlens_q,
+        max_seqlen_q,
+        max_seqlen_k,
+        page_table,
+        seqused_k,
+    )
 
 
 class Operator(BenchmarkOperator):
@@ -288,9 +344,32 @@ class Operator(BenchmarkOperator):
             return 1.0 / math.sqrt(64)  # default
         return 1.0 / math.sqrt(self.current_shape.d_head)
 
+    def _is_paged_attention(self) -> bool:
+        """Check if current shape uses paged attention."""
+        if self.current_shape is None:
+            return False
+        return self.current_shape.paged_attention
+
+    def _get_block_size(self) -> int:
+        """Get block size for paged attention."""
+        if self.current_shape is None:
+            return 16
+        return self.current_shape.block_size
+
+    def _get_max_model_seq_len(self) -> int:
+        """Get max model sequence length for paged attention."""
+        if self.current_shape is None:
+            return 32768
+        return self.current_shape.max_model_seq_len
+
     @register_benchmark(enabled=(IS_BLACKWELL and HAS_FLASH_CUTE), label="FAv4")
+    def cutedsl_blackwell(self, *args) -> Callable:
+        if self._is_paged_attention():
+            return self._cutedsl_blackwell_paged(*args)
+        return self._cutedsl_blackwell(*args)
+
     @multi_input_wrapper
-    def cutedsl_blackwell(self, *args) -> Tuple[Callable, Callable]:
+    def _cutedsl_blackwell(self, *args) -> Tuple[Callable, Callable]:
         causal = self._get_causal()
         local = self._get_local()
         window_size = self._get_window_size()
@@ -303,9 +382,48 @@ class Operator(BenchmarkOperator):
         )
         return preproc_permute, fn
 
-    @register_benchmark(enabled=(IS_BLACKWELL and HAS_OSS_FA4), label="OSS-FAv4")
     @multi_input_wrapper
-    def oss_fa4(self, *args) -> Tuple[Callable, Callable]:
+    def _cutedsl_blackwell_paged(self, *args) -> Tuple[Callable, Callable]:
+        # Paged attention uses flash_attn_varlen_func
+        # Note: mslk may not have flash_attn_varlen_func exposed yet
+        # This is a placeholder - will fail if mslk doesn't support it
+        causal = self._get_causal()
+        window_size = self._get_window_size()
+        local = self._get_local()
+
+        def paged_attn_fn(
+            q,
+            k_cache,
+            v_cache,
+            cu_seqlens_q,
+            max_seqlen_q,
+            max_seqlen_k,
+            page_table,
+            seqused_k,
+        ):
+            # flash_attn_varlen_func signature:
+            # q, k, v, cu_seqlens_q, cu_seqlens_k, max_seqlen_q, max_seqlen_k,
+            # seqused_q, seqused_k, page_table, softmax_scale, causal, window_size, ...
+            return facute_flash_attn_func(
+                q,
+                k_cache,
+                v_cache,
+                softmax_scale=self._get_sm_scale(),
+                causal=causal,
+                window_size=window_size if local else (None, None),
+                deterministic=self.deterministic,
+            )
+
+        return preproc_paged_attention, paged_attn_fn
+
+    @register_benchmark(enabled=(IS_BLACKWELL and HAS_OSS_FA4), label="OSS-FAv4")
+    def oss_fa4(self, *args) -> Callable:
+        if self._is_paged_attention():
+            return self._oss_fa4_paged(*args)
+        return self._oss_fa4(*args)
+
+    @multi_input_wrapper
+    def _oss_fa4(self, *args) -> Tuple[Callable, Callable]:
         causal = self._get_causal()
         local = self._get_local()
         window_size = self._get_window_size()
@@ -318,15 +436,62 @@ class Operator(BenchmarkOperator):
         )
         return preproc_permute, fn
 
-    @register_x_val(label="(name, B, H, H_KV, S, S_KV, D, causal, window)")
+    @multi_input_wrapper
+    def _oss_fa4_paged(self, *args) -> Tuple[Callable, Callable]:
+        # Paged attention uses flash_attn_varlen_func with page_table
+        causal = self._get_causal()
+        window_size = self._get_window_size()
+        local = self._get_local()
+
+        def paged_attn_fn(
+            q,
+            k_cache,
+            v_cache,
+            cu_seqlens_q,
+            max_seqlen_q,
+            max_seqlen_k,
+            page_table,
+            seqused_k,
+        ):
+            return oss_fa4_flash_attn_varlen_func(
+                q,
+                k_cache,
+                v_cache,
+                cu_seqlens_q=cu_seqlens_q,
+                cu_seqlens_k=None,  # Not needed with page_table
+                max_seqlen_q=max_seqlen_q,
+                max_seqlen_k=max_seqlen_k,
+                seqused_q=None,
+                seqused_k=seqused_k,
+                page_table=page_table,
+                softmax_scale=self._get_sm_scale(),
+                causal=causal,
+                window_size=window_size if local else (None, None),
+                deterministic=self.deterministic,
+            )
+
+        return preproc_paged_attention, paged_attn_fn
+
+    @register_x_val(
+        label="(name, B, H, H_KV, S, S_KV, D, causal, window, paged, blk_sz)"
+    )
     def get_x_val(
         self, example_inputs
-    ) -> Tuple[str, int, int, int, int, int, int, bool, str]:
+    ) -> Tuple[str, int, int, int, int, int, int, bool, str, str, int]:
         """Return all shape parameters as a tuple for separate columns."""
         if self.current_shape is None:
-            return ("unknown", 0, 0, 0, 0, 0, 0, True, "(-1,-1)")
+            return ("unknown", 0, 0, 0, 0, 0, 0, True, "(-1,-1)", "False", 0)
 
         ws = self.current_shape.window_size
+        # Format paged attention status with shuffle info
+        if self.current_shape.paged_attention:
+            if self.current_shape.page_shuffle:
+                paged_str = "True(shuffled)"
+            else:
+                paged_str = "True(contiguous)"
+        else:
+            paged_str = "False"
+
         return (
             self.current_shape.name,
             self.current_shape.batch,
@@ -337,16 +502,32 @@ class Operator(BenchmarkOperator):
             self.current_shape.d_head,
             self.current_shape.causal,
             f"({ws[0]},{ws[1]})",
+            paged_str,
+            self.current_shape.block_size if self.current_shape.paged_attention else 0,
         )
 
     @register_metric(x_only=True)
     def flops(
         self, fn_name: str, example_inputs: Any, metrics: BenchmarkOperatorMetrics
     ) -> float:
-        assert len(example_inputs) % 3 == 0
-        q, k, v = example_inputs[0:3]
-        BATCH, H, N_CTX, D_HEAD = q.shape
-        _, _, N_CTX_KV, _ = k.shape
+        if self._is_paged_attention():
+            # Paged attention: q, k_cache, v_cache, cu_seqlens_q, max_seqlen_q, max_seqlen_k, page_table, seqused_k
+            assert len(example_inputs) % 8 == 0
+            q = example_inputs[0]
+            # q shape: [total_q, num_heads, head_dim]
+            total_q, H, D_HEAD = q.shape
+            BATCH = self.current_shape.batch if self.current_shape else 1
+            N_CTX = total_q // BATCH
+            N_CTX_KV = (
+                self.current_shape.seq_len_kv
+                if self.current_shape
+                else example_inputs[5]
+            )  # max_seqlen_k
+        else:
+            assert len(example_inputs) % 3 == 0
+            q, k, v = example_inputs[0:3]
+            BATCH, H, N_CTX, D_HEAD = q.shape
+            _, _, N_CTX_KV, _ = k.shape
 
         local = self._get_local()
         causal = self._get_causal()
@@ -421,8 +602,12 @@ class Operator(BenchmarkOperator):
             yield tensors
 
     def get_num_inputs_per_iter(self, example_inputs) -> int:
-        assert len(example_inputs) % 3 == 0
-        return len(example_inputs) // 3
+        if self._is_paged_attention():
+            assert len(example_inputs) % 8 == 0
+            return len(example_inputs) // 8
+        else:
+            assert len(example_inputs) % 3 == 0
+            return len(example_inputs) // 3
 
     def get_latency_scale(self, example_inputs):
         return self.get_num_inputs_per_iter(example_inputs)
