@@ -49,9 +49,21 @@ BWD_ARGS_OPS = {
         "pffn_baseline,mkl_jfav3",
     ],
 }
+VALID_MODES = {"fwd", "bwd", "fwd_bwd", "fwd_no_grad"}
 
 logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger(__name__)
+
+
+def parse_modes(mode_str: str) -> List[str]:
+    """Parse comma-separated mode string into a list of modes."""
+    modes = [m.strip() for m in mode_str.split(",")]
+    for mode in modes:
+        if mode not in VALID_MODES:
+            raise ValueError(
+                f"Invalid mode '{mode}'. Valid modes are: {', '.join(sorted(VALID_MODES))}"
+            )
+    return modes
 
 
 def get_run_env(
@@ -143,9 +155,9 @@ def run_in_helion(
         subprocess_env = os.environ.copy()
         subprocess_env.update(extra_envs or {})
     if capture_output:
-        assert os.path.isdir(capture_output), (
-            f"specified capture output dir {capture_output} must exist"
-        )
+        assert os.path.isdir(
+            capture_output
+        ), f"specified capture output dir {capture_output} must exist"
     try:
         if capture_output:
             with (
@@ -217,9 +229,9 @@ def tritonbench_run(args: Optional[List[str]] = None):
     # Check if A/B testing mode is enabled
     if args.side_a is not None and args.side_b is not None:
         # A/B testing mode - only support single operator
-        assert len(ops) == 1, (
-            "A/B testing validation should have caught multiple operators"
-        )
+        assert (
+            len(ops) == 1
+        ), "A/B testing validation should have caught multiple operators"
         op = ops[0]
         args.op = op
 
@@ -260,74 +272,125 @@ def tritonbench_run(args: Optional[List[str]] = None):
 
 def _run(args: argparse.Namespace, extra_args: List[str]) -> BenchmarkOperatorResult:
     run_timestamp = datetime.fromtimestamp(time.time()).strftime("%Y%m%d%H%M%S")
-    if is_loader_op(args.op):
-        Opbench = get_op_loader_bench_cls_by_name(args.op)
-    else:
-        Opbench = load_opbench_by_name(args.op)
-    opbench = Opbench(
-        tb_args=args,
-        extra_args=extra_args,
-    )
-    try:
-        opbench.run(args.warmup, args.rep, sleep=args.sleep)
-    finally:
-        metrics = opbench.output
-        if is_fbcode() and args.log_scuba:
-            from .fb.utils import log_benchmark  # @manual
 
-            kwargs = {
-                "metrics": metrics,
-                "benchmark_name": args.op,
-                "device": args.device,
-                "logging_group": args.logging_group or args.op,
-                "precision": args.precision,
-            }
-            if args.production_shapes:
-                from tritonbench.utils.fb.durin_data import productionDataLoader
+    # Parse modes (can be comma-separated list)
+    modes = parse_modes(args.mode)
+    multi_mode = len(modes) > 1
 
-                kwargs["weights_loader"] = productionDataLoader
+    all_results = []
+    final_metrics = None
 
-            if "hardware" in args:
-                kwargs["hardware"] = args.hardware
-            if "triton_type" in args:
-                kwargs["triton_type"] = args.triton_type
-            log_benchmark(**kwargs)
-        # Log benchmark output to scuba even if not in fbcode
-        if args.log_scuba and not is_fbcode():
-            from tritonbench.utils.scuba_utils import log_benchmark
+    for mode in modes:
+        # Create a copy of args with the current mode
+        mode_args = copy.deepcopy(args)
+        mode_args.mode = mode
+        # Store the multi-mode flag for x_val formatting
+        mode_args._multi_mode = multi_mode
 
-            log_benchmark(
-                benchmark_data=None, run_timestamp=run_timestamp, opbench=opbench
-            )
+        if is_loader_op(mode_args.op):
+            Opbench = get_op_loader_bench_cls_by_name(mode_args.op)
+        else:
+            Opbench = load_opbench_by_name(mode_args.op)
 
-        if args.plot:
-            try:
-                opbench.plot()
-            except NotImplementedError:
-                logger.error(f"Plotting is not implemented for {args.op}")
+        opbench = Opbench(
+            tb_args=mode_args,
+            extra_args=extra_args,
+        )
+        try:
+            opbench.run(mode_args.warmup, mode_args.rep, sleep=mode_args.sleep)
+        finally:
+            metrics = opbench.output
 
-        if args.output:
-            with open(args.output, "w") as f:
+            if multi_mode:
+                # Append mode suffix to x_val for each result entry
+                mode_suffix_results = []
+                for x_val, y_val in metrics.result:
+                    new_x_val = f"{x_val} | {mode}"
+                    mode_suffix_results.append((new_x_val, y_val))
+                all_results.extend(mode_suffix_results)
+            else:
+                all_results.extend(metrics.result)
+
+            # Keep track of the last metrics for final output settings
+            final_metrics = metrics
+
+    # Create combined result if multi-mode
+    if multi_mode and final_metrics is not None:
+        from tritonbench.utils.triton_op import REGISTERED_X_VALS
+
+        # Update x_val label to include " | mode" suffix
+        op_name = final_metrics.op_name
+        original_label = REGISTERED_X_VALS.get(op_name, "x_val")
+        REGISTERED_X_VALS[op_name] = f"{original_label} | mode"
+
+        final_metrics = BenchmarkOperatorResult(
+            benchmark_name=final_metrics.benchmark_name,
+            op_name=final_metrics.op_name,
+            op_mode=args.mode,
+            metrics=final_metrics.metrics,
+            simple_mode=final_metrics.simple_mode,
+            result=all_results,
+        )
+    elif final_metrics is not None:
+        # Single mode - use the metrics as-is
+        pass
+
+    metrics = final_metrics
+
+    if is_fbcode() and args.log_scuba:
+        from .fb.utils import log_benchmark  # @manual
+
+        kwargs = {
+            "metrics": metrics,
+            "benchmark_name": args.op,
+            "device": args.device,
+            "logging_group": args.logging_group or args.op,
+            "precision": args.precision,
+        }
+        if args.production_shapes:
+            from tritonbench.utils.fb.durin_data import productionDataLoader
+
+            kwargs["weights_loader"] = productionDataLoader
+
+        if "hardware" in args:
+            kwargs["hardware"] = args.hardware
+        if "triton_type" in args:
+            kwargs["triton_type"] = args.triton_type
+        log_benchmark(**kwargs)
+    # Log benchmark output to scuba even if not in fbcode
+    if args.log_scuba and not is_fbcode():
+        from tritonbench.utils.scuba_utils import log_benchmark
+
+        log_benchmark(benchmark_data=None, run_timestamp=run_timestamp, opbench=opbench)
+
+    if args.plot:
+        try:
+            opbench.plot()
+        except NotImplementedError:
+            logger.error(f"Plotting is not implemented for {args.op}")
+
+    if args.output:
+        with open(args.output, "w") as f:
+            metrics.write_csv_to_file(f)
+        logger.info(f"[tritonbench] Output result csv to {args.output}")
+    if args.output_json:
+        with open(args.output_json, "w") as f:
+            metrics.write_json_to_file(f)
+    if args.output_dir:
+        if args.csv:
+            output_file = os.path.join(args.output_dir, f"{args.op}.csv")
+            with open(output_file, "w") as f:
                 metrics.write_csv_to_file(f)
-            logger.info(f"[tritonbench] Output result csv to {args.output}")
-        if args.output_json:
-            with open(args.output_json, "w") as f:
+        else:
+            output_file = os.path.join(args.output_dir, f"{args.op}.json")
+            with open(output_file, "w") as f:
                 metrics.write_json_to_file(f)
-        if args.output_dir:
-            if args.csv:
-                output_file = os.path.join(args.output_dir, f"{args.op}.csv")
-                with open(output_file, "w") as f:
-                    metrics.write_csv_to_file(f)
-            else:
-                output_file = os.path.join(args.output_dir, f"{args.op}.json")
-                with open(output_file, "w") as f:
-                    metrics.write_json_to_file(f)
-        if not args.skip_print:
-            if args.csv:
-                metrics.write_csv_to_file(sys.stdout)
-            else:
-                print(metrics)
-        return metrics
+    if not args.skip_print:
+        if args.csv:
+            metrics.write_csv_to_file(sys.stdout)
+        else:
+            print(metrics)
+    return metrics
 
 
 def run_config(
@@ -337,9 +400,9 @@ def run_config(
     override_envs: bool = False,
     capture_output: Optional[str] = None,
 ):
-    assert Path(config_file).exists(), (
-        f"Config file {config_file} must exist. Current working directory {os.getcwd()}"
-    )  # Fbcode only: need to run from fbsource root directory
+    assert Path(
+        config_file
+    ).exists(), f"Config file {config_file} must exist. Current working directory {os.getcwd()}"  # Fbcode only: need to run from fbsource root directory
     # Remove "TRITONBENCH_RUN_CONFIG" env
     if "TRITONBENCH_RUN_CONFIG" in os.environ:
         del os.environ["TRITONBENCH_RUN_CONFIG"]
@@ -455,9 +518,9 @@ def run_in_task(
             subprocess_env = os.environ.copy()
             subprocess_env.update(extra_envs or {})
         if capture_output:
-            assert os.path.isdir(capture_output), (
-                f"specified capture output dir {capture_output} must exist"
-            )
+            assert os.path.isdir(
+                capture_output
+            ), f"specified capture output dir {capture_output} must exist"
         if capture_output:
             with (
                 open(os.path.join(capture_output, "stdout.log"), "w") as stdout,

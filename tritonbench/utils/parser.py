@@ -31,9 +31,10 @@ def get_parser(args=None):
     )
     parser.add_argument(
         "--mode",
-        choices=["fwd", "bwd", "fwd_bwd", "fwd_no_grad"],
+        type=str,
         default="fwd",
-        help="Test mode (fwd, bwd, fwd_bwd, or fwd_no_grad).",
+        help="Test mode(s). Accepts a single mode or comma-separated list (e.g., 'fwd,bwd'). "
+        "Valid modes: fwd, bwd, fwd_bwd, fwd_no_grad.",
     )
     parser.add_argument("--bwd", action="store_true", help="Run backward pass.")
     parser.add_argument(
@@ -426,6 +427,16 @@ def get_parser(args=None):
         )
 
     args, extra_args = parser.parse_known_args(args)
+
+    # Validate mode(s)
+    valid_modes = {"fwd", "bwd", "fwd_bwd", "fwd_no_grad"}
+    modes = [m.strip() for m in args.mode.split(",")]
+    for mode in modes:
+        if mode not in valid_modes:
+            parser.error(
+                f"Invalid mode '{mode}'. Valid modes are: {', '.join(sorted(valid_modes))}"
+            )
+
     if args.op and args.ci:
         parser.error("cannot specify operator when in CI mode")
     if args.cudagraph and args.entropy_criterion:
