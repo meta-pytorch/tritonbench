@@ -18,12 +18,6 @@ gemm:
   extra_args: --skip hstu_triton_matmul,pt2_cutlass_matmul
 # fb-only ops
 fp8_fused_quant_gemm_rowwise:
-int4_gemm:
-# slow tests
-jagged_layer_norm:
-jagged_mean:
-jagged_softmax:
-jagged_sum:
 # Device specific tests
 blackwell_attentions:
   devices:
