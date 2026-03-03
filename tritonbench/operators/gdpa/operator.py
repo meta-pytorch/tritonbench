@@ -38,6 +38,7 @@ from tritonbench.utils.triton_op import (
     register_metric,
     register_x_val,
 )
+from tritonbench.utils.env_utils import is_hip
 from tritonbench.utils.triton_utils import has_tlx
 
 if has_tlx():
@@ -158,6 +159,8 @@ def parse_args(args):
 
 class Operator(BenchmarkOperator):
     DEFAULT_PRECISION = "bf16"
+    # Backward pass does not work on AMD
+    FWD_ONLY = not is_hip()
 
     def __init__(
         self, tb_args: argparse.Namespace, extra_args: Optional[List[str]] = None
