@@ -30,7 +30,7 @@ import gc
 from typing import Any, Callable, Generator, List, Optional
 
 import torch
-from tritonbench.utils.env_utils import is_hip
+from tritonbench.utils.env_utils import is_blackwell, is_hip
 from tritonbench.utils.triton_op import (
     BenchmarkOperator,
     BenchmarkOperatorMetrics,
