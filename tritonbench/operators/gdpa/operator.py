@@ -160,7 +160,7 @@ def parse_args(args):
 class Operator(BenchmarkOperator):
     DEFAULT_PRECISION = "bf16"
     # Backward pass does not work on AMD
-    FWD_ONLY = not is_hip()
+    FWD_ONLY = is_hip()
 
     def __init__(
         self, tb_args: argparse.Namespace, extra_args: Optional[List[str]] = None
