@@ -7,7 +7,7 @@
 import importlib.util
 import math
 from dataclasses import dataclass
-from typing import Generator, List, Optional, Tuple
+from typing import Generator, List, Optional, Tuple, Union
 
 import torch
 
@@ -28,7 +28,9 @@ class AttentionShape:
     n_heads: int
     n_heads_kv: int
     seq_len: int
-    seq_len_kv: int
+    seq_len_kv: Union[
+        int, List[int]
+    ]  # int for uniform, list for per-request variable lengths
     d_head: int
     causal: bool = True
     window_size: Tuple[int, int] = (-1, -1)  # (-1, -1) means no sliding window
@@ -261,6 +263,15 @@ def _generate_paged_attention_inputs(
     seq_len_q = shape.seq_len
     seq_len_kv = shape.seq_len_kv
 
+    # Normalize seq_len_kv to a list for variable-length support
+    if isinstance(seq_len_kv, list):
+        seq_len_kv_list = seq_len_kv
+        assert len(seq_len_kv_list) == batch, (
+            f"seq_len_kv list length ({len(seq_len_kv_list)}) must match batch size ({batch})"
+        )
+    else:
+        seq_len_kv_list = [seq_len_kv] * batch
+
     max_num_blocks_per_seq = max_model_seq_len // block_size
     total_blocks = batch * max_num_blocks_per_seq
     total_q = batch * seq_len_q
@@ -295,9 +306,8 @@ def _generate_paged_attention_inputs(
         (batch, max_num_blocks_per_seq), dtype=torch.int32, device=device
     )
 
-    num_blocks_used = (seq_len_kv + block_size - 1) // block_size
-
     for i in range(batch):
+        num_blocks_used = (seq_len_kv_list[i] + block_size - 1) // block_size
         offset = i * max_num_blocks_per_seq
         if shape.page_shuffle:
             # Shuffle all blocks and take the first num_blocks_used
@@ -310,12 +320,12 @@ def _generate_paged_attention_inputs(
             for j in range(num_blocks_used):
                 page_table[i, j] = offset + j
 
-    # Actual KV sequence lengths: [batch]
-    seqused_k = torch.full((batch,), seq_len_kv, dtype=torch.int32, device=device)
+    # Actual KV sequence lengths: [batch] (per-request)
+    seqused_k = torch.tensor(seq_len_kv_list, dtype=torch.int32, device=device)
 
     # max sequence lengths
     max_seqlen_q = seq_len_q
-    max_seqlen_k = seq_len_kv
+    max_seqlen_k = max(seq_len_kv_list)
 
     inputs = [
         q,

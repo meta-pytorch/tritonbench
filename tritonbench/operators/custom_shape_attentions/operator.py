@@ -6,55 +6,16 @@
 
 
 import argparse
+import logging
 import math
-import os
-from contextlib import nullcontext
+import traceback
 from functools import partial
-from typing import Callable, Optional, Tuple
+from typing import Any, Callable, Generator, List, Optional, Tuple
 
 import torch
-from torch.nn.attention import sdpa_kernel, SDPBackend
-from torch.nn.functional import scaled_dot_product_attention as sdpa
-from tritonbench.kernels.attention_utils import SUPPORT_GLUON
-
-try:
-    from tritonbench.kernels.blackwell_triton_fused_attention import (
-        attention_opt as blackwell_triton_tutorial_FA2_opt,
-    )
-    from tritonbench.kernels.blackwell_triton_fused_attention_dp import (
-        attention_opt as blackwell_triton_tutorial_FA2_dp,
-    )
-
-    HAS_BLACKWELL_AUTOWS = True
-except (ImportError, IOError, AttributeError, TypeError):
-    # Needs compiler that supports autoWS
-    HAS_BLACKWELL_AUTOWS = False
-
-from tritonbench.kernels.triton_fused_attention import (
-    attention_opt as triton_tutorial_FA2_opt,
-)
-
-if SUPPORT_GLUON:
-    from tritonbench.kernels.gluon_attention_forward import (
-        attention_forward as gluon_blackwell_fwd,
-    )
-    from tritonbench.kernels.gluon_attention_persistent_forward import (
-        attention_forward as gluon_blackwell_persistent_fwd,
-    )
-
-import logging
-
 from tritonbench.utils.env_utils import IS_BLACKWELL
 
 logger = logging.getLogger(__name__)
-
-# [Optional] flash_attn v2
-try:
-    from flash_attn.flash_attn_interface import flash_attn_func as flash_attn_func
-
-    HAS_FLASH_V2 = True
-except (ImportError, IOError, AttributeError):
-    HAS_FLASH_V2 = False
 
 # [Optional] CuTe
 try:
@@ -67,8 +28,6 @@ except (ImportError, IOError, AttributeError):
     HAS_FLASH_CUTE = False
 except SystemError as e:
     HAS_FLASH_CUTE = False
-    import traceback
-
     print(f"SystemError resulted from importing FA4: {e.__class__.__name__}: {e}")
     traceback.print_exc()
 
@@ -84,48 +43,8 @@ except (ImportError, IOError, AttributeError):
     HAS_OSS_FA4 = False
 except SystemError as e:
     HAS_OSS_FA4 = False
-    import traceback
-
     print(f"SystemError resulted from importing OSS FA4: {e.__class__.__name__}: {e}")
     traceback.print_exc()
-
-from ..flash_attention.test_fmha_utils import permute_qkv
-
-# [Optional] xformers backend
-try:
-    import xformers  # @manual=//fair/xformers:xformers
-    import xformers.ops.fmha as xformers_fmha  # @manual=//fair/xformers:xformers
-
-    HAS_XFORMERS = True
-except (ImportError, IOError, AttributeError, TypeError):
-    HAS_XFORMERS = False
-
-try:
-    from mslk.attention.cutlass_blackwell_fmha import cutlass_blackwell_fmha_func
-
-    HAS_CUTLASS_BLACKWELL = True
-except (ImportError, IOError, AttributeError, TypeError):
-    HAS_CUTLASS_BLACKWELL = False
-
-
-try:
-    # @manual=//triton:triton
-    import triton.language.extra.tlx as tlx  # type: ignore
-
-    HAS_TLX = True
-except ImportError:
-    # suppress type checking errors
-    tlx = None
-
-    HAS_TLX = False
-
-if HAS_TLX:
-    from tritonbench.kernels.tlx_attention_ws_pipelined import (
-        attention as tlx_blackwell,
-    )
-
-
-from typing import Any, Generator, List
 
 from tritonbench.utils.input import input_filter
 from tritonbench.utils.triton_op import (
@@ -137,11 +56,8 @@ from tritonbench.utils.triton_op import (
     register_x_val,
 )
 
+from ..flash_attention.test_fmha_utils import permute_qkv
 from .generate_inputs import AttentionShape, customized_inputs
-
-HAS_CUDA_124 = (
-    torch.cuda.is_available() and torch.version.cuda and torch.version.cuda >= "12.4"
-)
 
 
 def parse_op_args(args: List[str]):
@@ -181,11 +97,7 @@ def parse_op_args(args: List[str]):
 
 
 def unpack_inputs(*args):
-    inputs = args
-    if len(args) == 1 and isinstance(args[0], xformers_fmha.Inputs):
-        inp = args[0]
-        inputs = (inp.query, inp.key, inp.value)
-    return (t.detach() if isinstance(t, torch.Tensor) else t for t in inputs)
+    return (t.detach() if isinstance(t, torch.Tensor) else t for t in args)
 
 
 def detach_and_requires_grad(t):
@@ -197,14 +109,7 @@ def detach_and_requires_grad(t):
 
 
 def detach_inputs(*args):
-    inputs = args
-    if len(inputs) == 1 and isinstance(inputs[0], xformers_fmha.Inputs):
-        inp = inputs[0]
-        inp.query = detach_and_requires_grad(inp.query)
-        inp.key = detach_and_requires_grad(inp.key)
-        inp.value = detach_and_requires_grad(inp.value)
-        return (inp,)
-    return [detach_and_requires_grad(t) for t in inputs]
+    return [detach_and_requires_grad(t) for t in args]
 
 
 def multi_input_wrapper(fn):
@@ -250,10 +155,6 @@ def multi_input_wrapper(fn):
 
     wrapper.__name__ = fn.__name__
     return wrapper
-
-
-def preproc_noop(*args):
-    return args
 
 
 def preproc_permute(*args):
@@ -384,9 +285,6 @@ class Operator(BenchmarkOperator):
 
     @multi_input_wrapper
     def _cutedsl_blackwell_paged(self, *args) -> Tuple[Callable, Callable]:
-        # Paged attention uses flash_attn_varlen_func
-        # Note: mslk may not have flash_attn_varlen_func exposed yet
-        # This is a placeholder - will fail if mslk doesn't support it
         causal = self._get_causal()
         window_size = self._get_window_size()
         local = self._get_local()
@@ -401,16 +299,19 @@ class Operator(BenchmarkOperator):
             page_table,
             seqused_k,
         ):
-            # flash_attn_varlen_func signature:
-            # q, k, v, cu_seqlens_q, cu_seqlens_k, max_seqlen_q, max_seqlen_k,
-            # seqused_q, seqused_k, page_table, softmax_scale, causal, window_size, ...
             return facute_flash_attn_func(
                 q,
                 k_cache,
                 v_cache,
+                cu_seqlens_q=cu_seqlens_q,
+                cu_seqlens_k=None,
+                seqlen_kv=seqused_k,
+                max_seq_len_q=max_seqlen_q,
+                max_seq_len_k=max_seqlen_k,
                 softmax_scale=self._get_sm_scale(),
                 causal=causal,
                 window_size=window_size if local else (None, None),
+                page_table=page_table,
                 deterministic=self.deterministic,
             )
 
@@ -477,7 +378,7 @@ class Operator(BenchmarkOperator):
     )
     def get_x_val(
         self, example_inputs
-    ) -> Tuple[str, int, int, int, int, int, int, bool, str, str, int]:
+    ) -> Tuple[str, int, int, int, int, Any, int, bool, str, str, int]:
         """Return all shape parameters as a tuple for separate columns."""
         if self.current_shape is None:
             return ("unknown", 0, 0, 0, 0, 0, 0, True, "(-1,-1)", "False", 0)
@@ -492,13 +393,20 @@ class Operator(BenchmarkOperator):
         else:
             paged_str = "False"
 
+        # Format seq_len_kv: show sum for variable lengths
+        seq_len_kv = self.current_shape.seq_len_kv
+        if isinstance(seq_len_kv, list):
+            seq_len_kv_display = sum(seq_len_kv)
+        else:
+            seq_len_kv_display = seq_len_kv
+
         return (
             self.current_shape.name,
             self.current_shape.batch,
             self.current_shape.n_heads,
             self.current_shape.n_heads_kv,
             self.current_shape.seq_len,
-            self.current_shape.seq_len_kv,
+            seq_len_kv_display,
             self.current_shape.d_head,
             self.current_shape.causal,
             f"({ws[0]},{ws[1]})",
@@ -533,22 +441,29 @@ class Operator(BenchmarkOperator):
         causal = self._get_causal()
         window_size = self._get_window_size()
 
+        # Normalize N_CTX_KV to a list for variable-length support
+        if isinstance(N_CTX_KV, list):
+            kv_lens = N_CTX_KV
+        else:
+            kv_lens = [N_CTX_KV] * BATCH
+
         if not local:
-            flops_per_matmul = 2.0 * BATCH * H * N_CTX * N_CTX_KV * D_HEAD
-            flops = 2 * flops_per_matmul
+            flops = sum(2.0 * 2 * H * N_CTX * kv_len * D_HEAD for kv_len in kv_lens)
             if causal:
                 flops *= 0.5
         else:
-            row_idx = torch.arange(N_CTX, device="cuda")
-            col_left = torch.maximum(
-                row_idx + N_CTX_KV - N_CTX - window_size[0], torch.tensor(0)
-            )
-            col_right = torch.minimum(
-                row_idx + N_CTX_KV - N_CTX + window_size[1],
-                torch.tensor(N_CTX_KV - 1),
-            )
-            avg_seqlen = (col_right - col_left + 1).float().mean().item()
-            flops = 2 * 2.0 * BATCH * H * N_CTX * avg_seqlen * D_HEAD
+            flops = 0
+            for kv_len in kv_lens:
+                row_idx = torch.arange(N_CTX, device="cuda")
+                col_left = torch.maximum(
+                    row_idx + kv_len - N_CTX - window_size[0], torch.tensor(0)
+                )
+                col_right = torch.minimum(
+                    row_idx + kv_len - N_CTX + window_size[1],
+                    torch.tensor(kv_len - 1),
+                )
+                avg_seqlen = (col_right - col_left + 1).float().mean().item()
+                flops += 2 * 2.0 * H * N_CTX * avg_seqlen * D_HEAD
 
         if self.mode == BenchmarkMode.BWD:
             flops *= 2.5  # 2.0(bwd) + 0.5(recompute)
