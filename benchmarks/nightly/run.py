@@ -9,7 +9,6 @@ import json
 import logging
 import os
 from pathlib import Path
-from typing import Any, Dict
 
 import yaml
 
@@ -19,24 +18,6 @@ logger = logging.getLogger(__name__)
 logging.basicConfig(level=logging.INFO)
 
 from ..common import setup_output_dir, setup_tritonbench_cwd
-
-
-def get_operator_benchmarks() -> Dict[str, Any]:
-    def _load_benchmarks(config_path: str) -> Dict[str, Any]:
-        out = {}
-        with open(config_path, "r") as f:
-            obj = yaml.safe_load(f)
-        if not obj:
-            return out
-        for benchmark_name in obj:
-            # bypass disabled benchmarks
-            if obj[benchmark_name].get("disabled", False):
-                continue
-            out[benchmark_name] = obj[benchmark_name]["args"].split(" ")
-        return out
-
-    out = _load_benchmarks(os.path.join(CURRENT_DIR, "autogen.yaml"))
-    return out
 
 
 def run():
@@ -57,11 +38,21 @@ def run():
     # Run each operator
     output_files = []
     operator_benchmarks = get_operator_benchmarks()
+    with open(os.path.join(CURRENT_DIR, "ci.yaml"), "r") as f:
+        operator_benchmarks = yaml.safe_load(f)
     for op_bench in operator_benchmarks:
-        op_args = operator_benchmarks[op_bench]
+        benchmark_config = operator_benchmarks[op_bench]
+        disabled = (
+            benchmark_config.get("disabled", False)
+            and _device_env_check(benchmark_config)
+            and _triton_env_check(benchmark_config)
+        )
+        if disabled:
+            logger.info(f"[nightly] Skipping disabled benchmark {benchmark_name}.")
+            continue
         output_file = output_dir.joinpath(f"{op_bench}.json")
-        op_args.extend(["--output-json", str(output_file.absolute())])
-        run_in_task(op_args=op_args, benchmark_name=op_bench)
+        benchmark_config["args"].extend(["--output-json", str(output_file.absolute())])
+        run_in_task(op_args=benchmark_config["args"].split(" "), benchmark_name=op_bench)
         # write pass or fail to result json
         # todo: check every input shape has passed
         output_file_name = Path(output_file).stem

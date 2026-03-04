@@ -17,8 +17,8 @@ from tritonbench.utils.env_utils import (
     is_blackwell,  # @manual=//pytorch/tritonbench:tritonbench
     is_fbcode,  # @manual=//pytorch/tritonbench:tritonbench
 )
-from tritonbench.utils.run_utils import _device_env_check, _triton_env_check
 from tritonbench.utils.parser import get_parser
+from tritonbench.utils.run_utils import _device_env_check, _triton_env_check
 
 if is_fbcode():
     import importlib
@@ -42,6 +42,7 @@ TEST_OPERATORS = (
     else set(list_operators_by_collection(op_collection="default"))
 )
 
+
 def _gen_test_operators(test_ops, skip_tests) -> set[str]:
     # to save capacity, only run tests specific to b200 on b200
     if is_blackwell():
@@ -56,9 +57,13 @@ def _gen_test_operators(test_ops, skip_tests) -> set[str]:
         if skip_tests[skip_op] == None:
             test_ops[skip_op]["disabled"] = True
         if "devices" in skip_tests[skip_op]:
-            test_ops[skip_op]["disabled"] = test_ops[skip_op]["disabled"] and _device_env_check(skip_tests[skip_op])
+            test_ops[skip_op]["disabled"] = test_ops[skip_op][
+                "disabled"
+            ] and _device_env_check(skip_tests[skip_op])
         if "channels" in skip_tests[skip_op]:
-            test_ops[skip_op]["disabled"] = test_ops[skip_op]["disabled"] and _triton_env_check(skip_tests[skip_op])
+            test_ops[skip_op]["disabled"] = test_ops[skip_op][
+                "disabled"
+            ] and _triton_env_check(skip_tests[skip_op])
     return {test_op for test_op in test_ops if not test_ops[test_op]["disabled"]}
 
 

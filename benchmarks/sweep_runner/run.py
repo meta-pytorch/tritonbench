@@ -27,14 +27,13 @@ from pathlib import Path
 from typing import Any, Dict, List, Optional, override
 
 import yaml
-from test.test_gpu.main import skip_tests
 
 from ..common import REPO_PATH, setup_output_dir, setup_tritonbench_cwd
 
 
 setup_tritonbench_cwd()
 
-from tritonbench.metadata.query import apply_skip_test, get_benchmark_config_with_tags
+from tritonbench.metadata.query import get_benchmark_config_with_tags
 
 logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger(__name__)
@@ -92,11 +91,11 @@ def parse_args(args: Optional[List[str]] = None) -> argparse.Namespace:
     return parsed_args
 
 
-def load_config(config_file: str) -> Dict[str, Any]:
+def load_config(config_file: str, base_dir=CURRENT_DIR) -> Dict[str, Any]:
     """Load and parse the YAML config file."""
     config_path = Path(config_file)
     if not config_path.exists():
-        config_path = Path(CURRENT_DIR).joinpath(config_file)
+        config_path = Path(base_dir).joinpath(config_file)
         if not config_path.exists():
             raise FileNotFoundError(f"Config file not found: {config_file}")
 
@@ -126,14 +125,15 @@ def generate_run_config(
     Returns:
         A dictionary in TRITONBENCH_RUN_CONFIG format
     """
+    if skip_tests := sweep_runner_config["run_config"].get("skip_tests", None):
+        skip_tests = [load_config(skip_test, base_dir=REPO_PATH) for skip_test in skip_tests]
     run_config = get_benchmark_config_with_tags(
         tags=sweep_runner_config["run_config"]["tags"],
         per_backend=separate_backends,
+        with_backwards=sweep_runner_config["run_config"].get("with_backwards", False),
+        metrics=sweep_runner_config["run_config"].get("metrics", None),
+        skip_tests=skip_tests,
     )
-
-    if skip_tests := sweep_runner_config["run_config"].get("skip_tests", {}):
-        for skip_test in skip_tests:
-            run_config = apply_skip_test(run_config, skip_test)
     result_configs = {}
     result_configs["common_args"] = f"--launch benchmarks.{target}.run"
     if attach_output_dir:
