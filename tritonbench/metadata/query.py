@@ -139,9 +139,7 @@ def get_benchmark_config_with_tags(
             f"{dtype[op]}_" if op in dtype and dtype[op] not in SKIP_DTYPE else ""
         )
         metric_args = (
-            get_metric_args(op, metrics, kernel_metadata=operators)
-            if metrics
-            else ""
+            get_metric_args(op, metrics, kernel_metadata=operators) if metrics else ""
         )
         if per_backend:
             for backend_name in backend_names_with_tags:
