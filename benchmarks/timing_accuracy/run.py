@@ -20,6 +20,7 @@ from tritonbench.utils.parser import get_parser
 logger = logging.getLogger(__name__)
 logger.setLevel(logging.INFO)
 
+CURRENT_DIR = os.path.dirname(os.path.abspath(__file__))
 
 @dataclass
 class MethodStats:
@@ -398,6 +399,9 @@ def run(args: Optional[List[str]] = None):
     parser.add_argument(
         "--dump-json", action="store_true", help="Output results as JSON"
     )
+    parser.add_argument(
+        "--ci", action="store_true", help="Run in CI mode (run all tests in ci.yaml)"
+    )
     parser.add_argument("--output-dir", type=str, default=None, help="Output JSON path")
     parser.add_argument("--quiet", action="store_true")
 
@@ -407,6 +411,12 @@ def run(args: Optional[List[str]] = None):
 
     tb_parser = get_parser()
     args, extra_args = parser.parse_known_args(args)
+
+    if args.ci:
+        from tritonbench.utils.run_utils import tritonbench_run
+        os.environ["TRITONBENCH_RUN_CONFIG"] = os.path.join(CURRENT_DIR, "ci.yaml")
+        tritonbench_run()
+        return
 
     tb_args, extra_args = tb_parser.parse_known_args(extra_args)
     _run(args, tb_args, extra_args)
