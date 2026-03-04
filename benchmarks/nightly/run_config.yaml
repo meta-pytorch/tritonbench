@@ -10,28 +10,14 @@ run_config:
     - latency
     - flops
     - speedup
-# disable some ops
-disabled:
-  # FB-Only kernel
-  - fp8_fused_quant_gemm_rowwise_fwd
+  skip_tests:
+    - test/test_gpu/skip_tests.yaml
 # override some ops
+# 1. launch_latency_fwd: measure walltime instead of latency
+# 2. bf16_flex_attention_fwd/bwd: measure compiled version (pt2)
 overrides:
   launch_latency_fwd:
     args: --op launch_latency --metrics walltime
-  bf16_blackwell_attentions_fwd:
-    args: --op blackwell_attentions --only triton_tutorial_flash_v2_blackwell,triton_tutorial_flash_dp_persistent_blackwell,triton_tutorial_flash_dp_blackwell,triton_tutorial_flash_v2_tma_ws_persistent_blackwell,triton_tutorial_flash_v2_persistent_blackwell
-      --metrics tflops,latency
-    device: b200
-  bf16_blackwell_attentions_bwd:
-    args: --op blackwell_attentions --only triton_tutorial_flash_v2_blackwell,triton_tutorial_flash_dp_persistent_blackwell,triton_tutorial_flash_dp_blackwell,triton_tutorial_flash_v2_tma_ws_persistent_blackwell,triton_tutorial_flash_v2_persistent_blackwell
-      --bwd --metrics tflops,latency
-    device: b200
-  # triton_tutorial_flash_v2_opt does not work on Triton main branch
-  bf16_flash_attention_fwd:
-    args: --op flash_attention --baseline flash_v3 --metrics latency,tflops,speedup --only triton_tutorial_flash_v2,flash_v3
-  # flash_attention triton_tutorial_flash_v2 impl only supports causal in backward
-  bf16_flash_attention_bwd:
-    args: --op flash_attention --baseline flash_v3 --metrics latency,tflops,speedup --bwd --only triton_tutorial_flash_v2,flash_v3 --causal
   bf16_flex_attention_fwd:
     args: --op flex_attention --metrics latency,tflops --only compiled
   bf16_flex_attention_bwd:
