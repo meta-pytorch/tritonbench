@@ -171,12 +171,7 @@ def _device_env_check(benchmark_config: Dict[str, str], mode: str = "any") -> bo
         raise ValueError(f"Unknown mode: {mode}")
 
 
-def run_in_helion(
-    op_args: Dict[str, str],
-    extra_envs: Dict[str, str],
-    override_envs: bool = False,
-    capture_output: Optional[str] = None,
-):
+def _get_helion_root():
     # Allow override via TRITONBENCH_HELION_PATH; fallback to the current default.
     default_helion = REPO_PATH.joinpath(".install", "helion")
     helion_root = (
@@ -191,47 +186,7 @@ def run_in_helion(
             "Expected to find 'benchmarks/run.py'. "
             "Set TRITONBENCH_HELION_PATH to a Helion checkout or run 'python install.py --helion'."
         )
-    environ = os.environ.copy()
-    environ.update(extra_envs)
-    cmd = [sys.executable, "benchmarks/run.py"] + op_args
-    logger.info(
-        f"[tritonbench] Running helion benchmark: " + " ".join(cmd),
-    )
-
-    if override_envs:
-        subprocess_env = extra_envs.copy()
-    else:
-        subprocess_env = os.environ.copy()
-        subprocess_env.update(extra_envs or {})
-    if capture_output:
-        assert os.path.isdir(capture_output), (
-            f"specified capture output dir {capture_output} must exist"
-        )
-    try:
-        if capture_output:
-            with (
-                open(os.path.join(capture_output, "stdout.log"), "w") as stdout,
-                open(os.path.join(capture_output, "stderr.log"), "w") as stderr,
-            ):
-                subprocess.check_call(
-                    cmd,
-                    stdout=stdout,
-                    stderr=stderr,
-                    cwd=helion_root,
-                    env=subprocess_env,
-                )
-        else:
-            subprocess.check_call(
-                cmd,
-                stdout=sys.stdout,
-                stderr=sys.stderr,
-                cwd=helion_root,
-                env=subprocess_env,
-            )
-        return 0
-    except subprocess.CalledProcessError as e:
-        # By default, we will continue on the failed operators
-        return e.returncode
+    return helion_root
 
 
 def tritonbench_run(args: Optional[List[str]] = None):
@@ -436,23 +391,16 @@ def run_config(
         if disabled:
             logger.info(f"Skipping disabled benchmark {benchmark_name}.")
             continue
-        if runner == "helion":
-            run_in_helion(
-                op_args,
-                config_extra_envs,
-                override_envs=override_envs,
-                capture_output=capture_output,
-            )
-        else:
-            op_name = get_cmd_parameter(op_args, "--op")
-            run_in_task(
-                op=op_name,
-                op_args=op_args,
-                benchmark_name=benchmark_name,
-                extra_envs=config_extra_envs,
-                override_envs=override_envs,
-                capture_output=capture_output,
-            )
+        op_name = get_cmd_parameter(op_args, "--op")
+        run_in_task(
+            op=op_name,
+            op_args=op_args,
+            runner=runner,
+            benchmark_name=benchmark_name,
+            extra_envs=config_extra_envs,
+            override_envs=override_envs,
+            capture_output=capture_output,
+        )
 
 
 def load_operator_by_args(task_args: List[str]):
@@ -479,6 +427,7 @@ def run_one_operator(task_args: List[str], with_bwd: bool = False):
 def run_in_task(
     op: Optional[str] = None,
     op_args: Optional[List[str]] = None,
+    runner: Optional[str] = None,
     benchmark_name: Optional[str] = None,
     extra_envs: Optional[Dict[str, str]] = None,
     override_envs: bool = False,
@@ -506,8 +455,11 @@ def run_in_task(
         benchmark_name = op
 
     # In OSS, we assume always using the run.py benchmark driver
-    if not is_fbcode() and not op_task_cmd[1] == "run.py":
-        op_task_cmd.insert(1, "run.py")
+    cwd = REPO_PATH if not runner == "helion" else _get_helion_root()
+    runner_script = "run.py" if not runner == "helion" else "benchmarks/run.py"
+    if not is_fbcode() and not op_task_cmd[1] == runner_script:
+        op_task_cmd.insert(1, runner_script)
+
     try:
         # if simple output, disable all the logs
         if "--simple-output" in op_task_cmd:
@@ -532,7 +484,7 @@ def run_in_task(
                     op_task_cmd,
                     stdout=stdout,
                     stderr=stderr,
-                    cwd=REPO_PATH,
+                    cwd=cwd,
                     env=subprocess_env,
                 )
         else:
@@ -540,7 +492,7 @@ def run_in_task(
                 op_task_cmd,
                 stdout=sys.stdout,
                 stderr=sys.stderr,
-                cwd=REPO_PATH,
+                cwd=cwd,
                 env=subprocess_env,
             )
         benchmark_time = time.perf_counter() - start_time
