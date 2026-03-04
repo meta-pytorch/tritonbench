@@ -18,24 +18,23 @@ Usage:
         --separate-backends
 """
 
-from test.test_gpu.main import skip_tests
-from typing import override
 import argparse
 import logging
 import os
 import subprocess
 import sys
 from pathlib import Path
-from typing import Any, Dict, List, Optional
+from typing import Any, Dict, List, Optional, override
 
 import yaml
+from test.test_gpu.main import skip_tests
 
 from ..common import REPO_PATH, setup_output_dir, setup_tritonbench_cwd
 
 
 setup_tritonbench_cwd()
 
-from tritonbench.metadata.query import get_benchmark_config_with_tags, apply_skip_test
+from tritonbench.metadata.query import apply_skip_test, get_benchmark_config_with_tags
 
 logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger(__name__)
