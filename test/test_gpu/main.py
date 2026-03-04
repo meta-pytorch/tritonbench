@@ -42,12 +42,12 @@ TEST_OPERATORS = (
     else set(list_operators_by_collection(op_collection="default"))
 )
 
-def _gen_test_operators(test_ops, skip_tests):
+def _gen_test_operators(test_ops, skip_tests) -> set[str]:
     # to save capacity, only run tests specific to b200 on b200
     if is_blackwell():
-        test_ops = [test_op: {"disabled": True} for test_op in test_ops]
+        test_ops = {test_op: {"disabled": True} for test_op in test_ops}
     else:
-        test_ops = [test_op: {"disabled": False} for test_op in test_ops]
+        test_ops = {test_op: {"disabled": False} for test_op in test_ops}
     for skip_op in skip_tests:
         if not skip_op in test_ops:
             continue
