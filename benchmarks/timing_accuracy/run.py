@@ -76,6 +76,7 @@ class MethodStats:
             "n_tests": self.n_tests,
             "warmup": self.warmup,
             "rep": self.rep,
+            "benchmark_time_s": self.benchmark_time,
             "intra_test": {
                 "avg_median_ms": statistics.mean(self.intra_test_medians)
                 if self.intra_test_medians
@@ -95,10 +96,13 @@ class MethodStats:
                 "median_ms": self.inter_test_median,
                 "std_ms": self.inter_test_std,
                 "cv": self.inter_test_cv,
+                "min_ms": self.inter_test_min,
             },
             "intra_test_medians": self.intra_test_medians,
             "intra_test_stds": self.intra_test_stds,
             "intra_test_cvs": self.intra_test_cvs,
+            "intra_test_mins": self.intra_test_mins,
+            "intra_test_maxs": self.intra_test_maxs,
             "all_samples": self.all_samples,
         }
 
