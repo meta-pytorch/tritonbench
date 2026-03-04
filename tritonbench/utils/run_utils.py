@@ -138,9 +138,9 @@ def _env_get_str(var_name: str, default: str) -> str:
 def _triton_env_check(benchmark_config: Dict[str, str], mode: str = "any") -> bool:
     """True means we should run the benchmark, False means we should skip it."""
     triton_channels = benchmark_config.get("triton_channels", None)
-    assert triton_channels == None or all([channel in TRITON_ENV_CHECK for channel in triton_channels]), (
-        f"Unknown triton_channel: {triton_channels}"
-    )
+    assert triton_channels == None or all(
+        [channel in TRITON_ENV_CHECK for channel in triton_channels]
+    ), f"Unknown triton_channel: {triton_channels}"
     if mode == "any":
         if triton_channels is None:
             return True
