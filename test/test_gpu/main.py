@@ -16,10 +16,8 @@ from tritonbench.operators_collection import (
 from tritonbench.utils.env_utils import (
     is_blackwell,  # @manual=//pytorch/tritonbench:tritonbench
     is_fbcode,  # @manual=//pytorch/tritonbench:tritonbench
-    is_hip,  # @manual=//pytorch/tritonbench:tritonbench
-    is_meta_triton,  # @manual=//pytorch/tritonbench:tritonbench
-    is_triton_beta,  # @manual=//pytorch/tritonbench:tritonbench
 )
+from tritonbench.utils.run_utils import _device_env_check, _triton_env_check
 from tritonbench.utils.parser import get_parser
 
 if is_fbcode():
@@ -44,63 +42,27 @@ TEST_OPERATORS = (
     else set(list_operators_by_collection(op_collection="default"))
 )
 
-# operators that unconditionally bypassed on CI
-# ususally CI environment issue or broken operators need to be fixed
-BYPASS_OPS = set(
-    [op for op in TEST_OPERATORS if (op in skip_tests and skip_tests[op] == None)]
-)
-TEST_OPERATORS = TEST_OPERATORS - BYPASS_OPS
+def _gen_test_operators(test_ops, skip_tests):
+    # to save capacity, only run tests specific to b200 on b200
+    if is_blackwell():
+        test_ops = [test_op: {"disabled": True} for test_op in test_ops]
+    else:
+        test_ops = [test_op: {"disabled": False} for test_op in test_ops]
+    for skip_op in skip_tests:
+        if not skip_op in test_ops:
+            continue
+        # remove operators that are unconditionally bypassed on CI
+        # ususally CI environment issue or broken operators need to be fixed
+        if skip_tests[skip_op] == None:
+            test_ops[skip_op]["disabled"] = True
+        elif "devices" in skip_tests[skip_op]:
+            test_ops[skip_op]["disabled"] = _device_env_check(skip_tests[skip_op])
+        elif "channels" in skip_tests[skip_op]:
+            test_ops[skip_op]["disabled"] = _triton_env_check(skip_tests[skip_op])
+    return {test_op for test_op in test_ops if not test_ops[test_op]["disabled"]}
 
-# to save capacity, only run B200-only operators on B200 hosts
-B200_ONLY_OPS = set(
-    [
-        op
-        for op in TEST_OPERATORS
-        if (skip_tests.get(op, None) and skip_tests[op].get("devices", []) == ["b200"])
-    ]
-)
-TEST_OPERATORS = (
-    B200_ONLY_OPS if is_blackwell() else TEST_OPERATORS - set(B200_ONLY_OPS)
-)
 
-# remove cuda only operators when testing hip
-if is_hip():
-    CUDA_ONLY_OPS = [
-        op
-        for op in TEST_OPERATORS
-        if skip_tests.get(op, None) and skip_tests[op].get("devices", []) == ["cuda"]
-    ]
-    TEST_OPERATORS = TEST_OPERATORS - set(CUDA_ONLY_OPS)
-
-# remove triton-beta only ops when testing triton-stable
-if is_fbcode() and not is_triton_beta():
-    TRITON_BETA_OPS = [
-        op
-        for op in TEST_OPERATORS
-        if skip_tests.get(op, None)
-        and skip_tests[op].get("channels", []) == ["triton-beta"]
-    ]
-    TEST_OPERATORS = TEST_OPERATORS - set(TRITON_BETA_OPS)
-
-# remove triton-stable only ops when testing triton-beta
-if is_fbcode() and is_triton_beta():
-    TRITON_STABLE_OPS = [
-        op
-        for op in TEST_OPERATORS
-        if skip_tests.get(op, None)
-        and skip_tests[op].get("channels", []) == ["triton-stable"]
-    ]
-    TEST_OPERATORS = TEST_OPERATORS - set(TRITON_STABLE_OPS)
-
-# remove triton-main only ops when testing meta-triton
-if not is_fbcode() and is_meta_triton():
-    TRITON_MAIN_OPS = [
-        op
-        for op in TEST_OPERATORS
-        if skip_tests.get(op, None)
-        and skip_tests[op].get("channels", []) == ["triton-main"]
-    ]
-    TEST_OPERATORS = TEST_OPERATORS - set(TRITON_MAIN_OPS)
+TEST_OPERATORS = _gen_test_operators(TEST_OPERATORS, skip_tests)
 
 
 def check_ci_output(op):
