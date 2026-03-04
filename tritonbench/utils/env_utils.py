@@ -43,10 +43,18 @@ def is_triton_beta() -> bool:
     return "fb.beta" in triton.__version__
 
 
+def is_triton_stable() -> bool:
+    return is_fbcode() and not is_triton_beta()
+
+
 def is_meta_triton() -> bool:
     tlx_module = "triton.language.extra.tlx"
     spec = importlib.util.find_spec(tlx_module)
     return spec is not None
+
+
+def is_triton_main():
+    return not is_fbcode() and not is_meta_triton()
 
 
 def is_cuda() -> bool:

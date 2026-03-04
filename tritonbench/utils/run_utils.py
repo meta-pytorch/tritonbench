@@ -17,7 +17,18 @@ from tritonbench.operator_loader import get_op_loader_bench_cls_by_name, is_load
 from tritonbench.operators import load_opbench_by_name
 from tritonbench.operators_collection import list_operators_by_collection
 from tritonbench.utils.ab_test import compare_ab_results, run_ab_test
-from tritonbench.utils.env_utils import is_fbcode, is_hip, set_torchrun_env
+from tritonbench.utils.env_utils import (
+    is_blackwell,
+    is_cuda,
+    is_fbcode,
+    is_h100,
+    is_hip,
+    is_meta_triton,
+    is_triton_beta,
+    is_triton_main,
+    is_triton_stable,
+    set_torchrun_env,
+)
 from tritonbench.utils.git_utils import get_branch, get_commit_time, get_current_hash
 from tritonbench.utils.gpu_utils import get_amd_device_name, gpu_lockdown
 from tritonbench.utils.list_operator_details import list_operator_details
@@ -48,6 +59,20 @@ BWD_ARGS_OPS = {
         "--skip",
         "pffn_baseline,mkl_jfav3",
     ],
+}
+
+DEVICE_ENV_CHECK = {
+    "h100": is_h100,
+    "b200": is_blackwell,
+    "cuda": is_cuda,
+    "hip": is_hip,
+}
+
+TRITON_ENV_CHECK = {
+    "triton-main": is_triton_main,
+    "triton-beta": is_triton_beta,
+    "meta-triton": is_meta_triton,
+    "triton-stable": is_triton_stable,
 }
 
 logging.basicConfig(level=logging.INFO)
@@ -108,6 +133,42 @@ def _env_get_str(var_name: str, default: str) -> str:
     if value is None:
         return default
     return value.strip() or default
+
+
+def _triton_env_check(benchmark_config: Dict[str, str], mode: str = "any") -> bool:
+    triton_channels = benchmark_config.get("triton_channels", None)
+    if triton_channels is None:
+        return True
+    assert all([channel in TRITON_ENV_CHECK for channel in triton_channels]), (
+        f"Unknown triton_channel: {triton_channels}"
+    )
+    if mode == "any":
+        if triton_channels is None:
+            return True
+        return any([TRITON_ENV_CHECK[channel]() for channel in triton_channels])
+    elif mode == "all":
+        if triton_channels is None:
+            return False
+        return all([TRITON_ENV_CHECK[channel]() for channel in triton_channels])
+    else:
+        raise ValueError(f"Unknown mode: {mode}")
+
+
+def _device_env_check(benchmark_config: Dict[str, str], mode: str = "any") -> bool:
+    devices = benchmark_config.get("devices", None)
+    assert device == None or all([device in DEVICE_ENV_CHECK for device in devices]), (
+        f"Unknown device: {devices}"
+    )
+    if mode == "any":
+        if devices is None:
+            return True
+        return any([DEVICE_ENV_CHECK[channel]() for device in devices])
+    elif mode == "all":
+        if devices is None:
+            return False
+        return all([DEVICE_ENV_CHECK[channel]() for device in devices])
+    else:
+        raise ValueError(f"Unknown mode: {mode}")
 
 
 def run_in_helion(
@@ -367,7 +428,11 @@ def run_config(
                 config_extra_envs[key] = val
         if extra_envs:
             config_extra_envs.update(extra_envs)
-        disabled = benchmark_config.get("disabled", False)
+        disabled = (
+            benchmark_config.get("disabled", False)
+            and _device_env_check(benchmark_config)
+            and _triton_env_check(benchmark_config)
+        )
         if disabled:
             logger.info(f"Skipping disabled benchmark {benchmark_name}.")
             continue
