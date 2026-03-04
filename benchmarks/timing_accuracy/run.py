@@ -5,6 +5,7 @@ import os
 import statistics
 import sys
 import time
+from pathlib import Path
 from dataclasses import dataclass, field
 from typing import Any, Callable, Dict, List, Optional
 
@@ -358,6 +359,8 @@ def _run(args: argparse.Namespace, tb_args: argparse.Namespace, extra_args: List
         if not args.output_dir:
             timestamp, output_dir = setup_output_dir(bm_name="timing_accuracy")
             args.output_dir = output_dir
+        if not os.path.exists(args.output_dir):
+            Path(args.output_dir).mkdir(parents=True, exist_ok=True)
         output = os.path.join(args.output_dir, f"{operation_name}.json")
         output_data = {
             "config": {
@@ -409,14 +412,14 @@ def run(args: Optional[List[str]] = None):
         print("ERROR: CUDA is not available!")
         sys.exit(1)
 
-    tb_parser = get_parser()
     args, extra_args = parser.parse_known_args(args)
-
     if args.ci:
         from tritonbench.utils.run_utils import tritonbench_run
         os.environ["TRITONBENCH_RUN_CONFIG"] = os.path.join(CURRENT_DIR, "ci.yaml")
-        tritonbench_run()
+        tritonbench_run(args=extra_args, disable_sys_argv=True)
         return
+
+    tb_parser = get_parser()
 
     tb_args, extra_args = tb_parser.parse_known_args(extra_args)
     _run(args, tb_args, extra_args)

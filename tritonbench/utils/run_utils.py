@@ -173,8 +173,8 @@ def run_in_helion(
         return e.returncode
 
 
-def tritonbench_run(args: Optional[List[str]] = None):
-    if args == None or args == []:
+def tritonbench_run(args: Optional[List[str]] = None, disable_sys_argv: bool = False):
+    if (args == None or args == []) and not disable_sys_argv:
         args = sys.argv[1:]
     if config := os.environ.get("TRITONBENCH_RUN_CONFIG", None):
         run_config(config, args)
