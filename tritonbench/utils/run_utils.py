@@ -454,7 +454,8 @@ def run_in_task(
         assert op, "If benchmark_name is none, op must not be None."
         benchmark_name = op
 
-    # In OSS, we assume always using the run.py benchmark driver
+    # In OSS, we assume using the run.py benchmark driver
+    # In helion, use "benchmarks/run.py" as the runner script
     cwd = REPO_PATH if not runner == "helion" else _get_helion_root()
     runner_script = "run.py" if not runner == "helion" else "benchmarks/run.py"
     if not is_fbcode() and not op_task_cmd[1] == runner_script:
@@ -465,7 +466,10 @@ def run_in_task(
         if "--simple-output" in op_task_cmd:
             logger.setLevel(logging.ERROR)
         start_time = time.perf_counter()
-        logger.info(f"[tritonbench] Start {benchmark_name}: " + " ".join(op_task_cmd))
+        logger.info(
+            f"[tritonbench] Running {runner}benchmark {benchmark_name}: "
+            + " ".join(op_task_cmd)
+        )
         if override_envs:
             subprocess_env = extra_envs.copy()
         else:
@@ -497,7 +501,7 @@ def run_in_task(
             )
         benchmark_time = time.perf_counter() - start_time
         logger.info(
-            f"[tritonbench] Finish {benchmark_name} in {benchmark_time:.3f} seconds."
+            f"[tritonbench] Complete {runner}benchmark {benchmark_name} in {benchmark_time:.3f} seconds."
         )
         return 0
     except subprocess.CalledProcessError as e:
