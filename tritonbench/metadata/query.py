@@ -54,6 +54,33 @@ def get_benchmark_dtype(op_name: str, runtime_dtype: str | None = None):
         dtype_mapping = yaml.safe_load(f)
     return dtype_mapping[op_name]
 
+def _merge_skip_tests(skip_tests: List[Dict[str, Any]]) -> List[Dict[str, Any]]:
+    merged_skip_tests = {}
+    for skip_test in skip_tests:
+        for skip_test_op in skip_test:
+            if skip_test_op not in merged_skip_tests:
+                merged_skip_tests[skip_test_op] = skip_test[skip_test_op]
+            else:
+                merged_skip_tests[skip_test_op].update(skip_test[skip_test_op])
+    return merged_skip_tests
+
+def _update_benchmark_by_skip_tests(op: str, benchmark_config: Dict[str, Any], skip_tests: Dict[str, Any]) -> Dict[str, Any]:
+    if op not in skip_tests:
+        return benchmark_config
+    if "devices" in skip_tests[op]:
+        benchmark_config["devices"] = skip_tests[op]["devices"]
+    if "channels" in skip_tests[op]:
+        benchmark_config["channels"] = skip_tests[op]["channels"]
+    if "extra_args" in skip_tests[op]:
+        benchmark_config["args"] += " " + skip_tests[op]["extra_args"]
+    if "extra_bwd_args" in skip_tests[op] and "--bwd" in benchmark_config["args"]:
+        benchmark_config["args"] += " " + skip_tests[op]["extra_bwd_args"]
+    return benchmark_config
+
+def _need_skip_by_skip_test(op: str, skip_tests: Dict[str, Any]) -> bool:
+    if op in skip_tests and skip_tests[op] == None:
+        return True
+    return False
 
 def get_benchmark_config_with_tags(
     tags: List[str],
@@ -62,6 +89,7 @@ def get_benchmark_config_with_tags(
     per_backend: bool = False,
     with_backwards: bool = True,
     metrics: Optional[List[str]] = None,
+    skip_tests: Optional[List[Dict[str, Any]]] = None,
 ) -> Dict[str, Any]:
     """Return benchmark config dict with any of these tags.
     runtime_metadata: runtime metadata to override the default metadata
@@ -87,8 +115,12 @@ def get_benchmark_config_with_tags(
     with open(DTYPE_METADATA_PATH, "r") as f:
         dtype = yaml.safe_load(f)
 
+    skip_tests = _merge_skip_tests(skip_tests or [])
+
     result_dict = {}
     for op, backend in operators.items():
+        if _need_skip_by_skip_test(op, skip_tests):
+            continue
         backend_with_wanted_tags = {
             b
             for b in backend
@@ -132,7 +164,5 @@ def get_benchmark_config_with_tags(
                     + [",".join(backend_names_with_tags), "--bwd"]
                     + " " + metric_args
                 )
+        result_dict[benchmark_name] = _update_benchmark_by_skip_tests(op, result_dict[benchmark_name], skip_tests)
     return result_dict
-
-def apply_skip_test(run_config, skip_test):
-    return run_config
