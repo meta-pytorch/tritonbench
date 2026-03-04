@@ -82,6 +82,17 @@ if is_fbcode() and not is_triton_beta():
     ]
     TEST_OPERATORS = TEST_OPERATORS - set(TRITON_BETA_OPS)
 
+# remove triton-stable only ops when testing triton-beta
+if is_fbcode() and is_triton_beta():
+    TRITON_STABLE_OPS = [
+        op
+        for op in TEST_OPERATORS
+        if skip_tests.get(op, None)
+        and skip_tests[op].get("channels", []) == ["triton-stable"]
+    ]
+    TEST_OPERATORS = TEST_OPERATORS - set(TRITON_STABLE_OPS)
+
+# remove triton-main only ops when testing meta-triton
 if not is_fbcode() and is_meta_triton():
     TRITON_MAIN_OPS = [
         op

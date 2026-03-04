@@ -44,7 +44,7 @@ if SUPPORT_GLUON:
 
 import logging
 
-from tritonbench.utils.env_utils import IS_BLACKWELL
+from tritonbench.utils.env_utils import IS_BLACKWELL, is_blackwell
 
 logger = logging.getLogger(__name__)
 
@@ -158,7 +158,9 @@ def parse_op_args(args: List[str]):
         default=1,
         help="Number of heads per KV group for GQA",
     )
-    parser.add_argument("--d-head", type=int, default=64, help="specify head dimension")
+    parser.add_argument(
+        "--d-head", type=int, default=128, help="specify head dimension"
+    )
     parser.add_argument(
         "--causal",
         action="store_true",
@@ -592,6 +594,9 @@ class Operator(BenchmarkOperator):
     @register_benchmark(enabled=HAS_TLX)
     @multi_input_wrapper
     def tlx_blackwell_ws_pipelined_fwd(self, *args) -> Tuple[Callable, Callable]:
+        if self.D_HEAD < 128:
+            raise NotImplementedError("TLX only supports d_head >= 128")
+
         def fn(q, k, v):
             return tlx_blackwell(
                 q,
