@@ -1,4 +1,3 @@
-common_args: --launch benchmarks.timing_accuracy.run --dump-json
 fp16_addmm_streamk_addmm_fwd:
   args: --op addmm --only streamk_addmm --launch benchmarks.timing_accuracy.run --dump-json
 fp16_addmm_streamk_addmm_bwd:
