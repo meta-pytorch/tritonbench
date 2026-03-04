@@ -80,6 +80,11 @@ def parse_args(args: Optional[List[str]] = None) -> argparse.Namespace:
         type=int,
         help="Maximum number of configs to generate.",
     )
+    parser.add_argument(
+        "--attach-output-dir",
+        action="store_true",
+        help="Attach the output directory to the generated config file.",
+    )
 
     parsed_args, extra_args = parser.parse_known_args(args)
     parsed_args.extra_args = extra_args
@@ -106,6 +111,7 @@ def generate_run_config(
     extra_args: List[str],
     separate_backends: bool = False,
     num_configs: Optional[int] = None,
+    attach_output_dir: bool = False,
 ) -> Dict[str, Any]:
     """
     Generate a TRITONBENCH_RUN_CONFIG file from the sweep runner config and target.
@@ -124,12 +130,15 @@ def generate_run_config(
         per_backend=separate_backends,
     )
     result_configs = {}
+    result_configs["common_args"] = f"--launch benchmarks.{target}.run"
+    if attach_output_dir:
+        result_configs["common_args"] += f" --output-dir .benchmarks/{target}/" + "run-${timestamp}"
+    if extra_args:
+        result_configs["common_args"] += " " + " ".join(extra_args)
+
     for cid, c in enumerate(run_config):
         if num_configs is not None and cid >= num_configs:
             break
-        per_config_args = ["--launch", f"benchmarks.{target}.run"]
-        per_config_args.extend(extra_args)
-        run_config[c]["args"] += " " + " ".join(per_config_args)
         result_configs[c] = run_config[c].copy()
     return result_configs
 
@@ -155,6 +164,7 @@ def run(args: Optional[List[str]] = None) -> None:
         extra_args=parsed_args.extra_args,
         separate_backends=parsed_args.separate_backends,
         num_configs=parsed_args.sweep_num_configs,
+        attach_output_dir=parsed_args.attach_output_dir,
     )
 
     write_run_config(run_config, parsed_args.sweep_output_file)

@@ -330,6 +330,16 @@ def _run(args: argparse.Namespace, extra_args: List[str]) -> BenchmarkOperatorRe
         return metrics
 
 
+def _process_common_args(common_args: str) -> List[str]:
+    if not common_args:
+        return []
+    if "${timestamp}" in common_args:
+        current_timestamp = datetime.fromtimestamp(time.time()).strftime("%Y%m%d%H%M%S")
+        common_args = common_args.replace("${timestamp}", current_timestamp)
+    common_args = common_args.split(" ")
+    common_args = [arg for arg in common_args if arg]
+    return common_args
+
 def run_config(
     config_file: str,
     args: List[str],
@@ -345,10 +355,12 @@ def run_config(
         del os.environ["TRITONBENCH_RUN_CONFIG"]
     with open(config_file, "r") as fp:
         config = yaml.safe_load(fp)
+    common_args = _process_common_args(config.get("common_args", ""))
     for benchmark_name in config:
         benchmark_config = config[benchmark_name]
         runner = benchmark_config.get("runner", None)
         op_args = benchmark_config["args"].split(" ") + args
+        op_args += common_args
         env_string = benchmark_config.get("envs", None)
         config_extra_envs = {}
         forbidden_list = [";", "$", "&"]

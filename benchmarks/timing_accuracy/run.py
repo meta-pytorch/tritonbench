@@ -353,10 +353,11 @@ def _run(args: argparse.Namespace, tb_args: argparse.Namespace, extra_args: List
 
     print_summary_table(results, operation_name)
 
-    if args.dump_json or args.output:
-        if not args.output:
+    if args.dump_json or args.output_dir:
+        if not args.output_dir:
             timestamp, output_dir = setup_output_dir(bm_name="timing_accuracy")
-            args.output = os.path.join(output_dir, f"{operation_name}.json")
+            args.output_dir = output_dir
+        output = os.path.join(args.output_dir, f"{operation_name}.json")
         output_data = {
             "config": {
                 "device": device_name,
@@ -371,9 +372,9 @@ def _run(args: argparse.Namespace, tb_args: argparse.Namespace, extra_args: List
             },
             "results": {name: stats.to_dict() for name, stats in results.items()},
         }
-        with open(args.output, "w") as f:
+        with open(output, "w") as f:
             json.dump(output_data, f, indent=2)
-        logger.info(f"Results saved to: {args.output}")
+        logger.info(f"Results saved to: {output}")
 
 
 def run(args: Optional[List[str]] = None):
@@ -397,7 +398,7 @@ def run(args: Optional[List[str]] = None):
     parser.add_argument(
         "--dump-json", action="store_true", help="Output results as JSON"
     )
-    parser.add_argument("--output", type=str, default=None, help="Output JSON path")
+    parser.add_argument("--output-dir", type=str, default=None, help="Output JSON path")
     parser.add_argument("--quiet", action="store_true")
 
     if not torch.cuda.is_available():
