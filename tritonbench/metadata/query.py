@@ -133,3 +133,6 @@ def get_benchmark_config_with_tags(
                     + " " + metric_args
                 )
     return result_dict
+
+def apply_skip_test(run_config, skip_test):
+    return run_config

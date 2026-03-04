@@ -18,6 +18,8 @@ Usage:
         --separate-backends
 """
 
+from test.test_gpu.main import skip_tests
+from typing import override
 import argparse
 import logging
 import os
@@ -33,7 +35,7 @@ from ..common import REPO_PATH, setup_output_dir, setup_tritonbench_cwd
 
 setup_tritonbench_cwd()
 
-from tritonbench.metadata.query import get_benchmark_config_with_tags
+from tritonbench.metadata.query import get_benchmark_config_with_tags, apply_skip_test
 
 logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger(__name__)
@@ -129,6 +131,10 @@ def generate_run_config(
         tags=sweep_runner_config["run_config"]["tags"],
         per_backend=separate_backends,
     )
+
+    if skip_tests := sweep_runner_config["run_config"].get("skip_tests", {}):
+        for skip_test in skip_tests:
+            run_config = apply_skip_test(run_config, skip_test)
     result_configs = {}
     result_configs["common_args"] = f"--launch benchmarks.{target}.run"
     if attach_output_dir:
@@ -138,9 +144,17 @@ def generate_run_config(
     if extra_args:
         result_configs["common_args"] += " " + " ".join(extra_args)
 
+    disabled_benchmarks = sweep_runner_config.get("disabled", {})
+    override_benchmarks = sweep_runner_config.get("overrides", {})
+
     for cid, c in enumerate(run_config):
         if num_configs is not None and cid >= num_configs:
             break
+        if c in disabled_benchmarks:
+            continue
+        if c in override_benchmarks:
+            result_configs[c] = override_benchmarks[c].copy()
+            continue
         result_configs[c] = run_config[c].copy()
     return result_configs
 
