@@ -72,9 +72,9 @@ def _update_benchmark_by_skip_tests(
     if op not in skip_tests:
         return benchmark_config
     if "devices" in skip_tests[op]:
-        benchmark_config["devices"] = skip_tests[op]["devices"]
+        benchmark_config["devices"] = skip_tests[op]["devices"].copy()
     if "channels" in skip_tests[op]:
-        benchmark_config["channels"] = skip_tests[op]["channels"]
+        benchmark_config["channels"] = skip_tests[op]["channels"].copy()
     if "extra_args" in skip_tests[op]:
         benchmark_config["args"] += " " + skip_tests[op]["extra_args"]
     if "extra_bwd_args" in skip_tests[op] and "--bwd" in benchmark_config["args"]:
@@ -149,18 +149,27 @@ def get_benchmark_config_with_tags(
                 result_dict[benchmark_name]["args"] = (
                     " ".join(["--op", op, "--only", backend_name]) + [metric_args]
                 )
+                result_dict[benchmark_name] = _update_benchmark_by_skip_tests(
+                    op, result_dict[benchmark_name], skip_tests
+                )
                 if with_backwards and op in backwards:
                     benchmark_name = f"{benchmark_prefix}_bwd"
                     result_dict[benchmark_name] = {}
                     result_dict[benchmark_name]["args"] = (
                         " ".join(["--op", op, "--only", backend_name, "--bwd"] + [metric_args])
                     )
+                    result_dict[benchmark_name] = _update_benchmark_by_skip_tests(
+                        op, result_dict[benchmark_name], skip_tests
+                    )
         else:
-            benchmark_prefix = f"{dtype_prefix}_{op}"
+            benchmark_prefix = f"{dtype_prefix}{op}"
             benchmark_name = f"{benchmark_prefix}_fwd"
             result_dict[benchmark_name] = {}
             result_dict[benchmark_name]["args"] = (
                 " ".join(["--op", op, "--only"] + [",".join(backend_names_with_tags)] + [metric_args])
+            )
+            result_dict[benchmark_name] = _update_benchmark_by_skip_tests(
+                op, result_dict[benchmark_name], skip_tests
             )
             if with_backwards and op in backwards:
                 benchmark_name = f"{benchmark_prefix}_bwd"
@@ -170,7 +179,7 @@ def get_benchmark_config_with_tags(
                     + [",".join(backend_names_with_tags), "--bwd"]
                     + [metric_args]
                 )
-        result_dict[benchmark_name] = _update_benchmark_by_skip_tests(
-            op, result_dict[benchmark_name], skip_tests
-        )
+                result_dict[benchmark_name] = _update_benchmark_by_skip_tests(
+                    op, result_dict[benchmark_name], skip_tests
+                )
     return result_dict
