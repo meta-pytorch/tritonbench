@@ -494,7 +494,8 @@ class Operator(BenchmarkOperator):
 
             return preproc_noop, _inner
 
-        @register_benchmark(enabled=HAS_PALLAS)  # noqa
+        # TODO: pallas backend is broken
+        @register_benchmark(enabled=False)  # noqa
         @multi_input_wrapper
         def pallas(self, *args):
             def preproc(q, k, v):
