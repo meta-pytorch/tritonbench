@@ -55,10 +55,10 @@ def _gen_test_operators(test_ops, skip_tests) -> set[str]:
         # ususally CI environment issue or broken operators need to be fixed
         if skip_tests[skip_op] == None:
             test_ops[skip_op]["disabled"] = True
-        elif "devices" in skip_tests[skip_op]:
-            test_ops[skip_op]["disabled"] = _device_env_check(skip_tests[skip_op])
-        elif "channels" in skip_tests[skip_op]:
-            test_ops[skip_op]["disabled"] = _triton_env_check(skip_tests[skip_op])
+        if "devices" in skip_tests[skip_op]:
+            test_ops[skip_op]["disabled"] = test_ops[skip_op]["disabled"] and _device_env_check(skip_tests[skip_op])
+        if "channels" in skip_tests[skip_op]:
+            test_ops[skip_op]["disabled"] = test_ops[skip_op]["disabled"] and _triton_env_check(skip_tests[skip_op])
     return {test_op for test_op in test_ops if not test_ops[test_op]["disabled"]}
 
 
