@@ -46,7 +46,12 @@ TEST_OPERATORS = (
 def _gen_test_operators(test_ops, skip_tests) -> set[str]:
     # to save capacity, only run tests specific to b200 on b200
     if is_blackwell():
-        test_ops = {test_op: {"disabled": True} for test_op in test_ops}
+        test_ops = {
+            test_op: {"disabled": False}
+            for test_op in skip_tests
+            if "devices" in skip_tests[test_op]
+            and "b200" in skip_tests[test_op]["devices"]
+        }
     else:
         test_ops = {test_op: {"disabled": False} for test_op in test_ops}
     for skip_op in skip_tests:
@@ -56,14 +61,15 @@ def _gen_test_operators(test_ops, skip_tests) -> set[str]:
         # ususally CI environment issue or broken operators need to be fixed
         if skip_tests[skip_op] == None:
             test_ops[skip_op]["disabled"] = True
+            continue
         if "devices" in skip_tests[skip_op]:
             test_ops[skip_op]["disabled"] = test_ops[skip_op][
                 "disabled"
-            ] and _device_env_check(skip_tests[skip_op])
+            ] or not _device_env_check(skip_tests[skip_op])
         if "channels" in skip_tests[skip_op]:
             test_ops[skip_op]["disabled"] = test_ops[skip_op][
                 "disabled"
-            ] and _triton_env_check(skip_tests[skip_op])
+            ] or not _triton_env_check(skip_tests[skip_op])
     return {test_op for test_op in test_ops if not test_ops[test_op]["disabled"]}
 
 

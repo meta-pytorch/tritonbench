@@ -24,7 +24,7 @@ import os
 import subprocess
 import sys
 from pathlib import Path
-from typing import Any, Dict, List, Optional, override
+from typing import Any, Dict, List, Optional
 
 import yaml
 
@@ -126,7 +126,9 @@ def generate_run_config(
         A dictionary in TRITONBENCH_RUN_CONFIG format
     """
     if skip_tests := sweep_runner_config["run_config"].get("skip_tests", None):
-        skip_tests = [load_config(skip_test, base_dir=REPO_PATH) for skip_test in skip_tests]
+        skip_tests = [
+            load_config(skip_test, base_dir=REPO_PATH) for skip_test in skip_tests
+        ]
     run_config = get_benchmark_config_with_tags(
         tags=sweep_runner_config["run_config"]["tags"],
         per_backend=separate_backends,

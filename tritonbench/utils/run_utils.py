@@ -136,10 +136,9 @@ def _env_get_str(var_name: str, default: str) -> str:
 
 
 def _triton_env_check(benchmark_config: Dict[str, str], mode: str = "any") -> bool:
+    """True means we should run the benchmark, False means we should skip it."""
     triton_channels = benchmark_config.get("triton_channels", None)
-    if triton_channels is None:
-        return True
-    assert all([channel in TRITON_ENV_CHECK for channel in triton_channels]), (
+    assert triton_channels == None or all([channel in TRITON_ENV_CHECK for channel in triton_channels]), (
         f"Unknown triton_channel: {triton_channels}"
     )
     if mode == "any":
@@ -155,18 +154,19 @@ def _triton_env_check(benchmark_config: Dict[str, str], mode: str = "any") -> bo
 
 
 def _device_env_check(benchmark_config: Dict[str, str], mode: str = "any") -> bool:
+    """True means we should run the benchmark, False means we should skip it."""
     devices = benchmark_config.get("devices", None)
     assert device == None or all([device in DEVICE_ENV_CHECK for device in devices]), (
         f"Unknown device: {devices}"
     )
     if mode == "any":
         if devices is None:
-            return True
-        return any([DEVICE_ENV_CHECK[channel]() for device in devices])
+            return False
+        return not any([DEVICE_ENV_CHECK[channel]() for device in devices])
     elif mode == "all":
         if devices is None:
-            return False
-        return all([DEVICE_ENV_CHECK[channel]() for device in devices])
+            return True
+        return not all([DEVICE_ENV_CHECK[channel]() for device in devices])
     else:
         raise ValueError(f"Unknown mode: {mode}")
 
@@ -400,8 +400,8 @@ def run_config(
             config_extra_envs.update(extra_envs)
         disabled = (
             benchmark_config.get("disabled", False)
-            and _device_env_check(benchmark_config)
-            and _triton_env_check(benchmark_config)
+            or not _device_env_check(benchmark_config)
+            or not _triton_env_check(benchmark_config)
         )
         if disabled:
             logger.info(f"Skipping disabled benchmark {benchmark_name}.")

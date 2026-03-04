@@ -139,24 +139,26 @@ def get_benchmark_config_with_tags(
             f"{dtype[op]}_" if op in dtype and dtype[op] not in SKIP_DTYPE else ""
         )
         metric_args = (
-            " " + get_metric_args(op, metrics, kernel_metadata=operators) if metrics else ""
+            " " + get_metric_args(op, metrics, kernel_metadata=operators)
+            if metrics
+            else ""
         )
         if per_backend:
             for backend_name in backend_names_with_tags:
                 benchmark_prefix = f"{dtype_prefix}{op}_{backend_name}"
                 benchmark_name = f"{benchmark_prefix}_fwd"
                 result_dict[benchmark_name] = {}
-                result_dict[benchmark_name]["args"] = (
-                    " ".join(["--op", op, "--only", backend_name]) + [metric_args]
-                )
+                result_dict[benchmark_name]["args"] = " ".join(
+                    ["--op", op, "--only", backend_name]
+                ) + [metric_args]
                 result_dict[benchmark_name] = _update_benchmark_by_skip_tests(
                     op, result_dict[benchmark_name], skip_tests
                 )
                 if with_backwards and op in backwards:
                     benchmark_name = f"{benchmark_prefix}_bwd"
                     result_dict[benchmark_name] = {}
-                    result_dict[benchmark_name]["args"] = (
-                        " ".join(["--op", op, "--only", backend_name, "--bwd"] + [metric_args])
+                    result_dict[benchmark_name]["args"] = " ".join(
+                        ["--op", op, "--only", backend_name, "--bwd"] + [metric_args]
                     )
                     result_dict[benchmark_name] = _update_benchmark_by_skip_tests(
                         op, result_dict[benchmark_name], skip_tests
@@ -165,8 +167,10 @@ def get_benchmark_config_with_tags(
             benchmark_prefix = f"{dtype_prefix}{op}"
             benchmark_name = f"{benchmark_prefix}_fwd"
             result_dict[benchmark_name] = {}
-            result_dict[benchmark_name]["args"] = (
-                " ".join(["--op", op, "--only"] + [",".join(backend_names_with_tags)] + [metric_args])
+            result_dict[benchmark_name]["args"] = " ".join(
+                ["--op", op, "--only"]
+                + [",".join(backend_names_with_tags)]
+                + [metric_args]
             )
             result_dict[benchmark_name] = _update_benchmark_by_skip_tests(
                 op, result_dict[benchmark_name], skip_tests

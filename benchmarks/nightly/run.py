@@ -52,7 +52,9 @@ def run():
             continue
         output_file = output_dir.joinpath(f"{op_bench}.json")
         benchmark_config["args"].extend(["--output-json", str(output_file.absolute())])
-        run_in_task(op_args=benchmark_config["args"].split(" "), benchmark_name=op_bench)
+        run_in_task(
+            op_args=benchmark_config["args"].split(" "), benchmark_name=op_bench
+        )
         # write pass or fail to result json
         # todo: check every input shape has passed
         output_file_name = Path(output_file).stem
