@@ -356,6 +356,8 @@ def run_config(
     with open(config_file, "r") as fp:
         config = yaml.safe_load(fp)
     common_args = _process_common_args(config.get("common_args", ""))
+    if "common_args" in config:
+        del config["common_args"]
     for benchmark_name in config:
         benchmark_config = config[benchmark_name]
         runner = benchmark_config.get("runner", None)
