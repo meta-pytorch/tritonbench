@@ -5,6 +5,7 @@ Get input generator for TritonBench gemm type inputs.
 import logging
 from typing import Any, Callable
 
+import torch
 from tritonbench.operator_loader.aten.input_loader import OperatorInputLoader
 from tritonbench.utils.triton_op import PRECISION_DTYPE_MAPPING
 
@@ -61,6 +62,15 @@ class InputLoader(OperatorInputLoader):
                 actual_m = max(m, strides[0][1])
                 actual_k = max(k, strides[0][0], strides[1][1])
                 actual_n = max(n, strides[1][0])
+                # Skip shapes whose backing storage exceeds GPU memory
+                elem_size = torch.tensor([], dtype=dtype).element_size()
+                total_bytes = (actual_m * actual_k + actual_k * actual_n) * elem_size
+                free_mem, _ = torch.cuda.mem_get_info(device)
+                if total_bytes > free_mem:
+                    print(
+                        f"Skipping shape (M={m}, K={k}, N={n}) with strides {strides}: requires {total_bytes / 2**30:.1f} GiB but GPU only has {free_mem / 2**30:.1f} GiB free"
+                    )
+                    continue
                 a = self.op._scaled_randn(
                     (actual_m, actual_k), scale=k, device=device, dtype=dtype
                 ).requires_grad_(requires_grad)
