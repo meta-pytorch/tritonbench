@@ -5,8 +5,8 @@ import os
 import statistics
 import sys
 import time
-from pathlib import Path
 from dataclasses import dataclass, field
+from pathlib import Path
 from typing import Any, Callable, Dict, List, Optional
 
 import torch
@@ -22,6 +22,7 @@ logger = logging.getLogger(__name__)
 logger.setLevel(logging.INFO)
 
 CURRENT_DIR = os.path.dirname(os.path.abspath(__file__))
+
 
 @dataclass
 class MethodStats:
@@ -415,6 +416,7 @@ def run(args: Optional[List[str]] = None):
     args, extra_args = parser.parse_known_args(args)
     if args.ci:
         from tritonbench.utils.run_utils import tritonbench_run
+
         os.environ["TRITONBENCH_RUN_CONFIG"] = os.path.join(CURRENT_DIR, "ci.yaml")
         tritonbench_run(args=extra_args, disable_sys_argv=True)
         return

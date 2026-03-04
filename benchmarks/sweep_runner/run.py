@@ -132,7 +132,9 @@ def generate_run_config(
     result_configs = {}
     result_configs["common_args"] = f"--launch benchmarks.{target}.run"
     if attach_output_dir:
-        result_configs["common_args"] += f" --output-dir .benchmarks/{target}/" + "run-${timestamp}"
+        result_configs["common_args"] += (
+            f" --output-dir .benchmarks/{target}/" + "run-${timestamp}"
+        )
     if extra_args:
         result_configs["common_args"] += " " + " ".join(extra_args)
 

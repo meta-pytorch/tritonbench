@@ -340,6 +340,7 @@ def _process_common_args(common_args: str) -> List[str]:
     common_args = [arg for arg in common_args if arg]
     return common_args
 
+
 def run_config(
     config_file: str,
     args: List[str],
