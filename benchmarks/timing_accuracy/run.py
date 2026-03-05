@@ -443,7 +443,6 @@ def aggregate_outputs(
             single_result = json.load(f)
         aggregated_data.append(_process_single_result(single_result))
     benchmark_data = decorate_benchmark_data(name, run_timestamp, ci, aggregated_data)
-    benchmark_data["benchmark_metadata"] = {}
     result_file_path = os.path.join(output_dir, result_file_name)
     with open(result_file_path, "w") as f:
         json.dump(benchmark_data, f, indent=4)
