@@ -3,10 +3,13 @@ import logging
 import os
 import sys
 import time
+import yaml
+
+from functools import partial
 from datetime import datetime
 from os.path import abspath, exists
 from pathlib import Path
-from typing import Any, Dict, List
+from typing import List, Callable
 
 logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger(__name__)
@@ -20,6 +23,7 @@ def setup_tritonbench_cwd():
         "../../../tritonbench",
     ):
         if exists(tritonbench_dir):
+
             break
 
     if exists(tritonbench_dir):
@@ -34,11 +38,12 @@ setup_tritonbench_cwd()
 
 from tritonbench.utils.path_utils import REPO_PATH
 
-SPECIAL_FIELDS = ["common_args"]
 BENCHMARKS_OUTPUT_DIR = REPO_PATH.joinpath(".benchmarks")
 
 
-def post_run_callback(benchmark_group_name, benchmark, output_file):
+def post_run_callback(logger, benchmark_group_name, benchmark, output_file, output_files, disabled):
+    if disabled:
+        return
     if not os.path.exists(output_file) or os.path.getsize(output_file) == 0:
         logger.warning(f"[{benchmark_group_name}] Failed to run benchmark {benchmark}.")
         with open(output_file, "w") as f:
@@ -56,45 +61,45 @@ def run_benchmark_config_ci(
     benchmark_group_name: str,
     benchmark_config_file: str,
     extra_args: List[str] | None = None,
-    aggregate_func: Callable | None = None,
+    transform_func: Callable | None = None,
     output_dir: str | None = None,
     op: str | None = None,
     ci: bool = False,
     log_scuba: bool = False,
 ):
-    from tritonbench.utils.run_utils import run_config
+    from tritonbench.utils.run_utils import run_config, SPECIAL_CONFIG_FIELDS
     from tritonbench.utils.scuba_utils import decorate_benchmark_data, log_benchmark
 
     output_files = []
     run_timestamp, output_dir = setup_output_dir(
         benchmark_group_name, ci=ci, output_dir=output_dir
     )
-    if aggregate_func is None:
-        aggregate_func = lambda x: x
+    if transform_func is None:
+        transform_func = lambda x: x
     with open(benchmark_config_file, "r") as f:
         benchmark_config_obj = yaml.safe_load(f)
     per_benchmark_map = {}
     for benchmark in benchmark_config_obj:
-        if benchmark in SPECIAL_FIELDS:
+        if benchmark in SPECIAL_CONFIG_FIELDS:
             continue
         per_benchmark_extra_args = [] if extra_args is None else extra_args.copy()
         output_file = output_dir.joinpath(f"{benchmark}.json")
         per_benchmark_extra_args.extend(["--output-json", str(output_file.absolute())])
         per_benchmark_map[benchmark] = {
             "extra_args": per_benchmark_extra_args,
-            "callback": lambda: post_run_callback(
-                logger, benchmark_group_name, benchmark, output_file
+            "enable_condition": lambda op_name: op == None or op_name == op,
+            "callback": partial(post_run_callback,
+                logger, benchmark_group_name, benchmark, output_file, output_files
             ),
         }
-        output_files.append(output_file)
-    # Run the config file
+    # Run the config file w/per-benchmark extra args and callback
     run_config(
         config_file=benchmark_config_file,
-        op=op,
+        args=None,
         per_config_entry=per_benchmark_map,
     )
     # Reduce all operator CSV outputs to a single output json
-    benchmark_data = [aggregate_func(json.load(open(f, "r"))) for f in output_files]
+    benchmark_data = [transform_func(json.load(open(f, "r"))) for f in output_files]
     aggregated_obj = decorate_benchmark_data(
         benchmark_group_name, run_timestamp, ci, benchmark_data
     )

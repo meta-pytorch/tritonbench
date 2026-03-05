@@ -9,7 +9,7 @@ import sys
 import time
 from datetime import datetime
 from pathlib import Path
-from typing import Dict, List, Optional
+from typing import Dict, List, Optional, Any, Callable
 
 import torch
 import yaml
@@ -63,6 +63,10 @@ ENV_CHECK_MAP = {
         "meta-triton": is_meta_triton,
         "triton-stable": is_triton_stable,
     },
+}
+
+SPECIAL_CONFIG_FIELDS = {
+    "common_args"
 }
 
 logging.basicConfig(level=logging.INFO)
@@ -322,14 +326,13 @@ def _process_common_args(common_args: str) -> List[str]:
 
 def _run_config_entry(
     benchmark_name: str,
-    config: Dict[str, Any],
-    op: str | None = None,
+    benchmark_config: Dict[str, Any],
+    per_benchmark_enable_cond: Callable,
     args: List[str] | None = None,
     extra_envs: Optional[Dict[str, str]] = None,
     override_envs: bool = False,
     capture_output: Optional[str] = None,
-):
-    benchmark_config = config[benchmark_name]
+) -> bool:
     runner = benchmark_config.get("runner", None)
     op_args = benchmark_config["args"].split(" ") + args
     env_string = benchmark_config.get("envs", None)
@@ -355,11 +358,11 @@ def _run_config_entry(
         benchmark_config.get("disabled", False)
         or not _env_check(benchmark_config, "devices")
         or not _env_check(benchmark_config, "channels")
-        or (op and op_name and not op_name == op)
+        or not per_benchmark_enable_cond(op_name)
     )
     if disabled:
         logger.info(f"Skipping disabled benchmark {benchmark_name}.")
-        return
+        return True
     run_in_task(
         op=op_name,
         op_args=op_args,
@@ -369,12 +372,12 @@ def _run_config_entry(
         override_envs=override_envs,
         capture_output=capture_output,
     )
+    return False
 
 
 def run_config(
     config_file: str,
     args: List[str],
-    op: str | None = None,
     extra_envs: Optional[Dict[str, str]] = None,
     override_envs: bool = False,
     capture_output: Optional[str] = None,
@@ -389,32 +392,36 @@ def run_config(
     with open(config_file, "r") as fp:
         config = yaml.safe_load(fp)
     common_args = _process_common_args(config.get("common_args", ""))
-    if "common_args" in config:
-        del config["common_args"]
+    for field in SPECIAL_CONFIG_FIELDS:
+        if field in config:
+            del config[field]
+    if args is None:
+        args = []
     for benchmark_name in config:
+        per_benchmark_enable_cond = lambda x: True
+        per_benchmark_callback = lambda x: None
         per_benchmark_args = common_args.copy() if common_args else []
         per_benchmark_args += args
         if (
             per_config_entry
             and benchmark_name in per_config_entry
-            and per_config_entry[benchmark_name].get("extra_args", None)
         ):
-            per_benchmark_args += per_config_entry[benchmark_name]["extra_args"]
-        _run_config_entry(
+            if per_config_entry[benchmark_name].get("extra_args", None):
+                per_benchmark_args += per_config_entry[benchmark_name]["extra_args"]
+            if per_config_entry[benchmark_name].get("enable_condition", None):
+                per_benchmark_enable_cond = per_config_entry[benchmark_name]["enable_condition"]
+            if per_config_entry[benchmark_name].get("callback", None):
+                per_benchmark_callback = per_config_entry[benchmark_name]["callback"]
+        disabled = _run_config_entry(
             benchmark_name,
             config[benchmark_name],
-            op=op,
+            per_benchmark_enable_cond=per_benchmark_enable_cond,
             args=per_benchmark_args,
             extra_envs=extra_envs,
             override_envs=override_envs,
             capture_output=capture_output,
         )
-        if (
-            per_config_entry
-            and benchmark_name in per_config_entry
-            and per_config_entry[benchmark_name].get("callback", None)
-        ):
-            per_config_entry[benchmark_name]["callback"]()
+        per_benchmark_callback(disabled)
 
 
 def load_operator_by_args(task_args: List[str]):
