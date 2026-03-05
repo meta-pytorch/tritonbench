@@ -162,11 +162,11 @@ def _device_env_check(benchmark_config: Dict[str, str], mode: str = "any") -> bo
     if mode == "any":
         if devices is None:
             return False
-        return not any([DEVICE_ENV_CHECK[channel]() for device in devices])
+        return not any([DEVICE_ENV_CHECK[device]() for device in devices])
     elif mode == "all":
         if devices is None:
             return True
-        return not all([DEVICE_ENV_CHECK[channel]() for device in devices])
+        return not all([DEVICE_ENV_CHECK[device]() for device in devices])
     else:
         raise ValueError(f"Unknown mode: {mode}")
 
