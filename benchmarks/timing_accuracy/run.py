@@ -393,7 +393,11 @@ def _run(args: argparse.Namespace, tb_args: argparse.Namespace, extra_args: List
 
 
 def aggregate_outputs(
-    name: str, run_timestamp: str, output_dir: str,  ci: bool = False, result_file_name: str = "result.json",
+    name: str,
+    run_timestamp: str,
+    output_dir: str,
+    ci: bool = False,
+    result_file_name: str = "result.json",
 ) -> Dict[str, Any]:
     """
     Aggregate output json files from multiple runs into a single file "result.json".
@@ -419,24 +423,44 @@ def aggregate_outputs(
         out[f"{prefix}rep"] = result["config"]["rep"]
         for method_name, method_stats in result["results"].items():
             method_key = method_stats["method_name"]
-            out[f"{prefix}{method_key}-benchmark_time_s"] = method_stats["benchmark_time_s"]
-            out[f"{prefix}{method_key}-intra_test_avg_median_ms"] = method_stats["intra_test"]["avg_median_ms"]
-            out[f"{prefix}{method_key}-intra_test_avg_std_ms"] = method_stats["intra_test"]["avg_std_ms"]
-            out[f"{prefix}{method_key}-intra_test_avg_cv"] = method_stats["intra_test"]["avg_cv"]
-            out[f"{prefix}{method_key}-intra_test_avg_min_ms"] = method_stats["intra_test"]["avg_min_ms"]
-            out[f"{prefix}{method_key}-intra_test_avg_max_ms"] = method_stats["intra_test"]["avg_max_ms"]
-            out[f"{prefix}{method_key}-inter_test_median_ms"] = method_stats["inter_test"]["median_ms"]
-            out[f"{prefix}{method_key}-inter_test_std_ms"] = method_stats["inter_test"]["std_ms"]
-            out[f"{prefix}{method_key}-inter_test_cv"] = method_stats["inter_test"]["cv"]
-            out[f"{prefix}{method_key}-inter_test_min_ms"] = method_stats["inter_test"]["min_ms"]
+            out[f"{prefix}{method_key}-benchmark_time_s"] = method_stats[
+                "benchmark_time_s"
+            ]
+            out[f"{prefix}{method_key}-intra_test_avg_median_ms"] = method_stats[
+                "intra_test"
+            ]["avg_median_ms"]
+            out[f"{prefix}{method_key}-intra_test_avg_std_ms"] = method_stats[
+                "intra_test"
+            ]["avg_std_ms"]
+            out[f"{prefix}{method_key}-intra_test_avg_cv"] = method_stats["intra_test"][
+                "avg_cv"
+            ]
+            out[f"{prefix}{method_key}-intra_test_avg_min_ms"] = method_stats[
+                "intra_test"
+            ]["avg_min_ms"]
+            out[f"{prefix}{method_key}-intra_test_avg_max_ms"] = method_stats[
+                "intra_test"
+            ]["avg_max_ms"]
+            out[f"{prefix}{method_key}-inter_test_median_ms"] = method_stats[
+                "inter_test"
+            ]["median_ms"]
+            out[f"{prefix}{method_key}-inter_test_std_ms"] = method_stats["inter_test"][
+                "std_ms"
+            ]
+            out[f"{prefix}{method_key}-inter_test_cv"] = method_stats["inter_test"][
+                "cv"
+            ]
+            out[f"{prefix}{method_key}-inter_test_min_ms"] = method_stats["inter_test"][
+                "min_ms"
+            ]
         return out
 
     from tritonbench.utils.scuba_utils import decorate_benchmark_data, log_benchmark
 
     all_result_files = _find_all_result_files(output_dir)
-    assert (
-        len(all_result_files) > 0
-    ), f"No result files found in output dir {output_dir}!"
+    assert len(all_result_files) > 0, (
+        f"No result files found in output dir {output_dir}!"
+    )
     aggregated_data = []
     for result_file in all_result_files:
         with open(result_file, "r") as f:
@@ -490,12 +514,16 @@ def run(args: Optional[List[str]] = None):
     if args.ci:
         from tritonbench.utils.run_utils import tritonbench_run
 
-        run_timestamp, output_dir = setup_output_dir(bm_name="timing_accuracy", output_dir=args.output_dir)
+        run_timestamp, output_dir = setup_output_dir(
+            bm_name="timing_accuracy", output_dir=args.output_dir
+        )
         os.environ["TRITONBENCH_RUN_CONFIG"] = os.path.join(CURRENT_DIR, "ci.yaml")
         extra_args.extend(["--output-dir", str(output_dir.absolute())])
         tritonbench_run(args=extra_args, disable_sys_argv=True)
         # finished running all configs. now reduce output metrics to a single file
-        benchmark_data = aggregate_outputs("timing_accuracy", run_timestamp, output_dir, args.ci)
+        benchmark_data = aggregate_outputs(
+            "timing_accuracy", run_timestamp, output_dir, args.ci
+        )
         if args.log_scuba:
             log_benchmark(benchmark_data)
         return
