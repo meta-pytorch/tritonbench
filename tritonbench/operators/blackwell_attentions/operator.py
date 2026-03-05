@@ -583,11 +583,12 @@ class Operator(BenchmarkOperator):
     def gluon_blackwell_tutorial_persistent_fwd(
         self, *args
     ) -> Tuple[Callable, Callable]:
-        fn = partial(
-            gluon_blackwell_persistent_fwd,
-            causal=self.causal,
-            sm_scale=self.sm_scale,
-        )
+        def fn(q, k, v):
+            o, _M = gluon_blackwell_persistent_fwd(
+                q, k, v, causal=self.causal, sm_scale=self.sm_scale
+            )
+            return o
+
         return preproc_noop, fn
 
     # Only works with triton beta, forward only.

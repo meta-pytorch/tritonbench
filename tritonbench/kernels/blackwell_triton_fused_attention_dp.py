@@ -64,11 +64,36 @@ HAS_PINGPONG_AUTO_WS = _supports_pingpong_auto_ws()
 
 
 @triton.jit
+def _mask_scalar(qk, col_limit_right, s, i):
+    col_lim_right_s = col_limit_right - s
+    col_lim_right_cur = max(col_lim_right_s, 0)
+    mask = -1 << col_lim_right_cur
+    mask_i_bit = (mask & (1 << i)) == 0
+    return tl.where(mask_i_bit, qk, -float("inf"))
+
+
+@triton.jit
+def _apply_causal_mask(qk, col_limit_right, BLOCK_N: tl.constexpr):
+    # Apply causal mask via a bitmask calculated for each block of 16 elements.
+    # This allows the efficient R2P (register to predicate) instruction to be used at the SASS level.
+    # Credit to Tri Dao,
+    # https://github.com/Dao-AILab/flash-attention/commit/bac1001e4f6caa09d70537495d6746a685a2fa78
+    #
+    # NOTE: We use map_elementiwse here in order to generate an interleaved sequence of instructions
+    # that processes one element of qk at a time. This improves ptxas's resulting SASS.
+    offs_n = tl.arange(0, BLOCK_N)[None, :]
+    s = offs_n & ~0xF
+    i = offs_n & 0xF
+    return tl.map_elementwise(_mask_scalar, qk, col_limit_right, s, i)
+
+
+@triton.jit
 def _attn_fwd_subtile(
     q,
     k,
     offs_m,
     start_n,
+    BLOCK_N,
     offs_n,
     qk_scale,
     l_i0,
@@ -78,17 +103,21 @@ def _attn_fwd_subtile(
     v,
     dtype: tl.constexpr,
     STAGE: tl.constexpr,
+    # apply_mask: tl.constexpr,
     SUBTILING: tl.constexpr,
     SUBTILING_P: tl.constexpr,
     VECT_MUL: tl.constexpr,
     FADD2_REDUCE: tl.constexpr,
 ):
     qk = tl.dot(q, k)
-    if STAGE == 2:
-        mask = offs_m[:, None] >= (start_n + offs_n[None, :])
-        qk = qk * qk_scale + tl.where(mask, 0, -1.0e6)
-        m_ij = tl.maximum(m_i, tl.max(qk, 1))
-        qk -= m_ij[:, None]
+    if STAGE == 3:
+        col_limit_right = (offs_m - start_n + 1)[:, None]
+        qk = _apply_causal_mask(qk, col_limit_right, BLOCK_N)
+        m_ij = tl.maximum(m_i, tl.max(qk, 1) * qk_scale)
+        if VECT_MUL & 2:
+            qk = _fma_f32x2(qk, qk_scale, -m_ij[:, None])
+        else:
+            qk = qk * qk_scale - m_ij[:, None]
     else:
         m_ij = tl.maximum(m_i, tl.max(qk, 1) * qk_scale)
         if VECT_MUL & 2:
@@ -190,13 +219,10 @@ def _attn_fwd_inner_oss_dp(
 ):
     # range of values handled by this stage
     if STAGE == 1:
-        lo, hi = 0, start_m * BLOCK_M
-    elif STAGE == 2:
-        lo, hi = start_m * BLOCK_M, (start_m + 1) * BLOCK_M
-        lo = tl.multiple_of(lo, BLOCK_M)
-    # causal = False
-    else:
         lo, hi = 0, N_CTX
+    else:
+        lo, hi = 0, (start_m + 1) * BLOCK_M
+
     offsetkv_y = offset_y + lo
 
     # loop over k, v and update accumulator
@@ -213,6 +239,7 @@ def _attn_fwd_inner_oss_dp(
             k,
             offs_m0,
             start_n,
+            BLOCK_N,
             offs_n,
             qk_scale,
             l_i0,
@@ -232,6 +259,7 @@ def _attn_fwd_inner_oss_dp(
             k,
             offs_m1,
             start_n,
+            BLOCK_N,
             offs_n,
             qk_scale,
             l_i1,
@@ -302,7 +330,17 @@ if is_tile_enabled():
 else:
     # Helper to build config with optional minRegAutoWS/maxRegAutoWS
     def make_standard_config(
-        BM, BN, s, w, subtile, subtile_p, vectmul, add2reduce, maxreg, pingpong
+        BM,
+        BN,
+        s,
+        w,
+        subtile,
+        subtile_p,
+        vectmul,
+        add2reduce,
+        group_size_n,
+        maxreg,
+        pingpong,
     ):
         config_kwargs = {
             "BLOCK_M": BM,
@@ -311,6 +349,7 @@ else:
             "SUBTILING_P": subtile_p,
             "VECT_MUL": vectmul,
             "FADD2_REDUCE": add2reduce,
+            "GROUP_SIZE_N": group_size_n,
         }
         extra_kwargs = {
             "num_stages": s,
@@ -330,7 +369,17 @@ else:
 
     configs = [
         make_standard_config(
-            BM, BN, s, w, subtile, subtile_p, vectmul, add2reduce, maxreg, pingpong
+            BM,
+            BN,
+            s,
+            w,
+            subtile,
+            subtile_p,
+            vectmul,
+            add2reduce,
+            group_size_n,
+            maxreg,
+            pingpong,
         )
         for BM in [256]
         for BN in [64, 128]
@@ -340,6 +389,7 @@ else:
         for subtile_p in [True, False]
         for vectmul in [1]
         for add2reduce in [False]
+        for group_size_n in [1, 4]
         for maxreg in [152, 192]
         for pingpong in [True, False]
     ]
@@ -498,70 +548,38 @@ def _attn_fwd_tma_dp(
         l_i0_1 = 0
         l_i1_1 = 0
 
-    if STAGE & 1:
-        acc0, acc1, l_i0_0, l_i0_1, l_i1_0, l_i1_1, m_i0, m_i1 = _attn_fwd_inner_oss_dp(
-            acc0,
-            acc1,
-            l_i0_0,
-            l_i0_1,
-            l_i1_0,
-            l_i1_1,
-            m_i0,
-            m_i1,
-            q0,
-            q1,  #
-            desc_k,
-            desc_v,  #
-            offset_y,
-            dtype,
-            start_m,
-            qk_scale,  #
-            BLOCK_M,
-            HEAD_DIM,
-            BLOCK_N,  #
-            4 - STAGE,
-            offs_m0,
-            offs_m1,
-            offs_n,
-            N_CTX,  #
-            warp_specialize,
-            SUBTILING,
-            SUBTILING_P,
-            VECT_MUL,
-            FADD2_REDUCE,
-        )
-    if STAGE & 2:
-        acc0, acc1, l_i0_0, l_i0_1, l_i1_0, l_i1_1, m_i0, m_i1 = _attn_fwd_inner_oss_dp(
-            acc0,
-            acc1,
-            l_i0_0,
-            l_i0_1,
-            l_i1_0,
-            l_i1_1,
-            m_i0,
-            m_i1,
-            q0,
-            q1,  #
-            desc_k,
-            desc_v,  #
-            offset_y,
-            dtype,
-            start_m,
-            qk_scale,  #
-            BLOCK_M,
-            HEAD_DIM,
-            BLOCK_N,  #
-            2,
-            offs_m0,
-            offs_m1,
-            offs_n,
-            N_CTX,  #
-            warp_specialize,
-            SUBTILING,
-            SUBTILING_P,
-            VECT_MUL,
-            FADD2_REDUCE,
-        )
+    # Merged causal: single loop covering below-diagonal and on-diagonal
+    acc0, acc1, l_i0_0, l_i0_1, l_i1_0, l_i1_1, m_i0, m_i1 = _attn_fwd_inner_oss_dp(
+        acc0,
+        acc1,
+        l_i0_0,
+        l_i0_1,
+        l_i1_0,
+        l_i1_1,
+        m_i0,
+        m_i1,
+        q0,
+        q1,  #
+        desc_k,
+        desc_v,  #
+        offset_y,
+        dtype,
+        start_m,
+        qk_scale,  #
+        BLOCK_M,
+        HEAD_DIM,
+        BLOCK_N,  #
+        STAGE,
+        offs_m0,
+        offs_m1,
+        offs_n,
+        N_CTX,  #
+        warp_specialize,
+        SUBTILING,
+        SUBTILING_P,
+        VECT_MUL,
+        FADD2_REDUCE,
+    )
 
     if FADD2_REDUCE:
         l_i0 = l_i0_0 + l_i0_1
@@ -667,11 +685,14 @@ def _attn_fwd_persist(
     SUBTILING_P: tl.constexpr,
     VECT_MUL: tl.constexpr,
     FADD2_REDUCE: tl.constexpr,
+    GROUP_SIZE_N: tl.constexpr,
 ):
-    n_tile_num = tl.cdiv(N_CTX, BLOCK_M)
     prog_id = tl.program_id(0)
     num_progs = tl.num_programs(0)
-    total_tiles = n_tile_num * Z * H
+    num_pid_m = tl.cdiv(N_CTX, BLOCK_M)
+    num_pid_n = Z * H
+    num_pid_in_group = num_pid_m * GROUP_SIZE_N
+    total_tiles = num_pid_m * Z * H
 
     tiles_per_sm = total_tiles // num_progs
     if prog_id < total_tiles % num_progs:
@@ -706,8 +727,14 @@ def _attn_fwd_persist(
 
     # inner loop warpspec vs. outer loop warpspec
     for _ in tl.range(0, tiles_per_sm, warp_specialize=warp_specialize and OUTER_LOOP):
-        pid = tile_idx % n_tile_num
-        off_hz = tile_idx // n_tile_num
+        # pid = tile_idx % num_pid_m
+        # off_hz = tile_idx // num_pid_m
+        group_id = tile_idx // num_pid_in_group
+        first_pid_n = group_id * GROUP_SIZE_N
+        group_size_n = min(num_pid_n - first_pid_n, GROUP_SIZE_N)
+        off_hz = first_pid_n + (tile_idx % group_size_n)
+        pid = (tile_idx % num_pid_in_group) // group_size_n
+
         _attn_fwd_tma_dp(
             sm_scale,
             M,
