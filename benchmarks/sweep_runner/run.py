@@ -81,9 +81,9 @@ def parse_args(args: Optional[List[str]] = None) -> argparse.Namespace:
         help="Maximum number of configs to generate.",
     )
     parser.add_argument(
-        "--attach-output-dir",
+        "--attach-launch",
         action="store_true",
-        help="Attach the output directory to the generated config file.",
+        help="Attach launch argument in common_args.",
     )
 
     parsed_args, extra_args = parser.parse_known_args(args)
@@ -111,7 +111,7 @@ def generate_run_config(
     extra_args: List[str],
     separate_backends: bool = False,
     num_configs: Optional[int] = None,
-    attach_output_dir: bool = False,
+    attach_launch: bool = False,
 ) -> Dict[str, Any]:
     """
     Generate a TRITONBENCH_RUN_CONFIG file from the sweep runner config and target.
@@ -137,15 +137,14 @@ def generate_run_config(
         skip_tests=skip_tests,
     )
     result_configs = {}
-    if attach_output_dir:
+    if attach_launch:
         result_configs["common_args"] = f"--launch benchmarks.{target}.run"
-        result_configs["common_args"] += (
-            f" --output-dir .benchmarks/{target}/" + "run-${timestamp}"
-        )
     if extra_args:
         if "common_args" not in result_configs:
             result_configs["common_args"] = ""
-        result_configs["common_args"] += " " + " ".join(extra_args)
+        if len(result_configs["common_args"]):
+            result_configs["common_args"] += " "
+        result_configs["common_args"] += " ".join(extra_args)
 
     disabled_benchmarks = sweep_runner_config.get("disabled", {})
     override_benchmarks = sweep_runner_config.get("overrides", {})
@@ -183,7 +182,7 @@ def run(args: Optional[List[str]] = None) -> None:
         extra_args=parsed_args.extra_args,
         separate_backends=parsed_args.separate_backends,
         num_configs=parsed_args.sweep_num_configs,
-        attach_output_dir=parsed_args.attach_output_dir,
+        attach_launch=parsed_args.attach_launch,
     )
 
     write_run_config(run_config, parsed_args.sweep_output_file)
