@@ -20,16 +20,14 @@ def load_metadata(metadata_path: str) -> Any:
 
 
 def _has_meaningful_baseline(
-    op: str, baseline_metadata: Dict[str, Any], kernel_metadata: Dict[str, Any]
+    op: str, backends: List[str], baseline_metadata: Dict[str, Any]
 ) -> bool:
     return op in baseline_metadata and not (
-        baseline_metadata[op] in kernel_metadata[op] and len(kernel_metadata[op]) == 1
+        baseline_metadata[op] in backends and len(backends) == 1
     )
 
 
-def get_metric_args(
-    op: str, required_metrics: List[str], kernel_metadata: Dict[str, Any]
-) -> str:
+def get_metric_args(op: str, backends: List[str], required_metrics: List[str]) -> str:
     special_metrics = ["flops", "tflops", "speedup"]
     valid_metrics = [m for m in required_metrics if m not in special_metrics]
     # do basic sanity checks
@@ -41,7 +39,7 @@ def get_metric_args(
             valid_metrics.append("tflops")
     if "speedup" in required_metrics:
         baseline_metadata = load_metadata(BASELINE_OPS_PATH)
-        if _has_meaningful_baseline(op, baseline_metadata, kernel_metadata):
+        if _has_meaningful_baseline(op, backends, baseline_metadata):
             valid_metrics.append("speedup")
             baseline_prefix = f"--baseline {baseline_metadata[op]} "
     return baseline_prefix + "--metrics " + ",".join(valid_metrics)
@@ -127,19 +125,18 @@ def get_benchmark_config_with_tags(
     for op, backend in operators.items():
         if _need_skip_by_skip_test(op, skip_tests):
             continue
-        backend_with_wanted_tags = {
+        backend_names_with_tags = {
             b
             for b in backend
             if "tags" in backend[b] and any(t in backend[b]["tags"] for t in tags)
         }
-        backend_names_with_tags = [b for b in backend_with_wanted_tags]
         if not backend_names_with_tags:
             continue
         dtype_prefix = (
             f"{dtype[op]}_" if op in dtype and dtype[op] not in SKIP_DTYPE else ""
         )
         metric_args = (
-            get_metric_args(op, metrics, kernel_metadata=operators) if metrics else ""
+            get_metric_args(op, backend_names_with_tags, metrics) if metrics else ""
         )
         if per_backend:
             for backend_name in backend_names_with_tags:

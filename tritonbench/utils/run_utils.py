@@ -62,7 +62,7 @@ ENV_CHECK_MAP = {
         "triton-beta": is_triton_beta,
         "meta-triton": is_meta_triton,
         "triton-stable": is_triton_stable,
-    }
+    },
 }
 
 logging.basicConfig(level=logging.INFO)
@@ -129,9 +129,9 @@ def _env_check(benchmark_config: Dict[str, str], field_name: str) -> bool:
     """True means we should run the benchmark, False means we should skip it."""
     check_map = ENV_CHECK_MAP[field_name]
     field_val = benchmark_config.get(field_name, None)
-    assert field_val is None or all([field_val in check_map for field_val in check_map]), (
-        f"Unknown {field_name} value: {field_val}"
-    )
+    assert field_val is None or all(
+        [field_val in check_map for field_val in check_map]
+    ), f"Unknown {field_name} value: {field_val}"
     if field_val is None:
         return True
     return any([check_map[val]() for val in field_val])

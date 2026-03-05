@@ -137,12 +137,14 @@ def generate_run_config(
         skip_tests=skip_tests,
     )
     result_configs = {}
-    result_configs["common_args"] = f"--launch benchmarks.{target}.run"
     if attach_output_dir:
+        result_configs["common_args"] = f"--launch benchmarks.{target}.run"
         result_configs["common_args"] += (
             f" --output-dir .benchmarks/{target}/" + "run-${timestamp}"
         )
     if extra_args:
+        if "common_args" not in result_configs:
+            result_configs["common_args"] = ""
         result_configs["common_args"] += " " + " ".join(extra_args)
 
     disabled_benchmarks = sweep_runner_config.get("disabled", {})

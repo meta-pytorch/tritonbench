@@ -50,7 +50,9 @@ def run():
             logger.info(f"[nightly] Skipping disabled benchmark {benchmark_name}.")
             continue
         output_file = output_dir.joinpath(f"{op_bench}.json")
-        benchmark_config["args"] += " " + " ".join(["--output-json", str(output_file.absolute())])
+        benchmark_config["args"] += " " + " ".join(
+            ["--output-json", str(output_file.absolute())]
+        )
         run_in_task(
             op_args=benchmark_config["args"].split(" "), benchmark_name=op_bench
         )
