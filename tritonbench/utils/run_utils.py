@@ -315,9 +315,6 @@ def _run(args: argparse.Namespace, extra_args: List[str]) -> BenchmarkOperatorRe
 def _process_common_args(common_args: str) -> List[str]:
     if not common_args:
         return []
-    if "${timestamp}" in common_args:
-        current_timestamp = datetime.fromtimestamp(time.time()).strftime("%Y%m%d%H%M%S")
-        common_args = common_args.replace("${timestamp}", current_timestamp)
     common_args = common_args.split(" ")
     common_args = [arg for arg in common_args if arg]
     return common_args
@@ -445,7 +442,7 @@ def run_in_task(
             logger.setLevel(logging.ERROR)
         start_time = time.perf_counter()
         logger.info(
-            f"[tritonbench] Running {runner}benchmark {benchmark_name}: "
+            f"[tritonbench] Running benchmark {benchmark_name}: "
             + " ".join(op_task_cmd)
         )
         if override_envs:
@@ -479,7 +476,7 @@ def run_in_task(
             )
         benchmark_time = time.perf_counter() - start_time
         logger.info(
-            f"[tritonbench] Complete {runner}benchmark {benchmark_name} in {benchmark_time:.3f} seconds."
+            f"[tritonbench] Complete benchmark {benchmark_name} in {benchmark_time:.3f} seconds."
         )
         return 0
     except subprocess.CalledProcessError as e:
