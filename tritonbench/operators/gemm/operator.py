@@ -600,6 +600,42 @@ class Operator(BenchmarkOperator):
         else:
             return lambda: matmul_func(a_contig, b_contig).to(target_dtype)
 
+    @register_benchmark(enabled=has_tlx() and IS_BLACKWELL)
+    def tlx_matmul_clc(self, a, b, bias) -> Callable:
+        # TLX matmul requires contiguous inputs with 16-byte aligned strides
+        a_contig = a.contiguous()
+        b_contig = b.contiguous()
+        target_dtype = a.dtype
+        if bias is not None:
+            return lambda: _tlx_matmul_clc(a_contig, b_contig).to(target_dtype) + bias
+        else:
+            return lambda: _tlx_matmul_clc(a_contig, b_contig).to(target_dtype)
+
+    @register_benchmark(enabled=has_tlx() and IS_BLACKWELL)
+    def tlx_matmul_pipelined(self, a, b, bias) -> Callable:
+        # TLX matmul requires contiguous inputs with 16-byte aligned strides
+        a_contig = a.contiguous()
+        b_contig = b.contiguous()
+        target_dtype = a.dtype
+        if bias is not None:
+            return (
+                lambda: _tlx_matmul_pipelined(a_contig, b_contig).to(target_dtype)
+                + bias
+            )
+        else:
+            return lambda: _tlx_matmul_pipelined(a_contig, b_contig).to(target_dtype)
+
+    @register_benchmark(enabled=has_tlx() and IS_BLACKWELL)
+    def tlx_matmul_2cta(self, a, b, bias) -> Callable:
+        # TLX matmul requires contiguous inputs with 16-byte aligned strides
+        a_contig = a.contiguous()
+        b_contig = b.contiguous()
+        target_dtype = a.dtype
+        if bias is not None:
+            return lambda: _tlx_matmul_2cta(a_contig, b_contig).to(target_dtype) + bias
+        else:
+            return lambda: _tlx_matmul_2cta(a_contig, b_contig).to(target_dtype)
+
     if IS_BLACKWELL:
 
         @register_benchmark(enabled=False)
@@ -667,48 +703,6 @@ class Operator(BenchmarkOperator):
                 return lambda: blackwell_matmul_descriptor_persistent(
                     a, b, warp_specialize=False
                 )
-
-        @register_benchmark(enabled=has_tlx())
-        def tlx_matmul_clc(self, a, b, bias) -> Callable:
-            # TLX matmul requires contiguous inputs with 16-byte aligned strides
-            a_contig = a.contiguous()
-            b_contig = b.contiguous()
-            target_dtype = a.dtype
-            if bias is not None:
-                return (
-                    lambda: _tlx_matmul_clc(a_contig, b_contig).to(target_dtype) + bias
-                )
-            else:
-                return lambda: _tlx_matmul_clc(a_contig, b_contig).to(target_dtype)
-
-        @register_benchmark(enabled=has_tlx())
-        def tlx_matmul_pipelined(self, a, b, bias) -> Callable:
-            # TLX matmul requires contiguous inputs with 16-byte aligned strides
-            a_contig = a.contiguous()
-            b_contig = b.contiguous()
-            target_dtype = a.dtype
-            if bias is not None:
-                return (
-                    lambda: _tlx_matmul_pipelined(a_contig, b_contig).to(target_dtype)
-                    + bias
-                )
-            else:
-                return lambda: _tlx_matmul_pipelined(a_contig, b_contig).to(
-                    target_dtype
-                )
-
-        @register_benchmark(enabled=has_tlx())
-        def tlx_matmul_2cta(self, a, b, bias) -> Callable:
-            # TLX matmul requires contiguous inputs with 16-byte aligned strides
-            a_contig = a.contiguous()
-            b_contig = b.contiguous()
-            target_dtype = a.dtype
-            if bias is not None:
-                return (
-                    lambda: _tlx_matmul_2cta(a_contig, b_contig).to(target_dtype) + bias
-                )
-            else:
-                return lambda: _tlx_matmul_2cta(a_contig, b_contig).to(target_dtype)
 
         @register_benchmark(enabled=HAS_TILELANG and is_cu130())
         def tilelang_blackwell_matmul(self, a, b, bias) -> Callable:

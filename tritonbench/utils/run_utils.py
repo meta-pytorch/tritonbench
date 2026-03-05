@@ -320,12 +320,65 @@ def _process_common_args(common_args: str) -> List[str]:
     return common_args
 
 
-def run_config(
-    config_file: str,
-    args: List[str],
+def _run_config_entry(
+    benchmark_name: str,
+    config: Dict[str, Any],
+    op: str | None = None,
+    args: List[str] | None = None,
     extra_envs: Optional[Dict[str, str]] = None,
     override_envs: bool = False,
     capture_output: Optional[str] = None,
+):
+    benchmark_config = config[benchmark_name]
+    runner = benchmark_config.get("runner", None)
+    op_args = benchmark_config["args"].split(" ") + args
+    env_string = benchmark_config.get("envs", None)
+    config_extra_envs = {}
+    forbidden_list = [";", "$", "&"]
+    if env_string:
+        _ASSIGN_RE = re.compile(r"^[A-Za-z_][A-Za-z0-9_]*=")
+        if any(char in env_string for char in forbidden_list):
+            raise ValueError(
+                f"Env string containing '{forbidden_list}' is not supported."
+            )
+        for env_part in shlex.split(env_string, posix=True):
+            if not _ASSIGN_RE.match(env_part):
+                raise ValueError(
+                    f"Env string must be in the form of key=value, get {env_part}"
+                )
+            key, val = env_part.split("=", 1)
+            config_extra_envs[key] = val
+    if extra_envs:
+        config_extra_envs.update(extra_envs)
+    op_name = get_cmd_parameter(op_args, "--op")
+    disabled = (
+        benchmark_config.get("disabled", False)
+        or not _env_check(benchmark_config, "devices")
+        or not _env_check(benchmark_config, "channels")
+        or (op and op_name and not op_name == op)
+    )
+    if disabled:
+        logger.info(f"Skipping disabled benchmark {benchmark_name}.")
+        return
+    run_in_task(
+        op=op_name,
+        op_args=op_args,
+        runner=runner,
+        benchmark_name=benchmark_name,
+        extra_envs=config_extra_envs,
+        override_envs=override_envs,
+        capture_output=capture_output,
+    )
+
+
+def run_config(
+    config_file: str,
+    args: List[str],
+    op: str | None = None,
+    extra_envs: Optional[Dict[str, str]] = None,
+    override_envs: bool = False,
+    capture_output: Optional[str] = None,
+    per_config_entry: Dict[str, Any] | None = None,
 ):
     assert Path(config_file).exists(), (
         f"Config file {config_file} must exist. Current working directory {os.getcwd()}"
@@ -339,46 +392,29 @@ def run_config(
     if "common_args" in config:
         del config["common_args"]
     for benchmark_name in config:
-        benchmark_config = config[benchmark_name]
-        runner = benchmark_config.get("runner", None)
-        op_args = benchmark_config["args"].split(" ") + args
-        op_args += common_args
-        env_string = benchmark_config.get("envs", None)
-        config_extra_envs = {}
-        forbidden_list = [";", "$", "&"]
-        if env_string:
-            _ASSIGN_RE = re.compile(r"^[A-Za-z_][A-Za-z0-9_]*=")
-            if any(char in env_string for char in forbidden_list):
-                raise ValueError(
-                    f"Env string containing '{forbidden_list}' is not supported."
-                )
-            for env_part in shlex.split(env_string, posix=True):
-                if not _ASSIGN_RE.match(env_part):
-                    raise ValueError(
-                        f"Env string must be in the form of key=value, get {env_part}"
-                    )
-                key, val = env_part.split("=", 1)
-                config_extra_envs[key] = val
-        if extra_envs:
-            config_extra_envs.update(extra_envs)
-        disabled = (
-            benchmark_config.get("disabled", False)
-            or not _env_check(benchmark_config, "devices")
-            or not _env_check(benchmark_config, "channels")
-        )
-        if disabled:
-            logger.info(f"Skipping disabled benchmark {benchmark_name}.")
-            continue
-        op_name = get_cmd_parameter(op_args, "--op")
-        run_in_task(
-            op=op_name,
-            op_args=op_args,
-            runner=runner,
-            benchmark_name=benchmark_name,
-            extra_envs=config_extra_envs,
+        per_benchmark_args = common_args.copy() if common_args else []
+        per_benchmark_args += args
+        if (
+            per_config_entry
+            and benchmark_name in per_config_entry
+            and per_config_entry[benchmark_name].get("extra_args", None)
+        ):
+            per_benchmark_args += per_config_entry[benchmark_name]["extra_args"]
+        _run_config_entry(
+            benchmark_name,
+            config[benchmark_name],
+            op=op,
+            args=per_benchmark_args,
+            extra_envs=extra_envs,
             override_envs=override_envs,
             capture_output=capture_output,
         )
+        if (
+            per_config_entry
+            and benchmark_name in per_config_entry
+            and per_config_entry[benchmark_name].get("callback", None)
+        ):
+            per_config_entry[benchmark_name]["callback"]()
 
 
 def load_operator_by_args(task_args: List[str]):
