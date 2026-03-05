@@ -103,7 +103,6 @@ def _attn_fwd_subtile(
     v,
     dtype: tl.constexpr,
     STAGE: tl.constexpr,
-    # apply_mask: tl.constexpr,
     SUBTILING: tl.constexpr,
     SUBTILING_P: tl.constexpr,
     VECT_MUL: tl.constexpr,
@@ -727,8 +726,6 @@ def _attn_fwd_persist(
 
     # inner loop warpspec vs. outer loop warpspec
     for _ in tl.range(0, tiles_per_sm, warp_specialize=warp_specialize and OUTER_LOOP):
-        # pid = tile_idx % num_pid_m
-        # off_hz = tile_idx // num_pid_m
         group_id = tile_idx // num_pid_in_group
         first_pid_n = group_id * GROUP_SIZE_N
         group_size_n = min(num_pid_n - first_pid_n, GROUP_SIZE_N)
