@@ -15,12 +15,11 @@ logging.basicConfig(level=logging.INFO)
 
 from ..common import run_benchmark_config_ci
 
+
 def run():
     parser = argparse.ArgumentParser()
     parser.add_argument("--name", default="nightly", help="Benchmark name.")
-    parser.add_argument(
-        "--op", type=str, default=None, help="Running on a single op."
-    )
+    parser.add_argument("--op", type=str, default=None, help="Running on a single op.")
     parser.add_argument(
         "--ci", action="store_true", help="Running in GitHub Actions CI mode."
     )
@@ -36,6 +35,7 @@ def run():
         ci=args.ci,
         log_scuba=args.log_scuba,
     )
+
 
 if __name__ == "__main__":
     run()

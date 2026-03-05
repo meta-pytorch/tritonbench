@@ -3,13 +3,13 @@ import logging
 import os
 import sys
 import time
-import yaml
-
-from functools import partial
 from datetime import datetime
+from functools import partial
 from os.path import abspath, exists
 from pathlib import Path
-from typing import List, Callable
+from typing import Callable, List
+
+import yaml
 
 logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger(__name__)
@@ -23,7 +23,6 @@ def setup_tritonbench_cwd():
         "../../../tritonbench",
     ):
         if exists(tritonbench_dir):
-
             break
 
     if exists(tritonbench_dir):
@@ -41,7 +40,9 @@ from tritonbench.utils.path_utils import REPO_PATH
 BENCHMARKS_OUTPUT_DIR = REPO_PATH.joinpath(".benchmarks")
 
 
-def post_run_callback(logger, benchmark_group_name, benchmark, output_file, output_files, disabled):
+def post_run_callback(
+    logger, benchmark_group_name, benchmark, output_file, output_files, disabled
+):
     if disabled:
         return
     if not os.path.exists(output_file) or os.path.getsize(output_file) == 0:
@@ -88,8 +89,13 @@ def run_benchmark_config_ci(
         per_benchmark_map[benchmark] = {
             "extra_args": per_benchmark_extra_args,
             "enable_condition": lambda op_name: op == None or op_name == op,
-            "callback": partial(post_run_callback,
-                logger, benchmark_group_name, benchmark, output_file, output_files
+            "callback": partial(
+                post_run_callback,
+                logger,
+                benchmark_group_name,
+                benchmark,
+                output_file,
+                output_files,
             ),
         }
     # Run the config file w/per-benchmark extra args and callback

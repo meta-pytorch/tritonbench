@@ -9,7 +9,7 @@ import sys
 import time
 from datetime import datetime
 from pathlib import Path
-from typing import Dict, List, Optional, Any, Callable
+from typing import Any, Callable, Dict, List, Optional
 
 import torch
 import yaml
@@ -65,9 +65,7 @@ ENV_CHECK_MAP = {
     },
 }
 
-SPECIAL_CONFIG_FIELDS = {
-    "common_args"
-}
+SPECIAL_CONFIG_FIELDS = {"common_args"}
 
 logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger(__name__)
@@ -402,14 +400,13 @@ def run_config(
         per_benchmark_callback = lambda x: None
         per_benchmark_args = common_args.copy() if common_args else []
         per_benchmark_args += args
-        if (
-            per_config_entry
-            and benchmark_name in per_config_entry
-        ):
+        if per_config_entry and benchmark_name in per_config_entry:
             if per_config_entry[benchmark_name].get("extra_args", None):
                 per_benchmark_args += per_config_entry[benchmark_name]["extra_args"]
             if per_config_entry[benchmark_name].get("enable_condition", None):
-                per_benchmark_enable_cond = per_config_entry[benchmark_name]["enable_condition"]
+                per_benchmark_enable_cond = per_config_entry[benchmark_name][
+                    "enable_condition"
+                ]
             if per_config_entry[benchmark_name].get("callback", None):
                 per_benchmark_callback = per_config_entry[benchmark_name]["callback"]
         disabled = _run_config_entry(
