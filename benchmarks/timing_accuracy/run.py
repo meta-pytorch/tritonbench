@@ -268,7 +268,12 @@ def print_summary_table(results: Dict[str, MethodStats], operation_name: str):
     )
 
 
-def _run(args: argparse.Namespace, tb_args: argparse.Namespace, extra_args: List[str], output_dir: str):
+def _run(
+    args: argparse.Namespace,
+    tb_args: argparse.Namespace,
+    extra_args: List[str],
+    output_dir: str,
+):
     device_name = torch.cuda.get_device_name()
     logger.info(f"Loading operator: {tb_args.op}")
 
