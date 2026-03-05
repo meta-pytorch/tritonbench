@@ -1,0 +1,19 @@
+# Run config file for nightly benchmark
+# First, collect all ops and backends with tags "triton"
+# Measure latency, flops, and speedup metrics in the best effort
+# Some operators might not support flops or speedup metrics
+run_config:
+  with_backwards: true
+  tags:
+    - triton
+  metrics:
+    - compile_time
+  skip_tests:
+    - test/test_gpu/skip_tests.yaml
+# override some ops
+# 2. bf16_flex_attention_fwd/bwd: measure compiled version (pt2)
+overrides:
+  bf16_flex_attention_fwd:
+    args: --op flex_attention --metrics latency,tflops --only compiled
+  bf16_flex_attention_bwd:
+    args: --op flex_attention --metrics latency,tflops --only compiled

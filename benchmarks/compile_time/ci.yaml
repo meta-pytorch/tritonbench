@@ -1,0 +1,134 @@
+fp16_addmm_fwd:
+  args: --op addmm --only triton_addmm,streamk_addmm --metrics compile_time
+fp16_addmm_bwd:
+  args: --op addmm --only triton_addmm,streamk_addmm --bwd --metrics compile_time
+bf16xint16_gemm_fwd:
+  args: --op bf16xint16_gemm --only bf16xbf16,bf16xint16_casted,bf16xint16 --metrics
+    compile_time
+bf16_blackwell_attentions_fwd:
+  args: --op blackwell_attentions --only triton_tutorial_flash_v2_tma_ws_persistent_blackwell,triton_tutorial_flash_v2_persistent_blackwell,triton_tutorial_flash_v2_blackwell,triton_tutorial_flash_dp_persistent_blackwell,triton_tutorial_flash_dp_blackwell
+    --metrics compile_time
+  devices:
+  - b200
+bf16_blackwell_attentions_bwd:
+  args: --op blackwell_attentions --only triton_tutorial_flash_v2_tma_ws_persistent_blackwell,triton_tutorial_flash_v2_persistent_blackwell,triton_tutorial_flash_v2_blackwell,triton_tutorial_flash_dp_persistent_blackwell,triton_tutorial_flash_dp_blackwell
+    --bwd --metrics compile_time
+  devices:
+  - b200
+cross_entropy_fwd:
+  args: --op cross_entropy --only liger_cross_entropy_loss --metrics compile_time
+cross_entropy_bwd:
+  args: --op cross_entropy --only liger_cross_entropy_loss --bwd --metrics compile_time
+embedding_fwd:
+  args: --op embedding --only liger_embedding --metrics compile_time
+embedding_bwd:
+  args: --op embedding --only liger_embedding --bwd --metrics compile_time
+bf16_flash_attention_fwd:
+  args: --op flash_attention --only triton_tutorial_flash_v2_tma_ws,triton_tutorial_flash_v2_tma_ws_persistent,triton_tutorial_flash_v2_tma,triton_tutorial_flash_v2_ws,triton_tutorial_flash_v2
+    --metrics compile_time
+bf16_flash_attention_bwd:
+  args: --op flash_attention --only triton_tutorial_flash_v2_tma_ws,triton_tutorial_flash_v2_tma_ws_persistent,triton_tutorial_flash_v2_tma,triton_tutorial_flash_v2_ws,triton_tutorial_flash_v2
+    --bwd --metrics compile_time --causal
+fp8_attention_fwd:
+  args: --op fp8_attention --only triton_flash_v2,triton_flash_v2_ws,triton_flash_v2_tma
+    --metrics compile_time
+fp8_gemm_fwd:
+  args: --op fp8_gemm --only triton_fp8_gemm,triton_persistent_fp8_gemm,triton_tma_persistent_fp8_gemm
+    --metrics compile_time
+fp8_gemm_blockwise_fwd:
+  args: --op fp8_gemm_blockwise --only _triton --metrics compile_time
+fp8_gemm_rowwise_fwd:
+  args: --op fp8_gemm_rowwise --only _triton,_aoti_fp8_triton_mm --metrics compile_time
+  channels:
+  - triton-main
+fp8_gemm_rowwise_grouped_fwd:
+  args: --op fp8_gemm_rowwise_grouped --only _triton --metrics compile_time
+fused_linear_cross_entropy_fwd:
+  args: --op fused_linear_cross_entropy --only liger_lm_head_ce --metrics compile_time
+fused_linear_cross_entropy_bwd:
+  args: --op fused_linear_cross_entropy --only liger_lm_head_ce --bwd --metrics compile_time
+fused_linear_jsd_fwd:
+  args: --op fused_linear_jsd --only liger_lm_head_jsd --metrics compile_time
+fused_linear_jsd_bwd:
+  args: --op fused_linear_jsd --only liger_lm_head_jsd --bwd --metrics compile_time
+gather_gemv_fwd:
+  args: --op gather_gemv --only triton_gather_gemv --metrics compile_time
+bf16_gdpa_fwd:
+  args: --op gdpa --only gdpa_opt_sorted,gdpa,gdpa_opt --metrics compile_time
+bf16_gdpa_bwd:
+  args: --op gdpa --only gdpa_opt_sorted,gdpa,gdpa_opt --bwd --metrics compile_time
+geglu_fwd:
+  args: --op geglu --only liger_geglu --metrics compile_time
+geglu_bwd:
+  args: --op geglu --only liger_geglu --bwd --metrics compile_time
+fp16_gemm_fwd:
+  args: --op gemm --only matmul_partition_k,triton_tutorial_matmul,streamk_matmul,triton_ops_matmul
+    --metrics compile_time
+fp16_gemm_bwd:
+  args: --op gemm --only matmul_partition_k,triton_tutorial_matmul,streamk_matmul,triton_ops_matmul
+    --bwd --metrics compile_time
+bf16_grouped_gemm_fwd:
+  args: --op grouped_gemm --only tlx_grouped_gemm,precompiled_cutedsl_grouped_mm_tuned,triton_grouped_gemm
+    --metrics compile_time
+int4_gemm_fwd:
+  args: --op int4_gemm --only triton_int4_gemm,preprocessed_triton_int4_gemm --metrics
+    compile_time
+fp32_jagged_mean_fwd:
+  args: --op jagged_mean --only triton_jagged_mean_simple_fused,triton_jagged_mean_variable_length_loop
+    --metrics compile_time
+fp32_jagged_softmax_fwd:
+  args: --op jagged_softmax --only triton_jagged_softmax_variable_length_loop,triton_jagged_softmax_simple_fused
+    --metrics compile_time
+fp32_jagged_sum_fwd:
+  args: --op jagged_sum --only triton_jagged_sum_no_pad_simple_fused,triton_jagged_sum_no_pad_variable_length_loop
+    --metrics compile_time
+jsd_fwd:
+  args: --op jsd --only liger_jsd --metrics compile_time
+jsd_bwd:
+  args: --op jsd --only liger_jsd --bwd --metrics compile_time
+kl_div_fwd:
+  args: --op kl_div --only liger_kl_div --metrics compile_time
+kl_div_bwd:
+  args: --op kl_div --only liger_kl_div --bwd --metrics compile_time
+launch_latency_fwd:
+  args: --op launch_latency --only nop_triton_kernel --metrics compile_time
+layer_norm_fwd:
+  args: --op layer_norm --only triton_fused_layer_norm,triton_layer_norm,liger_layer_norm
+    --metrics compile_time
+layer_norm_bwd:
+  args: --op layer_norm --only triton_fused_layer_norm,triton_layer_norm,liger_layer_norm
+    --bwd --metrics compile_time
+low_mem_dropout_fwd:
+  args: --op low_mem_dropout --only triton_dropout,seeded_dropout --metrics compile_time
+bf16_ragged_attention_fwd:
+  args: --op ragged_attention --only hstu --metrics compile_time
+bf16_ragged_attention_bwd:
+  args: --op ragged_attention --only hstu --bwd --metrics compile_time
+rms_norm_fwd:
+  args: --op rms_norm --only triton_fused_rmsnorm,liger_rms --metrics compile_time
+rms_norm_bwd:
+  args: --op rms_norm --only triton_fused_rmsnorm,liger_rms --bwd --metrics compile_time
+rope_fwd:
+  args: --op rope --only liger_rotary_pos_emb --metrics compile_time
+rope_bwd:
+  args: --op rope --only liger_rotary_pos_emb --bwd --metrics compile_time
+fp16_softmax_fwd:
+  args: --op softmax --only triton_softmax --metrics compile_time
+fp16_softmax_bwd:
+  args: --op softmax --only triton_softmax --bwd --metrics compile_time
+sum_fwd:
+  args: --op sum --only triton_sum --metrics compile_time
+swiglu_fwd:
+  args: --op swiglu --only liger_swiglu --metrics compile_time
+swiglu_bwd:
+  args: --op swiglu --only liger_swiglu --bwd --metrics compile_time
+template_attention_fwd:
+  args: --op template_attention --only test_no_exp2,test_with_exp2 --metrics compile_time
+vector_add_fwd:
+  args: --op vector_add --only triton_add --metrics compile_time
+vector_exp_fwd:
+  args: --op vector_exp --only triton_exp --metrics compile_time
+vector_exp_bwd:
+  args: --op vector_exp --only triton_exp --bwd --metrics compile_time
+welford_fwd:
+  args: --op welford --only test_no_welford,triton_welford --metrics compile_time
