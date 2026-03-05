@@ -437,11 +437,11 @@ def aggregate_outputs(
     assert (
         len(all_result_files) > 0
     ), f"No result files found in output dir {output_dir}!"
-    aggregated_data = {}
+    aggregated_data = []
     for result_file in all_result_files:
         with open(result_file, "r") as f:
             single_result = json.load(f)
-        aggregated_data.update(_process_single_result(single_result))
+        aggregated_data.append(_process_single_result(single_result))
     benchmark_data = decorate_benchmark_data(name, run_timestamp, ci, aggregated_data)
     benchmark_data["benchmark_metadata"] = {}
     result_file_path = os.path.join(output_dir, result_file_name)
