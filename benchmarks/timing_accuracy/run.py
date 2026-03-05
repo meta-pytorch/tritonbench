@@ -17,6 +17,7 @@ from ..common import setup_output_dir, setup_tritonbench_cwd
 setup_tritonbench_cwd()
 
 from tritonbench.utils.parser import get_parser
+from tritonbench.utils.scuba_utils import decorate_benchmark_data, log_benchmark
 
 logger = logging.getLogger(__name__)
 logger.setLevel(logging.INFO)
@@ -267,7 +268,7 @@ def print_summary_table(results: Dict[str, MethodStats], operation_name: str):
     )
 
 
-def _run(args: argparse.Namespace, tb_args: argparse.Namespace, extra_args: List[str]):
+def _run(args: argparse.Namespace, tb_args: argparse.Namespace, extra_args: List[str], output_dir: str):
     device_name = torch.cuda.get_device_name()
     logger.info(f"Loading operator: {tb_args.op}")
 
@@ -366,30 +367,29 @@ def _run(args: argparse.Namespace, tb_args: argparse.Namespace, extra_args: List
 
     print_summary_table(results, operation_name)
 
-    if args.dump_json or args.output_dir:
-        if not args.output_dir:
-            timestamp, output_dir = setup_output_dir(bm_name="timing_accuracy")
-            args.output_dir = output_dir
-        if not os.path.exists(args.output_dir):
-            Path(args.output_dir).mkdir(parents=True, exist_ok=True)
-        output = os.path.join(args.output_dir, f"{operation_name}.json")
-        output_data = {
-            "config": {
-                "device": device_name,
-                "operator": tb_args.op,
-                "backend": backend_name,
-                "input_id": tb_args.input_id,
-                "mode": tb_args.mode,
-                "precision": tb_args.precision,
-                "n_tests": args.n_tests,
-                "rep": tb_args.rep,
-                "warmup": tb_args.warmup,
-            },
-            "results": {name: stats.to_dict() for name, stats in results.items()},
-        }
-        with open(output, "w") as f:
-            json.dump(output_data, f, indent=2)
-        logger.info(f"Results saved to: {output}")
+    if not output_dir:
+        return
+
+    if not os.path.exists(output_dir):
+        Path(output_dir).mkdir(parents=True, exist_ok=True)
+    output = os.path.join(output_dir, f"{operation_name}.json")
+    output_data = {
+        "config": {
+            "device": device_name,
+            "operator": tb_args.op,
+            "backend": backend_name,
+            "input_id": tb_args.input_id,
+            "mode": tb_args.mode,
+            "precision": tb_args.precision,
+            "n_tests": args.n_tests,
+            "rep": tb_args.rep,
+            "warmup": tb_args.warmup,
+        },
+        "results": {name: stats.to_dict() for name, stats in results.items()},
+    }
+    with open(output, "w") as f:
+        json.dump(output_data, f, indent=2)
+    logger.info(f"Results saved to: {output}")
 
 
 def aggregate_outputs(
@@ -455,8 +455,6 @@ def aggregate_outputs(
             ]
         return out
 
-    from tritonbench.utils.scuba_utils import decorate_benchmark_data, log_benchmark
-
     all_result_files = _find_all_result_files(output_dir)
     assert len(all_result_files) > 0, (
         f"No result files found in output dir {output_dir}!"
@@ -517,21 +515,29 @@ def run(args: Optional[List[str]] = None):
         run_timestamp, output_dir = setup_output_dir(
             bm_name="timing_accuracy", output_dir=args.output_dir
         )
+        # override output_dir in ci mode
+        args.output_dir = output_dir
         os.environ["TRITONBENCH_RUN_CONFIG"] = os.path.join(CURRENT_DIR, "ci.yaml")
         extra_args.extend(["--output-dir", str(output_dir.absolute())])
         tritonbench_run(args=extra_args, disable_sys_argv=True)
-        # finished running all configs. now reduce output metrics to a single file
+    else:
+        tb_parser = get_parser()
+
+        tb_args, extra_args = tb_parser.parse_known_args(extra_args)
+        if args.dump_json and not args.output_dir:
+            run_timestamp, output_dir = setup_output_dir(bm_name="timing_accuracy")
+            args.output_dir = output_dir
+        else:
+            run_timestamp = None
+        _run(args, tb_args, extra_args, args.output_dir)
+
+    # finished running all configs. now reduce output metrics to a single file
+    if run_timestamp and args.output_dir:
         benchmark_data = aggregate_outputs(
-            "timing_accuracy", run_timestamp, output_dir, args.ci
+            "timing_accuracy", run_timestamp, args.output_dir, args.ci
         )
         if args.log_scuba:
             log_benchmark(benchmark_data)
-        return
-
-    tb_parser = get_parser()
-
-    tb_args, extra_args = tb_parser.parse_known_args(extra_args)
-    _run(args, tb_args, extra_args)
 
 
 if __name__ == "__main__":
