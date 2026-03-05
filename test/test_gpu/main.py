@@ -18,7 +18,7 @@ from tritonbench.utils.env_utils import (
     is_fbcode,  # @manual=//pytorch/tritonbench:tritonbench
 )
 from tritonbench.utils.parser import get_parser
-from tritonbench.utils.run_utils import _device_env_check, _triton_env_check
+from tritonbench.utils.run_utils import _env_check
 
 if is_fbcode():
     import importlib
@@ -62,14 +62,10 @@ def _gen_test_operators(test_ops, skip_tests) -> set[str]:
         if skip_tests[skip_op] == None:
             test_ops[skip_op]["disabled"] = True
             continue
-        if "devices" in skip_tests[skip_op]:
+        for field_name in ["devices", "channels"]:
             test_ops[skip_op]["disabled"] = test_ops[skip_op][
                 "disabled"
-            ] or not _device_env_check(skip_tests[skip_op])
-        if "channels" in skip_tests[skip_op]:
-            test_ops[skip_op]["disabled"] = test_ops[skip_op][
-                "disabled"
-            ] or not _triton_env_check(skip_tests[skip_op])
+            ] or not _env_check(skip_tests[skip_op], field_name)
     return {test_op for test_op in test_ops if not test_ops[test_op]["disabled"]}
 
 

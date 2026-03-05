@@ -1,4 +1,3 @@
-common_args: --launch benchmarks.nightly.run --output-dir .benchmarks/nightly/run-${timestamp}
 fp16_addmm_fwd:
   args: --op addmm --only streamk_addmm,triton_addmm --baseline aten_addmm --metrics
     latency,tflops,speedup
