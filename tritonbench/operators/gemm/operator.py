@@ -33,6 +33,13 @@ if has_tlx():
     from triton.language.extra.tlx.tutorials.blackwell_gemm_ws import (
         matmul as _tlx_matmul_ws,
     )
+
+    try:
+        from triton.language.extra.tlx.tutorials.hopper_gemm_ws import (
+            matmul as _hopper_tlx_matmul_ws,
+        )
+    except (ImportError, ModuleNotFoundError):
+        _hopper_tlx_matmul_ws = None
 else:
 
     def _tlx_matmul_clc(*args, **kwargs):
@@ -62,6 +69,7 @@ from tritonbench.utils.env_utils import (
     is_cu130,
     is_cuda,
     is_fbcode,
+    IS_HOPPER,
     supports_tma,
 )
 from tritonbench.utils.path_utils import REPO_PATH
@@ -549,6 +557,26 @@ class Operator(BenchmarkOperator):
         else:
             return lambda: compiled_decompose_k(a, b)
 
+    @register_benchmark(
+        enabled=has_tlx() and (IS_HOPPER or IS_BLACKWELL), fwd_only=True
+    )
+    def tlx_matmul_ws(self, a, b, bias) -> Callable:
+        # TLX matmul requires contiguous inputs with 16-byte aligned strides
+        a_contig = a.contiguous()
+        b_contig = b.contiguous()
+        target_dtype = a.dtype
+
+        # Choose the appropriate implementation based on architecture
+        if IS_HOPPER:
+            matmul_func = _hopper_tlx_matmul_ws
+        else:  # IS_BLACKWELL
+            matmul_func = _tlx_matmul_ws
+
+        if bias is not None:
+            return lambda: matmul_func(a_contig, b_contig).to(target_dtype) + bias
+        else:
+            return lambda: matmul_func(a_contig, b_contig).to(target_dtype)
+
     if IS_BLACKWELL:
 
         @register_benchmark(enabled=False)
@@ -616,19 +644,6 @@ class Operator(BenchmarkOperator):
                 return lambda: blackwell_matmul_descriptor_persistent(
                     a, b, warp_specialize=False
                 )
-
-        @register_benchmark(enabled=has_tlx())
-        def tlx_matmul_ws(self, a, b, bias) -> Callable:
-            # TLX matmul requires contiguous inputs with 16-byte aligned strides
-            a_contig = a.contiguous()
-            b_contig = b.contiguous()
-            target_dtype = a.dtype
-            if bias is not None:
-                return (
-                    lambda: _tlx_matmul_ws(a_contig, b_contig).to(target_dtype) + bias
-                )
-            else:
-                return lambda: _tlx_matmul_ws(a_contig, b_contig).to(target_dtype)
 
         @register_benchmark(enabled=has_tlx())
         def tlx_matmul_clc(self, a, b, bias) -> Callable:

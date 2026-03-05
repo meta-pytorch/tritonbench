@@ -136,6 +136,19 @@ def is_blackwell() -> bool:
 IS_BLACKWELL = is_blackwell()
 
 
+def is_hopper() -> bool:
+    """Check if running on an NVIDIA Hopper GPU (H100, H200, etc.)."""
+    if not is_cuda_available():
+        return False
+    try:
+        return torch.cuda.get_device_capability()[0] == 9
+    except Exception:
+        return False
+
+
+IS_HOPPER = is_hopper()
+
+
 def is_h100() -> bool:
     """Check if running on an NVIDIA H100 GPU."""
     if not is_cuda_available():
