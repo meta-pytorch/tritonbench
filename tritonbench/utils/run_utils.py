@@ -50,17 +50,6 @@ try:
 except ImportError:
     usage_report_logger = lambda *args, **kwargs: None
 
-FWD_ONLY_OPS = ["triton_dot_compress", "triton_group_index_select"]
-BWD_ARGS_OPS = {
-    # flash_attention/triton_tutorial_flash_v2 does not support non-causal in backward
-    "flash_attention": ["--causal"],
-    # pffn_baseline does not support backward
-    "generalized_dot_product_attention": [
-        "--skip",
-        "pffn_baseline,mkl_jfav3",
-    ],
-}
-
 DEVICE_ENV_CHECK = {
     "h100": is_h100,
     "b200": is_blackwell,
@@ -428,12 +417,9 @@ def load_operator_by_args(task_args: List[str]):
 def run_one_operator(task_args: List[str], with_bwd: bool = False):
     op = load_operator_by_args(task_args)
     op.run()
-    if with_bwd and op.has_bwd() and not op.name in FWD_ONLY_OPS:
+    if with_bwd and op.has_bwd():
         op_name = copy.deepcopy(op.name)
         del op
-        if op_name in BWD_ARGS_OPS:
-            task_args = copy.deepcopy(task_args)
-            task_args.extend(BWD_ARGS_OPS[op_name])
         task_args.extend(["--mode", "bwd"])
         op = load_operator_by_args(task_args)
         op.run()
