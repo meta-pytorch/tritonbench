@@ -1,6 +1,6 @@
 # TLX Benchmarks
 # Add or disable TLX benchmarks that are not covered by the static analyzer
-common_args: --latency-measaure-mode=profiler
+common_args: --latency-measure-mode=profiler
 
 bf16_gemm_fwd:
   op: gemm
