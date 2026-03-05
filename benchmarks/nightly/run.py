@@ -37,7 +37,6 @@ def run():
     run_timestamp, output_dir = setup_output_dir("nightly", ci=args.ci)
     # Run each operator
     output_files = []
-    operator_benchmarks = get_operator_benchmarks()
     with open(os.path.join(CURRENT_DIR, "ci.yaml"), "r") as f:
         operator_benchmarks = yaml.safe_load(f)
     for op_bench in operator_benchmarks:
