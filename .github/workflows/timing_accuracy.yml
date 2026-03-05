@@ -1,6 +1,7 @@
 name: TritonBench Timing Accuracy Benchmark
 permissions:
   contents: read
+  id-token: write
 on:
   schedule:
     # Test daily at 4 PM UTC
