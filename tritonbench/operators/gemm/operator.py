@@ -420,6 +420,29 @@ class Operator(BenchmarkOperator):
 
         return lambda: compiled(a, b)
 
+    if IS_BLACKWELL:
+
+        @register_benchmark(enabled=has_tlx())
+        def torch_tlx_mm(self, a, b, bias) -> Callable:
+            torch._dynamo.reset()
+            inductor_config_patch = {
+                "max_autotune": True,
+                "max_autotune_gemm_backends": "TRITON",
+                "autotune_fallback_to_aten": False,
+                "autotune_num_choices_displayed": self.inductor_autotune_num_choices_displayed,
+                "triton.enable_tlx_templates": True,
+                "test_configs.autotune_choice_name_regex": "blackwell_gemm_ws",
+            }
+            with inductor_config.patch(inductor_config_patch):
+                if bias is not None:
+                    f = lambda a, b: a.matmul(b) + bias
+                else:
+                    f = lambda a, b: a.matmul(b)
+                compiled = torch.compile(f, dynamic=False)
+                compiled(a, b)
+
+            return lambda: compiled(a, b)
+
     @register_benchmark(enabled=False)
     def pt2_matmul_maxautotune(self, a, b, bias) -> Callable:
         torch._dynamo.reset()
