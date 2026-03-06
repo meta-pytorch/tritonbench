@@ -9,10 +9,13 @@ import triton
 from tritonbench.utils.env_utils import get_logger, is_fbcode
 from tritonbench.utils.python_utils import try_import
 
-try:
-    from hammer.ops.triton.triton_hstu_linear import triton_addmm as hstu_triton_addmm
-except ModuleNotFoundError:
-    from .hstu import triton_addmm as hstu_triton_addmm
+with try_import("HAS_HSTU"):
+    try:
+        from hammer.ops.triton.triton_hstu_linear import (
+            triton_addmm as hstu_triton_addmm,
+        )
+    except ModuleNotFoundError:
+        from .hstu import triton_addmm as hstu_triton_addmm
 
 with try_import("HAS_STREAMK"):
     from tritonbench.operators.gemm.stream_k import streamk_cuda_matmul
@@ -129,7 +132,7 @@ class Operator(BenchmarkOperator):
             self.shapes = [(m, k, n, True) for m, k, n, _ in self.shapes]
         self.col_major = addmm_args.col_major
 
-    @register_benchmark()
+    @register_benchmark(enabled=HAS_HSTU)  # type: ignore # noqa: F821
     def triton_addmm(self, a, mat1, mat2) -> Callable:
         return lambda: hstu_triton_addmm(a, mat1, mat2)
 
