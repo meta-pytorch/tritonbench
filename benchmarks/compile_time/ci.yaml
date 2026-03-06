@@ -1,3 +1,5 @@
+# only run one input per kernel
+common_args: --num-inputs 1
 fp16_addmm_fwd:
   args: --op addmm --only triton_addmm,streamk_addmm --metrics compile_time
 fp16_addmm_bwd:
