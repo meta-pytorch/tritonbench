@@ -3,9 +3,6 @@ permissions:
   contents: read
   id-token: write
 on:
-  schedule:
-    # Test daily at 4 PM UTC
-    - cron: '0 16 * * *'
   workflow_dispatch:
 
 
