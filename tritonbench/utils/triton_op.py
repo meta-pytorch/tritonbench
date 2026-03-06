@@ -1309,9 +1309,29 @@ class BenchmarkOperator(metaclass=PostInitProcessor):
         return None
 
     def plot(self):
-        """Plot the comparison between different operator implementations."""
-        raise NotImplementedError(
-            "Each operator must implement its own plotting logic."
+        """
+        Plot the comparison between different operator implementations.
+
+        This default implementation uses the generic plot_benchmark_results
+        utility which dynamically discovers providers from benchmark results
+        and creates a bar chart comparing TFLOPS across providers.
+
+        Operators can override this method to provide custom plotting logic
+        with operator-specific title maps, x-axis formatting, etc.
+        """
+        if "tflops" not in self.required_metrics:
+            print(
+                f"Skipping plot for {self.name}: 'tflops' metric not available. "
+                "Override plot() method for custom plotting."
+            )
+            return
+
+        from tritonbench.utils.plot_utils import plot_benchmark_results
+
+        plot_benchmark_results(
+            output=self.output,
+            tb_args=self.tb_args,
+            op_name=self.name,
         )
 
     def best_config(self, fn):
