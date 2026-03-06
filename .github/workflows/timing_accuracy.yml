@@ -11,7 +11,7 @@ jobs:
     uses: ./.github/workflows/_linux-benchmark-h100.yml
     with:
       test_type:  'periodic'
-      venv_name: "triton-main"
+      venv_name: "meta-triton"
       benchmark_name: "timing_accuracy"
     secrets:
       TRITONBENCH_SCRIBE_GRAPHQL_ACCESS_TOKEN: ${{ secrets.TRITONBENCH_SCRIBE_GRAPHQL_ACCESS_TOKEN }}
