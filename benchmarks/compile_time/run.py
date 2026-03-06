@@ -5,6 +5,8 @@ Measure and collect compile time for operators.
 import argparse
 import os
 
+CURRENT_DIR = os.path.dirname(os.path.abspath(__file__))
+
 from ..common import run_benchmark_config_ci
 
 def main() -> None:
