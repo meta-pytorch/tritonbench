@@ -6,18 +6,16 @@ import statistics
 import sys
 import time
 from dataclasses import dataclass, field
-from pathlib import Path
 from typing import Any, Callable, Dict, List, Optional
 
 import torch
 import triton
 
-from ..common import setup_output_dir, setup_tritonbench_cwd
+from ..common import setup_tritonbench_cwd, run_benchmark_config_ci
 
 setup_tritonbench_cwd()
 
 from tritonbench.utils.parser import get_parser
-from tritonbench.utils.scuba_utils import decorate_benchmark_data, log_benchmark
 
 logger = logging.getLogger(__name__)
 logger.setLevel(logging.INFO)
@@ -272,7 +270,6 @@ def _run(
     args: argparse.Namespace,
     tb_args: argparse.Namespace,
     extra_args: List[str],
-    output_dir: str,
 ):
     device_name = torch.cuda.get_device_name()
     logger.info(f"Loading operator: {tb_args.op}")
@@ -372,12 +369,9 @@ def _run(
 
     print_summary_table(results, operation_name)
 
-    if not output_dir:
+    if not args.output_json:
         return
 
-    if not os.path.exists(output_dir):
-        Path(output_dir).mkdir(parents=True, exist_ok=True)
-    output = os.path.join(output_dir, f"{operation_name}.json")
     output_data = {
         "config": {
             "device": device_name,
@@ -392,88 +386,55 @@ def _run(
         },
         "results": {name: stats.to_dict() for name, stats in results.items()},
     }
-    with open(output, "w") as f:
+    with open(args.output_json, "w") as f:
         json.dump(output_data, f, indent=2)
-    logger.info(f"Results saved to: {output}")
+    logger.info(f"Results saved to: {args.output_json}")
 
 
-def aggregate_outputs(
-    name: str,
-    run_timestamp: str,
-    output_dir: str,
-    ci: bool = False,
-    result_file_name: str = "result.json",
-) -> Dict[str, Any]:
-    """
-    Aggregate output json files from multiple runs into a single file "result.json".
-    """
-
-    def _find_all_result_files(output_dir: str) -> List[str]:
-        return [
-            os.path.join(output_dir, f)
-            for f in os.listdir(output_dir)
-            if f.endswith(".json")
+def transform_single_result(result) -> Dict[str, Any]:
+    out = {}
+    op_name = result["config"]["operator"]
+    mode = result["config"]["mode"]
+    backend = result["config"]["backend"]
+    input_id = result["config"]["input_id"]
+    prefix = f"tritonbench_{op_name}_{mode}[input_id_{input_id}-{backend}]-"
+    out[f"{prefix}precision"] = result["config"]["precision"]
+    out[f"{prefix}warmup"] = result["config"]["warmup"]
+    out[f"{prefix}ntests"] = result["config"]["n_tests"]
+    out[f"{prefix}rep"] = result["config"]["rep"]
+    for method_name, method_stats in result["results"].items():
+        method_key = method_stats["method_name"]
+        out[f"{prefix}{method_key}-benchmark_time_s"] = method_stats[
+            "benchmark_time_s"
         ]
-
-    def _process_single_result(result) -> Dict[str, Any]:
-        out = {}
-        op_name = result["config"]["operator"]
-        mode = result["config"]["mode"]
-        backend = result["config"]["backend"]
-        input_id = result["config"]["input_id"]
-        prefix = f"tritonbench_{op_name}_{mode}[input_id_{input_id}-{backend}]-"
-        out[f"{prefix}precision"] = result["config"]["precision"]
-        out[f"{prefix}warmup"] = result["config"]["warmup"]
-        out[f"{prefix}ntests"] = result["config"]["n_tests"]
-        out[f"{prefix}rep"] = result["config"]["rep"]
-        for method_name, method_stats in result["results"].items():
-            method_key = method_stats["method_name"]
-            out[f"{prefix}{method_key}-benchmark_time_s"] = method_stats[
-                "benchmark_time_s"
-            ]
-            out[f"{prefix}{method_key}-intra_test_avg_median_ms"] = method_stats[
-                "intra_test"
-            ]["avg_median_ms"]
-            out[f"{prefix}{method_key}-intra_test_avg_std_ms"] = method_stats[
-                "intra_test"
-            ]["avg_std_ms"]
-            out[f"{prefix}{method_key}-intra_test_avg_cv"] = method_stats["intra_test"][
-                "avg_cv"
-            ]
-            out[f"{prefix}{method_key}-intra_test_avg_min_ms"] = method_stats[
-                "intra_test"
-            ]["avg_min_ms"]
-            out[f"{prefix}{method_key}-intra_test_avg_max_ms"] = method_stats[
-                "intra_test"
-            ]["avg_max_ms"]
-            out[f"{prefix}{method_key}-inter_test_median_ms"] = method_stats[
-                "inter_test"
-            ]["median_ms"]
-            out[f"{prefix}{method_key}-inter_test_std_ms"] = method_stats["inter_test"][
-                "std_ms"
-            ]
-            out[f"{prefix}{method_key}-inter_test_cv"] = method_stats["inter_test"][
-                "cv"
-            ]
-            out[f"{prefix}{method_key}-inter_test_min_ms"] = method_stats["inter_test"][
-                "min_ms"
-            ]
-        return out
-
-    all_result_files = _find_all_result_files(output_dir)
-    assert len(all_result_files) > 0, (
-        f"No result files found in output dir {output_dir}!"
-    )
-    aggregated_data = []
-    for result_file in all_result_files:
-        with open(result_file, "r") as f:
-            single_result = json.load(f)
-        aggregated_data.append(_process_single_result(single_result))
-    benchmark_data = decorate_benchmark_data(name, run_timestamp, ci, aggregated_data)
-    result_file_path = os.path.join(output_dir, result_file_name)
-    with open(result_file_path, "w") as f:
-        json.dump(benchmark_data, f, indent=4)
-    return benchmark_data
+        out[f"{prefix}{method_key}-intra_test_avg_median_ms"] = method_stats[
+            "intra_test"
+        ]["avg_median_ms"]
+        out[f"{prefix}{method_key}-intra_test_avg_std_ms"] = method_stats[
+            "intra_test"
+        ]["avg_std_ms"]
+        out[f"{prefix}{method_key}-intra_test_avg_cv"] = method_stats["intra_test"][
+            "avg_cv"
+        ]
+        out[f"{prefix}{method_key}-intra_test_avg_min_ms"] = method_stats[
+            "intra_test"
+        ]["avg_min_ms"]
+        out[f"{prefix}{method_key}-intra_test_avg_max_ms"] = method_stats[
+            "intra_test"
+        ]["avg_max_ms"]
+        out[f"{prefix}{method_key}-inter_test_median_ms"] = method_stats[
+            "inter_test"
+        ]["median_ms"]
+        out[f"{prefix}{method_key}-inter_test_std_ms"] = method_stats["inter_test"][
+            "std_ms"
+        ]
+        out[f"{prefix}{method_key}-inter_test_cv"] = method_stats["inter_test"][
+            "cv"
+        ]
+        out[f"{prefix}{method_key}-inter_test_min_ms"] = method_stats["inter_test"][
+            "min_ms"
+        ]
+    return out
 
 
 def run(args: Optional[List[str]] = None):
@@ -501,11 +462,14 @@ def run(args: Optional[List[str]] = None):
         "--ci", action="store_true", help="Run in CI mode (run all tests in ci.yaml)"
     )
     parser.add_argument(
+        "--test-op", type=str, help="(CI mode only) Only run specific op in ci."
+    )
+    parser.add_argument(
         "--log-scuba",
         action="store_true",
         help="Log results to Scuba",
     )
-    parser.add_argument("--output-dir", type=str, default=None, help="Output JSON path")
+    parser.add_argument("--output-json", type=str, default=None, help="Output JSON file")
     parser.add_argument("--quiet", action="store_true")
 
     if not torch.cuda.is_available():
@@ -515,34 +479,21 @@ def run(args: Optional[List[str]] = None):
     args, extra_args = parser.parse_known_args(args)
 
     if args.ci:
-        from tritonbench.utils.run_utils import tritonbench_run
-
-        run_timestamp, output_dir = setup_output_dir(
-            bm_name="timing_accuracy", output_dir=args.output_dir
+        run_benchmark_config_ci(
+            benchmark_group_name="timing_accuracy",
+            benchmark_config_file=os.path.join(CURRENT_DIR, "ci.yaml"),
+            transform_func=transform_single_result,
+            op=args.test_op,
+            ci=args.ci,
+            log_scuba=args.log_scuba,
         )
-        # override output_dir in ci mode
-        args.output_dir = output_dir
-        os.environ["TRITONBENCH_RUN_CONFIG"] = os.path.join(CURRENT_DIR, "ci.yaml")
-        extra_args.extend(["--output-dir", str(output_dir.absolute())])
-        tritonbench_run(args=extra_args, disable_sys_argv=True)
-    else:
-        tb_parser = get_parser()
+        return
 
-        tb_args, extra_args = tb_parser.parse_known_args(extra_args)
-        if args.dump_json and not args.output_dir:
-            run_timestamp, output_dir = setup_output_dir(bm_name="timing_accuracy")
-            args.output_dir = output_dir
-        else:
-            run_timestamp = None
-        _run(args, tb_args, extra_args, args.output_dir)
+    tb_parser = get_parser()
 
-    # finished running all configs. now reduce output metrics to a single file
-    if run_timestamp and args.output_dir:
-        benchmark_data = aggregate_outputs(
-            "timing_accuracy", run_timestamp, args.output_dir, args.ci
-        )
-        if args.log_scuba:
-            log_benchmark(benchmark_data)
+    tb_args, extra_args = tb_parser.parse_known_args(extra_args)
+    _run(args, tb_args, extra_args)
+
 
 
 if __name__ == "__main__":
