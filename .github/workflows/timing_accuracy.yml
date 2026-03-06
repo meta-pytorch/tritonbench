@@ -7,11 +7,7 @@ on:
     # Test daily at 4 PM UTC
     - cron: '0 16 * * *'
   workflow_dispatch:
-  pull_request:
-    paths:
-      - benchmarks/timing_accuracy/**
-      - .github/workflows/_linux-benchmark-*.yml
-      - .github/workflows/timing_accuracy.yml
+
 
 jobs:
   h100-meta-triton-timing-accuracy-benchmark:
