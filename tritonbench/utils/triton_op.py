@@ -105,6 +105,7 @@ BASELINE_SKIP_METRICS = {
     "speedup",
     "accuracy",
     "cosine_similarity",
+    "snr",
     "determinism",
     "mem_footprint_compression_ratio",
     "nsys_gpu_speedup",
@@ -235,6 +236,8 @@ class BenchmarkOperatorMetrics:
     accuracy: Optional[bool] = None
     # cosine similarity to baseline output (1.0 = identical direction)
     cosine_similarity: Optional[float] = None
+    # signal-to-noise ratio compared to baseline (higher is better)
+    snr: Optional[float] = None
     # determinism check result (independent of accuracy)
     determinism: Optional[DeterminismResult] = None
     # wall time
@@ -1789,6 +1792,42 @@ class BenchmarkOperator(metaclass=PostInitProcessor):
             logger.warning(f"Exception during cosine similarity computation: {e}")
             return 0.0
 
+    def snr(self, fn: Callable, baseline_fn: Callable) -> float:
+        """
+        Compute Signal-to-Noise Ratio (SNR) between the output of fn and baseline_fn.
+        SNR = 10 * log10(signal_power / noise_power)
+        where signal is the baseline output and noise is the difference (error).
+        Returns SNR in decibels (dB). Higher values indicate closer match.
+        """
+        try:
+            output = fn()
+            baseline_output = baseline_fn()
+
+            if isinstance(output, torch.Tensor) and isinstance(
+                baseline_output, torch.Tensor
+            ):
+                output_flat = output.flatten().float()
+                baseline_flat = baseline_output.flatten().float()
+
+                # Compute signal power (baseline) and noise power (error)
+                signal_power = torch.mean(baseline_flat**2)
+                noise = output_flat - baseline_flat
+                noise_power = torch.mean(noise**2)
+
+                if noise_power == 0:
+                    return float("inf")
+                if signal_power == 0:
+                    return float("-inf")
+
+                snr_db = 10 * torch.log10(signal_power / noise_power)
+                return snr_db.item()
+            else:
+                logger.warning("SNR only supported for tensor outputs")
+                return 0.0
+        except Exception as e:
+            logger.warning(f"Exception during SNR computation: {e}")
+            return 0.0
+
     def _do_bench(
         self,
         input_id: int,
@@ -1906,6 +1945,10 @@ class BenchmarkOperator(metaclass=PostInitProcessor):
                     self.cosine_similarity(fn, self.baseline_fn)
                     if self.baseline_fn
                     else None
+                )
+            if not baseline and "snr" in self.required_metrics:
+                metrics.snr = (
+                    self.snr(fn, self.baseline_fn) if self.baseline_fn else None
                 )
             if "hw_roofline" in self.required_metrics:
                 metrics.hw_roofline = self.hw_roofline()
