@@ -20,4 +20,8 @@ if [ -e "${NVIDIA_LIB_PATH}" ]; then
   export LD_LIBRARY_PATH=${NVIDIA_LIB_PATH}:${LD_LIBRARY_PATH}
 fi
 
+# workaround: disable inductor subprocess compilation to avoid
+# "Could not find an active GPU backend" in subprocess workers
+export TORCHINDUCTOR_COMPILE_THREADS=1
+
 python -m unittest test.test_gpu.main -v
