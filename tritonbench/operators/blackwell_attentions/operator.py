@@ -445,7 +445,7 @@ class Operator(BenchmarkOperator):
             causal=self.causal,
             window_size=self.window_size if self.local else (-1, -1),
             deterministic=self.deterministic,
-            bottom_right=False,
+            bottom_right=True,
         )
         return preproc_permute, fn
 
@@ -486,6 +486,7 @@ class Operator(BenchmarkOperator):
             causal=self.causal,
             window_size=self.window_size if self.local else (None, None),
             deterministic=self.deterministic,
+            bottom_right=True,
         )
         return preproc_permute, fn
 

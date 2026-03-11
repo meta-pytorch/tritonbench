@@ -280,6 +280,7 @@ class Operator(BenchmarkOperator):
             causal=causal,
             window_size=window_size if local else (None, None),
             deterministic=self.deterministic,
+            bottom_right=True,
         )
         return preproc_permute, fn
 
@@ -313,6 +314,7 @@ class Operator(BenchmarkOperator):
                 window_size=window_size if local else (None, None),
                 page_table=page_table,
                 deterministic=self.deterministic,
+                bottom_right=True,
             )
 
         return preproc_paged_attention, paged_attn_fn
