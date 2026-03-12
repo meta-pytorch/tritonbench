@@ -588,6 +588,21 @@ class Operator(BenchmarkOperator):
         b_contig = b.contiguous()
         target_dtype = a.dtype
 
+        # Reject unaligned strides: TMA TensorDescriptor requires 16-byte alignment
+        elem_bytes = a_contig.element_size()
+        for name, t in [("a", a_contig), ("b", b_contig)]:
+            for s in t.stride():
+                if s > 1 and (s * elem_bytes) % 16 != 0:
+                    import warnings
+
+                    warnings.warn(
+                        f"tlx_matmul_ws: skipping input with non-16-byte-aligned "
+                        f"stride ({name}.stride()={t.stride()}, "
+                        f"stride {s} * {elem_bytes} = {s * elem_bytes} "
+                        f"is not divisible by 16)"
+                    )
+                    return None
+
         # Choose the appropriate implementation based on architecture
         if IS_HOPPER:
             matmul_func = _hopper_tlx_matmul_ws
