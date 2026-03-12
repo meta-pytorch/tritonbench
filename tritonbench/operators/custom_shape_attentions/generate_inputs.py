@@ -39,6 +39,8 @@ class AttentionShape:
     block_size: int = 16  # Default block size for paged attention
     max_model_seq_len: int = 32768  # Maximum model sequence length
     page_shuffle: bool = False  # Whether to randomly shuffle page blocks
+    # Flash attention kernel options
+    return_lse: bool = True  # Whether to return log-sum-exp for numerical stability
 
 
 # Default placeholder shapes for benchmarking (non-confidential)
@@ -54,6 +56,7 @@ ATTENTION_SHAPES: List[AttentionShape] = [
         d_head=128,
         causal=True,
         window_size=(-1, -1),
+        return_lse=True,
     ),
     # Example: Cross-attention shape
     AttentionShape(
@@ -130,6 +133,7 @@ def _convert_to_attention_shapes(shapes_data: List) -> List[AttentionShape]:
                     block_size=shape_item.get("block_size", 16),
                     max_model_seq_len=shape_item.get("max_model_seq_len", 32768),
                     page_shuffle=shape_item.get("page_shuffle", False),
+                    return_lse=shape_item.get("return_lse", True),
                 )
             )
         else:

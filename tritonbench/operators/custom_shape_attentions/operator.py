@@ -263,6 +263,12 @@ class Operator(BenchmarkOperator):
             return 32768
         return self.current_shape.max_model_seq_len
 
+    def _get_return_lse(self) -> bool:
+        """Get return_lse setting from current shape."""
+        if self.current_shape is None:
+            return False
+        return self.current_shape.return_lse
+
     @register_benchmark(enabled=(IS_BLACKWELL and HAS_FLASH_CUTE), label="FAv4")
     def cutedsl_blackwell(self, *args) -> Callable:
         if self._is_paged_attention():
@@ -330,6 +336,7 @@ class Operator(BenchmarkOperator):
         causal = self._get_causal()
         local = self._get_local()
         window_size = self._get_window_size()
+        # OSS FA4 may not support bottom_right or return_lse parameters
         fn = partial(
             oss_fa4_flash_attn_func,
             softmax_scale=self._get_sm_scale(),
