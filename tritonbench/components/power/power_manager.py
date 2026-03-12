@@ -18,14 +18,22 @@ from pynvml import (
     nvmlDeviceGetClock,
     nvmlDeviceGetFieldValues,
     nvmlDeviceGetHandleByIndex,
+    nvmlDeviceGetMemoryInfo,
     nvmlDeviceGetPerformanceState,
     nvmlDeviceGetTemperature,
+    nvmlDeviceGetUtilizationRates,
     nvmlInit,
     nvmlShutdown,
 )
-from tritonbench.components.power.charts import plot_latencies, plot_power_charts
-from tritonbench.components.tasks.base import run_in_worker
-from tritonbench.components.tasks.manager import ManagerTask
+
+try:
+    from tritonbench.components.tasks.base import run_in_worker
+    from tritonbench.components.tasks.manager import ManagerTask
+except ImportError:
+    ManagerTask = None
+    run_in_worker = None
+
+_PowerManagerBase = ManagerTask if ManagerTask is not None else object
 
 # query every 10 ms
 DEFAULT_QUERY_INTERVAL = 0.01
@@ -39,6 +47,9 @@ class PowerEvent:
     power_draw_instant: float
     power_draw_current_limit: float
     gpu_temp: float
+    gpu_utilization_pct: float = 0
+    memory_utilization_pct: float = 0
+    memory_used_mb: int = 0
 
 
 def check_nvml_status(nvml_status):
@@ -71,6 +82,21 @@ class GPUCollectorThread:
                 handle, [NVML_FI_DEV_POWER_INSTANT, NVML_FI_DEV_POWER_CURRENT_LIMIT]
             )
             gpu_temp = nvmlDeviceGetTemperature(handle, NVML_TEMPERATURE_GPU)
+
+            try:
+                util_rates = nvmlDeviceGetUtilizationRates(handle)
+                gpu_utilization_pct = util_rates.gpu
+                memory_utilization_pct = util_rates.memory
+            except Exception:
+                gpu_utilization_pct = 0
+                memory_utilization_pct = 0
+
+            try:
+                mem_info = nvmlDeviceGetMemoryInfo(handle)
+                memory_used_mb = mem_info.used // (1024 * 1024)
+            except Exception:
+                memory_used_mb = 0
+
             self.events.append(
                 PowerEvent(
                     timestamp=int(time.time_ns() / 1e3),
@@ -79,6 +105,9 @@ class GPUCollectorThread:
                     power_draw_instant=power_info[0].value.uiVal / 1000.0,
                     power_draw_current_limit=power_info[1].value.uiVal / 1000.0,
                     gpu_temp=gpu_temp,
+                    gpu_utilization_pct=gpu_utilization_pct,
+                    memory_utilization_pct=memory_utilization_pct,
+                    memory_used_mb=memory_used_mb,
                 )
             )
             time.sleep(self.sampling_interval)
@@ -118,7 +147,7 @@ class PowerManager:
                 writer.writerow(asdict(event))
 
 
-class PowerManagerTask(ManagerTask):
+class PowerManagerTask(_PowerManagerBase):
     def __init__(
         self,
         benchmark_name: str,
@@ -175,11 +204,13 @@ class PowerManagerTask(ManagerTask):
         return PowerManagerTask(benchmark_name, gpu_id, output_dir, query_interval)
 
     def finalize(self, metrics) -> None:
-        # finalize the power manager task
+        from tritonbench.components.power.charts import (
+            plot_latencies,
+            plot_power_charts,
+        )
+
         self._finalize()
-        # draw the latency charts
         plot_latencies(self.output_dir, self.gpu_id, metrics)
-        # draw the power charts
         plot_power_charts(
             self.benchmark_name,
             self.gpu_id,
