@@ -8,9 +8,9 @@ import triton
 import triton.language as tl
 
 try:
-    from tritonbench.utils.env_utils import is_mtia
+    from tritonbench.utils.env_utils import is_hip, is_mtia
 except ModuleNotFoundError:
-    # In CI environment, we don't have torch installed at this point
+    is_hip = lambda: False
     is_mtia = lambda: False
 
 AMD_SLEEP_NS_PER_ITERATION = 3870
@@ -97,6 +97,29 @@ HW_ROOFLINE_SPECS: Dict[
 
 CUDA_VISIBLE_DEVICES = os.environ.get("CUDA_VISIBLE_DEVICES", "0")
 
+logger = logging.getLogger(__name__)
+
+
+def get_gpu_id() -> int:
+    """Get the first GPU ID from CUDA_VISIBLE_DEVICES."""
+    return int(CUDA_VISIBLE_DEVICES.split(",")[0])
+
+
+def get_gpu_device_name() -> str:
+    try:
+        import torch
+
+        if is_hip():
+            return get_amd_device_name()
+        return torch.cuda.get_device_name()
+    except Exception:
+        return "None"
+
+
+# =============================================================================
+# NVIDIA Primitives
+# =============================================================================
+
 POWER_LIMIT = {
     "NVIDIA PG509-210": "330",
     "NVIDIA A100": "330",
@@ -111,10 +134,14 @@ MEMORY_FREQ_LIMIT = {
     "NVIDIA H100": "1593",
 }
 
-AMD_DEVICE_NAME_MAPPING = {
-    (9, 4): "AMD MI300X",
-    (9, 5): "AMD MI350X",
-}
+
+def _get_gpu_name() -> str:
+    import pynvml  # @manual=fbsource//third-party/pypi/nvidia-ml-py:nvidia-ml-py
+
+    pynvml.nvmlInit()
+    gpu_id = CUDA_VISIBLE_DEVICES.split(",")[0]
+    handle = pynvml.nvmlDeviceGetHandleByIndex(int(gpu_id))
+    return pynvml.nvmlDeviceGetName(handle)
 
 
 def _set_pm():
@@ -158,6 +185,18 @@ def _set_clock(gpu_info: str):
         subprocess.check_call(command)
 
 
+def _set_clock_mhz(target_mhz: int) -> None:
+    command = [
+        "sudo",
+        "nvidia-smi",
+        "-i",
+        CUDA_VISIBLE_DEVICES,
+        "-lgc",
+        str(target_mhz),
+    ]
+    subprocess.check_call(command)
+
+
 def _maybe_set_app_clocks(gpu_info: str):
     graphic_freq = GRAPHIC_FREQ_LIMIT.get(gpu_info, None)
     memory_freq = MEMORY_FREQ_LIMIT.get(gpu_info, None)
@@ -177,33 +216,6 @@ def _reset_clock(gpu_info: str):
     # rgc: reset gpu clocks
     command = ["sudo", "nvidia-smi", "-i", CUDA_VISIBLE_DEVICES, "-rgc"]
     subprocess.check_call(command)
-
-
-def _get_gpu_name() -> str:
-    import pynvml  # @manual=fbsource//third-party/pypi/nvidia-ml-py:nvidia-ml-py
-
-    pynvml.nvmlInit()
-    gpu_id = CUDA_VISIBLE_DEVICES.split(",")[0]
-    handle = pynvml.nvmlDeviceGetHandleByIndex(int(gpu_id))
-    return pynvml.nvmlDeviceGetName(handle)
-
-
-@contextmanager
-def gpu_lockdown(enabled=True):
-    try:
-        if enabled:
-            logging.info(f"[tritonbench] Locking down GPU {CUDA_VISIBLE_DEVICES}")
-            gpu_name = _get_gpu_name()
-            assert gpu_name in POWER_LIMIT, f"Unsupported GPU {gpu_name}"
-            _set_pm()
-            _set_power(gpu_name)
-            _set_clock(gpu_name)
-            _maybe_set_app_clocks(gpu_name)
-        yield
-    finally:
-        if enabled:
-            gpu_name = _get_gpu_name()
-            _reset_clock(gpu_name)
 
 
 def _nvidia_smi_query(query: str, device_ids: Optional[List[str]] = None) -> List[str]:
@@ -268,6 +280,53 @@ def has_nvidia_smi() -> bool:
         return False
 
 
+# =============================================================================
+# AMD Primitives
+# =============================================================================
+
+AMD_DEVICE_NAME_MAPPING = {
+    (9, 4): "AMD MI300X",
+    (9, 5): "AMD MI350X",
+}
+
+AMD_POWER_LIMIT = {
+    "AMD MI300X": 750,
+    "AMD Instinct MI300X": 750,
+    "AMD MI350X": 900,
+    "AMD Instinct MI350X": 900,
+}
+
+AMD_GRAPHIC_FREQ_LIMIT = {
+    "AMD MI300X": 2100,
+    "AMD Instinct MI300X": 2100,
+    "AMD MI350X": 2200,
+    "AMD Instinct MI350X": 2200,
+}
+
+
+def _match_amd_device_name(gpu_name: str, lookup: Dict) -> Optional[str]:
+    """Match a raw AMD device name to a key in a lookup dict using substring matching.
+
+    E.g. 'AMD Instinct MI300X' matches 'AMD MI300X'.
+    """
+    if gpu_name in lookup:
+        return gpu_name
+    for key in lookup:
+        if key in gpu_name or gpu_name in key:
+            return key
+    return None
+
+
+def _get_amd_gpu_id() -> int:
+    """Get the AMD GPU ID from environment variables."""
+    return int(
+        os.environ.get(
+            "HIP_VISIBLE_DEVICES",
+            os.environ.get("ROCR_VISIBLE_DEVICES", "0"),
+        ).split(",")[0]
+    )
+
+
 def get_amd_device_name() -> str:
     import torch
     from tritonbench.utils.env_utils import is_hip
@@ -287,17 +346,89 @@ def get_amd_device_name() -> str:
     return AMD_DEVICE_NAME_MAPPING[(gcn_arch_major, gcn_arch_minor)]
 
 
-def get_gpu_device_name() -> str:
-    try:
-        import torch
-        from tritonbench.utils.env_utils import is_hip
-        from tritonbench.utils.gpu_utils import get_amd_device_name
+def _amd_lock_clock(gpu_id: int, target_mhz: int) -> None:
+    """Lock AMD GPU clock using perf determinism mode via rocm-smi.
 
-        if is_hip():
-            return get_amd_device_name()
-        return torch.cuda.get_device_name()
-    except Exception:
-        return "None"
+    Equivalent to: sudo rocm-smi -d <gpu_id> --setperfdeterminism <mhz>
+    """
+    command = [
+        "sudo",
+        "rocm-smi",
+        "-d",
+        str(gpu_id),
+        "--setperfdeterminism",
+        str(target_mhz),
+    ]
+    subprocess.check_call(command)
+    logger.info(
+        f"[tritonbench] AMD GPU {gpu_id}: locked clock to {target_mhz} MHz (perf determinism)"
+    )
+
+
+def _amd_set_power_cap(gpu_id: int, power_watts: int) -> None:
+    """Set AMD GPU power cap in watts via rocm-smi.
+
+    Equivalent to: sudo rocm-smi -d <gpu_id> --setpoweroverdrive <watts>
+    """
+    command = [
+        "sudo",
+        "rocm-smi",
+        "-d",
+        str(gpu_id),
+        "--setpoweroverdrive",
+        str(power_watts),
+    ]
+    subprocess.check_call(command)
+    logger.info(f"[tritonbench] AMD GPU {gpu_id}: set power cap to {power_watts} W")
+
+
+def _amd_reset_clocks(gpu_id: int) -> None:
+    """Reset AMD GPU clocks and power overdrive via rocm-smi."""
+    subprocess.check_call(
+        ["sudo", "rocm-smi", "-d", str(gpu_id), "--resetperfdeterminism"]
+    )
+    subprocess.check_call(
+        ["sudo", "rocm-smi", "-d", str(gpu_id), "--resetpoweroverdrive"]
+    )
+    logger.info(f"[tritonbench] AMD GPU {gpu_id}: reset clocks and power")
+
+
+@contextmanager
+def gpu_lockdown(enabled=True, target_clock_mhz: Optional[int] = None):
+    try:
+        if enabled:
+            if is_hip():
+                gpu_id = _get_amd_gpu_id()
+                gpu_name = get_amd_device_name()
+                matched_name = _match_amd_device_name(gpu_name, AMD_POWER_LIMIT)
+                logger.info(f"[tritonbench] Locking down AMD GPU {gpu_id} ({gpu_name})")
+                assert matched_name is not None, (
+                    f"Unsupported AMD GPU {gpu_name}. "
+                    f"Supported: {list(AMD_POWER_LIMIT.keys())}"
+                )
+                _amd_set_power_cap(gpu_id, AMD_POWER_LIMIT[matched_name])
+                clock_mhz = target_clock_mhz or AMD_GRAPHIC_FREQ_LIMIT[matched_name]
+                _amd_lock_clock(gpu_id, clock_mhz)
+            else:
+                logger.info(f"[tritonbench] Locking down GPU {CUDA_VISIBLE_DEVICES}")
+                gpu_name = _get_gpu_name()
+                assert gpu_name in POWER_LIMIT, f"Unsupported GPU {gpu_name}"
+                _set_pm()
+                _set_power(gpu_name)
+                if target_clock_mhz and target_clock_mhz > 0:
+                    _set_clock_mhz(target_clock_mhz)
+                else:
+                    _set_clock(gpu_name)
+                _maybe_set_app_clocks(gpu_name)
+        yield
+    finally:
+        if enabled:
+            if is_hip():
+                gpu_id = _get_amd_gpu_id()
+                _amd_reset_clocks(gpu_id)
+            else:
+                gpu_name = _get_gpu_name()
+                _reset_clock(gpu_name)
 
 
 @triton.jit
