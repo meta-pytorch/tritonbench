@@ -42,16 +42,16 @@ if has_tlx():
         _hopper_tlx_matmul_ws = None
 else:
 
-    def _tlx_matmul_clc(*args, **kwargs):
-        raise RuntimeError("TLX not available in this Triton version")
-
-    def _tlx_matmul_pipelined(*args, **kwargs):
+    def _tlx_matmul_2cta(*args, **kwargs):
         raise RuntimeError("TLX not available in this Triton version")
 
     def _tlx_matmul_clc(*args, **kwargs):
         raise RuntimeError("TLX not available in this Triton version")
 
     def _tlx_matmul_pipelined(*args, **kwargs):
+        raise RuntimeError("TLX not available in this Triton version")
+
+    def _tlx_matmul_ws(*args, **kwargs):
         raise RuntimeError("TLX not available in this Triton version")
 
 
