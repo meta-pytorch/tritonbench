@@ -74,7 +74,10 @@ except SystemError as e:
 
 # [Optional] OSS Flash Attention v4
 try:
-    from flash_attn.cute import flash_attn_func as oss_fa4_flash_attn_func
+    from flash_attn.cute import (
+        flash_attn_func as oss_fa4_flash_attn_func,
+        flash_attn_varlen_func as oss_fa4_flash_attn_varlen_func,
+    )
 
     HAS_OSS_FA4 = True
 except (ImportError, IOError, AttributeError):
@@ -202,6 +205,11 @@ def parse_op_args(args: List[str]):
         default=0,
         help="Max inputs per iteration. This is used when --gen-cache-size-inputs is on.",
     )
+    parser.add_argument(
+        "--varlen",
+        action="store_true",
+        help="Use variable-length (varlen) interface with packed tensors and cu_seqlens",
+    )
     return parser.parse_args(args)
 
 
@@ -210,7 +218,11 @@ def unpack_inputs(*args):
     if len(args) == 1 and isinstance(args[0], xformers_fmha.Inputs):
         inp = args[0]
         inputs = (inp.query, inp.key, inp.value)
-    return (t.detach() for t in inputs)
+    return (
+        t.detach()
+        for t in inputs
+        if isinstance(t, torch.Tensor) and t.is_floating_point()
+    )
 
 
 def detach_and_requires_grad(t: torch.Tensor):
@@ -225,7 +237,13 @@ def detach_inputs(*args):
         inp.key = detach_and_requires_grad(inp.key)
         inp.value = detach_and_requires_grad(inp.value)
         return (inp,)
-    return [detach_and_requires_grad(t) for t in inputs]
+    result = []
+    for t in inputs:
+        if isinstance(t, torch.Tensor) and t.is_floating_point():
+            result.append(detach_and_requires_grad(t))
+        else:
+            result.append(t)
+    return result
 
 
 def multi_input_wrapper(fn):
@@ -260,8 +278,22 @@ def preproc_noop(*args):
     return args
 
 
-def preproc_permute(q, k, v):
-    return [t.contiguous() for t in permute_qkv(q, k, v, perm=(0, 2, 1, 3))]
+def preproc_permute(q, k, v, varlen=False):
+    q, k, v = [t.contiguous() for t in permute_qkv(q, k, v, perm=(0, 2, 1, 3))]
+    if not varlen:
+        return [q, k, v]
+    B, S_Q, H, D = q.shape
+    _, S_KV, H_KV, _ = k.shape
+    cu_seqlens_q = torch.arange(
+        0, (B + 1) * S_Q, S_Q, dtype=torch.int32, device=q.device
+    )
+    cu_seqlens_k = torch.arange(
+        0, (B + 1) * S_KV, S_KV, dtype=torch.int32, device=q.device
+    )
+    q_packed = q.reshape(-1, H, D).contiguous()
+    k_packed = k.reshape(-1, H_KV, D).contiguous()
+    v_packed = v.reshape(-1, H_KV, D).contiguous()
+    return [q_packed, k_packed, v_packed, cu_seqlens_q, cu_seqlens_k, S_Q, S_KV]
 
 
 def _sdpa_cudnn_attention(q, k, v, is_causal=False, scale=False):
@@ -333,6 +365,7 @@ class Operator(BenchmarkOperator):
         self.deterministic = args.deterministic
         self.gen_cache_size_inputs = args.gen_cache_size_inputs
         self.max_inputs_per_iter = args.max_inputs_per_iter
+        self.varlen = args.varlen
         self.optims = {}
 
     @register_benchmark()
@@ -480,27 +513,68 @@ class Operator(BenchmarkOperator):
     @register_benchmark(enabled=(IS_BLACKWELL and HAS_FLASH_CUTE), label="FAv4")
     @multi_input_wrapper
     def cutedsl_blackwell(self, *args) -> Tuple[Callable, Callable]:
-        fn = partial(
-            facute_flash_attn_func,
-            softmax_scale=self.sm_scale,
-            causal=self.causal,
-            window_size=self.window_size if self.local else (None, None),
-            deterministic=self.deterministic,
-            bottom_right=True,
-        )
-        return preproc_permute, fn
+        if self.varlen:
+
+            def fn(q, k, v, cu_seqlens_q, cu_seqlens_k, max_seqlen_q, max_seqlen_k):
+                return facute_flash_attn_func(
+                    q,
+                    k,
+                    v,
+                    cu_seqlens_q=cu_seqlens_q,
+                    cu_seqlens_k=cu_seqlens_k,
+                    max_seq_len_q=max_seqlen_q,
+                    max_seq_len_k=max_seqlen_k,
+                    softmax_scale=self.sm_scale,
+                    causal=self.causal,
+                    window_size=self.window_size if self.local else (None, None),
+                    deterministic=self.deterministic,
+                    bottom_right=True,
+                )
+
+            return partial(preproc_permute, varlen=True), fn
+        else:
+            fn = partial(
+                facute_flash_attn_func,
+                softmax_scale=self.sm_scale,
+                causal=self.causal,
+                window_size=self.window_size if self.local else (None, None),
+                deterministic=self.deterministic,
+                bottom_right=True,
+            )
+            return preproc_permute, fn
 
     @register_benchmark(enabled=(IS_BLACKWELL and HAS_OSS_FA4), label="OSS-FAv4")
     @multi_input_wrapper
     def oss_fa4(self, *args) -> Tuple[Callable, Callable]:
-        fn = partial(
-            oss_fa4_flash_attn_func,
-            softmax_scale=self.sm_scale,
-            causal=self.causal,
-            window_size=self.window_size if self.local else (None, None),
-            deterministic=self.deterministic,
-        )
-        return preproc_permute, fn
+        if self.varlen:
+
+            def fn(q, k, v, cu_seqlens_q, cu_seqlens_k, max_seqlen_q, max_seqlen_k):
+                return oss_fa4_flash_attn_varlen_func(
+                    q,
+                    k,
+                    v,
+                    cu_seqlens_q=cu_seqlens_q,
+                    cu_seqlens_k=cu_seqlens_k,
+                    seqused_q=None,
+                    seqused_k=None,
+                    max_seqlen_q=max_seqlen_q,
+                    max_seqlen_k=max_seqlen_k,
+                    softmax_scale=self.sm_scale,
+                    causal=self.causal,
+                    window_size=self.window_size if self.local else (None, None),
+                    deterministic=self.deterministic,
+                )
+
+            return partial(preproc_permute, varlen=True), fn
+        else:
+            fn = partial(
+                oss_fa4_flash_attn_func,
+                softmax_scale=self.sm_scale,
+                causal=self.causal,
+                window_size=self.window_size if self.local else (None, None),
+                deterministic=self.deterministic,
+            )
+            return preproc_permute, fn
 
     @register_benchmark()
     @multi_input_wrapper
