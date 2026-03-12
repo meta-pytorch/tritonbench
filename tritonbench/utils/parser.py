@@ -71,6 +71,18 @@ def get_parser(args=None):
         help="The rep time for each benchmark run.",
     )
     parser.add_argument(
+        "--autotune-warmup",
+        type=int,
+        default=None,
+        help="Warmup time in ms for Triton autotuning (sets TRITON_AUTOTUNE_WARMUP_MS). Default: Triton's default (25ms).",
+    )
+    parser.add_argument(
+        "--autotune-rep",
+        type=int,
+        default=None,
+        help="Rep time in ms for Triton autotuning (sets TRITON_AUTOTUNE_REP_MS). Default: Triton's default (100ms).",
+    )
+    parser.add_argument(
         "--sleep",
         type=float,
         default=0.0,

@@ -4,6 +4,19 @@ import triton.language as tl
 import triton.language.extra.tlx as tlx
 from triton.tools.tensor_descriptor import TensorDescriptor
 
+try:
+    tlx.alloc_warp_barrier
+    HAS_WARP_BARRIER = True
+except:
+    HAS_WARP_BARRIER = False
+
+    # Triton's JIT DependenciesFinder walks the entire kernel AST and resolves
+    # all attribute accesses (via getattr) regardless of runtime branch conditions.
+    # Without this stub, `tlx.alloc_warp_barrier` references inside
+    # `if USE_WARP_BARRIER:` branches cause AttributeError during cache key
+    # computation even when USE_WARP_BARRIER is False.
+    tlx.alloc_warp_barrier = None
+
 DEVICE = triton.runtime.driver.active.get_active_torch_device()
 
 
@@ -49,12 +62,30 @@ configs_fwd = [
             "NUM_BUFFERS_KV": 3,
             "NUM_BUFFERS_QK": 1,
             "NUM_MMA_GROUPS": 2,
+            "USE_WARP_BARRIER": False,
+        },
+        num_stages=1,
+        num_warps=4,
+        pre_hook=_fwd_host_descriptor_pre_hook,
+    ),
+    triton.Config(
+        {
+            "BLOCK_M": 256,
+            "BLOCK_N": 128,
+            "NUM_BUFFERS_Q": 1,
+            "NUM_BUFFERS_KV": 3,
+            "NUM_BUFFERS_QK": 1,
+            "NUM_MMA_GROUPS": 2,
+            "USE_WARP_BARRIER": True,
         },
         num_stages=1,
         num_warps=4,
         pre_hook=_fwd_host_descriptor_pre_hook,
     ),
 ]
+
+if not HAS_WARP_BARRIER:
+    configs_fwd = [c for c in configs_fwd if not c.kwargs.get("USE_WARP_BARRIER")]
 
 configs_fwd_persistent = [
     # H-DIM = 128 configs, non-causal
@@ -68,6 +99,23 @@ configs_fwd_persistent = [
             "NUM_MMA_GROUPS": 2,
             "NUM_MMA_SLICES": 2,
             "GROUP_SIZE_N": 1,
+            "USE_WARP_BARRIER": False,
+        },
+        num_stages=1,
+        num_warps=4,
+        pre_hook=_fwd_host_descriptor_pre_hook,
+    ),
+    triton.Config(
+        {
+            "BLOCK_M": 256,
+            "BLOCK_N": 128,
+            "NUM_BUFFERS_Q": 1,
+            "NUM_BUFFERS_KV": 3,
+            "NUM_BUFFERS_QK": 1,
+            "NUM_MMA_GROUPS": 2,
+            "NUM_MMA_SLICES": 2,
+            "GROUP_SIZE_N": 1,
+            "USE_WARP_BARRIER": True,
         },
         num_stages=1,
         num_warps=4,
@@ -84,6 +132,23 @@ configs_fwd_persistent = [
             "NUM_MMA_GROUPS": 2,
             "NUM_MMA_SLICES": 2,
             "GROUP_SIZE_N": 4,
+            "USE_WARP_BARRIER": False,
+        },
+        num_stages=1,
+        num_warps=4,
+        pre_hook=_fwd_host_descriptor_pre_hook,
+    ),
+    triton.Config(
+        {
+            "BLOCK_M": 256,
+            "BLOCK_N": 128,
+            "NUM_BUFFERS_Q": 1,
+            "NUM_BUFFERS_KV": 3,
+            "NUM_BUFFERS_QK": 1,
+            "NUM_MMA_GROUPS": 2,
+            "NUM_MMA_SLICES": 2,
+            "GROUP_SIZE_N": 4,
+            "USE_WARP_BARRIER": True,
         },
         num_stages=1,
         num_warps=4,
@@ -100,6 +165,23 @@ configs_fwd_persistent = [
             "NUM_MMA_GROUPS": 2,
             "NUM_MMA_SLICES": 2,
             "GROUP_SIZE_N": 1,
+            "USE_WARP_BARRIER": False,
+        },
+        num_stages=1,
+        num_warps=4,
+        pre_hook=_fwd_host_descriptor_pre_hook,
+    ),
+    triton.Config(
+        {
+            "BLOCK_M": 256,
+            "BLOCK_N": 128,
+            "NUM_BUFFERS_Q": 1,
+            "NUM_BUFFERS_KV": 6,
+            "NUM_BUFFERS_QK": 1,
+            "NUM_MMA_GROUPS": 2,
+            "NUM_MMA_SLICES": 2,
+            "GROUP_SIZE_N": 1,
+            "USE_WARP_BARRIER": True,
         },
         num_stages=1,
         num_warps=4,
@@ -116,12 +198,34 @@ configs_fwd_persistent = [
             "NUM_MMA_GROUPS": 2,
             "NUM_MMA_SLICES": 2,
             "GROUP_SIZE_N": 4,
+            "USE_WARP_BARRIER": False,
+        },
+        num_stages=1,
+        num_warps=4,
+        pre_hook=_fwd_host_descriptor_pre_hook,
+    ),
+    triton.Config(
+        {
+            "BLOCK_M": 256,
+            "BLOCK_N": 128,
+            "NUM_BUFFERS_Q": 1,
+            "NUM_BUFFERS_KV": 6,
+            "NUM_BUFFERS_QK": 1,
+            "NUM_MMA_GROUPS": 2,
+            "NUM_MMA_SLICES": 2,
+            "GROUP_SIZE_N": 4,
+            "USE_WARP_BARRIER": True,
         },
         num_stages=1,
         num_warps=4,
         pre_hook=_fwd_host_descriptor_pre_hook,
     ),
 ]
+
+if not HAS_WARP_BARRIER:
+    configs_fwd_persistent = [
+        c for c in configs_fwd_persistent if not c.kwargs.get("USE_WARP_BARRIER")
+    ]
 
 configs_bwd_persistent = [
     # H-DIM = 128 non-causal config,
@@ -139,6 +243,26 @@ configs_bwd_persistent = [
             "NUM_BUFFERS_TMEM": 1,
             "EPILOGUE_SUBTILE": 2,
             "GROUP_SIZE_M": 1,
+            "USE_WARP_BARRIER": False,
+        },
+        num_warps=4,
+        num_stages=1,
+        pre_hook=_bwd_host_descriptor_pre_hook,
+    ),
+    triton.Config(
+        {
+            "BLOCK_M1": 64,
+            "BLOCK_N1": 128,
+            "BLOCK_M2": 128,
+            "BLOCK_N2": 128,
+            "NUM_BUFFERS_KV": 1,
+            "NUM_BUFFERS_Q": 2,
+            "NUM_BUFFERS_DO": 1,
+            "NUM_BUFFERS_DS": 1,
+            "NUM_BUFFERS_TMEM": 1,
+            "EPILOGUE_SUBTILE": 2,
+            "GROUP_SIZE_M": 1,
+            "USE_WARP_BARRIER": True,
         },
         num_warps=4,
         num_stages=1,
@@ -158,6 +282,26 @@ configs_bwd_persistent = [
             "NUM_BUFFERS_TMEM": 1,
             "EPILOGUE_SUBTILE": 2,
             "GROUP_SIZE_M": 1,
+            "USE_WARP_BARRIER": False,
+        },
+        num_warps=4,
+        num_stages=1,
+        pre_hook=_bwd_host_descriptor_pre_hook,
+    ),
+    triton.Config(
+        {
+            "BLOCK_M1": 128,
+            "BLOCK_N1": 128,
+            "BLOCK_M2": 128,
+            "BLOCK_N2": 128,
+            "NUM_BUFFERS_KV": 1,
+            "NUM_BUFFERS_Q": 2,
+            "NUM_BUFFERS_DO": 1,
+            "NUM_BUFFERS_DS": 1,
+            "NUM_BUFFERS_TMEM": 1,
+            "EPILOGUE_SUBTILE": 2,
+            "GROUP_SIZE_M": 1,
+            "USE_WARP_BARRIER": True,
         },
         num_warps=4,
         num_stages=1,
@@ -177,6 +321,26 @@ configs_bwd_persistent = [
             "NUM_BUFFERS_TMEM": 1,
             "EPILOGUE_SUBTILE": 2,
             "GROUP_SIZE_M": 4,
+            "USE_WARP_BARRIER": False,
+        },
+        num_warps=4,
+        num_stages=1,
+        pre_hook=_bwd_host_descriptor_pre_hook,
+    ),
+    triton.Config(
+        {
+            "BLOCK_M1": 64,
+            "BLOCK_N1": 128,
+            "BLOCK_M2": 128,
+            "BLOCK_N2": 128,
+            "NUM_BUFFERS_KV": 1,
+            "NUM_BUFFERS_Q": 2,
+            "NUM_BUFFERS_DO": 1,
+            "NUM_BUFFERS_DS": 1,
+            "NUM_BUFFERS_TMEM": 1,
+            "EPILOGUE_SUBTILE": 2,
+            "GROUP_SIZE_M": 4,
+            "USE_WARP_BARRIER": True,
         },
         num_warps=4,
         num_stages=1,
@@ -195,12 +359,37 @@ configs_bwd_persistent = [
             "NUM_BUFFERS_TMEM": 1,
             "EPILOGUE_SUBTILE": 2,
             "GROUP_SIZE_M": 4,
+            "USE_WARP_BARRIER": False,
+        },
+        num_warps=4,
+        num_stages=1,
+        pre_hook=_bwd_host_descriptor_pre_hook,
+    ),
+    triton.Config(
+        {
+            "BLOCK_M1": 128,
+            "BLOCK_N1": 128,
+            "BLOCK_M2": 128,
+            "BLOCK_N2": 128,
+            "NUM_BUFFERS_KV": 1,
+            "NUM_BUFFERS_Q": 2,
+            "NUM_BUFFERS_DO": 1,
+            "NUM_BUFFERS_DS": 1,
+            "NUM_BUFFERS_TMEM": 1,
+            "EPILOGUE_SUBTILE": 2,
+            "GROUP_SIZE_M": 4,
+            "USE_WARP_BARRIER": True,
         },
         num_warps=4,
         num_stages=1,
         pre_hook=_bwd_host_descriptor_pre_hook,
     ),
 ]
+
+if not HAS_WARP_BARRIER:
+    configs_bwd_persistent = [
+        c for c in configs_bwd_persistent if not c.kwargs.get("USE_WARP_BARRIER")
+    ]
 
 
 def prune_pipelined_configs_by_hdim(configs, named_args, **kwargs):
@@ -437,6 +626,7 @@ def _attn_fwd_ws(
     NUM_BUFFERS_KV: tl.constexpr,  #
     NUM_BUFFERS_QK: tl.constexpr,  #
     NUM_MMA_GROUPS: tl.constexpr,  #
+    USE_WARP_BARRIER: tl.constexpr = False,  #
 ):
     tl.static_assert(BLOCK_N <= HEAD_DIM)
     tl.static_assert(NUM_MMA_GROUPS == 2)
@@ -501,14 +691,31 @@ def _attn_fwd_ws(
         tlx.storage_kind.tmem,
     )
 
+    # MMA-hardware-signaled barriers (cannot be warp barriers)
     qk_fulls = tlx.alloc_barriers(num_barriers=NUM_MMA_GROUPS * NUM_BUFFERS_QK)
-    p_fulls = tlx.alloc_barriers(num_barriers=NUM_MMA_GROUPS * NUM_BUFFERS_QK)
-    acc_fulls = tlx.alloc_barriers(num_barriers=NUM_MMA_GROUPS * NUM_BUFFERS_QK)
     acc_empties = tlx.alloc_barriers(num_barriers=NUM_MMA_GROUPS * NUM_BUFFERS_QK)
 
-    alpha_fulls = tlx.alloc_barriers(num_barriers=NUM_MMA_GROUPS * NUM_BUFFERS_QK)
-    alpha_empties = tlx.alloc_barriers(num_barriers=NUM_MMA_GROUPS * NUM_BUFFERS_QK)
-    l_fulls = tlx.alloc_barriers(num_barriers=NUM_MMA_GROUPS)
+    # Software-signaled TMEM barriers
+    if USE_WARP_BARRIER:
+        p_fulls = tlx.alloc_warp_barrier(
+            num_barriers=NUM_MMA_GROUPS * NUM_BUFFERS_QK, num_warps=4
+        )
+        acc_fulls = tlx.alloc_warp_barrier(
+            num_barriers=NUM_MMA_GROUPS * NUM_BUFFERS_QK, num_warps=4
+        )
+        alpha_fulls = tlx.alloc_warp_barrier(
+            num_barriers=NUM_MMA_GROUPS * NUM_BUFFERS_QK, num_warps=4
+        )
+        alpha_empties = tlx.alloc_warp_barrier(
+            num_barriers=NUM_MMA_GROUPS * NUM_BUFFERS_QK, num_warps=4
+        )
+        l_fulls = tlx.alloc_warp_barrier(num_barriers=NUM_MMA_GROUPS, num_warps=4)
+    else:
+        p_fulls = tlx.alloc_barriers(num_barriers=NUM_MMA_GROUPS * NUM_BUFFERS_QK)
+        acc_fulls = tlx.alloc_barriers(num_barriers=NUM_MMA_GROUPS * NUM_BUFFERS_QK)
+        alpha_fulls = tlx.alloc_barriers(num_barriers=NUM_MMA_GROUPS * NUM_BUFFERS_QK)
+        alpha_empties = tlx.alloc_barriers(num_barriers=NUM_MMA_GROUPS * NUM_BUFFERS_QK)
+        l_fulls = tlx.alloc_barriers(num_barriers=NUM_MMA_GROUPS)
 
     with tlx.async_tasks():
         # correction group
@@ -987,6 +1194,7 @@ def _attn_fwd_ws_persistent(
     NUM_MMA_GROUPS: tl.constexpr,  #
     NUM_MMA_SLICES: tl.constexpr,  #
     GROUP_SIZE_N: tl.constexpr,  #
+    USE_WARP_BARRIER: tl.constexpr = False,  #
 ):
     tl.static_assert(NUM_MMA_GROUPS == 2)
     tl.static_assert(NUM_BUFFERS_QK == 1)
@@ -1026,8 +1234,6 @@ def _attn_fwd_ws_persistent(
     q_empties = tlx.alloc_barriers(num_barriers=NUM_MMA_GROUPS * NUM_BUFFERS_Q)
     kv_fulls = tlx.alloc_barriers(num_barriers=NUM_BUFFERS_KV)
     kv_empties = tlx.alloc_barriers(num_barriers=NUM_BUFFERS_KV)
-    o_fulls = tlx.alloc_barriers(num_barriers=NUM_MMA_GROUPS)
-    o_empties = tlx.alloc_barriers(num_barriers=NUM_MMA_GROUPS)
 
     # allocate TMEM buffers and barriers
     qk_tiles = tlx.local_alloc(
@@ -1075,15 +1281,31 @@ def _attn_fwd_ws_persistent(
         (BLOCK_M_SPLIT, HEAD_DIM), tl.float32, NUM_MMA_GROUPS, tlx.storage_kind.tmem
     )
 
+    # MMA-hardware-signaled barriers (cannot be warp barriers)
     qk_fulls = tlx.alloc_barriers(num_barriers=NUM_MMA_GROUPS)
-    qk_empties = tlx.alloc_barriers(num_barriers=NUM_MMA_GROUPS)
-    p_fulls = tlx.alloc_barriers(num_barriers=NUM_MMA_GROUPS * NUM_MMA_SLICES)
-    acc_fulls = tlx.alloc_barriers(num_barriers=NUM_MMA_GROUPS)
     acc_empties = tlx.alloc_barriers(num_barriers=NUM_MMA_GROUPS)
 
-    alpha_fulls = tlx.alloc_barriers(num_barriers=NUM_MMA_GROUPS)
-    alpha_empties = tlx.alloc_barriers(num_barriers=NUM_MMA_GROUPS)
-    l_fulls = tlx.alloc_barriers(num_barriers=NUM_MMA_GROUPS)
+    # Software-signaled TMEM barriers
+    if USE_WARP_BARRIER:
+        qk_empties = tlx.alloc_warp_barrier(num_barriers=NUM_MMA_GROUPS, num_warps=4)
+        p_fulls = tlx.alloc_warp_barrier(
+            num_barriers=NUM_MMA_GROUPS * NUM_MMA_SLICES, num_warps=4
+        )
+        acc_fulls = tlx.alloc_warp_barrier(num_barriers=NUM_MMA_GROUPS, num_warps=4)
+        alpha_fulls = tlx.alloc_warp_barrier(num_barriers=NUM_MMA_GROUPS, num_warps=4)
+        alpha_empties = tlx.alloc_warp_barrier(num_barriers=NUM_MMA_GROUPS, num_warps=4)
+        l_fulls = tlx.alloc_warp_barrier(num_barriers=NUM_MMA_GROUPS, num_warps=4)
+        o_fulls = tlx.alloc_warp_barrier(num_barriers=NUM_MMA_GROUPS, num_warps=4)
+        o_empties = tlx.alloc_warp_barrier(num_barriers=NUM_MMA_GROUPS, num_warps=1)
+    else:
+        qk_empties = tlx.alloc_barriers(num_barriers=NUM_MMA_GROUPS)
+        p_fulls = tlx.alloc_barriers(num_barriers=NUM_MMA_GROUPS * NUM_MMA_SLICES)
+        acc_fulls = tlx.alloc_barriers(num_barriers=NUM_MMA_GROUPS)
+        alpha_fulls = tlx.alloc_barriers(num_barriers=NUM_MMA_GROUPS)
+        alpha_empties = tlx.alloc_barriers(num_barriers=NUM_MMA_GROUPS)
+        l_fulls = tlx.alloc_barriers(num_barriers=NUM_MMA_GROUPS)
+        o_fulls = tlx.alloc_barriers(num_barriers=NUM_MMA_GROUPS)
+        o_empties = tlx.alloc_barriers(num_barriers=NUM_MMA_GROUPS)
 
     with tlx.async_tasks():
         # correction group
@@ -1738,6 +1960,7 @@ def _attn_bwd_ws_persistent(
     EPILOGUE_SUBTILE: tl.constexpr,
     STAGE: tl.constexpr,
     GROUP_SIZE_M: tl.constexpr,
+    USE_WARP_BARRIER: tl.constexpr = False,
 ):
     # Kernel hangs if NUM_BUFFERS_Q != 2.
     tl.static_assert(NUM_BUFFERS_Q == 2)
@@ -1792,7 +2015,10 @@ def _attn_bwd_ws_persistent(
     q_empties = tlx.alloc_barriers(num_barriers=NUM_BUFFERS_Q)
     do_fulls = tlx.alloc_barriers(num_barriers=NUM_BUFFERS_DO)
     do_empties = tlx.alloc_barriers(num_barriers=NUM_BUFFERS_DO)
-    ds_fulls = tlx.alloc_barriers(num_barriers=NUM_BUFFERS_TMEM)
+    if USE_WARP_BARRIER:
+        ds_fulls = tlx.alloc_warp_barrier(num_barriers=NUM_BUFFERS_TMEM, num_warps=8)
+    else:
+        ds_fulls = tlx.alloc_barriers(num_barriers=NUM_BUFFERS_TMEM)
 
     # allocate tmem buffers
     qk_tiles = tlx.local_alloc(
@@ -1821,16 +2047,29 @@ def _attn_bwd_ws_persistent(
 
     # allocate barriers for tmem buffers
     qk_fulls = tlx.alloc_barriers(num_barriers=NUM_BUFFERS_TMEM)
-    qk_empties = tlx.alloc_barriers(num_barriers=NUM_BUFFERS_TMEM)
-    p_fulls = tlx.alloc_barriers(num_barriers=NUM_BUFFERS_TMEM)
+    if USE_WARP_BARRIER:
+        qk_empties = tlx.alloc_warp_barrier(num_barriers=NUM_BUFFERS_TMEM, num_warps=8)
+        p_fulls = tlx.alloc_warp_barrier(num_barriers=NUM_BUFFERS_TMEM, num_warps=8)
+    else:
+        qk_empties = tlx.alloc_barriers(num_barriers=NUM_BUFFERS_TMEM)
+        p_fulls = tlx.alloc_barriers(num_barriers=NUM_BUFFERS_TMEM)
     dp_fulls = tlx.alloc_barriers(num_barriers=NUM_BUFFERS_TMEM)
     dq_fulls = tlx.alloc_barriers(num_barriers=NUM_BUFFERS_TMEM)
-    dq_empties = tlx.alloc_barriers(num_barriers=NUM_BUFFERS_TMEM)
+    if USE_WARP_BARRIER:
+        dq_empties = tlx.alloc_warp_barrier(num_barriers=NUM_BUFFERS_TMEM, num_warps=4)
+    else:
+        dq_empties = tlx.alloc_barriers(num_barriers=NUM_BUFFERS_TMEM)
 
     dv_fulls = tlx.alloc_barriers(num_barriers=NUM_BUFFERS_KV)
-    dv_empties = tlx.alloc_barriers(num_barriers=NUM_BUFFERS_KV)
+    if USE_WARP_BARRIER:
+        dv_empties = tlx.alloc_warp_barrier(num_barriers=NUM_BUFFERS_KV, num_warps=8)
+    else:
+        dv_empties = tlx.alloc_barriers(num_barriers=NUM_BUFFERS_KV)
     dk_fulls = tlx.alloc_barriers(num_barriers=NUM_BUFFERS_KV)
-    dk_empties = tlx.alloc_barriers(num_barriers=NUM_BUFFERS_KV)
+    if USE_WARP_BARRIER:
+        dk_empties = tlx.alloc_warp_barrier(num_barriers=NUM_BUFFERS_KV, num_warps=8)
+    else:
+        dk_empties = tlx.alloc_barriers(num_barriers=NUM_BUFFERS_KV)
 
     # Establish the barriers and allocations we will use if we need to
     # share TMEM for dq and dp. For barriers we cannot modify the definition
@@ -1851,7 +2090,12 @@ def _attn_bwd_ws_persistent(
             NUM_BUFFERS_TMEM,
             tlx.storage_kind.tmem,
         )
-        dp_empties = tlx.alloc_barriers(num_barriers=NUM_BUFFERS_TMEM)
+        if USE_WARP_BARRIER:
+            dp_empties = tlx.alloc_warp_barrier(
+                num_barriers=NUM_BUFFERS_TMEM, num_warps=8
+            )
+        else:
+            dp_empties = tlx.alloc_barriers(num_barriers=NUM_BUFFERS_TMEM)
 
     LN2: tl.constexpr = 0.6931471824645996  # = ln(2)
 
@@ -2559,7 +2803,7 @@ class _attention(torch.autograd.Function):
             STAGE=stage,  #
         )
 
-        return dq, dk, dv, None, None, None, None
+        return dq, dk, dv, None, None, None
 
 
 attention = _attention.apply

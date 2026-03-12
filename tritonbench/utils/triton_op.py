@@ -753,6 +753,11 @@ class BenchmarkOperator(metaclass=PostInitProcessor):
     ):
         set_env()
         set_random_seed()
+        # Set Triton autotune env vars before any kernels are invoked
+        if tb_args.autotune_warmup is not None:
+            os.environ["TRITON_AUTOTUNE_WARMUP_MS"] = str(tb_args.autotune_warmup)
+        if tb_args.autotune_rep is not None:
+            os.environ["TRITON_AUTOTUNE_REP_MS"] = str(tb_args.autotune_rep)
         if tb_args.plugin:
             load_plugin(tb_args.plugin)
         if extra_args and not tb_args:

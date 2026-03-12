@@ -248,7 +248,7 @@ def multi_input_wrapper(fn):
                 outputs.append(benchmark_fn(*i))
             return outputs
 
-        self.optims[multi_input_fn] = torch.optim.SGD(all_inputs)
+        self.optims[multi_input_fn] = torch.optim.SGD(all_inputs, foreach=True)
 
         return multi_input_fn
 
@@ -335,7 +335,7 @@ class Operator(BenchmarkOperator):
         self.max_inputs_per_iter = args.max_inputs_per_iter
         self.optims = {}
 
-    @register_benchmark()
+    @register_benchmark(baseline=True)
     @multi_input_wrapper
     def aten(self, *args) -> Tuple[Callable, Callable]:
         def _inner(q, k, v):
