@@ -212,7 +212,8 @@ def tritonbench_run(args: Optional[List[str]] = None, disable_sys_argv: bool = F
         print(f"Operator: {op}")
         print()
 
-        with gpu_lockdown(args.gpu_lockdown):
+        lockdown_enabled = args.gpu_lockdown or (args.gpu_lock_clock_mhz is not None)
+        with gpu_lockdown(lockdown_enabled, args.gpu_lock_clock_mhz):
             try:
                 result_a, result_b = run_ab_test(args, extra_args, _run)
 
@@ -232,7 +233,8 @@ def tritonbench_run(args: Optional[List[str]] = None, disable_sys_argv: bool = F
         if len(ops) >= 2:
             args.isolate = True
 
-        with gpu_lockdown(args.gpu_lockdown):
+        lockdown_enabled = args.gpu_lockdown or (args.gpu_lock_clock_mhz is not None)
+        with gpu_lockdown(lockdown_enabled, args.gpu_lock_clock_mhz):
             for op in ops:
                 args.op = op
                 if args.isolate:

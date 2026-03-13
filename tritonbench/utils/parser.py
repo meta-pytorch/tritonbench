@@ -259,12 +259,14 @@ def get_parser(args=None):
     )
     parser.add_argument(
         "--gpu-lockdown",
-        nargs="?",
-        const=True,
-        default=False,
-        type=lambda x: int(x) if x.isdigit() else (x.lower() == "true"),
-        help="Lock down GPU frequency and clocks to avoid throttling. "
-        "Optionally specify target clock frequency in MHz (e.g., --gpu-lockdown 1000).",
+        action="store_true",
+        help="Lock down GPU frequency and clocks to avoid throttling.",
+    )
+    parser.add_argument(
+        "--gpu-lock-clock-mhz",
+        type=int,
+        default=None,
+        help="Target GPU clock frequency in MHz when using --gpu-lockdown (e.g., --gpu-lock-clock-mhz 1400). If not specified, uses max supported frequency.",
     )
     parser.add_argument(
         "--gpu-telemetry",
