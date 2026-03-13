@@ -30,6 +30,7 @@ from tritonbench.utils.env_utils import (
     set_torchrun_env,
 )
 from tritonbench.utils.git_utils import get_branch, get_commit_time, get_current_hash
+from tritonbench.utils.gpu_telemetry_observer import TelemetryContext
 from tritonbench.utils.gpu_utils import get_amd_device_name, gpu_lockdown
 from tritonbench.utils.list_operator_details import list_operator_details
 from tritonbench.utils.parser import get_parser
@@ -252,10 +253,54 @@ def _run(args: argparse.Namespace, extra_args: List[str]) -> BenchmarkOperatorRe
         tb_args=args,
         extra_args=extra_args,
     )
+
+    # Set up GPU telemetry observer if enabled
+    gpu_telemetry_enabled = getattr(args, "gpu_telemetry", False)
+    telemetry_ctx = None
+    if gpu_telemetry_enabled:
+        try:
+            interval_ms = getattr(args, "gpu_telemetry_interval_ms", 50.0)
+            telemetry_ctx = TelemetryContext(gpu_id=0, sample_interval_ms=interval_ms)
+            logger.info(
+                f"[tritonbench] GPU telemetry enabled (interval={interval_ms}ms)"
+            )
+        except Exception:
+            logger.warning(
+                "[tritonbench] GPU telemetry requested but observer not available"
+            )
+
     try:
+        # Start telemetry if enabled
+        if telemetry_ctx is not None:
+            telemetry_ctx.__enter__()
+            telemetry_ctx.annotate("benchmark_start")
+
         opbench.run(args.warmup, args.rep, sleep=args.sleep)
     finally:
         metrics = opbench.output
+
+        # Stop telemetry and save data
+        if telemetry_ctx is not None:
+            telemetry_ctx.annotate("benchmark_end")
+            telemetry_ctx.__exit__(None, None, None)
+
+            if telemetry_ctx.data is not None and telemetry_ctx.data.samples:
+                telemetry_output = getattr(args, "gpu_telemetry_output", None)
+                if telemetry_output:
+                    telemetry_base = telemetry_output
+                else:
+                    telemetry_base = f"/tmp/gpu_telemetry_{args.op}_{run_timestamp}"
+
+                telemetry_csv = f"{telemetry_base}.csv"
+                telemetry_png = f"{telemetry_base}.png"
+
+                telemetry_ctx.save_csv(telemetry_csv)
+                telemetry_ctx.plot(telemetry_png, title=f"GPU Telemetry: {args.op}")
+
+                logger.info(
+                    f"[tritonbench] GPU telemetry saved to {telemetry_csv} and {telemetry_png} "
+                    f"({len(telemetry_ctx.data.samples)} samples)"
+                )
         if is_fbcode() and args.log_scuba:
             from .fb.utils import log_benchmark  # @manual
 

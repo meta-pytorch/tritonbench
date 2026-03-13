@@ -259,8 +259,29 @@ def get_parser(args=None):
     )
     parser.add_argument(
         "--gpu-lockdown",
+        nargs="?",
+        const=True,
+        default=False,
+        type=lambda x: int(x) if x.isdigit() else (x.lower() == "true"),
+        help="Lock down GPU frequency and clocks to avoid throttling. "
+        "Optionally specify target clock frequency in MHz (e.g., --gpu-lockdown 1000).",
+    )
+    parser.add_argument(
+        "--gpu-telemetry",
         action="store_true",
-        help="Lock down GPU frequency and clocks to avoid throttling.",
+        help="Enable GPU telemetry collection (clock, power, temperature, utilization).",
+    )
+    parser.add_argument(
+        "--gpu-telemetry-output",
+        type=str,
+        default=None,
+        help="Output directory for GPU telemetry CSV and charts. Required when --gpu-telemetry is enabled.",
+    )
+    parser.add_argument(
+        "--gpu-telemetry-interval-ms",
+        type=float,
+        default=10.0,
+        help="GPU telemetry sampling interval in milliseconds (default: 10).",
     )
     parser.add_argument(
         "--operator-loader",
