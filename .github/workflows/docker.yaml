@@ -1,8 +1,8 @@
 name: TritonBench Nightly Docker Build
 on:
   schedule:
-    # Push the docker every weekend
-    - cron: '0 0 * * 6'
+    # Push the docker every day
+    - cron: '0 0 * * *'
   pull_request:
     paths:
       - .github/workflows/docker.yaml
