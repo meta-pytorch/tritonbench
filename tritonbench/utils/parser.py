@@ -290,23 +290,6 @@ def get_parser(args=None):
         help="Target GPU clock frequency in MHz when using --gpu-lockdown (e.g., --gpu-lock-clock-mhz 1400). If not specified, uses max supported frequency.",
     )
     parser.add_argument(
-        "--gpu-telemetry",
-        action="store_true",
-        help="Enable GPU telemetry collection (clock, power, temperature, utilization).",
-    )
-    parser.add_argument(
-        "--gpu-telemetry-output",
-        type=str,
-        default=None,
-        help="Output directory for GPU telemetry CSV and charts. Required when --gpu-telemetry is enabled.",
-    )
-    parser.add_argument(
-        "--gpu-telemetry-interval-ms",
-        type=float,
-        default=10.0,
-        help="GPU telemetry sampling interval in milliseconds (default: 10).",
-    )
-    parser.add_argument(
         "--operator-loader",
         action="store_true",
         help="Benchmarking aten ops in tritonbench/operator_loader.",
