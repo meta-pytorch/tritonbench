@@ -7,24 +7,29 @@ from dataclasses import asdict, dataclass, fields
 from pathlib import Path
 from typing import Dict, Optional
 
-from pynvml import (
-    NVML_CLOCK_ID_CURRENT,
-    NVML_CLOCK_MEM,
-    NVML_CLOCK_SM,
-    NVML_FI_DEV_POWER_CURRENT_LIMIT,
-    NVML_FI_DEV_POWER_INSTANT,
-    NVML_SUCCESS,
-    NVML_TEMPERATURE_GPU,
-    nvmlDeviceGetClock,
-    nvmlDeviceGetFieldValues,
-    nvmlDeviceGetHandleByIndex,
-    nvmlDeviceGetMemoryInfo,
-    nvmlDeviceGetPerformanceState,
-    nvmlDeviceGetTemperature,
-    nvmlDeviceGetUtilizationRates,
-    nvmlInit,
-    nvmlShutdown,
-)
+try:
+    from pynvml import (
+        NVML_CLOCK_ID_CURRENT,
+        NVML_CLOCK_MEM,
+        NVML_CLOCK_SM,
+        NVML_FI_DEV_POWER_CURRENT_LIMIT,
+        NVML_FI_DEV_POWER_INSTANT,
+        NVML_SUCCESS,
+        NVML_TEMPERATURE_GPU,
+        nvmlDeviceGetClock,
+        nvmlDeviceGetFieldValues,
+        nvmlDeviceGetHandleByIndex,
+        nvmlDeviceGetMemoryInfo,
+        nvmlDeviceGetPerformanceState,
+        nvmlDeviceGetTemperature,
+        nvmlDeviceGetUtilizationRates,
+        nvmlInit,
+        nvmlShutdown,
+    )
+
+    _HAS_PYNVML = True
+except (ImportError, OSError):
+    _HAS_PYNVML = False
 
 try:
     from tritonbench.components.tasks.base import run_in_worker
@@ -59,6 +64,11 @@ def check_nvml_status(nvml_status):
 
 class GPUCollectorThread:
     def __init__(self, gpu_id=None, query_interval=DEFAULT_QUERY_INTERVAL) -> None:
+        if not _HAS_PYNVML:
+            raise RuntimeError(
+                "pynvml is required for GPU power monitoring. "
+                "Install with: pip install nvidia-ml-py"
+            )
         self.gpu_id = (
             int(gpu_id) if gpu_id else os.environ.get("CUDA_VISIBLE_DEVICES", "0")
         )

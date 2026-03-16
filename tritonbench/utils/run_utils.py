@@ -30,7 +30,6 @@ from tritonbench.utils.env_utils import (
     set_torchrun_env,
 )
 from tritonbench.utils.git_utils import get_branch, get_commit_time, get_current_hash
-from tritonbench.utils.gpu_telemetry_observer import TelemetryContext
 from tritonbench.utils.gpu_utils import get_amd_device_name, gpu_lockdown
 from tritonbench.utils.list_operator_details import list_operator_details
 from tritonbench.utils.parser import get_parser
@@ -261,6 +260,8 @@ def _run(args: argparse.Namespace, extra_args: List[str]) -> BenchmarkOperatorRe
     telemetry_ctx = None
     if gpu_telemetry_enabled:
         try:
+            from tritonbench.utils.gpu_telemetry_observer import TelemetryContext
+
             interval_ms = getattr(args, "gpu_telemetry_interval_ms", 50.0)
             telemetry_ctx = TelemetryContext(gpu_id=0, sample_interval_ms=interval_ms)
             logger.info(
