@@ -332,7 +332,11 @@ def _attn_fwd_inner_ws(
                 [start_n.to(tl.int32) + (qvk_offset // stride_kn).to(tl.int32), 0]
             )
         else:
-            k = tl.load(K_block_ptr, boundary_check=(1,), padding_option="zero")
+            # fp8 types don't support padding_option="zero" (Triton can't cast int32 to fp8)
+            if fp8_v:
+                k = tl.load(K_block_ptr)
+            else:
+                k = tl.load(K_block_ptr, boundary_check=(1,), padding_option="zero")
         if ENABLE_TMA:
             k = tl.trans(k)
         qk = tl.dot(q, k)
@@ -360,7 +364,10 @@ def _attn_fwd_inner_ws(
             else:
                 v = desc_v.load([(qvk_offset // stride_vk + start_n).to(tl.int32), 0])
         else:
-            v = tl.load(V_block_ptr, boundary_check=(0,), padding_option="zero")
+            if fp8_v:
+                v = tl.load(V_block_ptr)
+            else:
+                v = tl.load(V_block_ptr, boundary_check=(0,), padding_option="zero")
         if fp8_v:
             if ENABLE_TMA:
                 v = tl.trans(v)
@@ -439,7 +446,10 @@ def _attn_fwd_inner_ws_with_dp(
                 [start_n.to(tl.int32) + (qvk_offset // stride_kn).to(tl.int32), 0]
             )
         else:
-            k = tl.load(K_block_ptr, boundary_check=(1,), padding_option="zero")
+            if fp8_v:
+                k = tl.load(K_block_ptr)
+            else:
+                k = tl.load(K_block_ptr, boundary_check=(1,), padding_option="zero")
 
         if ENABLE_TMA:  # feeds into gemm
             k = tl.trans(k)
@@ -505,7 +515,10 @@ def _attn_fwd_inner_ws_with_dp(
             else:
                 v = desc_v.load([(qvk_offset // stride_vk + start_n).to(tl.int32), 0])
         else:
-            v = tl.load(V_block_ptr, boundary_check=(0,), padding_option="zero")
+            if fp8_v:
+                v = tl.load(V_block_ptr)
+            else:
+                v = tl.load(V_block_ptr, boundary_check=(0,), padding_option="zero")
         if fp8_v:
             if ENABLE_TMA:
                 v = tl.trans(v)
@@ -749,7 +762,11 @@ def _attn_fwd_compute(
     if ENABLE_TMA:
         q = desc_q.load([(qvk_offset // stride_qm + start_m * BLOCK_M).to(tl.int32), 0])
     else:
-        q = tl.load(Q_block_ptr, boundary_check=(0,), padding_option="zero")
+        # fp8 types don't support padding_option="zero" (Triton can't cast int32 to fp8)
+        if V.dtype.element_ty == tl.float8e5:
+            q = tl.load(Q_block_ptr)
+        else:
+            q = tl.load(Q_block_ptr, boundary_check=(0,), padding_option="zero")
     # stage 1: off-band
     # For causal = True, STAGE = 3 and _attn_fwd_inner gets 1 as its STAGE
     # For causal = False, STAGE = 1, and _attn_fwd_inner gets 3 as its STAGE
