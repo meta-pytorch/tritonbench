@@ -116,6 +116,9 @@ class Operator(BenchmarkOperator):
 
     @register_benchmark(baseline=True)
     def hstu(self, q, k, v, seq_offsets, num_targets, max_seq_len, sparsity):
+        # TMA is NVIDIA Hopper+ only; on AMD the backward kernel crashes when
+        # tensor-descriptor rewrite and tl.assume (buffer-ops) coexist.
+        _enable_tma = is_cuda()
         return lambda: triton_hstu_mha(
             max_seq_len,
             alpha=self.alpha,
@@ -127,7 +130,7 @@ class Operator(BenchmarkOperator):
             max_attn_len=self.max_attn_len,
             contextual_seq_len=self.contextual_seq_len,
             sort_by_length=True,
-            enable_tma=True,
+            enable_tma=_enable_tma,
         )
 
     @register_benchmark(enabled=HAS_HAMMER)
