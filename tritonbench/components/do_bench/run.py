@@ -18,7 +18,18 @@ from .power import do_bench_power
 NS_TO_MS = 1e-6
 logger = logging.getLogger(__name__)
 # Kernel name for L2 cache clearing - we want to exclude this from latency measurements
+# On NVIDIA: FillFunctor<int>, on AMD/ROCm: FillFunctor<float> with [clone .kd] suffix
+# Use substring matching via _is_cache_clear_kernel() instead of exact match
 CACHE_CLEAR_KERNEL = "void at::native::vectorized_elementwise_kernel<4, at::native::FillFunctor<int>, std::array<char*, 1ul> >(int, at::native::FillFunctor<int>, std::array<char*, 1ul>)"
+
+
+def _is_cache_clear_kernel(name: str) -> bool:
+    """Check if a kernel event is the L2 cache clearing kernel.
+
+    Matches both NVIDIA (FillFunctor<int>) and AMD/ROCm (FillFunctor<float>,
+    with [clone .kd] suffix) variants.
+    """
+    return "vectorized_elementwise_kernel" in name and "FillFunctor" in name
 
 
 class Latency:
@@ -356,7 +367,7 @@ def _do_bench_profiler(
             if (
                 evt.device_type == torch.autograd.DeviceType.CUDA
                 and hasattr(evt, "time_range")
-                and evt.name != CACHE_CLEAR_KERNEL
+                and not _is_cache_clear_kernel(evt.name)
             ):
                 # time_range has start and end attributes in microseconds
                 start_us = evt.time_range.start
