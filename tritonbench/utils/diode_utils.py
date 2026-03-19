@@ -12,7 +12,7 @@ if is_fbcode():  # Diode not available in OSS
     from diode.torch_diode.choices import DiodeInductorChoices
     from diode.torch_diode.models.triton_gemm.encode_features import FeatureVersion
     from diode.torch_diode.models.triton_gemm.model import (
-        GEMMModelV2,
+        GEMMModel,
         MODEL_CONFIGS,
         ModelConfig,
     )
@@ -76,7 +76,7 @@ def setup_diode_model(
     if model_config is None:
         model_config = MODEL_CONFIGS[diode_version]
 
-    gemm_diode_model: GEMMModelV2 = GEMMModelV2(model_config=model_config)
+    gemm_diode_model: GEMMModel = GEMMModel(model_config=model_config)
     register(gemm_diode_model)
 
     V.set_choices_handler(DiodeInductorChoices())
