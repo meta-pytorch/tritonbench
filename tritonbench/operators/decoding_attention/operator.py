@@ -58,6 +58,7 @@ except ImportError:
     HAS_FB_IMPORT = False
 
 
+from tritonbench.utils.env_utils import is_b200
 from tritonbench.utils.triton_op import (
     BenchmarkOperator,
     BenchmarkOperatorMetrics,
@@ -74,7 +75,7 @@ except (ImportError, IOError, AttributeError):
     HAS_AITER = False
 
 # [Optional] cutlass_blackwell_fmha backend
-HAS_CUTLASS_BLACKWELL = True
+HAS_CUTLASS_BLACKWELL = is_b200()
 try:
     from mslk.attention.cutlass_blackwell_fmha import (
         cutlass_blackwell_fmha_interface as blackwell,

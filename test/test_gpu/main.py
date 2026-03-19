@@ -49,7 +49,8 @@ def _gen_test_operators(test_ops, skip_tests) -> set[str]:
         test_ops = {
             test_op: {"disabled": False}
             for test_op in skip_tests
-            if "devices" in skip_tests[test_op]
+            if skip_tests[test_op]
+            and "devices" in skip_tests[test_op]
             and "b200" in skip_tests[test_op]["devices"]
         }
     else:
