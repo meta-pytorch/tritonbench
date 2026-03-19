@@ -106,7 +106,9 @@ class Operator(BenchmarkOperator):
 
         return fn
 
-    @register_benchmark()
+    # TODO: disabled because of test failure
+    # Error: "torch._inductor.exc.InductorError: LoweringException: NoValidChoicesError: No choices to select."
+    @register_benchmark(enabled=False)
     def pt2_nvgemm_scaled_mm(self, a, b, scale_a, scale_b, m, n, k) -> Callable:
         out_dtype = self.out_dtype
         torch._dynamo.reset()
