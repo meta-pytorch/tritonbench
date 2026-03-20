@@ -58,8 +58,18 @@ except (ImportError, IOError, AttributeError):
 
 # [Optional] CuTe
 try:
+    import cutlass
     from mslk.attention.flash_attn.interface import (
         flash_attn_func as facute_flash_attn_func,
+    )
+
+    print(
+        f"TRITONBENCH CUTLASS INFO: cutlass.CUDA_VERSION {cutlass.CUDA_VERSION}",
+        flush=True,
+    )
+    print(
+        f"TRITONBENCH CUTLASS INFO: cutlass.__version__ {cutlass.__version__}",
+        flush=True,
     )
 
     HAS_FLASH_CUTE = True
