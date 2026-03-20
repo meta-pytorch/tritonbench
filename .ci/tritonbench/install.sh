@@ -1,4 +1,5 @@
 #!/bin/bash
+set -x
 
 if [ -z "${SETUP_SCRIPT:-}" ]; then
   echo "ERROR: SETUP_SCRIPT is not set"
@@ -26,4 +27,4 @@ if [ -n "${INSTALL_PYTORCH_NIGHTLY}" ]; then
 fi
 
 # Install Tritonbench and all its customized packages
-python install.py --all
+LD_LIBRARY_PATH=${LD_LIBRARY_PATH} python install.py --all

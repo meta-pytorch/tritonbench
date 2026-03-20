@@ -67,6 +67,7 @@ if [ -n "${USE_CUDA:-}" ]; then
 
 elif [ -n "${USE_HIP:-}" ]; then
     python -m tools.cuda_utils --install-torch-nightly --hip
+    bash ./.ci/tritonbench/setup-rocm-path.sh
 else
     echo "Unknown backend. Only CUDA and HIP are supported."
     exit 1
