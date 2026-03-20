@@ -1673,6 +1673,21 @@ class BenchmarkOperator(metaclass=PostInitProcessor):
             return DeterminismResult.FAIL
 
     def accuracy(self, fn: Callable, baseline_fn: Callable) -> bool:
+        # Poison the CUDA caching allocator to detect stale memory reuse.
+        # Without this, torch.empty() may return memory from a previous
+        # call that contains correct results, masking correctness bugs.
+        # We call fn() to get an output, fill it with NaN in-place, then
+        # call fn() again. If fn() reuses the same memory block without
+        # fully writing it, the NaN values will remain and fail the check.
+        _probe = fn()
+
+        def _poison(t):
+            if isinstance(t, torch.Tensor) and t.is_floating_point():
+                t.fill_(float("nan"))
+            return t
+
+        tree_map(_poison, _probe)
+        del _probe
         try:
             if self.mode == Mode.FWD:
                 output = fn()
