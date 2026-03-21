@@ -40,7 +40,7 @@ jobs:
         with:
           registry: ghcr.io
           username: meta-pytorch
-          password: ${{ secrets.TRITONBENCH_ACCESS_TOKEN }}
+          password: ${{ secrets.GITHUB_TOKEN }}
       - name: Build TritonBench nightly docker
         run: |
           set -x
