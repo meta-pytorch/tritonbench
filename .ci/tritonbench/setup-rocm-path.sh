@@ -14,5 +14,7 @@ fi
 # some pytorch nightly version require rocprofiler-sdk.so
 if [ -e "/opt/rocm/lib" ]; then
    echo "export LD_LIBRARY_PATH=/opt/rocm/lib\${LD_LIBRARY_PATH:+:\${LD_LIBRARY_PATH}}" >> "${SETUP_SCRIPT}"
-   sudo cp /opt/rocm/lib/librocprofiler-sdk.so /opt/rocm/lib/librocprofiler-sdk.so.1
+   if [ ! -e "/opt/rocm/lib/librocprofiler-sdk.so.1" ]; then
+       sudo cp /opt/rocm/lib/librocprofiler-sdk.so /opt/rocm/lib/librocprofiler-sdk.so.1
+   fi
 fi
