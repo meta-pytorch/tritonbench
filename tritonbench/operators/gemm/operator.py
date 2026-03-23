@@ -438,14 +438,18 @@ class Operator(BenchmarkOperator):
                 "max_autotune_gemm_backends": "TRITON",
                 "autotune_fallback_to_aten": False,
                 "autotune_num_choices_displayed": self.inductor_autotune_num_choices_displayed,
-                "triton.enable_tlx_templates": True,
-                "test_configs.autotune_choice_name_regex": "blackwell_gemm_ws",
+                "force_disable_caches": True,
             }
-            with inductor_config.patch(inductor_config_patch):
+            from torch._inductor.fb.tlx_templates import tlx_config
+
+            with (
+                tlx_config.patch(tlx_mode="force"),
+                inductor_config.patch(inductor_config_patch),
+            ):
                 if bias is not None:
-                    f = lambda a, b: a.matmul(b) + bias
+                    f = lambda a, b: a.contiguous().matmul(b.contiguous()) + bias
                 else:
-                    f = lambda a, b: a.matmul(b)
+                    f = lambda a, b: a.contiguous().matmul(b.contiguous())
                 compiled = torch.compile(f, dynamic=False)
                 compiled(a, b)
 
