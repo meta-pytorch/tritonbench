@@ -367,3 +367,4 @@ def set_torchrun_env():
             f"[distributed] Found TORCHELASTIC_RUN_ID={os.environ['TORCHELASTIC_RUN_ID']} and LOCAL_RANK={os.environ['LOCAL_RANK']}. "
             f"Set current device to: {torch.cuda.current_device()}"
         )
+        torch.distributed.init_process_group("nccl")
