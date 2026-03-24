@@ -588,14 +588,14 @@ class Operator(BenchmarkOperator):
         enabled=has_tlx() and (IS_HOPPER or IS_BLACKWELL), fwd_only=True
     )
     def tlx_matmul_ws(self, a, b, bias) -> Callable:
-        # TLX matmul requires contiguous inputs with 16-byte aligned strides
-        a_contig = a.contiguous()
-        b_contig = b.contiguous()
         target_dtype = a.dtype
 
-        # Reject unaligned strides: TMA TensorDescriptor requires 16-byte alignment
-        elem_bytes = a_contig.element_size()
-        for name, t in [("a", a_contig), ("b", b_contig)]:
+        # Reject unaligned strides: TMA TensorDescriptor requires 16-byte alignment.
+        # The loop checks non-unit input strides, which depend on layout:
+        #   row-major a → checks K,  column-major a → checks M
+        #   row-major b → checks N,  column-major b → checks K
+        elem_bytes = a.element_size()
+        for name, t in [("a", a), ("b", b)]:
             for s in t.stride():
                 if s > 1 and (s * elem_bytes) % 16 != 0:
                     import warnings
@@ -615,9 +615,9 @@ class Operator(BenchmarkOperator):
             matmul_func = _tlx_matmul_ws
 
         if bias is not None:
-            return lambda: matmul_func(a_contig, b_contig).to(target_dtype) + bias
+            return lambda: matmul_func(a, b).to(target_dtype) + bias
         else:
-            return lambda: matmul_func(a_contig, b_contig).to(target_dtype)
+            return lambda: matmul_func(a, b).to(target_dtype)
 
     @register_benchmark(enabled=has_tlx() and IS_BLACKWELL)
     def tlx_matmul_clc(self, a, b, bias) -> Callable:
