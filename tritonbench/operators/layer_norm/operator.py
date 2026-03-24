@@ -4,6 +4,7 @@ from typing import Callable, List, Optional
 import torch
 import torch.nn.functional as F
 import triton
+from tritonbench.utils.env_utils import is_b200, is_h100
 from tritonbench.utils.triton_op import (
     BenchmarkOperator,
     BenchmarkOperatorMetrics,
@@ -13,7 +14,7 @@ from tritonbench.utils.triton_op import (
     register_x_val,
 )
 
-from . import fused_triton, tutorial
+from . import fused_triton, multi_cta_triton, tlx_layernorm, tutorial
 
 
 QUACK_SHAPES = [
@@ -84,6 +85,11 @@ class Operator(BenchmarkOperator):
 
     @register_benchmark()
     def triton_layer_norm(self, *args):
+        x = args[0]
+        N = x.shape[-1]
+        MAX_FUSED_SIZE = 65536 // x.element_size()
+        if N > MAX_FUSED_SIZE:
+            return None
         return lambda: tutorial.layer_norm(*args)
 
     @register_benchmark()
@@ -116,6 +122,21 @@ class Operator(BenchmarkOperator):
     def liger_layer_norm(self, *args):
         (x, w_shape, weight, bias, eps) = args
         return lambda: LigerLayerNormFunction.apply(x, weight, bias, eps)
+
+    @register_benchmark(enabled=multi_cta_triton.HAS_MULTI_CTA)
+    def triton_multi_cta_layer_norm(self, *args):
+        x = args[0]
+        M, N = x.reshape(-1, x.shape[-1]).shape
+        if (M - 1) * N > 2**31 - 1:
+            return None
+        return lambda: multi_cta_triton.layer_norm_multi_cta(*args)
+
+    @register_benchmark(
+        enabled=tlx_layernorm.HAS_TLX and (is_b200() or is_h100()), fwd_only=True
+    )
+    def tlx_multi_cta_layer_norm(self, *args):
+        # TLX manual multi-CTA layernorm (Blackwell clusters + DSM)
+        return lambda: tlx_layernorm.layer_norm_tlx_multi_cta(*args)
 
     @register_benchmark(enabled=HAS_QUACK_KERNEL, fwd_only=True)
     def quack_layer_norm(self, *args) -> Callable:
