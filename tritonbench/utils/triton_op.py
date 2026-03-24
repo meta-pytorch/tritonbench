@@ -2394,12 +2394,12 @@ class BenchmarkOperator(metaclass=PostInitProcessor):
             "ncu",
             "--nvtx",
             "--nvtx-include",
+            # it is for range_start and range_end. no ending /.
+            f"{_RANGE_NAME}",
             "--pm-sampling-max-passes",
             "4",
             "--warp-sampling-max-passes",
             "4",
-            # it is for range_start and range_end. no ending /.
-            f"{_RANGE_NAME}",
             "--target-processes",
             "all",
             "--import-source",
