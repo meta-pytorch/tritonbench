@@ -1683,7 +1683,8 @@ class BenchmarkOperator(metaclass=PostInitProcessor):
 
         def _poison(t):
             if isinstance(t, torch.Tensor) and t.is_floating_point():
-                t.fill_(float("nan"))
+                if not (t.is_leaf and t.requires_grad):
+                    t.data.fill_(float("nan"))
             return t
 
         tree_map(_poison, _probe)
