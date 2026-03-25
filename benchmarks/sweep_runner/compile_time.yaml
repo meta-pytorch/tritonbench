@@ -2,6 +2,7 @@
 # First, collect all ops and backends with tags "triton"
 # Measure latency, flops, and speedup metrics in the best effort
 # Some operators might not support flops or speedup metrics
+<<<<<<< HEAD
 run_configs:
   default:
     with_backwards: true
@@ -13,6 +14,18 @@ run_configs:
       - test/test_gpu/skip_tests.yaml
     # only run one input per kernel
     extra_args: --num-inputs 1
+=======
+run_config:
+  with_backwards: true
+  tags:
+    - triton
+  metrics:
+    - compile_time
+  skip_tests:
+    - test/test_gpu/skip_tests.yaml
+  # only run one input per kernel
+  extra_args: --num-inputs 1
+>>>>>>> 5d5f16b (fix compile time)
 # override some ops
 # bf16_flex_attention_fwd/bwd: measure compiled version (pt2)
 overrides:
