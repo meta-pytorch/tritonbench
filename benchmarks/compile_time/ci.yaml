@@ -1,4 +1,3 @@
-# only run one input per kernel
 common_args: --num-inputs 1
 fp16_addmm_fwd:
   args: --op addmm --only streamk_addmm,triton_addmm --metrics compile_time
@@ -13,7 +12,7 @@ bf16_blackwell_attentions_fwd:
   devices:
   - b200
 bf16_blackwell_attentions_bwd:
-  args: --op blackwell_attentions --only triton_tutorial_flash_v2_tma_ws_persistent_blackwell,triton_tutorial_flash_dp_persistent_blackwell,triton_tutorial_flash_v2_blackwell,triton_tutorial_flash_v2_persistent_blackwell,triton_tutorial_flash_dp_blackwell
+  args: --op blackwell_attentions --only triton_tutorial_flash_dp_blackwell,triton_tutorial_flash_v2_tma_ws_persistent_blackwell,triton_tutorial_flash_dp_persistent_blackwell,triton_tutorial_flash_v2_blackwell,triton_tutorial_flash_v2_persistent_blackwell
     --bwd --metrics compile_time
   devices:
   - b200
@@ -29,7 +28,7 @@ bf16_flash_attention_fwd:
   args: --op flash_attention --only triton_tutorial_flash_v2,triton_tutorial_flash_v2_tma,triton_tutorial_flash_v2_tma_ws,triton_tutorial_flash_v2_tma_ws_persistent,triton_tutorial_flash_v2_ws
     --metrics compile_time
 bf16_flash_attention_bwd:
-  args: --op flash_attention --only triton_tutorial_flash_v2_tma_ws,triton_tutorial_flash_v2_tma_ws_persistent,triton_tutorial_flash_v2,triton_tutorial_flash_v2_ws,triton_tutorial_flash_v2_tma
+  args: --op flash_attention --only triton_tutorial_flash_v2_ws,triton_tutorial_flash_v2,triton_tutorial_flash_v2_tma_ws_persistent,triton_tutorial_flash_v2_tma_ws,triton_tutorial_flash_v2_tma
     --bwd --metrics compile_time --causal
 fp8_attention_fwd:
   args: --op fp8_attention --only triton_flash_v2,triton_flash_v2_tma,triton_flash_v2_ws
@@ -58,7 +57,7 @@ gather_gemv_fwd:
 bf16_gdpa_fwd:
   args: --op gdpa --only gdpa,gdpa_opt,gdpa_opt_sorted --metrics compile_time
 bf16_gdpa_bwd:
-  args: --op gdpa --only gdpa,gdpa_opt,gdpa_opt_sorted --bwd --metrics compile_time
+  args: --op gdpa --only gdpa_opt,gdpa,gdpa_opt_sorted --bwd --metrics compile_time
 geglu_fwd:
   args: --op geglu --only liger_geglu --metrics compile_time
 geglu_bwd:
@@ -67,7 +66,7 @@ fp16_gemm_fwd:
   args: --op gemm --only matmul_partition_k,streamk_matmul,triton_ops_matmul,triton_tutorial_matmul
     --metrics compile_time
 fp16_gemm_bwd:
-  args: --op gemm --only streamk_matmul,triton_ops_matmul,matmul_partition_k,triton_tutorial_matmul
+  args: --op gemm --only streamk_matmul,triton_tutorial_matmul,matmul_partition_k,triton_ops_matmul
     --bwd --metrics compile_time
 bf16_grouped_gemm_fwd:
   args: --op grouped_gemm --only precompiled_cutedsl_grouped_mm_tuned,tlx_grouped_gemm,triton_grouped_gemm
@@ -109,7 +108,7 @@ bf16_ragged_attention_bwd:
 rms_norm_fwd:
   args: --op rms_norm --only liger_rms,triton_fused_rmsnorm --metrics compile_time
 rms_norm_bwd:
-  args: --op rms_norm --only liger_rms,triton_fused_rmsnorm --bwd --metrics compile_time
+  args: --op rms_norm --only triton_fused_rmsnorm,liger_rms --bwd --metrics compile_time
 rope_fwd:
   args: --op rope --only liger_rotary_pos_emb --metrics compile_time
 rope_bwd:

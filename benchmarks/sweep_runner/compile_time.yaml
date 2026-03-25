@@ -10,6 +10,8 @@ run_config:
     - compile_time
   skip_tests:
     - test/test_gpu/skip_tests.yaml
+  # only run one input per kernel
+  extra_args: --num-inputs 1
 # override some ops
 # fp16_softmax_fwd/bwd: measure compiled version (pt2)
 # bf16_flex_attention_fwd/bwd: measure compiled version (pt2)
