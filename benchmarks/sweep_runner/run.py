@@ -172,7 +172,7 @@ def run(args: Optional[List[str]] = None) -> None:
     parsed_args = parse_args(args)
 
     if not parsed_args.sweep_output_file:
-        default_output_name = f"sweep_{parsed_args.target}.yaml"
+        default_output_name = f"sweep_{parsed_args.sweep_target}.yaml"
         timestamp, output_dir = setup_output_dir(bm_name=parsed_args.target)
         parsed_args.sweep_output_file = output_dir.join(default_output_name)
 

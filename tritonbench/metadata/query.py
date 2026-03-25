@@ -164,7 +164,7 @@ def get_benchmark_config_with_tags(
             result_dict[benchmark_name] = {}
             result_dict[benchmark_name]["args"] = " ".join(
                 ["--op", op, "--only"]
-                + [",".join(backend_names_with_tags)]
+                + [",".join(sorted(backend_names_with_tags))]
                 + [metric_args]
             )
             result_dict[benchmark_name] = _update_benchmark_by_skip_tests(
