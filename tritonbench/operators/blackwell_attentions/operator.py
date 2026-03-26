@@ -130,7 +130,7 @@ except ImportError:
     HAS_TLX = False
 
 if HAS_TLX:
-    from tritonbench.kernels.tlx_attention_ws_pipelined import (
+    from triton.language.extra.tlx.tutorials.blackwell_fa_ws_pipelined_persistent import (
         attention as tlx_blackwell,
     )
 
@@ -688,9 +688,8 @@ class Operator(BenchmarkOperator):
                 q,
                 k,
                 v,
-                self.causal,
                 self.sm_scale,
-                False,
+                self.causal,
             )
 
         return preproc_noop, fn
@@ -704,9 +703,8 @@ class Operator(BenchmarkOperator):
                 q,
                 k,
                 v,
-                self.causal,
                 self.sm_scale,
-                True,
+                self.causal,
             )
 
         return preproc_noop, fn
