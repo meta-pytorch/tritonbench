@@ -707,7 +707,6 @@ def _attn_bwd_preprocess(
 # Frozen (hashable) wrapper for dot attrs configuration, usable in triton.Config.
 # Supports .get(key) like a dict but is hashable for Triton's JIT cache key.
 class FrozenDotAttrs:
-
     def __init__(self, d):
         self._data = d
         self._hash = hash(json.dumps(d, sort_keys=True)) if d else hash(None)
@@ -734,29 +733,67 @@ class FrozenDotAttrs:
 # Each key corresponds to a dot operation in _attn_bwd_dkdv_inner.
 # Set to None to disable attrs for a given dot (heuristic allocation).
 # Format: {"stage": str, "order": str, "channels": [str, ...]}
-_DEFAULT_BWD_DOT_ATTRS = FrozenDotAttrs({
-    "qkT": {"stage": "0", "order": "0", "channels": ["opndA,smem,1,0", "opndB,smem,2,1", "opndD,tmem,1,2"]},
-    "dpT": {"stage": "0", "order": "2", "channels": ["opndA,smem,1,3", "opndB,smem,1,4", "opndD,tmem,1,5"]},
-    "dv": {"stage": "0", "order": "2", "channels": ["opndA,tmem,1,2", "opndD,tmem,1,7"]},
-    "dq": {"stage": "1", "order": "1", "channels": ["opndA,smem,1,8", "opndD,tmem,1,5"]},
-    "dk": {"stage": "1", "order": "1", "channels": ["opndD,tmem,1,10"]},
-})
+_DEFAULT_BWD_DOT_ATTRS = FrozenDotAttrs(
+    {
+        "qkT": {
+            "stage": "0",
+            "order": "0",
+            "channels": ["opndA,smem,1,0", "opndB,smem,2,1", "opndD,tmem,1,2"],
+        },
+        "dpT": {
+            "stage": "0",
+            "order": "2",
+            "channels": ["opndA,smem,1,3", "opndB,smem,1,4", "opndD,tmem,1,5"],
+        },
+        "dv": {
+            "stage": "0",
+            "order": "2",
+            "channels": ["opndA,tmem,1,2", "opndD,tmem,1,7"],
+        },
+        "dq": {
+            "stage": "1",
+            "order": "1",
+            "channels": ["opndA,smem,1,8", "opndD,tmem,1,5"],
+        },
+        "dk": {"stage": "1", "order": "1", "channels": ["opndD,tmem,1,10"]},
+    }
+)
 
-_BWD_DOT_ATTRS_BM64 = FrozenDotAttrs({
-    "qkT": {"stage": "0", "order": "0", "channels": ["opndA,smem,1,0", "opndB,smem,2,1", "opndD,tmem,1,2"]},
-    "dpT": {"stage": "0", "order": "2", "channels": ["opndA,smem,1,3", "opndB,smem,1,4", "opndD,tmem,1,5"]},
-    "dv": {"stage": "0", "order": "2", "channels": ["opndA,tmem,1,2", "opndD,tmem,1,7"]},
-    "dq": {"stage": "1", "order": "1", "channels": ["opndA,smem,1,8", "opndD,tmem,1,11"]},
-    "dk": {"stage": "1", "order": "1", "channels": ["opndD,tmem,1,10"]},
-})
+_BWD_DOT_ATTRS_BM64 = FrozenDotAttrs(
+    {
+        "qkT": {
+            "stage": "0",
+            "order": "0",
+            "channels": ["opndA,smem,1,0", "opndB,smem,2,1", "opndD,tmem,1,2"],
+        },
+        "dpT": {
+            "stage": "0",
+            "order": "2",
+            "channels": ["opndA,smem,1,3", "opndB,smem,1,4", "opndD,tmem,1,5"],
+        },
+        "dv": {
+            "stage": "0",
+            "order": "2",
+            "channels": ["opndA,tmem,1,2", "opndD,tmem,1,7"],
+        },
+        "dq": {
+            "stage": "1",
+            "order": "1",
+            "channels": ["opndA,smem,1,8", "opndD,tmem,1,11"],
+        },
+        "dk": {"stage": "1", "order": "1", "channels": ["opndD,tmem,1,10"]},
+    }
+)
 
-_BWD_DOT_ATTRS_SCHED = FrozenDotAttrs({
-    "qkT": {"stage": "0", "order": "0"},
-    "dpT": {"stage": "0", "order": "2"},
-    "dv": {"stage": "0", "order": "2"},
-    "dq": {"stage": "1", "order": "1"},
-    "dk": {"stage": "1", "order": "1"},
-})
+_BWD_DOT_ATTRS_SCHED = FrozenDotAttrs(
+    {
+        "qkT": {"stage": "0", "order": "0"},
+        "dpT": {"stage": "0", "order": "2"},
+        "dv": {"stage": "0", "order": "2"},
+        "dq": {"stage": "1", "order": "1"},
+        "dk": {"stage": "1", "order": "1"},
+    }
+)
 
 
 @triton.jit
@@ -864,21 +901,64 @@ def _attn_bwd_dkdv(
     curr_m = start_m
     step_m = BLOCK_M1
     if warp_specialize:
-        for blk_idx in tl.range(0, num_steps, warp_specialize=True, merge_epilogue=True, tmem_alloc_algo=2,
-                                smem_alloc_algo=1, smem_budget=200000):
+        for blk_idx in tl.range(
+            0,
+            num_steps,
+            warp_specialize=True,
+            merge_epilogue=True,
+            tmem_alloc_algo=2,
+            smem_alloc_algo=1,
+            smem_budget=200000,
+        ):
             dk, dv, curr_m = _attn_bwd_dkdv_inner(
-                dk, dv, desc_q, k, v, desc_do, desc_dq, M, D, off_bh,
-                curr_m, step_m, start_n, offs_n,
-                BLOCK_M1, HEAD_DIM, MASK, dtype, EPILOGUE_SUBTILE, LN2,
-                True, BWD_DOT_ATTRS,
+                dk,
+                dv,
+                desc_q,
+                k,
+                v,
+                desc_do,
+                desc_dq,
+                M,
+                D,
+                off_bh,
+                curr_m,
+                step_m,
+                start_n,
+                offs_n,
+                BLOCK_M1,
+                HEAD_DIM,
+                MASK,
+                dtype,
+                EPILOGUE_SUBTILE,
+                LN2,
+                True,
+                BWD_DOT_ATTRS,
             )
     else:
         for blk_idx in tl.range(0, num_steps):
             dk, dv, curr_m = _attn_bwd_dkdv_inner(
-                dk, dv, desc_q, k, v, desc_do, desc_dq, M, D, off_bh,
-                curr_m, step_m, start_n, offs_n,
-                BLOCK_M1, HEAD_DIM, MASK, dtype, EPILOGUE_SUBTILE, LN2,
-                True, BWD_DOT_ATTRS,
+                dk,
+                dv,
+                desc_q,
+                k,
+                v,
+                desc_do,
+                desc_dq,
+                M,
+                D,
+                off_bh,
+                curr_m,
+                step_m,
+                start_n,
+                offs_n,
+                BLOCK_M1,
+                HEAD_DIM,
+                MASK,
+                dtype,
+                EPILOGUE_SUBTILE,
+                LN2,
+                True,
+                BWD_DOT_ATTRS,
             )
 
     return dk, dv
@@ -951,8 +1031,12 @@ configs_bwd_persist = [
     ),
     triton.Config(
         {
-            "BLOCK_M1": 128, "BLOCK_N1": 128, "BLOCK_M2": 128, "BLOCK_N2": 128, "EPILOGUE_SUBTILE": 4, "BWD_DOT_ATTRS":
-            _BWD_DOT_ATTRS_SCHED,
+            "BLOCK_M1": 128,
+            "BLOCK_N1": 128,
+            "BLOCK_M2": 128,
+            "BLOCK_N2": 128,
+            "EPILOGUE_SUBTILE": 4,
+            "BWD_DOT_ATTRS": _BWD_DOT_ATTRS_SCHED,
         },
         num_warps=4,
         num_stages=2,
@@ -1004,7 +1088,9 @@ def _attn_bwd_core(
     BWD_DOT_ATTRS: tl.constexpr = None,
 ):
     off_chz = (bhid * N_CTX).to(tl.int64)
-    off_bh = ((stride_h * (bhid % H) + stride_z * (bhid // H)).to(tl.int64)) // stride_tok
+    off_bh = (
+        (stride_h * (bhid % H) + stride_z * (bhid // H)).to(tl.int64)
+    ) // stride_tok
 
     M += off_chz
     D += off_chz
@@ -1217,8 +1303,15 @@ def _attn_bwd_persist(
         block_shape=[BLOCK_N1, HEAD_DIM // EPILOGUE_SUBTILE],
     )
 
-    for _ in tl.range(0, tiles_per_sm, warp_specialize=True, merge_epilogue=True, tmem_alloc_algo=2, smem_alloc_algo=1,
-                      smem_budget=200000):
+    for _ in tl.range(
+        0,
+        tiles_per_sm,
+        warp_specialize=True,
+        merge_epilogue=True,
+        tmem_alloc_algo=2,
+        smem_alloc_algo=1,
+        smem_budget=200000,
+    ):
         pid = tile_idx % n_tile_num
         bhid = tile_idx // n_tile_num
         _attn_bwd_core(
