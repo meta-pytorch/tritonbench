@@ -268,7 +268,7 @@ else:
         }
 
         # Only add minRegAutoWS/maxRegAutoWS if supported (triton/tree/ws-3.5)
-        if False: #HAS_REG_AUTO_WS:
+        if HAS_REG_AUTO_WS:
             extra_kwargs["minRegAutoWS"] = 24
             extra_kwargs["maxRegAutoWS"] = maxreg
 
@@ -276,12 +276,12 @@ else:
 
     configs = [
         make_standard_config(BM, BN, s, w, subtile, vectmul, add2reduce, maxreg)
-        for BM in [256]
-        for BN in [128]
-        for s in [3]
+        for BM in [128, 256]
+        for BN in [64, 128]
+        for s in NUM_STAGES_OPTIONS
         for w in [4]
         for subtile in [True]
-        for vectmul in [1]
+        for vectmul in [0, 1]
         for add2reduce in [False]
         for maxreg in [152, 192]
     ]
@@ -936,28 +936,28 @@ configs_bwd = [
 ]
 
 configs_bwd_persist = [
-    #triton.Config(
-    #    {
-    #        "BLOCK_M1": 128,
-    #        "BLOCK_N1": 128,
-    #        "BLOCK_M2": 128,
-    #        "BLOCK_N2": 128,
-    #        "EPILOGUE_SUBTILE": 4,
-    #        "BWD_DOT_ATTRS": _DEFAULT_BWD_DOT_ATTRS,
-    #    },
-    #    num_warps=4,
-    #    num_stages=2,
-    #    pre_hook=_bwd_host_descriptor_pre_hook,
-    #),
-    #triton.Config(
-    #    {
-    #        "BLOCK_M1": 128, "BLOCK_N1": 128, "BLOCK_M2": 128, "BLOCK_N2": 128, "EPILOGUE_SUBTILE": 4, "BWD_DOT_ATTRS":
-    #        _BWD_DOT_ATTRS_SCHED,
-    #    },
-    #    num_warps=4,
-    #    num_stages=2,
-    #    pre_hook=_bwd_host_descriptor_pre_hook,
-    #),
+    triton.Config(
+        {
+            "BLOCK_M1": 128,
+            "BLOCK_N1": 128,
+            "BLOCK_M2": 128,
+            "BLOCK_N2": 128,
+            "EPILOGUE_SUBTILE": 4,
+            "BWD_DOT_ATTRS": _DEFAULT_BWD_DOT_ATTRS,
+        },
+        num_warps=4,
+        num_stages=2,
+        pre_hook=_bwd_host_descriptor_pre_hook,
+    ),
+    triton.Config(
+        {
+            "BLOCK_M1": 128, "BLOCK_N1": 128, "BLOCK_M2": 128, "BLOCK_N2": 128, "EPILOGUE_SUBTILE": 4, "BWD_DOT_ATTRS":
+            _BWD_DOT_ATTRS_SCHED,
+        },
+        num_warps=4,
+        num_stages=2,
+        pre_hook=_bwd_host_descriptor_pre_hook,
+    ),
     triton.Config(
         {
             "BLOCK_M1": 64,
@@ -1312,16 +1312,13 @@ class _attention_opt(torch.autograd.Function):
 
         ctx.grid = grid
         persistent = baseVariant == "persistent" or baseVariant == "ws_persistent"
-        if is_blackwell() and warp_specialize:
+        if WITH_MAXNREG and is_blackwell() and warp_specialize:
             if HEAD_DIM_K == 128 and (
                 q.dtype == torch.float16 or q.dtype == torch.bfloat16
             ):
-                extra_kern_args["maxnreg"] = 128
+                extra_kern_args["maxnreg"] = 168
             else:
-                extra_kern_args["maxnreg"] = 128
-        # NOTE: forward persistent kernel crashes NVGPUWarpSpecialization pass.
-        # Use non-persistent forward without WS until compiler is fixed.
-        fwd_warp_specialize = True
+                extra_kern_args["maxnreg"] = 80
         if persistent:
             _attn_fwd_persist[grid_persist](
                 sm_scale,
@@ -1355,7 +1352,7 @@ class _attention_opt(torch.autograd.Function):
                 HEAD_DIM=HEAD_DIM_K,  #
                 FP8_OUTPUT=q.dtype == torch.float8_e5m2,  #
                 STAGE=stage,  #
-                warp_specialize=fwd_warp_specialize,
+                warp_specialize=warp_specialize,
                 dtype=torch_dtype_to_triton(q.dtype),
                 **extra_kern_args,
             )
@@ -1406,52 +1403,57 @@ class _attention_opt(torch.autograd.Function):
 
         triton.set_allocator(alloc_fn)
 
-        # NOTE: persistent backward (_attn_bwd_persist) is not yet usable:
-        # the kernel body exceeds the 512-unit TMEM hardware limit (needs 704)
-        # and the pipeliner cannot predicate tt.descriptor_reduce (atomic_add
-        # via TMA). Use non-persistent backward until compiler support improves.
-        desc_k = TensorDescriptor(
-            arg_k,
-            shape=[BATCH * N_HEAD * N_CTX, HEAD_DIM],
-            strides=[HEAD_DIM, 1],
-            block_shape=dummy_block,
-        )
-        desc_v = TensorDescriptor(
-            v,
-            shape=[BATCH * N_HEAD * N_CTX, HEAD_DIM],
-            strides=[HEAD_DIM, 1],
-            block_shape=dummy_block,
-        )
-        desc_q = TensorDescriptor(
-            q,
-            shape=[BATCH * N_HEAD * N_CTX, HEAD_DIM],
-            strides=[HEAD_DIM, 1],
-            block_shape=dummy_block,
-        )
-        desc_do = TensorDescriptor(
-            do,
-            shape=[BATCH * N_HEAD * N_CTX, HEAD_DIM],
-            strides=[HEAD_DIM, 1],
-            block_shape=dummy_block,
-        )
-        desc_dq = TensorDescriptor(
-            dq,
-            shape=[BATCH * N_HEAD * N_CTX, HEAD_DIM],
-            strides=[HEAD_DIM, 1],
-            block_shape=dummy_block,
-        )
-        desc_dk = TensorDescriptor(
-            dk,
-            shape=[BATCH * N_HEAD * N_CTX, HEAD_DIM],
-            strides=[HEAD_DIM, 1],
-            block_shape=dummy_block,
-        )
-        desc_dv = TensorDescriptor(
-            dv,
-            shape=[BATCH * N_HEAD * N_CTX, HEAD_DIM],
-            strides=[HEAD_DIM, 1],
-            block_shape=dummy_block,
-        )
+        if not FORCE_ON_DEVICE and supports_host_descriptor():
+            desc_k = TensorDescriptor(
+                arg_k,
+                shape=[BATCH * N_HEAD * N_CTX, HEAD_DIM],
+                strides=[HEAD_DIM, 1],
+                block_shape=dummy_block,
+            )
+            desc_v = TensorDescriptor(
+                v,
+                shape=[BATCH * N_HEAD * N_CTX, HEAD_DIM],
+                strides=[HEAD_DIM, 1],
+                block_shape=dummy_block,
+            )
+            desc_q = TensorDescriptor(
+                q,
+                shape=[BATCH * N_HEAD * N_CTX, HEAD_DIM],
+                strides=[HEAD_DIM, 1],
+                block_shape=dummy_block,
+            )
+            desc_do = TensorDescriptor(
+                do,
+                shape=[BATCH * N_HEAD * N_CTX, HEAD_DIM],
+                strides=[HEAD_DIM, 1],
+                block_shape=dummy_block,
+            )
+            desc_dq = TensorDescriptor(
+                dq,
+                shape=[BATCH * N_HEAD * N_CTX, HEAD_DIM],
+                strides=[HEAD_DIM, 1],
+                block_shape=dummy_block,
+            )
+            desc_dk = TensorDescriptor(
+                dk,
+                shape=[BATCH * N_HEAD * N_CTX, HEAD_DIM],
+                strides=[HEAD_DIM, 1],
+                block_shape=dummy_block,
+            )
+            desc_dv = TensorDescriptor(
+                dv,
+                shape=[BATCH * N_HEAD * N_CTX, HEAD_DIM],
+                strides=[HEAD_DIM, 1],
+                block_shape=dummy_block,
+            )
+        else:
+            desc_q = q
+            desc_v = v
+            desc_k = k
+            desc_do = do
+            desc_dq = dq
+            desc_dk = dk
+            desc_dv = dv
 
         def grid(meta):
             return (
