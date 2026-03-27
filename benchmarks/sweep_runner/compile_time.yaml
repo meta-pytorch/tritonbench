@@ -3,6 +3,9 @@
 # Measure latency, flops, and speedup metrics in the best effort
 # Some operators might not support flops or speedup metrics
 <<<<<<< HEAD
+<<<<<<< HEAD
+=======
+>>>>>>> 08ccf32 (support multiple configs)
 run_configs:
   default:
     with_backwards: true
@@ -14,6 +17,7 @@ run_configs:
       - test/test_gpu/skip_tests.yaml
     # only run one input per kernel
     extra_args: --num-inputs 1
+<<<<<<< HEAD
 =======
 run_config:
   with_backwards: true
@@ -26,6 +30,8 @@ run_config:
   # only run one input per kernel
   extra_args: --num-inputs 1
 >>>>>>> 5d5f16b (fix compile time)
+=======
+>>>>>>> 08ccf32 (support multiple configs)
 # override some ops
 # bf16_flex_attention_fwd/bwd: measure compiled version (pt2)
 overrides:
