@@ -413,7 +413,7 @@ class Operator(BenchmarkOperator):
 
         return preproc_noop, _inner
 
-    @register_benchmark()
+    @register_benchmark(baseline=True)
     @multi_input_wrapper
     def sdpa(self, *args) -> Tuple[Callable, Callable]:
         if self.local:

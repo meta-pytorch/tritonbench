@@ -9,12 +9,12 @@ bf16xint16_gemm_fwd:
     bf16xbf16 --metrics latency,tflops,speedup
 bf16_blackwell_attentions_fwd:
   args: --op blackwell_attentions --only triton_tutorial_flash_dp_blackwell,triton_tutorial_flash_dp_persistent_blackwell,triton_tutorial_flash_v2_blackwell,triton_tutorial_flash_v2_persistent_blackwell,triton_tutorial_flash_v2_tma_ws_persistent_blackwell
-    --metrics latency,tflops
+    --baseline sdpa --metrics latency,tflops,speedup
   devices:
   - b200
 bf16_blackwell_attentions_bwd:
-  args: --op blackwell_attentions --only triton_tutorial_flash_v2_persistent_blackwell,triton_tutorial_flash_dp_blackwell,triton_tutorial_flash_dp_persistent_blackwell,triton_tutorial_flash_v2_blackwell,triton_tutorial_flash_v2_tma_ws_persistent_blackwell
-    --bwd --metrics latency,tflops
+  args: --op blackwell_attentions --only triton_tutorial_flash_dp_blackwell,triton_tutorial_flash_dp_persistent_blackwell,triton_tutorial_flash_v2_tma_ws_persistent_blackwell,triton_tutorial_flash_v2_blackwell,triton_tutorial_flash_v2_persistent_blackwell
+    --bwd --baseline sdpa --metrics latency,tflops,speedup
   devices:
   - b200
 cross_entropy_fwd:
@@ -33,7 +33,7 @@ bf16_flash_attention_fwd:
   args: --op flash_attention --only triton_tutorial_flash_v2,triton_tutorial_flash_v2_tma,triton_tutorial_flash_v2_tma_ws,triton_tutorial_flash_v2_tma_ws_persistent,triton_tutorial_flash_v2_ws
     --baseline aten --metrics latency,tflops,speedup
 bf16_flash_attention_bwd:
-  args: --op flash_attention --only triton_tutorial_flash_v2_ws,triton_tutorial_flash_v2_tma,triton_tutorial_flash_v2_tma_ws_persistent,triton_tutorial_flash_v2,triton_tutorial_flash_v2_tma_ws
+  args: --op flash_attention --only triton_tutorial_flash_v2,triton_tutorial_flash_v2_tma_ws,triton_tutorial_flash_v2_ws,triton_tutorial_flash_v2_tma_ws_persistent,triton_tutorial_flash_v2_tma
     --bwd --baseline aten --metrics latency,tflops,speedup --causal
 fp8_attention_fwd:
   args: --op fp8_attention --only triton_flash_v2,triton_flash_v2_tma,triton_flash_v2_ws
@@ -70,7 +70,7 @@ bf16_gdpa_fwd:
   args: --op gdpa --only gdpa,gdpa_opt,gdpa_opt_sorted --baseline eager_gdpa --metrics
     latency,speedup
 bf16_gdpa_bwd:
-  args: --op gdpa --only gdpa_opt,gdpa,gdpa_opt_sorted --bwd --baseline eager_gdpa
+  args: --op gdpa --only gdpa_opt,gdpa_opt_sorted,gdpa --bwd --baseline eager_gdpa
     --metrics latency,speedup
 geglu_fwd:
   args: --op geglu --only liger_geglu --baseline torch_geglu --metrics latency,speedup
@@ -80,7 +80,7 @@ fp16_gemm_fwd:
   args: --op gemm --only matmul_partition_k,streamk_matmul,triton_ops_matmul,triton_tutorial_matmul
     --baseline aten_matmul --metrics latency,tflops,speedup
 fp16_gemm_bwd:
-  args: --op gemm --only matmul_partition_k,triton_ops_matmul,triton_tutorial_matmul,streamk_matmul
+  args: --op gemm --only triton_ops_matmul,matmul_partition_k,streamk_matmul,triton_tutorial_matmul
     --bwd --baseline aten_matmul --metrics latency,tflops,speedup
 bf16_grouped_gemm_fwd:
   args: --op grouped_gemm --only precompiled_cutedsl_grouped_mm_tuned,tlx_grouped_gemm,triton_grouped_gemm
@@ -111,7 +111,7 @@ layer_norm_fwd:
   args: --op layer_norm --only liger_layer_norm,triton_fused_layer_norm,triton_layer_norm
     --baseline torch_layer_norm --metrics latency,speedup
 layer_norm_bwd:
-  args: --op layer_norm --only triton_layer_norm,triton_fused_layer_norm,liger_layer_norm
+  args: --op layer_norm --only triton_fused_layer_norm,triton_layer_norm,liger_layer_norm
     --bwd --baseline torch_layer_norm --metrics latency,speedup
 low_mem_dropout_fwd:
   args: --op low_mem_dropout --only seeded_dropout,triton_dropout --baseline eager_dropout
@@ -124,7 +124,7 @@ rms_norm_fwd:
   args: --op rms_norm --only liger_rms,triton_fused_rmsnorm --baseline llama_rms --metrics
     latency,speedup
 rms_norm_bwd:
-  args: --op rms_norm --only triton_fused_rmsnorm,liger_rms --bwd --baseline llama_rms
+  args: --op rms_norm --only liger_rms,triton_fused_rmsnorm --bwd --baseline llama_rms
     --metrics latency,speedup
 rope_fwd:
   args: --op rope --only liger_rotary_pos_emb --baseline apply_rotary_pos_emb --metrics

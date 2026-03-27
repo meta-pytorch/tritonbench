@@ -4,6 +4,7 @@
 # =================================================================
 addmm: aten_addmm
 bf16xint16_gemm: bf16xbf16
+blackwell_attentions: sdpa
 cross_entropy: cross_entropy_loss
 decoding_attention: triton_splitk
 embedding: torch_embedding
