@@ -1,6 +1,7 @@
 # Example sweep configuration file for tritonbench sweep runner
 # Generate run config with all backends tagged "triton"
-run_config:
-  with_backwards: true
-  tags:
-    - triton
+run_configs:
+  default:
+    with_backwards: true
+    tags:
+      - triton

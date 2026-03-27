@@ -6,10 +6,18 @@ then launches tritonbench with the generated config.
 
 Example config file format (YAML):
 ```yaml
-run_config:
-  with_backwards: true
-  tags:
-    - triton
+run_configs:
+  perf:
+    with_backwards: true
+    tags:
+      - triton
+    metrics:
+      - latency
+  compile_time:
+    tags:
+      - triton
+    metrics:
+      - compile_time
 ```
 
 Usage:
@@ -125,17 +133,6 @@ def generate_run_config(
     Returns:
         A dictionary in TRITONBENCH_RUN_CONFIG format
     """
-    if skip_tests := sweep_runner_config["run_config"].get("skip_tests", None):
-        skip_tests = [
-            load_config(skip_test, base_dir=REPO_PATH) for skip_test in skip_tests
-        ]
-    run_config = get_benchmark_config_with_tags(
-        tags=sweep_runner_config["run_config"]["tags"],
-        per_backend=separate_backends,
-        with_backwards=sweep_runner_config["run_config"].get("with_backwards", False),
-        metrics=sweep_runner_config["run_config"].get("metrics", None),
-        skip_tests=skip_tests,
-    )
     result_configs = {}
     if attach_launch:
         result_configs["common_args"] = f"--launch benchmarks.{target}.run"
@@ -149,15 +146,29 @@ def generate_run_config(
     disabled_benchmarks = sweep_runner_config.get("disabled", {})
     override_benchmarks = sweep_runner_config.get("overrides", {})
 
-    for cid, c in enumerate(run_config):
-        if num_configs is not None and cid >= num_configs:
-            break
-        if c in disabled_benchmarks:
-            continue
-        if c in override_benchmarks:
-            result_configs[c] = override_benchmarks[c].copy()
-            continue
-        result_configs[c] = run_config[c].copy()
+    config_count = 0
+    for _run_config_name, run_config_value in sweep_runner_config["run_configs"].items():
+        if skip_tests := run_config_value.get("skip_tests", None):
+            skip_tests = [
+                load_config(skip_test, base_dir=REPO_PATH) for skip_test in skip_tests
+            ]
+        run_config = get_benchmark_config_with_tags(
+            tags=run_config_value["tags"],
+            per_backend=separate_backends,
+            with_backwards=run_config_value.get("with_backwards", False),
+            metrics=run_config_value.get("metrics", None),
+            skip_tests=skip_tests,
+        )
+        for c in run_config:
+            if num_configs is not None and config_count >= num_configs:
+                break
+            if c in disabled_benchmarks:
+                continue
+            if c in override_benchmarks:
+                result_configs[c] = override_benchmarks[c].copy()
+            else:
+                result_configs[c] = run_config[c].copy()
+            config_count += 1
     return result_configs
 
 

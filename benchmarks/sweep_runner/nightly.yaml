@@ -2,16 +2,17 @@
 # First, collect all ops and backends with tags "triton"
 # Measure latency, flops, and speedup metrics in the best effort
 # Some operators might not support flops or speedup metrics
-run_config:
-  with_backwards: true
-  tags:
-    - triton
-  metrics:
-    - latency
-    - flops
-    - speedup
-  skip_tests:
-    - test/test_gpu/skip_tests.yaml
+run_configs:
+  default:
+    with_backwards: true
+    tags:
+      - triton
+    metrics:
+      - latency
+      - flops
+      - speedup
+    skip_tests:
+      - test/test_gpu/skip_tests.yaml
 # override some ops
 # 1. launch_latency_fwd: measure walltime instead of latency
 # 2. bf16_flex_attention_fwd/bwd: measure compiled version (pt2)
