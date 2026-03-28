@@ -93,7 +93,9 @@ def _attn_fwd_subtile(
     k,
     offs_m,
     start_n,
+    start_m,
     BLOCK_N,
+    BLOCK_M,
     offs_n,
     qk_scale,
     l_i0,
@@ -109,20 +111,15 @@ def _attn_fwd_subtile(
     FADD2_REDUCE: tl.constexpr,
 ):
     qk = tl.dot(q, k)
-    if STAGE == 3:
+    if STAGE == 3 and start_n >= start_m * BLOCK_M:
         col_limit_right = (offs_m - start_n + 1)[:, None]
         qk = _apply_causal_mask(qk, col_limit_right, BLOCK_N)
-        m_ij = tl.maximum(m_i, tl.max(qk, 1) * qk_scale)
-        if VECT_MUL & 2:
-            qk = _fma_f32x2(qk, qk_scale, -m_ij[:, None])
-        else:
-            qk = qk * qk_scale - m_ij[:, None]
+
+    m_ij = tl.maximum(m_i, tl.max(qk, 1) * qk_scale)
+    if VECT_MUL & 2:
+        qk = _fma_f32x2(qk, qk_scale, -m_ij[:, None])
     else:
-        m_ij = tl.maximum(m_i, tl.max(qk, 1) * qk_scale)
-        if VECT_MUL & 2:
-            qk = _fma_f32x2(qk, qk_scale, -m_ij[:, None])
-        else:
-            qk = qk * qk_scale - m_ij[:, None]
+        qk = qk * qk_scale - m_ij[:, None]
 
     PM: tl.constexpr = qk.shape[0]
     PN: tl.constexpr = qk.shape[1]
@@ -238,7 +235,9 @@ def _attn_fwd_inner_oss_dp(
             k,
             offs_m0,
             start_n,
+            start_m,
             BLOCK_N,
+            BLOCK_M,
             offs_n,
             qk_scale,
             l_i0,
@@ -258,7 +257,9 @@ def _attn_fwd_inner_oss_dp(
             k,
             offs_m1,
             start_n,
+            start_m,
             BLOCK_N,
+            BLOCK_M,
             offs_n,
             qk_scale,
             l_i1,
@@ -384,9 +385,9 @@ else:
         for BN in [64, 128]
         for s in NUM_STAGES_OPTIONS
         for w in [4]
-        for subtile in [True]
-        for subtile_p in [True, False]
-        for vectmul in [1]
+        for subtile in [True, False]
+        for subtile_p in [True]
+        for vectmul in [1, 3]
         for add2reduce in [False]
         for group_size_n in [1, 4]
         for maxreg in [152, 192]
