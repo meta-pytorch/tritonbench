@@ -385,8 +385,8 @@ else:
         for BN in [64, 128]
         for s in NUM_STAGES_OPTIONS
         for w in [4]
-        for subtile in [True, False]
-        for subtile_p in [True]
+        for subtile in [True]
+        for subtile_p in [True, False]
         for vectmul in [1, 3]
         for add2reduce in [False]
         for group_size_n in [1, 4]
