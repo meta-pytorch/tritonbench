@@ -1617,7 +1617,7 @@ class _attention_opt(torch.autograd.Function):
                 warp_specialize=warp_specialize,
             )
 
-        return dq, dk, dv, None, None, None, None
+        return dq, dk, dv, None, None, None
 
 
 attention_opt = _attention_opt.apply
