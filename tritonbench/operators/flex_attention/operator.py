@@ -26,6 +26,7 @@ try:
 except ImportError:
     pass
 
+from tritonbench.kernels.flex_attention_triton import flex_attention_fwd
 from tritonbench.utils.env_utils import is_hip
 from tritonbench.utils.input import input_filter
 from tritonbench.utils.triton_op import (
@@ -427,6 +428,27 @@ class Operator(BenchmarkOperator):
 
         return sdpa_fn
 
+    @register_benchmark()
+    def triton(
+        self,
+        q: torch.Tensor,
+        k: torch.Tensor,
+        v: torch.Tensor,
+        score_mod: Optional[_score_mod_signature],
+        block_mask: Optional[BlockMask],
+        mod_type: str,
+        kernel_options: dict[str, Any],
+    ) -> Optional[Callable]:
+        """Standalone Triton kernel implementation (no torch.compile)."""
+        supported_mods = ["noop", "causal"]
+        if mod_type not in supported_mods:
+            return unsupported_fn
+
+        if block_mask is None:
+            return unsupported_fn
+
+        return lambda: flex_attention_fwd(q, k, v, block_mask)
+
     def get_grad_to_none(self, args) -> List[torch.Tensor]:
         """Return tensors whose gradients should be set to None between iterations."""
         q, k, v, *_ = args
@@ -445,7 +467,7 @@ class Operator(BenchmarkOperator):
         if fn_name == "sdpa_cudnn":
             flops *= 0.5 if mod_type == "causal" else 1.0
         if self.mode in (BenchmarkMode.FWD, BenchmarkMode.FWD_NO_GRAD):
-            if fn_name == "compiled":
+            if fn_name in ("compiled", "triton"):
                 return self.calculate_flops(full_shape, block_mask)
             return flops
         if self.mode == BenchmarkMode.BWD:
