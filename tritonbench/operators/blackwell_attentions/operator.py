@@ -278,6 +278,13 @@ def multi_input_wrapper(fn):
 
         self.optims[multi_input_fn] = torch.optim.SGD(all_inputs, foreach=True)
 
+        multi_input_fn._grad_inputs = [
+            t
+            for inp in inputs
+            for t in inp
+            if isinstance(t, torch.Tensor) and t.requires_grad
+        ]
+
         return multi_input_fn
 
     wrapper.__name__ = fn.__name__
@@ -741,6 +748,35 @@ class Operator(BenchmarkOperator):
             flops *= 3.5  # 1.0(fwd) + 2.0(bwd) + 0.5(recompute)
         return flops
 
+    def _check_gradients(self, grads, baseline_grads, mode=""):
+        """Check backward gradients with flash-attention-appropriate tolerances.
+
+        Uses the same max-absolute-error approach and atol=1e-2 as the
+        standalone test in test_tlx_bwd_from_fused_attention.py.
+        """
+        atol = self.tb_args.atol if self.tb_args.atol is not None else 1e-2
+        prefix = f"{mode}: " if mode else ""
+
+        assert len(grads) == len(baseline_grads), (
+            f"{prefix}Mismatch in number of grad tensors"
+        )
+
+        has_gradient = False
+        for i, (grad, baseline_grad) in enumerate(zip(grads, baseline_grads)):
+            if (grad is None) != (baseline_grad is None):
+                return False
+            if grad is not None:
+                has_gradient = True
+                max_err = (grad.float() - baseline_grad.float()).abs().max().item()
+                if max_err > atol:
+                    logger.warning(
+                        f"{prefix}tensor {i}: max_err={max_err:.6e} > atol={atol}"
+                    )
+                    return False
+
+        assert has_gradient, f"{prefix}No gradients were computed."
+        return True
+
     def get_bwd_fn(self, fwd_fn: Callable) -> Callable:
         if self.use_cuda_graphs:
             stream = self.get_cudagraph_stream()
@@ -748,28 +784,30 @@ class Operator(BenchmarkOperator):
         else:
             stream = torch.cuda.current_stream()
 
+        grad_inputs = getattr(fwd_fn, "_grad_inputs", None)
+
         with torch.cuda.stream(stream):
             o = fwd_fn()
             outputs = [
                 input_filter(lambda x: isinstance(x, torch.Tensor), o_) for o_ in o
             ]
-            dOs = [torch.rand_like(o_).detach() for o_ in outputs]
-            zero_grad = (
-                self.optims[fwd_fn].zero_grad
-                if fwd_fn in self.optims
-                else lambda set_to_none: None
-            )
+            torch.manual_seed(0)
+            dOs = [0.1 * torch.randn_like(o_).detach() for o_ in outputs]
 
         if self.use_cuda_graphs:
             torch.cuda.current_stream().wait_stream(stream)
 
         def fn():
-            zero_grad(set_to_none=True)
+            if grad_inputs:
+                for t in grad_inputs:
+                    if t.grad is not None:
+                        t.grad = None
             for (
                 o_tensor,
                 do,
             ) in zip(outputs, dOs):
                 o_tensor.backward(do, retain_graph=True)
+            return grad_inputs
 
         return fn
 
