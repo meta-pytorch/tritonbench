@@ -112,7 +112,12 @@ def _check_input_config(
     return True, None
 
 
-def get_input_loader(gpu: str, workloads: List[str], op: str) -> List[tuple[str, str]]:
+def get_input_loader(
+    gpu: str,
+    workloads: List[str],
+    op: str,
+    input_filter: Optional[str] = None,
+) -> List[tuple[str, str]]:
     """
     Get input loader paths for the given GPU type and workloads.
 
@@ -125,6 +130,7 @@ def get_input_loader(gpu: str, workloads: List[str], op: str) -> List[tuple[str,
         gpu: GPU type (e.g., "H100", "MI350") - will be lowercased
         workloads: List of workload names (e.g., ["cmf", "omnifm_v4"]).
         op: Operator name to find shape files for (e.g., "gemm", "addmm")
+        input_filter: Optional substring filter on input config filenames.
 
     Returns:
         List of (workload, input_loader_path) tuples
@@ -159,6 +165,11 @@ def get_input_loader(gpu: str, workloads: List[str], op: str) -> List[tuple[str,
             # Flat (metadata-driven): scan .json files in the workload dir
             found = False
             for json_file in sorted(workload_dir.glob("*.json")):
+                if input_filter and input_filter not in json_file.name:
+                    print(
+                        f"[Compare Benchmarks] Skipping {json_file.name}: does not match --input-filter '{input_filter}'"
+                    )
+                    continue
                 matches, skip_reason = _check_input_config(json_file, op, gpu_lower)
                 if not matches:
                     if skip_reason:
@@ -312,7 +323,7 @@ def run_benchmarks(config: BenchmarkConfig) -> None:
                 continue
 
             lhs_benchmark, rhs_benchmark = config.benchmark_map[op]
-            input_loaders = get_input_loader(gpu, config.workloads, op)
+            input_loaders = get_input_loader(gpu, config.workloads, op, config.input_filter)
 
             if not input_loaders:
                 print(
@@ -408,6 +419,12 @@ def parse_args(args: List[str] = None) -> BenchmarkConfig:
         help=f"Comma-separated list of workloads representing shapes to evaluate. Default: {','.join(DEFAULT_WORKLOADS)}",
     )
     parser.add_argument(
+        "--input-filter",
+        type=str,
+        default=None,
+        help="Substring filter on input config filenames (if searching a workload directory without explicit GPU subdirectories). Only files whose name contains this string will be used.",
+    )
+    parser.add_argument(
         "--benchmarks-lhs",
         type=str,
         default=None,
@@ -467,6 +484,7 @@ def parse_args(args: List[str] = None) -> BenchmarkConfig:
         "ops": args.ops.split(","),
         "metrics": args.metrics.split(","),
         "workloads": workloads,
+        "input_filter": args.input_filter,
         "parse_autotune_logs": args.parse_autotune_logs,
         "log_scuba": args.log_scuba,
         "scuba_eval_id": args.scuba_eval_id,

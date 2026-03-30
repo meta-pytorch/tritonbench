@@ -36,6 +36,7 @@ class BenchmarkConfig:
     metrics: List[str] = field(default_factory=lambda: DEFAULT_METRICS.copy())
     workloads: List[str] = field(default_factory=lambda: DEFAULT_WORKLOADS.copy())
     benchmark_map: dict[str, tuple[str, str]] = field(default_factory=dict)
+    input_filter: str = None
     parse_autotune_logs: bool = False
     log_scuba: bool = False
     scuba_eval_id: str = None
