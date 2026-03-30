@@ -19,12 +19,12 @@ import triton.language as tl
 def get_fwd_configs():
     configs = []
     for BLOCK_M, BLOCK_N, num_stages, num_warps in [
-        (128, 64, 3, 4),
-        (128, 128, 3, 4),
-        (128, 128, 2, 8),
+        # (128, 64, 3, 4),
+        # (128, 128, 3, 4),
+        # (128, 128, 2, 8),
         (128, 128, 1, 8),
-        (64, 128, 3, 4),
-        (64, 64, 3, 4),
+        # (64, 128, 3, 4),
+        # (64, 64, 3, 4),
     ]:
         configs.append(
             triton.Config(
@@ -260,6 +260,7 @@ def forward_inner(
     SPARSE_KV_BLOCK_SIZE: tl.constexpr = 128,
     FLOAT32_PRECISION: tl.constexpr = "ieee",
 ):
+    """Iterate over a single set of KV blocks (partial or full only)."""
     SPARSE_KV_MULTIPLE: tl.constexpr = SPARSE_KV_BLOCK_SIZE // BLOCK_N
     RCP_LN2: tl.constexpr = 1.44269504
 
@@ -353,6 +354,237 @@ def forward_inner(
             BLOCKS_ARE_CONTIGUOUS,
         )
         offs_n = offs_n + offset
+        kv_offset += offset
+
+    return acc, l_i, m_i
+
+
+@triton.jit
+def forward_inner_with_full_blocks(
+    q,
+    K,
+    V,
+    Q_LEN,
+    KV_LEN,
+    acc,
+    l_i,
+    m_i,
+    off_z,
+    off_h,
+    offs_m,
+    # Partial block data
+    partial_offs_n,
+    partial_kv_start,
+    partial_kv_indices,
+    partial_kv_num_blocks,
+    partial_block_n_end,
+    # Full block data
+    full_offs_n,
+    full_kv_start,
+    full_kv_indices,
+    full_kv_num_blocks,
+    full_block_n_end,
+    MATMUL_PRECISION,
+    stride_kk,
+    stride_kn,
+    stride_vn,
+    stride_vk,
+    SM_SCALE,
+    PRESCALE_QK: tl.constexpr = False,
+    ROWS_GUARANTEED_SAFE: tl.constexpr = False,
+    BLOCKS_ARE_CONTIGUOUS: tl.constexpr = False,
+    IS_DIVISIBLE: tl.constexpr = True,
+    QK_HEAD_DIM: tl.constexpr = 128,
+    QK_HEAD_DIM_ROUNDED: tl.constexpr = 128,
+    V_HEAD_DIM: tl.constexpr = 128,
+    V_HEAD_DIM_ROUNDED: tl.constexpr = 128,
+    SAFE_HEAD_DIM: tl.constexpr = True,
+    BLOCK_M: tl.constexpr = 128,
+    BLOCK_N: tl.constexpr = 64,
+    SPARSE_KV_BLOCK_SIZE: tl.constexpr = 128,
+    FLOAT32_PRECISION: tl.constexpr = "ieee",
+):
+    """Iterate over both partial and full KV blocks with shared accumulators."""
+    SPARSE_KV_MULTIPLE: tl.constexpr = SPARSE_KV_BLOCK_SIZE // BLOCK_N
+    RCP_LN2: tl.constexpr = 1.44269504
+
+    if PRESCALE_QK:
+        q = (q * SM_SCALE * RCP_LN2).to(MATMUL_PRECISION)
+
+    # Phase 1: partial blocks (need both score_mod and mask_mod)
+    kv_offset = 0
+    for start_n in range(0, partial_block_n_end):
+        if IS_DIVISIBLE:
+            acc, l_i, m_i = forward_block_mn(
+                q,
+                K,
+                V,
+                Q_LEN,
+                KV_LEN,
+                acc,
+                l_i,
+                m_i,
+                off_z,
+                off_h,
+                offs_m,
+                partial_offs_n,
+                partial_kv_start,
+                kv_offset,
+                MATMUL_PRECISION,
+                RCP_LN2,
+                stride_kk,
+                stride_kn,
+                stride_vn,
+                stride_vk,
+                SM_SCALE,
+                IS_FULL_BLOCKS=False,
+                PRESCALE_QK=PRESCALE_QK,
+                ROWS_GUARANTEED_SAFE=ROWS_GUARANTEED_SAFE,
+                IS_DIVISIBLE=IS_DIVISIBLE,
+                QK_HEAD_DIM=QK_HEAD_DIM,
+                QK_HEAD_DIM_ROUNDED=QK_HEAD_DIM_ROUNDED,
+                V_HEAD_DIM=V_HEAD_DIM,
+                V_HEAD_DIM_ROUNDED=V_HEAD_DIM_ROUNDED,
+                SAFE_HEAD_DIM=SAFE_HEAD_DIM,
+                BLOCK_M=BLOCK_M,
+                BLOCK_N=BLOCK_N,
+                FLOAT32_PRECISION=FLOAT32_PRECISION,
+            )
+        else:
+            acc, l_i, m_i = forward_block_mn(
+                q,
+                K,
+                V,
+                Q_LEN,
+                KV_LEN,
+                acc,
+                l_i,
+                m_i,
+                off_z,
+                off_h,
+                offs_m,
+                partial_offs_n,
+                partial_kv_start,
+                kv_offset,
+                MATMUL_PRECISION,
+                RCP_LN2,
+                stride_kk,
+                stride_kn,
+                stride_vn,
+                stride_vk,
+                SM_SCALE,
+                IS_FULL_BLOCKS=False,
+                CHECK_BLOCK_BOUNDARY=True,
+                PRESCALE_QK=PRESCALE_QK,
+                ROWS_GUARANTEED_SAFE=ROWS_GUARANTEED_SAFE,
+                IS_DIVISIBLE=IS_DIVISIBLE,
+                QK_HEAD_DIM=QK_HEAD_DIM,
+                QK_HEAD_DIM_ROUNDED=QK_HEAD_DIM_ROUNDED,
+                V_HEAD_DIM=V_HEAD_DIM,
+                V_HEAD_DIM_ROUNDED=V_HEAD_DIM_ROUNDED,
+                SAFE_HEAD_DIM=SAFE_HEAD_DIM,
+                BLOCK_M=BLOCK_M,
+                BLOCK_N=BLOCK_N,
+                FLOAT32_PRECISION=FLOAT32_PRECISION,
+            )
+        offset = get_offset_for_next_block(
+            start_n,
+            partial_kv_indices,
+            partial_kv_num_blocks,
+            SPARSE_KV_BLOCK_SIZE,
+            SPARSE_KV_MULTIPLE,
+            BLOCK_N,
+            BLOCKS_ARE_CONTIGUOUS,
+        )
+        partial_offs_n = partial_offs_n + offset
+        kv_offset += offset
+
+    # Phase 2: full blocks (only score_mod, skip mask_mod)
+    kv_offset = 0
+    for start_n in range(0, full_block_n_end):
+        if IS_DIVISIBLE:
+            acc, l_i, m_i = forward_block_mn(
+                q,
+                K,
+                V,
+                Q_LEN,
+                KV_LEN,
+                acc,
+                l_i,
+                m_i,
+                off_z,
+                off_h,
+                offs_m,
+                full_offs_n,
+                full_kv_start,
+                kv_offset,
+                MATMUL_PRECISION,
+                RCP_LN2,
+                stride_kk,
+                stride_kn,
+                stride_vn,
+                stride_vk,
+                SM_SCALE,
+                IS_FULL_BLOCKS=True,
+                PRESCALE_QK=PRESCALE_QK,
+                ROWS_GUARANTEED_SAFE=ROWS_GUARANTEED_SAFE,
+                IS_DIVISIBLE=IS_DIVISIBLE,
+                QK_HEAD_DIM=QK_HEAD_DIM,
+                QK_HEAD_DIM_ROUNDED=QK_HEAD_DIM_ROUNDED,
+                V_HEAD_DIM=V_HEAD_DIM,
+                V_HEAD_DIM_ROUNDED=V_HEAD_DIM_ROUNDED,
+                SAFE_HEAD_DIM=SAFE_HEAD_DIM,
+                BLOCK_M=BLOCK_M,
+                BLOCK_N=BLOCK_N,
+                FLOAT32_PRECISION=FLOAT32_PRECISION,
+            )
+        else:
+            acc, l_i, m_i = forward_block_mn(
+                q,
+                K,
+                V,
+                Q_LEN,
+                KV_LEN,
+                acc,
+                l_i,
+                m_i,
+                off_z,
+                off_h,
+                offs_m,
+                full_offs_n,
+                full_kv_start,
+                kv_offset,
+                MATMUL_PRECISION,
+                RCP_LN2,
+                stride_kk,
+                stride_kn,
+                stride_vn,
+                stride_vk,
+                SM_SCALE,
+                IS_FULL_BLOCKS=True,
+                CHECK_BLOCK_BOUNDARY=True,
+                PRESCALE_QK=PRESCALE_QK,
+                ROWS_GUARANTEED_SAFE=ROWS_GUARANTEED_SAFE,
+                IS_DIVISIBLE=IS_DIVISIBLE,
+                QK_HEAD_DIM=QK_HEAD_DIM,
+                QK_HEAD_DIM_ROUNDED=QK_HEAD_DIM_ROUNDED,
+                V_HEAD_DIM=V_HEAD_DIM,
+                V_HEAD_DIM_ROUNDED=V_HEAD_DIM_ROUNDED,
+                SAFE_HEAD_DIM=SAFE_HEAD_DIM,
+                BLOCK_M=BLOCK_M,
+                BLOCK_N=BLOCK_N,
+                FLOAT32_PRECISION=FLOAT32_PRECISION,
+            )
+        offset = get_offset_for_next_block(
+            start_n,
+            full_kv_indices,
+            full_kv_num_blocks,
+            SPARSE_KV_BLOCK_SIZE,
+            SPARSE_KV_MULTIPLE,
+            BLOCK_N,
+            BLOCKS_ARE_CONTIGUOUS,
+        )
+        full_offs_n = full_offs_n + offset
         kv_offset += offset
 
     return acc, l_i, m_i
@@ -494,57 +726,62 @@ def flex_attention_fwd_kernel(
     )
     offs_n = kv_start + tl.arange(0, BLOCK_N)
 
-    acc, l_i, m_i = forward_inner(
-        q,
-        K_ptr,
-        V_ptr,
-        Q_LEN,
-        KV_LEN,
-        acc,
-        l_i,
-        m_i,
-        off_zq,
-        off_hq,
-        offs_m[:, None],
-        offs_n[None, :],
-        kv_start,
-        kv_indices,
-        kv_num_blocks,
-        0,
-        block_n_end,
-        MATMUL_PRECISION,
-        stride_kk,
-        stride_kn,
-        stride_vn,
-        stride_vk,
-        SM_SCALE,
-        IS_FULL_BLOCKS=False,
-        PRESCALE_QK=PRESCALE_QK,
-        ROWS_GUARANTEED_SAFE=ROWS_GUARANTEED_SAFE,
-        BLOCKS_ARE_CONTIGUOUS=BLOCKS_ARE_CONTIGUOUS,
-        IS_DIVISIBLE=IS_DIVISIBLE,
-        QK_HEAD_DIM=QK_HEAD_DIM,
-        QK_HEAD_DIM_ROUNDED=QK_HEAD_DIM_ROUNDED,
-        V_HEAD_DIM=V_HEAD_DIM,
-        V_HEAD_DIM_ROUNDED=V_HEAD_DIM_ROUNDED,
-        SAFE_HEAD_DIM=SAFE_HEAD_DIM,
-        BLOCK_M=BLOCK_M,
-        BLOCK_N=BLOCK_N,
-        SPARSE_KV_BLOCK_SIZE=SPARSE_KV_BLOCK_SIZE,
-        FLOAT32_PRECISION=FLOAT32_PRECISION,
-    )
-
-    # ── Full blocks (only score_mod, skip mask_mod) ──
     if HAS_FULL_BLOCKS:
-        kv_indices = FULL_KV_IDX + sparse_kv_idx_offset
-        kv_start = tl.load(kv_indices) * SPARSE_KV_BLOCK_SIZE
-        kv_num_blocks = tl.load(FULL_KV_NUM_BLKS + sparse_kv_num_blks_offset)
-        block_n_end = tl.minimum(
-            kv_num_blocks * SPARSE_KV_MULTIPLE,
+        # Full block setup
+        full_kv_indices = FULL_KV_IDX + sparse_kv_idx_offset
+        full_kv_start = tl.load(full_kv_indices) * SPARSE_KV_BLOCK_SIZE
+        full_kv_num_blocks = tl.load(FULL_KV_NUM_BLKS + sparse_kv_num_blks_offset)
+        full_block_n_end = tl.minimum(
+            full_kv_num_blocks * SPARSE_KV_MULTIPLE,
             tl.maximum(tl.cdiv(KV_LEN, BLOCK_N), 1),
         )
-        offs_n = kv_start + tl.arange(0, BLOCK_N)
+        full_offs_n = full_kv_start + tl.arange(0, BLOCK_N)
 
+        acc, l_i, m_i = forward_inner_with_full_blocks(
+            q,
+            K_ptr,
+            V_ptr,
+            Q_LEN,
+            KV_LEN,
+            acc,
+            l_i,
+            m_i,
+            off_zq,
+            off_hq,
+            offs_m[:, None],
+            # Partial block data
+            offs_n[None, :],
+            kv_start,
+            kv_indices,
+            kv_num_blocks,
+            block_n_end,
+            # Full block data
+            full_offs_n[None, :],
+            full_kv_start,
+            full_kv_indices,
+            full_kv_num_blocks,
+            full_block_n_end,
+            MATMUL_PRECISION,
+            stride_kk,
+            stride_kn,
+            stride_vn,
+            stride_vk,
+            SM_SCALE,
+            PRESCALE_QK=PRESCALE_QK,
+            ROWS_GUARANTEED_SAFE=ROWS_GUARANTEED_SAFE,
+            BLOCKS_ARE_CONTIGUOUS=BLOCKS_ARE_CONTIGUOUS,
+            IS_DIVISIBLE=IS_DIVISIBLE,
+            QK_HEAD_DIM=QK_HEAD_DIM,
+            QK_HEAD_DIM_ROUNDED=QK_HEAD_DIM_ROUNDED,
+            V_HEAD_DIM=V_HEAD_DIM,
+            V_HEAD_DIM_ROUNDED=V_HEAD_DIM_ROUNDED,
+            SAFE_HEAD_DIM=SAFE_HEAD_DIM,
+            BLOCK_M=BLOCK_M,
+            BLOCK_N=BLOCK_N,
+            SPARSE_KV_BLOCK_SIZE=SPARSE_KV_BLOCK_SIZE,
+            FLOAT32_PRECISION=FLOAT32_PRECISION,
+        )
+    else:
         acc, l_i, m_i = forward_inner(
             q,
             K_ptr,
@@ -569,7 +806,7 @@ def flex_attention_fwd_kernel(
             stride_vn,
             stride_vk,
             SM_SCALE,
-            IS_FULL_BLOCKS=True,
+            IS_FULL_BLOCKS=False,
             PRESCALE_QK=PRESCALE_QK,
             ROWS_GUARANTEED_SAFE=ROWS_GUARANTEED_SAFE,
             BLOCKS_ARE_CONTIGUOUS=BLOCKS_ARE_CONTIGUOUS,
