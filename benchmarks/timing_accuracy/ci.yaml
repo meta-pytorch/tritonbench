@@ -1,9 +1,9 @@
 # Measure the stableness of timing_accuracy with TLX benchmarks
 common_args: --launch benchmarks.timing_accuracy.run
-bf16_gemm_fwd:
+bf16_gemm_aten_matmul_fwd:
   op: gemm
-  args: --op gemm --only tlx_matmul_ws,tlx_matmul_clc,tlx_matmul_2cta,tlx_matmul_pipelined --precision bf16
+  args: --op gemm --only aten_matmul --precision bf16
 
-fp16_gemm_fwd:
+bf16_gemm_tlx_matmul_ws_fwd:
   op: gemm
-  args: --op gemm --only tlx_matmul_ws,tlx_matmul_clc,tlx_matmul_2cta,tlx_matmul_pipelined --precision fp16
+  args: --op gemm --only tlx_matmul_ws --precision bf16
