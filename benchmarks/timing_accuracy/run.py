@@ -397,7 +397,7 @@ def transform_single_result(result) -> Dict[str, Any]:
     mode = result["config"]["mode"]
     backend = result["config"]["backend"]
     input_id = result["config"]["input_id"]
-    prefix = f"tritonbench_{op_name}_{mode}[input_id_{input_id}-{backend}]-"
+    prefix = f"tritonbench_{op_name}_{mode}[x_{input_id}-{backend}]_"
     out[f"{prefix}precision"] = result["config"]["precision"]
     out[f"{prefix}warmup"] = result["config"]["warmup"]
     out[f"{prefix}ntests"] = result["config"]["n_tests"]
