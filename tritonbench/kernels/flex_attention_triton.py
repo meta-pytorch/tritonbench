@@ -6,6 +6,11 @@ Triton template, but as a self-contained file with native Triton autotuning.
 It supports block-sparse attention via BlockMask from torch.nn.attention.flex_attention.
 
 Currently implements causal mask only (mask_mod: m >= n).
+
+Supports three modes:
+- Standard: strided pointer loads (default)
+- TMA: tensor descriptor loads via tl.make_tensor_descriptor (USE_TMA=True)
+- Persistent: TMA + round-robin tile scheduling across SMs (persistent=True)
 """
 
 import math
@@ -15,16 +20,80 @@ import triton
 import triton.language as tl
 
 
-# ─── Autotune configs (same as Inductor's max-autotune flex attention fwd) ────
+# ─── Autotune configs ─────────────────────────────────────────────────────────
+
+
+# Check if Triton version supports minRegAutoWS and maxRegAutoWS
+def _supports_reg_auto_ws():
+    try:
+        triton.Config({}, minRegAutoWS=24, maxRegAutoWS=152)
+        return True
+    except (TypeError, AttributeError):
+        return False
+
+
+HAS_REG_AUTO_WS = _supports_reg_auto_ws()
+
+
 def get_fwd_configs():
     configs = []
     for BLOCK_M, BLOCK_N, num_stages, num_warps in [
-        # (128, 64, 3, 4),
-        # (128, 128, 3, 4),
-        # (128, 128, 2, 8),
+        (128, 64, 3, 4),
+        (128, 128, 3, 4),
+        (128, 128, 2, 8),
         (128, 128, 1, 8),
-        # (64, 128, 3, 4),
-        # (64, 64, 3, 4),
+        (64, 128, 3, 4),
+        (64, 64, 3, 4),
+    ]:
+        configs.append(
+            triton.Config(
+                {"BLOCK_M": BLOCK_M, "BLOCK_N": BLOCK_N},
+                num_stages=num_stages,
+                num_warps=num_warps,
+            )
+        )
+    return configs
+
+
+def get_ws_configs():
+    """Configs for warp-specialized kernels, following the Blackwell FA reference."""
+    configs = []
+    for BLOCK_M, BLOCK_N, num_stages, num_warps, maxreg in [
+        (128, 64, 2, 4, 152),
+        (128, 64, 3, 4, 152),
+        (128, 128, 2, 4, 152),
+        (128, 128, 3, 4, 152),
+        (128, 128, 2, 4, 192),
+        (128, 128, 3, 4, 192),
+        (64, 128, 2, 4, 152),
+        (64, 128, 3, 4, 152),
+        (64, 64, 2, 4, 152),
+        (64, 64, 3, 4, 152),
+        # (256, 64, 2, 4, 152),   # may OOR on TMEM
+        # (256, 128, 2, 4, 192),  # may OOR on TMEM
+    ]:
+        extra_kwargs = dict(num_stages=num_stages, num_warps=num_warps)
+        if HAS_REG_AUTO_WS:
+            extra_kwargs["minRegAutoWS"] = 24
+            extra_kwargs["maxRegAutoWS"] = maxreg
+        configs.append(
+            triton.Config(
+                {"BLOCK_M": BLOCK_M, "BLOCK_N": BLOCK_N},
+                **extra_kwargs,
+            )
+        )
+    return configs
+
+
+def get_persistent_configs():
+    configs = []
+    for BLOCK_M, BLOCK_N, num_stages, num_warps in [
+        (128, 64, 3, 4),
+        (128, 128, 3, 4),
+        (128, 128, 2, 8),
+        (128, 128, 1, 8),
+        (64, 128, 3, 4),
+        (64, 64, 3, 4),
     ]:
         configs.append(
             triton.Config(
@@ -108,6 +177,8 @@ def forward_block_mn(
     q,
     K,
     V,
+    desc_k,
+    desc_v,
     Q_LEN,
     KV_LEN,
     acc,
@@ -139,32 +210,34 @@ def forward_block_mn(
     BLOCK_M: tl.constexpr = 128,
     BLOCK_N: tl.constexpr = 64,
     FLOAT32_PRECISION: tl.constexpr = "ieee",
+    USE_TMA: tl.constexpr = False,
 ):
     kv_base_offset = kv_start + kv_offset
 
-    # Load K as [BLOCK_N, QK_HEAD_DIM_ROUNDED] then transpose
-    offs_k = tl.arange(0, QK_HEAD_DIM_ROUNDED)
-    offs_n_load = kv_base_offset + tl.arange(0, BLOCK_N)
-    k = load_checked_2d(
-        K,
-        offs_n_load,
-        offs_k,
-        stride_kn,
-        stride_kk,
-        IS_DIVISIBLE,
-        SAFE_HEAD_DIM,
-        KV_LEN,
-        QK_HEAD_DIM,
-    )
+    if USE_TMA:
+        k = tl.load_tensor_descriptor(desc_k, [kv_base_offset, 0])
+    else:
+        offs_k = tl.arange(0, QK_HEAD_DIM_ROUNDED)
+        offs_n_load = kv_base_offset + tl.arange(0, BLOCK_N)
+        k = load_checked_2d(
+            K,
+            offs_n_load,
+            offs_k,
+            stride_kn,
+            stride_kk,
+            IS_DIVISIBLE,
+            SAFE_HEAD_DIM,
+            KV_LEN,
+            QK_HEAD_DIM,
+        )
+
     k = tl.trans(k)
     k = k.to(q.dtype)
 
-    # QK dot product
     qk = tl.dot(q, k, input_precision=FLOAT32_PRECISION)
     if not PRESCALE_QK:
         qk *= SM_SCALE
 
-    # Score mod (identity for causal — score passes through unchanged)
     m = get_bounded_indices(offs_m, Q_LEN if CHECK_BLOCK_BOUNDARY else None)
     n = get_bounded_indices(offs_n, KV_LEN if CHECK_BLOCK_BOUNDARY else None)
     post_mod_scores = qk
@@ -196,19 +269,24 @@ def forward_block_mn(
     l_i = l_i * alpha + tl.sum(p, 1)
     acc = acc * alpha[:, None]
 
-    # Load V and accumulate
-    offs_v = tl.arange(0, V_HEAD_DIM_ROUNDED)
-    v = load_checked_2d(
-        V,
-        offs_n_load,
-        offs_v,
-        stride_vn,
-        stride_vk,
-        IS_DIVISIBLE,
-        SAFE_HEAD_DIM,
-        KV_LEN,
-        V_HEAD_DIM,
-    )
+    if USE_TMA:
+        v = tl.load_tensor_descriptor(desc_v, [kv_base_offset, 0])
+    else:
+        if not USE_TMA:
+            offs_v = tl.arange(0, V_HEAD_DIM_ROUNDED)
+            offs_n_load_v = kv_base_offset + tl.arange(0, BLOCK_N)
+            v = load_checked_2d(
+                V,
+                offs_n_load_v,
+                offs_v,
+                stride_vn,
+                stride_vk,
+                IS_DIVISIBLE,
+                SAFE_HEAD_DIM,
+                KV_LEN,
+                V_HEAD_DIM,
+            )
+
     acc = tl.dot(
         p.to(MATMUL_PRECISION), v.to(q.dtype), acc, input_precision=FLOAT32_PRECISION
     )
@@ -225,6 +303,8 @@ def forward_inner(
     q,
     K,
     V,
+    desc_k,
+    desc_v,
     Q_LEN,
     KV_LEN,
     acc,
@@ -259,6 +339,8 @@ def forward_inner(
     BLOCK_N: tl.constexpr = 64,
     SPARSE_KV_BLOCK_SIZE: tl.constexpr = 128,
     FLOAT32_PRECISION: tl.constexpr = "ieee",
+    USE_TMA: tl.constexpr = False,
+    WARP_SPECIALIZE: tl.constexpr = False,
 ):
     """Iterate over a single set of KV blocks (partial or full only)."""
     SPARSE_KV_MULTIPLE: tl.constexpr = SPARSE_KV_BLOCK_SIZE // BLOCK_N
@@ -269,12 +351,16 @@ def forward_inner(
 
     kv_offset = 0
 
-    for start_n in range(block_n_start, block_n_end):
+    for start_n in tl.range(
+        block_n_start, block_n_end, warp_specialize=WARP_SPECIALIZE
+    ):
         if IS_DIVISIBLE:
             acc, l_i, m_i = forward_block_mn(
                 q,
                 K,
                 V,
+                desc_k,
+                desc_v,
                 Q_LEN,
                 KV_LEN,
                 acc,
@@ -305,12 +391,15 @@ def forward_inner(
                 BLOCK_M=BLOCK_M,
                 BLOCK_N=BLOCK_N,
                 FLOAT32_PRECISION=FLOAT32_PRECISION,
+                USE_TMA=USE_TMA,
             )
         else:
             acc, l_i, m_i = forward_block_mn(
                 q,
                 K,
                 V,
+                desc_k,
+                desc_v,
                 Q_LEN,
                 KV_LEN,
                 acc,
@@ -342,6 +431,7 @@ def forward_inner(
                 BLOCK_M=BLOCK_M,
                 BLOCK_N=BLOCK_N,
                 FLOAT32_PRECISION=FLOAT32_PRECISION,
+                USE_TMA=USE_TMA,
             )
 
         offset = get_offset_for_next_block(
@@ -364,6 +454,8 @@ def forward_inner_with_full_blocks(
     q,
     K,
     V,
+    desc_k,
+    desc_v,
     Q_LEN,
     KV_LEN,
     acc,
@@ -403,6 +495,8 @@ def forward_inner_with_full_blocks(
     BLOCK_N: tl.constexpr = 64,
     SPARSE_KV_BLOCK_SIZE: tl.constexpr = 128,
     FLOAT32_PRECISION: tl.constexpr = "ieee",
+    USE_TMA: tl.constexpr = False,
+    WARP_SPECIALIZE: tl.constexpr = False,
 ):
     """Iterate over both partial and full KV blocks in a single merged loop."""
     SPARSE_KV_MULTIPLE: tl.constexpr = SPARSE_KV_BLOCK_SIZE // BLOCK_N
@@ -413,17 +507,15 @@ def forward_inner_with_full_blocks(
 
     total_iters = partial_block_n_end + full_block_n_end
 
-    # State for both phases — starts with partial block state
     offs_n = partial_offs_n
     kv_start = partial_kv_start
     kv_indices = partial_kv_indices
     kv_num_blocks = partial_kv_num_blocks
     kv_offset = 0
 
-    for start_n in range(0, total_iters):
+    for start_n in tl.range(0, total_iters, warp_specialize=WARP_SPECIALIZE):
         is_full = start_n >= partial_block_n_end
 
-        # At the phase boundary, switch to full block state
         if start_n == partial_block_n_end:
             offs_n = full_offs_n
             kv_start = full_kv_start
@@ -436,6 +528,8 @@ def forward_inner_with_full_blocks(
                 q,
                 K,
                 V,
+                desc_k,
+                desc_v,
                 Q_LEN,
                 KV_LEN,
                 acc,
@@ -466,12 +560,15 @@ def forward_inner_with_full_blocks(
                 BLOCK_M=BLOCK_M,
                 BLOCK_N=BLOCK_N,
                 FLOAT32_PRECISION=FLOAT32_PRECISION,
+                USE_TMA=USE_TMA,
             )
         else:
             acc, l_i, m_i = forward_block_mn(
                 q,
                 K,
                 V,
+                desc_k,
+                desc_v,
                 Q_LEN,
                 KV_LEN,
                 acc,
@@ -503,6 +600,7 @@ def forward_inner_with_full_blocks(
                 BLOCK_M=BLOCK_M,
                 BLOCK_N=BLOCK_N,
                 FLOAT32_PRECISION=FLOAT32_PRECISION,
+                USE_TMA=USE_TMA,
             )
 
         offset = get_offset_for_next_block(
@@ -520,12 +618,11 @@ def forward_inner_with_full_blocks(
     return acc, l_i, m_i
 
 
-# ─── Main kernel entry point ─────────────────────────────────────────────────
+# ─── Shared tile body (used by both standard and persistent kernels) ─────────
 
 
-@triton.autotune(configs=get_fwd_configs(), key=["Q_LEN", "KV_LEN"])
 @triton.jit
-def flex_attention_fwd_kernel(
+def _flex_attention_fwd_tile(
     Q,
     K,
     V,
@@ -535,7 +632,6 @@ def flex_attention_fwd_kernel(
     KV_IDX,
     FULL_KV_NUM_BLKS,
     FULL_KV_IDX,
-    # Strides
     stride_qz,
     stride_qh,
     stride_qm,
@@ -552,18 +648,18 @@ def flex_attention_fwd_kernel(
     stride_oh,
     stride_om,
     stride_ok,
-    # Block mask strides
     stride_kv_num_blks_h,
     stride_kv_idx_h,
     stride_kv_idx_m,
-    # Dimensions
     ZQ,
     HQ,
     Q_LEN,
     ZKV,
     KV_LEN,
     SM_SCALE,
-    # Constexpr
+    q_start,
+    off_zq,
+    off_hq,
     GQA_SHARED_HEADS: tl.constexpr = 1,
     HAS_FULL_BLOCKS: tl.constexpr = True,
     QK_HEAD_DIM: tl.constexpr = 128,
@@ -580,21 +676,13 @@ def flex_attention_fwd_kernel(
     BLOCK_M: tl.constexpr = 128,
     BLOCK_N: tl.constexpr = 64,
     FLOAT32_PRECISION: tl.constexpr = "ieee",
+    USE_TMA: tl.constexpr = False,
+    WARP_SPECIALIZE: tl.constexpr = False,
 ):
+    """Process one Q-tile. Shared by standard and persistent kernels."""
     INDEX_DTYPE: tl.constexpr = tl.int32
 
-    tl.static_assert(
-        SPARSE_Q_BLOCK_SIZE >= BLOCK_M and SPARSE_Q_BLOCK_SIZE % BLOCK_M == 0
-    )
-    tl.static_assert(
-        SPARSE_KV_BLOCK_SIZE >= BLOCK_N and SPARSE_KV_BLOCK_SIZE % BLOCK_N == 0
-    )
-
     MATMUL_PRECISION = Q.dtype.element_ty
-
-    q_start = tl.program_id(0).to(INDEX_DTYPE)
-    off_zq = tl.program_id(1).to(INDEX_DTYPE)
-    off_hq = tl.program_id(2).to(INDEX_DTYPE)
 
     off_zkv = off_zq % ZKV
     off_hkv = off_hq // GQA_SHARED_HEADS
@@ -606,6 +694,23 @@ def flex_attention_fwd_kernel(
     Q_ptr = Q + q_offset
     K_ptr = K + k_offset
     V_ptr = V + v_offset
+
+    # TMA descriptors (None if not using TMA)
+    desc_k = None
+    desc_v = None
+    if USE_TMA:
+        desc_k = tl.make_tensor_descriptor(
+            K_ptr,
+            shape=[KV_LEN, QK_HEAD_DIM],
+            strides=[stride_kn, 1],
+            block_shape=[BLOCK_N, QK_HEAD_DIM_ROUNDED],
+        )
+        desc_v = tl.make_tensor_descriptor(
+            V_ptr,
+            shape=[KV_LEN, V_HEAD_DIM],
+            strides=[stride_vn, 1],
+            block_shape=[BLOCK_N, V_HEAD_DIM_ROUNDED],
+        )
 
     SPARSE_Z: tl.constexpr = 1
     SPARSE_HQ: tl.constexpr = 1
@@ -634,20 +739,29 @@ def flex_attention_fwd_kernel(
     )
 
     # Load Q tile
-    offs_k = tl.arange(0, QK_HEAD_DIM_ROUNDED)
-    q = load_checked_2d(
-        Q_ptr,
-        offs_m,
-        offs_k,
-        stride_qm,
-        stride_qk,
-        IS_DIVISIBLE,
-        SAFE_HEAD_DIM,
-        Q_LEN,
-        QK_HEAD_DIM,
-    )
+    if USE_TMA:
+        desc_q = tl.make_tensor_descriptor(
+            Q_ptr,
+            shape=[Q_LEN, QK_HEAD_DIM],
+            strides=[stride_qm, 1],
+            block_shape=[BLOCK_M, QK_HEAD_DIM_ROUNDED],
+        )
+        q = tl.load_tensor_descriptor(desc_q, [(q_start * BLOCK_M).to(tl.int32), 0])
+    else:
+        offs_k = tl.arange(0, QK_HEAD_DIM_ROUNDED)
+        q = load_checked_2d(
+            Q_ptr,
+            offs_m,
+            offs_k,
+            stride_qm,
+            stride_qk,
+            IS_DIVISIBLE,
+            SAFE_HEAD_DIM,
+            Q_LEN,
+            QK_HEAD_DIM,
+        )
 
-    # ── Partial blocks (need both score_mod and mask_mod) ──
+    # Partial blocks
     kv_indices = KV_IDX + sparse_kv_idx_offset
     kv_start = tl.load(kv_indices) * SPARSE_KV_BLOCK_SIZE
     kv_num_blocks = tl.load(KV_NUM_BLKS + sparse_kv_num_blks_offset)
@@ -657,7 +771,6 @@ def flex_attention_fwd_kernel(
     offs_n = kv_start + tl.arange(0, BLOCK_N)
 
     if HAS_FULL_BLOCKS:
-        # Full block setup
         full_kv_indices = FULL_KV_IDX + sparse_kv_idx_offset
         full_kv_start = tl.load(full_kv_indices) * SPARSE_KV_BLOCK_SIZE
         full_kv_num_blocks = tl.load(FULL_KV_NUM_BLKS + sparse_kv_num_blks_offset)
@@ -671,6 +784,8 @@ def flex_attention_fwd_kernel(
             q,
             K_ptr,
             V_ptr,
+            desc_k,
+            desc_v,
             Q_LEN,
             KV_LEN,
             acc,
@@ -679,13 +794,11 @@ def flex_attention_fwd_kernel(
             off_zq,
             off_hq,
             offs_m[:, None],
-            # Partial block data
             offs_n[None, :],
             kv_start,
             kv_indices,
             kv_num_blocks,
             block_n_end,
-            # Full block data
             full_offs_n[None, :],
             full_kv_start,
             full_kv_indices,
@@ -710,12 +823,16 @@ def flex_attention_fwd_kernel(
             BLOCK_N=BLOCK_N,
             SPARSE_KV_BLOCK_SIZE=SPARSE_KV_BLOCK_SIZE,
             FLOAT32_PRECISION=FLOAT32_PRECISION,
+            USE_TMA=USE_TMA,
+            WARP_SPECIALIZE=WARP_SPECIALIZE,
         )
     else:
         acc, l_i, m_i = forward_inner(
             q,
             K_ptr,
             V_ptr,
+            desc_k,
+            desc_v,
             Q_LEN,
             KV_LEN,
             acc,
@@ -750,6 +867,8 @@ def flex_attention_fwd_kernel(
             BLOCK_N=BLOCK_N,
             SPARSE_KV_BLOCK_SIZE=SPARSE_KV_BLOCK_SIZE,
             FLOAT32_PRECISION=FLOAT32_PRECISION,
+            USE_TMA=USE_TMA,
+            WARP_SPECIALIZE=WARP_SPECIALIZE,
         )
 
     # Handle fully masked out rows
@@ -757,8 +876,8 @@ def flex_attention_fwd_kernel(
     acc = acc / l_i[:, None]
 
     # Store output
-    idx_zq = tl.program_id(1).to(INDEX_DTYPE)
-    idx_hq = tl.program_id(2).to(INDEX_DTYPE)
+    idx_zq = off_zq.to(INDEX_DTYPE)
+    idx_hq = off_hq.to(INDEX_DTYPE)
     idx_m = offs_m[:, None].to(INDEX_DTYPE)
     idx_d = tl.arange(0, V_HEAD_DIM_ROUNDED)[None, :].to(INDEX_DTYPE)
 
@@ -782,6 +901,392 @@ def flex_attention_fwd_kernel(
         tl.store(l_ptrs, lse, mask=offs_m < Q_LEN)
 
 
+# ─── Standard kernel entry point ─────────────────────────────────────────────
+
+
+@triton.autotune(configs=get_fwd_configs(), key=["Q_LEN", "KV_LEN"])
+@triton.jit
+def flex_attention_fwd_kernel(
+    Q,
+    K,
+    V,
+    Out,
+    LSE,
+    KV_NUM_BLKS,
+    KV_IDX,
+    FULL_KV_NUM_BLKS,
+    FULL_KV_IDX,
+    stride_qz,
+    stride_qh,
+    stride_qm,
+    stride_qk,
+    stride_kz,
+    stride_kh,
+    stride_kn,
+    stride_kk,
+    stride_vz,
+    stride_vh,
+    stride_vn,
+    stride_vk,
+    stride_oz,
+    stride_oh,
+    stride_om,
+    stride_ok,
+    stride_kv_num_blks_h,
+    stride_kv_idx_h,
+    stride_kv_idx_m,
+    ZQ,
+    HQ,
+    Q_LEN,
+    ZKV,
+    KV_LEN,
+    SM_SCALE,
+    GQA_SHARED_HEADS: tl.constexpr = 1,
+    HAS_FULL_BLOCKS: tl.constexpr = True,
+    QK_HEAD_DIM: tl.constexpr = 128,
+    QK_HEAD_DIM_ROUNDED: tl.constexpr = 128,
+    V_HEAD_DIM: tl.constexpr = 128,
+    V_HEAD_DIM_ROUNDED: tl.constexpr = 128,
+    SAFE_HEAD_DIM: tl.constexpr = True,
+    PRESCALE_QK: tl.constexpr = False,
+    ROWS_GUARANTEED_SAFE: tl.constexpr = False,
+    BLOCKS_ARE_CONTIGUOUS: tl.constexpr = False,
+    IS_DIVISIBLE: tl.constexpr = True,
+    SPARSE_Q_BLOCK_SIZE: tl.constexpr = 128,
+    SPARSE_KV_BLOCK_SIZE: tl.constexpr = 128,
+    BLOCK_M: tl.constexpr = 128,
+    BLOCK_N: tl.constexpr = 64,
+    FLOAT32_PRECISION: tl.constexpr = "ieee",
+    USE_TMA: tl.constexpr = False,
+    WARP_SPECIALIZE: tl.constexpr = False,
+):
+    INDEX_DTYPE: tl.constexpr = tl.int32
+    q_start = tl.program_id(0)
+    off_zq = tl.program_id(1).to(INDEX_DTYPE)
+    off_hq = tl.program_id(2).to(INDEX_DTYPE)
+
+    _flex_attention_fwd_tile(
+        Q,
+        K,
+        V,
+        Out,
+        LSE,
+        KV_NUM_BLKS,
+        KV_IDX,
+        FULL_KV_NUM_BLKS,
+        FULL_KV_IDX,
+        stride_qz,
+        stride_qh,
+        stride_qm,
+        stride_qk,
+        stride_kz,
+        stride_kh,
+        stride_kn,
+        stride_kk,
+        stride_vz,
+        stride_vh,
+        stride_vn,
+        stride_vk,
+        stride_oz,
+        stride_oh,
+        stride_om,
+        stride_ok,
+        stride_kv_num_blks_h,
+        stride_kv_idx_h,
+        stride_kv_idx_m,
+        ZQ,
+        HQ,
+        Q_LEN,
+        ZKV,
+        KV_LEN,
+        SM_SCALE,
+        q_start,
+        off_zq,
+        off_hq,
+        GQA_SHARED_HEADS=GQA_SHARED_HEADS,
+        HAS_FULL_BLOCKS=HAS_FULL_BLOCKS,
+        QK_HEAD_DIM=QK_HEAD_DIM,
+        QK_HEAD_DIM_ROUNDED=QK_HEAD_DIM_ROUNDED,
+        V_HEAD_DIM=V_HEAD_DIM,
+        V_HEAD_DIM_ROUNDED=V_HEAD_DIM_ROUNDED,
+        SAFE_HEAD_DIM=SAFE_HEAD_DIM,
+        PRESCALE_QK=PRESCALE_QK,
+        ROWS_GUARANTEED_SAFE=ROWS_GUARANTEED_SAFE,
+        BLOCKS_ARE_CONTIGUOUS=BLOCKS_ARE_CONTIGUOUS,
+        IS_DIVISIBLE=IS_DIVISIBLE,
+        SPARSE_Q_BLOCK_SIZE=SPARSE_Q_BLOCK_SIZE,
+        SPARSE_KV_BLOCK_SIZE=SPARSE_KV_BLOCK_SIZE,
+        BLOCK_M=BLOCK_M,
+        BLOCK_N=BLOCK_N,
+        FLOAT32_PRECISION=FLOAT32_PRECISION,
+        USE_TMA=USE_TMA,
+        WARP_SPECIALIZE=WARP_SPECIALIZE,
+    )
+
+
+# ─── WS kernel entry point (separate autotune configs for warp specialization)
+
+
+@triton.autotune(configs=get_ws_configs(), key=["Q_LEN", "KV_LEN"])
+@triton.jit
+def flex_attention_fwd_kernel_ws(
+    Q,
+    K,
+    V,
+    Out,
+    LSE,
+    KV_NUM_BLKS,
+    KV_IDX,
+    FULL_KV_NUM_BLKS,
+    FULL_KV_IDX,
+    stride_qz,
+    stride_qh,
+    stride_qm,
+    stride_qk,
+    stride_kz,
+    stride_kh,
+    stride_kn,
+    stride_kk,
+    stride_vz,
+    stride_vh,
+    stride_vn,
+    stride_vk,
+    stride_oz,
+    stride_oh,
+    stride_om,
+    stride_ok,
+    stride_kv_num_blks_h,
+    stride_kv_idx_h,
+    stride_kv_idx_m,
+    ZQ,
+    HQ,
+    Q_LEN,
+    ZKV,
+    KV_LEN,
+    SM_SCALE,
+    GQA_SHARED_HEADS: tl.constexpr = 1,
+    HAS_FULL_BLOCKS: tl.constexpr = True,
+    QK_HEAD_DIM: tl.constexpr = 128,
+    QK_HEAD_DIM_ROUNDED: tl.constexpr = 128,
+    V_HEAD_DIM: tl.constexpr = 128,
+    V_HEAD_DIM_ROUNDED: tl.constexpr = 128,
+    SAFE_HEAD_DIM: tl.constexpr = True,
+    PRESCALE_QK: tl.constexpr = False,
+    ROWS_GUARANTEED_SAFE: tl.constexpr = False,
+    BLOCKS_ARE_CONTIGUOUS: tl.constexpr = False,
+    IS_DIVISIBLE: tl.constexpr = True,
+    SPARSE_Q_BLOCK_SIZE: tl.constexpr = 128,
+    SPARSE_KV_BLOCK_SIZE: tl.constexpr = 128,
+    BLOCK_M: tl.constexpr = 128,
+    BLOCK_N: tl.constexpr = 64,
+    FLOAT32_PRECISION: tl.constexpr = "ieee",
+    USE_TMA: tl.constexpr = True,
+    WARP_SPECIALIZE: tl.constexpr = True,
+):
+    INDEX_DTYPE: tl.constexpr = tl.int32
+    q_start = tl.program_id(0)
+    off_zq = tl.program_id(1).to(INDEX_DTYPE)
+    off_hq = tl.program_id(2).to(INDEX_DTYPE)
+
+    _flex_attention_fwd_tile(
+        Q,
+        K,
+        V,
+        Out,
+        LSE,
+        KV_NUM_BLKS,
+        KV_IDX,
+        FULL_KV_NUM_BLKS,
+        FULL_KV_IDX,
+        stride_qz,
+        stride_qh,
+        stride_qm,
+        stride_qk,
+        stride_kz,
+        stride_kh,
+        stride_kn,
+        stride_kk,
+        stride_vz,
+        stride_vh,
+        stride_vn,
+        stride_vk,
+        stride_oz,
+        stride_oh,
+        stride_om,
+        stride_ok,
+        stride_kv_num_blks_h,
+        stride_kv_idx_h,
+        stride_kv_idx_m,
+        ZQ,
+        HQ,
+        Q_LEN,
+        ZKV,
+        KV_LEN,
+        SM_SCALE,
+        q_start,
+        off_zq,
+        off_hq,
+        GQA_SHARED_HEADS=GQA_SHARED_HEADS,
+        HAS_FULL_BLOCKS=HAS_FULL_BLOCKS,
+        QK_HEAD_DIM=QK_HEAD_DIM,
+        QK_HEAD_DIM_ROUNDED=QK_HEAD_DIM_ROUNDED,
+        V_HEAD_DIM=V_HEAD_DIM,
+        V_HEAD_DIM_ROUNDED=V_HEAD_DIM_ROUNDED,
+        SAFE_HEAD_DIM=SAFE_HEAD_DIM,
+        PRESCALE_QK=PRESCALE_QK,
+        ROWS_GUARANTEED_SAFE=ROWS_GUARANTEED_SAFE,
+        BLOCKS_ARE_CONTIGUOUS=BLOCKS_ARE_CONTIGUOUS,
+        IS_DIVISIBLE=IS_DIVISIBLE,
+        SPARSE_Q_BLOCK_SIZE=SPARSE_Q_BLOCK_SIZE,
+        SPARSE_KV_BLOCK_SIZE=SPARSE_KV_BLOCK_SIZE,
+        BLOCK_M=BLOCK_M,
+        BLOCK_N=BLOCK_N,
+        FLOAT32_PRECISION=FLOAT32_PRECISION,
+        USE_TMA=USE_TMA,
+        WARP_SPECIALIZE=WARP_SPECIALIZE,
+    )
+
+
+# ─── Persistent kernel entry point
+
+
+@triton.autotune(configs=get_persistent_configs(), key=["Q_LEN", "KV_LEN"])
+@triton.jit
+def flex_attention_fwd_kernel_persistent(
+    Q,
+    K,
+    V,
+    Out,
+    LSE,
+    KV_NUM_BLKS,
+    KV_IDX,
+    FULL_KV_NUM_BLKS,
+    FULL_KV_IDX,
+    stride_qz,
+    stride_qh,
+    stride_qm,
+    stride_qk,
+    stride_kz,
+    stride_kh,
+    stride_kn,
+    stride_kk,
+    stride_vz,
+    stride_vh,
+    stride_vn,
+    stride_vk,
+    stride_oz,
+    stride_oh,
+    stride_om,
+    stride_ok,
+    stride_kv_num_blks_h,
+    stride_kv_idx_h,
+    stride_kv_idx_m,
+    ZQ,
+    HQ,
+    Q_LEN,
+    ZKV,
+    KV_LEN,
+    SM_SCALE,
+    NUM_SMS,
+    GQA_SHARED_HEADS: tl.constexpr = 1,
+    HAS_FULL_BLOCKS: tl.constexpr = True,
+    QK_HEAD_DIM: tl.constexpr = 128,
+    QK_HEAD_DIM_ROUNDED: tl.constexpr = 128,
+    V_HEAD_DIM: tl.constexpr = 128,
+    V_HEAD_DIM_ROUNDED: tl.constexpr = 128,
+    SAFE_HEAD_DIM: tl.constexpr = True,
+    PRESCALE_QK: tl.constexpr = False,
+    ROWS_GUARANTEED_SAFE: tl.constexpr = False,
+    BLOCKS_ARE_CONTIGUOUS: tl.constexpr = False,
+    IS_DIVISIBLE: tl.constexpr = True,
+    SPARSE_Q_BLOCK_SIZE: tl.constexpr = 128,
+    SPARSE_KV_BLOCK_SIZE: tl.constexpr = 128,
+    BLOCK_M: tl.constexpr = 128,
+    BLOCK_N: tl.constexpr = 64,
+    FLOAT32_PRECISION: tl.constexpr = "ieee",
+    WARP_SPECIALIZE: tl.constexpr = False,
+):
+    INDEX_DTYPE: tl.constexpr = tl.int32
+
+    prog_id = tl.program_id(0)
+    num_progs = tl.num_programs(0).to(INDEX_DTYPE)
+
+    n_tile_num = tl.cdiv(Q_LEN, BLOCK_M)
+    total_tiles = n_tile_num * ZQ * HQ
+
+    tiles_per_sm = total_tiles // num_progs
+    if prog_id < total_tiles % num_progs:
+        tiles_per_sm += 1
+
+    tile_idx = prog_id
+
+    for _ in tl.range(0, tiles_per_sm, warp_specialize=WARP_SPECIALIZE):
+        q_start = (tile_idx % n_tile_num).to(INDEX_DTYPE)
+        off_hz = tile_idx // n_tile_num
+        off_zq = (off_hz // HQ).to(INDEX_DTYPE)
+        off_hq = (off_hz % HQ).to(INDEX_DTYPE)
+
+        _flex_attention_fwd_tile(
+            Q,
+            K,
+            V,
+            Out,
+            LSE,
+            KV_NUM_BLKS,
+            KV_IDX,
+            FULL_KV_NUM_BLKS,
+            FULL_KV_IDX,
+            stride_qz,
+            stride_qh,
+            stride_qm,
+            stride_qk,
+            stride_kz,
+            stride_kh,
+            stride_kn,
+            stride_kk,
+            stride_vz,
+            stride_vh,
+            stride_vn,
+            stride_vk,
+            stride_oz,
+            stride_oh,
+            stride_om,
+            stride_ok,
+            stride_kv_num_blks_h,
+            stride_kv_idx_h,
+            stride_kv_idx_m,
+            ZQ,
+            HQ,
+            Q_LEN,
+            ZKV,
+            KV_LEN,
+            SM_SCALE,
+            q_start,
+            off_zq,
+            off_hq,
+            GQA_SHARED_HEADS=GQA_SHARED_HEADS,
+            HAS_FULL_BLOCKS=HAS_FULL_BLOCKS,
+            QK_HEAD_DIM=QK_HEAD_DIM,
+            QK_HEAD_DIM_ROUNDED=QK_HEAD_DIM_ROUNDED,
+            V_HEAD_DIM=V_HEAD_DIM,
+            V_HEAD_DIM_ROUNDED=V_HEAD_DIM_ROUNDED,
+            SAFE_HEAD_DIM=SAFE_HEAD_DIM,
+            PRESCALE_QK=PRESCALE_QK,
+            ROWS_GUARANTEED_SAFE=ROWS_GUARANTEED_SAFE,
+            BLOCKS_ARE_CONTIGUOUS=BLOCKS_ARE_CONTIGUOUS,
+            IS_DIVISIBLE=IS_DIVISIBLE,
+            SPARSE_Q_BLOCK_SIZE=SPARSE_Q_BLOCK_SIZE,
+            SPARSE_KV_BLOCK_SIZE=SPARSE_KV_BLOCK_SIZE,
+            BLOCK_M=BLOCK_M,
+            BLOCK_N=BLOCK_N,
+            FLOAT32_PRECISION=FLOAT32_PRECISION,
+            USE_TMA=True,
+            WARP_SPECIALIZE=WARP_SPECIALIZE,
+        )
+
+        tile_idx += num_progs
+
+
 # ─── Python wrapper ──────────────────────────────────────────────────────────
 
 
@@ -791,6 +1296,9 @@ def flex_attention_fwd(
     v: torch.Tensor,
     block_mask,
     sm_scale: float | None = None,
+    persistent: bool = False,
+    use_tma: bool = False,
+    warp_specialize: bool = False,
 ) -> torch.Tensor:
     """
     Standalone flex attention forward pass.
@@ -801,6 +1309,8 @@ def flex_attention_fwd(
         v: Value tensor [B, Hkv, N, Dv]
         block_mask: BlockMask from torch.nn.attention.flex_attention.create_block_mask
         sm_scale: Softmax scale (default: 1/sqrt(D))
+        persistent: Use persistent kernel with TMA (requires contiguous inner dim)
+        use_tma: Use TMA descriptor loads (requires stride_*k == 1, i.e. contiguous inner dim)
 
     Returns:
         Output tensor [B, Hq, M, Dv]
@@ -811,11 +1321,9 @@ def flex_attention_fwd(
     if sm_scale is None:
         sm_scale = 1.0 / math.sqrt(D)
 
-    # Allocate output and logsumexp
     out = torch.empty(B, Hq, M, Dv, device=q.device, dtype=q.dtype)
     lse = torch.empty(B, Hq, M, device=q.device, dtype=torch.float32)
 
-    # Extract block mask tensors
     kv_num_blocks = block_mask.kv_num_blocks
     kv_indices = block_mask.kv_indices
     full_kv_num_blocks = block_mask.full_kv_num_blocks
@@ -827,13 +1335,9 @@ def flex_attention_fwd(
         full_kv_indices = torch.zeros(1, device=q.device, dtype=torch.int32)
 
     SPARSE_Q_BLOCK_SIZE, SPARSE_KV_BLOCK_SIZE = block_mask.BLOCK_SIZE
-
     GQA_SHARED_HEADS = Hq // Hkv
-
-    # Determine if seq lens are divisible by block sizes
     IS_DIVISIBLE = (M % SPARSE_Q_BLOCK_SIZE == 0) and (N % SPARSE_KV_BLOCK_SIZE == 0)
 
-    # Head dim checks
     QK_HEAD_DIM = D
     V_HEAD_DIM = Dv
     QK_HEAD_DIM_ROUNDED = triton.next_power_of_2(QK_HEAD_DIM)
@@ -842,19 +1346,11 @@ def flex_attention_fwd(
         QK_HEAD_DIM == QK_HEAD_DIM_ROUNDED and V_HEAD_DIM == V_HEAD_DIM_ROUNDED
     )
 
-    # Block mask strides
     stride_kv_num_blks_h = kv_num_blocks.stride(-2)
     stride_kv_idx_h = kv_indices.stride(-3)
     stride_kv_idx_m = kv_indices.stride(-2)
 
-    def grid(META):
-        return (
-            triton.cdiv(M, META["BLOCK_M"]),
-            B,
-            Hq,
-        )
-
-    flex_attention_fwd_kernel[grid](
+    common_args = (
         q,
         k,
         v,
@@ -864,38 +1360,34 @@ def flex_attention_fwd(
         kv_indices,
         full_kv_num_blocks,
         full_kv_indices,
-        # Q strides
         q.stride(0),
         q.stride(1),
         q.stride(2),
         q.stride(3),
-        # K strides
         k.stride(0),
         k.stride(1),
         k.stride(2),
         k.stride(3),
-        # V strides
         v.stride(0),
         v.stride(1),
         v.stride(2),
         v.stride(3),
-        # Out strides
         out.stride(0),
         out.stride(1),
         out.stride(2),
         out.stride(3),
-        # Block mask strides
         stride_kv_num_blks_h,
         stride_kv_idx_h,
         stride_kv_idx_m,
-        # Dimensions
         B,
         Hq,
         M,
-        B,  # ZKV = ZQ = B
+        B,
         N,
         sm_scale,
-        # Constexpr
+    )
+
+    common_kwargs = dict(
         GQA_SHARED_HEADS=GQA_SHARED_HEADS,
         HAS_FULL_BLOCKS=has_full_blocks,
         QK_HEAD_DIM=QK_HEAD_DIM,
@@ -907,5 +1399,42 @@ def flex_attention_fwd(
         SPARSE_Q_BLOCK_SIZE=SPARSE_Q_BLOCK_SIZE,
         SPARSE_KV_BLOCK_SIZE=SPARSE_KV_BLOCK_SIZE,
     )
+
+    if persistent:
+        NUM_SMS = torch.cuda.get_device_properties(q.device).multi_processor_count
+
+        def grid_persist(META):
+            return (
+                min(NUM_SMS, triton.cdiv(M, META["BLOCK_M"]) * B * Hq),
+                1,
+                1,
+            )
+
+        flex_attention_fwd_kernel_persistent[grid_persist](
+            *common_args,
+            NUM_SMS,
+            **common_kwargs,
+            WARP_SPECIALIZE=warp_specialize,
+        )
+    elif warp_specialize:
+
+        def grid_ws(META):
+            return (triton.cdiv(M, META["BLOCK_M"]), B, Hq)
+
+        flex_attention_fwd_kernel_ws[grid_ws](
+            *common_args,
+            **common_kwargs,
+        )
+    else:
+
+        def grid(META):
+            return (triton.cdiv(M, META["BLOCK_M"]), B, Hq)
+
+        flex_attention_fwd_kernel[grid](
+            *common_args,
+            **common_kwargs,
+            USE_TMA=use_tma,
+            WARP_SPECIALIZE=warp_specialize,
+        )
 
     return out
