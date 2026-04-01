@@ -1,0 +1,60 @@
+# MI350 nightly benchmark configuration
+# Used by the MI350 cron job (test/fb/cron/run_mi350_benchmarks.sh)
+# Format matches benchmarks/nightly/ci.yaml
+common_args: "--hardware MI350 --triton-type beta --num-inputs 3 --log-scuba --bypass-fail --skip-print"
+
+addmm:
+  args: --op addmm --metrics latency,tflops,hw_roofline,compile_time --mode fwd
+    --precision bypass --logging-group addmm --config igr_lsr,fbr_rankfm,ig_onefeed,ifr,cfr
+
+flash_attention:
+  args: --op flash_attention --metrics latency,tflops,hw_roofline,compile_time --mode fwd
+    --precision bypass --logging-group flash_attention --d-head 128 --input-types
+    ADDITIONAL_SHAPES --only sdpa,triton_tutorial_flash_v2,xformers_splitk --baseline flash_v2
+
+softmax:
+  args: --op softmax --metrics latency,gbps,hw_roofline,compile_time --mode fwd
+    --precision bypass --logging-group softmax
+
+fp8_gemm:
+  args: --op fp8_gemm --metrics latency,tflops,hw_roofline,compile_time --mode fwd
+    --precision bypass --logging-group fp8_gemm --llama --num-inputs 10
+    --input-sample-mode equally-spaced-k --only torch_fp8_gemm,triton_fp8_gemm
+
+bf16_gemm:
+  args: --op gemm --metrics latency,tflops,hw_roofline,compile_time --mode fwd
+    --precision bf16 --logging-group bf16_gemm --only aten_matmul,triton_tutorial_matmul,tlx_matmul
+
+fp32_gemm:
+  args: --op gemm --metrics latency,tflops,hw_roofline,compile_time --mode fwd
+    --precision fp32 --logging-group fp32_gemm --only aten_matmul,triton_tutorial_matmul
+
+reduction_gemm:
+  args: --op reduction_gemm --metrics latency,tflops,hw_roofline,compile_time --mode fwd
+    --precision bypass --logging-group reduction_gemm --only eager,fused_reduction_gemm
+
+fp8_gemm_rowwise_fast_accum:
+  args: --op fp8_gemm_rowwise --metrics latency,tflops,gbps,hw_roofline,compile_time --mode fwd
+    --precision bypass --logging-group fp8_gemm_rowwise_fast_accum --llama --only _triton
+
+fp8_gemm_rowwise_fast_accum_prefill:
+  args: --op fp8_gemm_rowwise --metrics latency,tflops,gbps,hw_roofline,compile_time --mode fwd
+    --precision bypass --logging-group fp8_gemm_rowwise_fast_accum_prefill --llama
+    --prefill --only _triton
+
+jagged_flash_attention_fwd:
+  args: --op jagged_flash_attention --metrics latency,tflops,gbps,compile_time,hw_roofline
+    --mode fwd --precision bypass --logging-group jagged_flash_attention --only mkl_jfav2
+
+jagged_flash_attention_bwd:
+  args: --op jagged_flash_attention --metrics latency,tflops,gbps,compile_time,hw_roofline
+    --mode bwd --precision bypass --logging-group jagged_flash_attention_bwd --only mkl_jfav2
+
+jagged_dense_bmm:
+  args: --op jagged_dense_bmm --metrics latency --mode fwd --precision bypass
+    --logging-group jagged_dense_bmm --only amkl
+
+generalized_dot_product_attention:
+  args: --op generalized_dot_product_attention --metrics latency,tflops,compile_time
+    --mode fwd --precision bypass --logging-group generalized_dot_product_attention
+    --only gdpa,gdpa_pt2,tlx_gdpa
