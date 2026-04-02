@@ -113,12 +113,6 @@ rope_fwd:
   args: --op rope --only liger_rotary_pos_emb --metrics compile_time
 rope_bwd:
   args: --op rope --only liger_rotary_pos_emb --bwd --metrics compile_time
-fp16_softmax_fwd:
-  args: --op softmax --only triton_softmax,torch_compile_softmax --baseline naive_softmax
-    --metrics latency,speedup
-fp16_softmax_bwd:
-  args: --op softmax --only triton_softmax,torch_compile_softmax --bwd --baseline
-    naive_softmax --metrics latency,speedup
 sum_fwd:
   args: --op sum --only triton_sum --metrics compile_time
 swiglu_fwd:
