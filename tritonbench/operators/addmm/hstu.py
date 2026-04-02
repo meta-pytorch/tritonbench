@@ -3,9 +3,9 @@ from typing import Tuple
 
 import torch
 import triton
-from tritonbench.utils.path_utils import add_path, SUBMODULE_PATH
+from tritonbench.utils.path_utils import add_path, get_hstu_path
 
-with add_path(str(SUBMODULE_PATH.joinpath("generative-recommenders"))):
+with add_path(str(get_hstu_path())):
     from generative_recommenders.ops.triton.triton_addmm import _AddMmFunction
 
 

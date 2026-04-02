@@ -1,6 +1,6 @@
 import torch
 from tritonbench.utils.env_utils import is_fbcode
-from tritonbench.utils.path_utils import add_path, SUBMODULE_PATH
+from tritonbench.utils.path_utils import add_path, get_hstu_path
 
 if is_fbcode():
     from generative_recommenders.common import (
@@ -13,7 +13,7 @@ if is_fbcode():
 
     HAS_HAMMER = True
 else:
-    with add_path(str(SUBMODULE_PATH.joinpath("generative-recommenders"))):
+    with add_path(str(get_hstu_path())):
         from generative_recommenders.common import (
             apply_sampling,
             generate_sparse_seq_len,

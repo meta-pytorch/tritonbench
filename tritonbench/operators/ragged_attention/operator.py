@@ -9,6 +9,7 @@ from tritonbench.utils.env_utils import (
     is_fbcode,
 )
 from tritonbench.utils.input import input_filter
+from tritonbench.utils.python_utils import try_import
 from tritonbench.utils.triton_op import (
     BenchmarkOperator,
     BenchmarkOperatorMetrics,
@@ -17,11 +18,17 @@ from tritonbench.utils.triton_op import (
     register_metric,
 )
 
-from .hstu import get_test_inputs, HAS_HAMMER, triton_hstu_mha, triton_ragged_hstu_mha
+with try_import("HAS_HSTU"):
+    from .hstu import get_test_inputs, HAS_HAMMER, triton_hstu_mha, triton_ragged_hstu_mha
+
+if not HAS_HSTU:
+    HAS_HAMMER = False
+    triton_hstu_mha = None
+    triton_ragged_hstu_mha = None
 
 HAS_CUDA = False
 try:
-    HAS_CUDA = is_fbcode() and is_cuda() and not IS_BLACKWELL
+    HAS_CUDA = HAS_HSTU and is_fbcode() and is_cuda() and not IS_BLACKWELL
 except (FileNotFoundError, AttributeError):
     HAS_CUDA = False
 
@@ -69,6 +76,11 @@ class Operator(BenchmarkOperator):
         self, tb_args: argparse.Namespace, extra_args: Optional[List[str]] = None
     ):
         super().__init__(tb_args, extra_args=extra_args)
+        if not HAS_HSTU:
+            raise FileNotFoundError(
+                "HSTU kernels are not installed. Run 'python install.py --hstu' "
+                "or set TRITONBENCH_HSTU_PATH to a generative-recommenders checkout."
+            )
         args = parse_op_args(self.extra_args)
         prod_config = get_prod_config(args.config)
         if prod_config:
@@ -114,7 +126,7 @@ class Operator(BenchmarkOperator):
         self.sampling_alpha = args.sampling_alpha
         self.requires_grad = not (self.mode == Mode.FWD_NO_GRAD)
 
-    @register_benchmark(baseline=True)
+    @register_benchmark(enabled=HAS_HSTU, baseline=True)
     def hstu(self, q, k, v, seq_offsets, num_targets, max_seq_len, sparsity):
         # TMA is NVIDIA Hopper+ only; on AMD the backward kernel crashes when
         # tensor-descriptor rewrite and tl.assume (buffer-ops) coexist.
