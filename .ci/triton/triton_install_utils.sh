@@ -27,6 +27,7 @@ clone_triton() {
 update_triton() {
     TRITON_INSTALL_DIR=$1
     cd "${TRITON_INSTALL_DIR}"
+    git reset --hard
     git checkout main
     git pull origin main
     git submodule update --init --recursive
