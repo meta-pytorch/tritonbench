@@ -1,11 +1,16 @@
 import torch
-from generative_recommenders.common import (
-    apply_sampling,
-    generate_sparse_seq_len,
-    set_use_runtime_max_seq_len,
-)
-from generative_recommenders.ops.triton.triton_hstu_attention import triton_hstu_mha
 from tritonbench.utils.env_utils import is_fbcode
+from tritonbench.utils.path_utils import add_path, REPO_PATH
+
+with add_path(str(REPO_PATH.joinpath(".install/hstu"))):
+    from generative_recommenders.common import (
+        apply_sampling,
+        generate_sparse_seq_len,
+        set_use_runtime_max_seq_len,
+    )
+    from generative_recommenders.ops.triton.triton_hstu_attention import (
+        triton_hstu_mha,
+    )
 
 if is_fbcode():
     from hammer.ops.triton.triton_ragged_attn_interface import triton_ragged_hstu_mha

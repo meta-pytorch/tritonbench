@@ -25,5 +25,3 @@ def install_hstu():
     subprocess.check_call(git_checkout_cmd, cwd=HSTU_PATH)
     git_submodule_update_cmd = ["git", "submodule", "update", "--init", "--recursive"]
     subprocess.check_call(git_submodule_update_cmd, cwd=HSTU_PATH)
-    install_hstu_cmd = get_pip_cmd() + ["install", "-e", "."] + constraints_parameters
-    subprocess.check_call(install_hstu_cmd, cwd=HSTU_PATH)

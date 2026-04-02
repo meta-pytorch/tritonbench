@@ -18,6 +18,7 @@ from tritonbench.utils.triton_op import (
     register_metric,
 )
 
+HAS_HAMMER = False
 with try_import("HAS_HSTU"):
     from .hstu import (
         get_test_inputs,

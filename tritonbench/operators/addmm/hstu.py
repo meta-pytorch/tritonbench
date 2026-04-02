@@ -3,7 +3,10 @@ from typing import Tuple
 
 import torch
 import triton
-from generative_recommenders.ops.triton.triton_addmm import _AddMmFunction
+from tritonbench.utils.path_utils import add_path, REPO_PATH
+
+with add_path(str(REPO_PATH.joinpath(".install/hstu"))):
+    from generative_recommenders.ops.triton.triton_addmm import _AddMmFunction
 
 
 @torch.fx.wrap
