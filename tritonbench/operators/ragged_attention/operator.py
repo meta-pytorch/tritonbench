@@ -21,16 +21,7 @@ from tritonbench.utils.triton_op import (
 with try_import("HAS_HSTU"):
     from .hstu import get_test_inputs, HAS_HAMMER, triton_hstu_mha, triton_ragged_hstu_mha
 
-if not HAS_HSTU:
-    HAS_HAMMER = False
-    triton_hstu_mha = None
-    triton_ragged_hstu_mha = None
-
-HAS_CUDA = False
-try:
-    HAS_CUDA = HAS_HSTU and is_fbcode() and is_cuda() and not IS_BLACKWELL
-except (FileNotFoundError, AttributeError):
-    HAS_CUDA = False
+HAS_CUDA = HAS_HSTU and is_fbcode() and is_cuda() and not IS_BLACKWELL
 
 if HAS_CUDA:
     from .fb.hstu import cuda_hstu_mha
@@ -165,7 +156,7 @@ class Operator(BenchmarkOperator):
         )
 
     # TODO: remove B200 hacks like these.
-    @register_benchmark(enabled=(HAS_CUDA))
+    @register_benchmark(enabled=HAS_CUDA)
     def hstu_cuda(self, q, k, v, seq_offsets, num_targets, max_seq_len, sparsity):
         return lambda: cuda_hstu_mha(
             max_seq_len,
