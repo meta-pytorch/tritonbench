@@ -116,6 +116,9 @@ jobs:
             --changed-files "${CHANGED_FILES}"
 
   benchmarks:
+    permissions:
+      id-token: write
+      contents: read
     needs: set-parameters
     if: ${{ needs.set-parameters.outputs.has_benchmarks == 'true' }}
     strategy:
