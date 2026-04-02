@@ -12,6 +12,11 @@ on:
         type: string
         description: |
           Runner to use for the benchmark
+      runner_full_name:
+        required: True
+        type: string
+        description: |
+          Full runner label to use for runs-on
       test_type:
         required: True
         type: string
@@ -54,7 +59,7 @@ on:
 jobs:
   linux-benchmark:
     if: github.repository_owner == 'meta-pytorch'
-    runs-on: ${{ inputs.runner == 'h100' && 'gcp-h100-runner' || 'amd-mi350-runner' }}
+    runs-on: ${{ inputs.runner_full_name }}
     timeout-minutes: 240
     environment: docker-s3-upload
     permissions:
@@ -64,7 +69,7 @@ jobs:
       WORKSPACE_DIR: "/workspace"
       UV_VENV_DIR: "/workspace/uv_venvs"
       SETUP_SCRIPT: "/workspace/setup_instance.sh"
-      RUNNER_TYPE: ${{ inputs.runner == 'h100' && 'gcp-h100-runner' || 'amd-mi350-runner' }}
+      RUNNER_TYPE: ${{ inputs.runner_full_name }}
       JOB_NAME: tritonbench-${{ inputs.runner }}-benchmark-${{ inputs.venv_name }}-${{ inputs.test_type }}-${{ inputs.benchmark_name }}
       TRITONBENCH_SIDE_A_ENV: ${{ inputs.test_type == 'abtest' && 'triton-side-a' || inputs.venv_name }}
       TRITONBENCH_SIDE_B_ENV: "triton-side-b"

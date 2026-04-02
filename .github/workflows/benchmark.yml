@@ -11,10 +11,14 @@ on:
         description: 'Comma-separated benchmarks to run. Valid values: nightly,compile_time,tlx,timing_accuracy'
         default: 'nightly'
       triton_channels:
-        type: string
-        required: false
-        description: 'Comma-separated Triton channels to run. Valid values: meta-triton,triton-main'
-        default: ''
+        type: choice
+        required: true
+        description: 'Triton channel selection'
+        default: 'all'
+        options:
+          - 'all'
+          - 'triton-main'
+          - 'meta-triton'
       runners:
         type: choice
         required: true
@@ -120,6 +124,7 @@ jobs:
     uses: ./.github/workflows/_linux-benchmark.yml
     with:
       runner: ${{ matrix.runner }}
+      runner_full_name: ${{ matrix.runner_full_name }}
       test_type: ${{ inputs.test_type || 'periodic' }}
       benchmark_name: ${{ matrix.benchmark }}
       venv_name: ${{ matrix.triton_channel }}

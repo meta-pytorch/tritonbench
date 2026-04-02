@@ -30,6 +30,10 @@ BENCHMARK_CONFIG = {
 }
 
 CI_BENCHMARKS = ["nightly", "compile_time", "tlx"]
+RUNNER_FULL_NAMES = {
+    "h100": "gcp-h100-runner",
+    "mi350": "amd-mi350-runner",
+}
 INFRA_TRIGGER_PATHS = {
     ".github/scripts/generate_tritonbench_matrix.py",
     ".github/workflows/benchmark.yml",
@@ -49,6 +53,12 @@ def normalize_runners(runners: list[str]) -> list[str]:
     if not runners or "all" in runners:
         return []
     return runners
+
+
+def normalize_triton_channels(triton_channels: list[str]) -> list[str]:
+    if not triton_channels or "all" in triton_channels:
+        return []
+    return triton_channels
 
 
 def validate_requested_values(
@@ -150,6 +160,7 @@ def filter_dimensions(
                     "benchmark": benchmark,
                     "triton_channel": triton_channel,
                     "runner": runner,
+                    "runner_full_name": RUNNER_FULL_NAMES[runner],
                 }
             )
     return matrix_entries
@@ -179,7 +190,9 @@ def main() -> int:
     args = parser.parse_args()
 
     requested_benchmarks = parse_csv(args.benchmarks)
-    requested_triton_channels = parse_csv(args.triton_channels)
+    requested_triton_channels = normalize_triton_channels(
+        parse_csv(args.triton_channels)
+    )
     requested_runners = normalize_runners(parse_csv(args.runners))
     changed_files = parse_csv(args.changed_files)
 
