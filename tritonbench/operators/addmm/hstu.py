@@ -6,7 +6,6 @@ import triton
 from generative_recommenders.ops.triton.triton_addmm import _AddMmFunction
 
 
-
 @torch.fx.wrap
 def triton_addmm(
     input: torch.Tensor,

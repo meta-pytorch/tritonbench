@@ -147,7 +147,9 @@ def generate_run_config(
     override_benchmarks = sweep_runner_config.get("overrides", {})
 
     config_count = 0
-    for _run_config_name, run_config_value in sweep_runner_config["run_configs"].items():
+    for _run_config_name, run_config_value in sweep_runner_config[
+        "run_configs"
+    ].items():
         if skip_tests := run_config_value.get("skip_tests", None):
             skip_tests = [
                 load_config(skip_test, base_dir=REPO_PATH) for skip_test in skip_tests

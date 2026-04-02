@@ -19,7 +19,12 @@ from tritonbench.utils.triton_op import (
 )
 
 with try_import("HAS_HSTU"):
-    from .hstu import get_test_inputs, HAS_HAMMER, triton_hstu_mha, triton_ragged_hstu_mha
+    from .hstu import (
+        get_test_inputs,
+        HAS_HAMMER,
+        triton_hstu_mha,
+        triton_ragged_hstu_mha,
+    )
 
 HAS_CUDA = HAS_HSTU and is_fbcode() and is_cuda() and not IS_BLACKWELL
 
