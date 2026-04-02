@@ -1,0 +1,151 @@
+name: TritonBench
+on:
+  schedule:
+    # Run the CI benchmark suite daily at 4 PM UTC.
+    - cron: '0 16 * * *'
+  workflow_dispatch:
+    inputs:
+      benchmarks:
+        type: string
+        required: false
+        description: 'Comma-separated benchmarks to run. Valid values: nightly,compile_time,tlx,timing_accuracy'
+        default: 'nightly'
+      triton_channels:
+        type: string
+        required: false
+        description: 'Comma-separated Triton channels to run. Valid values: meta-triton,triton-main'
+        default: ''
+      runners:
+        type: string
+        required: false
+        description: 'Comma-separated runners to run. Valid values: h100,mi350'
+        default: ''
+      test_type:
+        type: choice
+        required: true
+        description: 'Choose advanced testing options'
+        default: 'periodic'
+        options:
+          - 'periodic'
+          - 'single'
+          - 'abtest'
+      side_a_triton:
+        type: string
+        required: false
+        description: 'Side A Triton repo override'
+        default: ''
+      side_a_commit:
+        type: string
+        required: false
+        description: 'Side A Triton commit'
+        default: 'main'
+      side_b_triton:
+        type: string
+        required: false
+        description: 'Side B Triton repo override (abtest only)'
+        default: ''
+      side_b_commit:
+        type: string
+        required: false
+        description: 'Side B Triton commit (abtest only)'
+        default: 'main'
+  pull_request:
+    paths:
+      - benchmarks/nightly/**
+      - benchmarks/compile_time/**
+      - benchmarks/tlx/**
+      - .github/scripts/generate_tritonbench_matrix.py
+      - .github/workflows/_linux-benchmark-*.yml
+      - .github/workflows/tritonbench.yml
+
+jobs:
+  set-parameters:
+    runs-on: ubuntu-latest
+    outputs:
+      benchmark_matrix: ${{ steps.set-parameters.outputs.benchmark_matrix }}
+      h100_matrix: ${{ steps.set-parameters.outputs.h100_matrix }}
+      mi350_matrix: ${{ steps.set-parameters.outputs.mi350_matrix }}
+      has_h100: ${{ steps.set-parameters.outputs.has_h100 }}
+      has_mi350: ${{ steps.set-parameters.outputs.has_mi350 }}
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+
+      - name: Collect changed files
+        if: ${{ github.event_name == 'pull_request' }}
+        id: changed-files
+        shell: bash
+        run: |
+          set -eux
+
+          git fetch origin "${{ github.base_ref }}" --depth=1
+          merge_base=$(git merge-base HEAD "origin/${{ github.base_ref }}")
+          changed_files=$(git diff --name-only "${merge_base}" HEAD | paste -sd, -)
+          echo "changed_files=${changed_files}" >> "${GITHUB_OUTPUT}"
+
+      - name: Set parameters
+        id: set-parameters
+        shell: bash
+        env:
+          BENCHMARKS: ${{ inputs.benchmarks || '' }}
+          TRITON_CHANNELS: ${{ inputs.triton_channels || '' }}
+          RUNNERS: ${{ inputs.runners || '' }}
+          TEST_TYPE: ${{ inputs.test_type || 'periodic' }}
+          EVENT_NAME: ${{ github.event_name }}
+          CHANGED_FILES: ${{ steps.changed-files.outputs.changed_files || '' }}
+        run: |
+          set -eux
+
+          python .github/scripts/generate_tritonbench_matrix.py \
+            --benchmarks "${BENCHMARKS}" \
+            --triton-channels "${TRITON_CHANNELS}" \
+            --runners "${RUNNERS}" \
+            --test-type "${TEST_TYPE}" \
+            --event-name "${EVENT_NAME}" \
+            --changed-files "${CHANGED_FILES}"
+
+  h100-benchmarks:
+    needs: set-parameters
+    if: ${{ needs.set-parameters.outputs.has_h100 == 'true' }}
+    strategy:
+      fail-fast: false
+      matrix: ${{ fromJSON(needs.set-parameters.outputs.h100_matrix) }}
+    uses: ./.github/workflows/_linux-benchmark-h100.yml
+    with:
+      test_type: ${{ inputs.test_type || 'periodic' }}
+      benchmark_name: ${{ matrix.benchmark }}
+      venv_name: ${{ matrix.triton_channel }}
+      side_a_triton: ${{ inputs.side_a_triton || (matrix.triton_channel == 'meta-triton' && 'facebookexperimental/triton' || 'triton-lang/triton') }}
+      side_a_commit: ${{ inputs.side_a_commit || 'main' }}
+      side_b_triton: ${{ inputs.side_b_triton || (matrix.triton_channel == 'meta-triton' && 'facebookexperimental/triton' || 'triton-lang/triton') }}
+      side_b_commit: ${{ inputs.side_b_commit || 'main' }}
+    secrets:
+      TRITONBENCH_SCRIBE_GRAPHQL_ACCESS_TOKEN: ${{ secrets.TRITONBENCH_SCRIBE_GRAPHQL_ACCESS_TOKEN }}
+
+  mi350-benchmarks:
+    needs: set-parameters
+    if: ${{ needs.set-parameters.outputs.has_mi350 == 'true' }}
+    strategy:
+      fail-fast: false
+      matrix: ${{ fromJSON(needs.set-parameters.outputs.mi350_matrix) }}
+    uses: ./.github/workflows/_linux-benchmark-mi350.yml
+    with:
+      test_type: ${{ inputs.test_type || 'periodic' }}
+      benchmark_name: ${{ matrix.benchmark }}
+      venv_name: ${{ matrix.triton_channel }}
+      side_a_triton: ${{ inputs.side_a_triton || 'triton-lang/triton' }}
+      side_a_commit: ${{ inputs.side_a_commit || 'main' }}
+      side_b_triton: ${{ inputs.side_b_triton || 'triton-lang/triton' }}
+      side_b_commit: ${{ inputs.side_b_commit || 'main' }}
+    secrets:
+      TRITONBENCH_SCRIBE_GRAPHQL_ACCESS_TOKEN: ${{ secrets.TRITONBENCH_SCRIBE_GRAPHQL_ACCESS_TOKEN }}
+
+concurrency:
+  group: ${{ github.workflow }}-${{ github.event.pull_request.number || github.sha }}-${{ github.event_name }}
+  cancel-in-progress: true
