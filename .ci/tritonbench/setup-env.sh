@@ -40,7 +40,9 @@ else
     . "${SETUP_SCRIPT}"
 fi
 
-export CONDA_ENV=pytorch
+if [ -n "${CONDA_ENV:-}" ]; then
+    export CONDA_ENV=pytorch
+fi
 echo "if [ -z \${CONDA_ENV} ]; then export CONDA_ENV=${CONDA_ENV}; fi" >> "${SETUP_SCRIPT}"
 
 python3 tools/python_utils.py --create-conda-env ${CONDA_ENV}

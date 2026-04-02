@@ -72,6 +72,7 @@ jobs:
       RUNNER_TYPE: ${{ inputs.runner_full_name }}
       JOB_NAME: tritonbench-${{ inputs.runner }}-benchmark-${{ inputs.venv_name }}-${{ inputs.test_type }}-${{ inputs.benchmark_name }}
       TRITONBENCH_SIDE_A_ENV: ${{ inputs.test_type == 'abtest' && 'triton-side-a' || inputs.venv_name }}
+      CONDA_ENV: ${{ inputs.test_type == 'abtest' && 'triton-side-a' || inputs.venv_name }}
       TRITONBENCH_SIDE_B_ENV: "triton-side-b"
       TRITONBENCH_SCRIBE_GRAPHQL_ACCESS_TOKEN: ${{ secrets.TRITONBENCH_SCRIBE_GRAPHQL_ACCESS_TOKEN }}
       AWS_ACCESS_KEY_ID: ${{ secrets.AWS_ACCESS_KEY_ID }}
@@ -96,35 +97,26 @@ jobs:
           role-duration-seconds: 18000
           aws-region: us-east-1
 
-      - name: Install PyTorch Nightly and TritonBench
-        if: ${{ inputs.runner == 'h100' }}
+      - name: Setup pytorch and tritonbench environment
         run: |
           set -eux
-          bash ./.ci/tritonbench/setup-nvidia-path.sh
-          bash ./.ci/tritonbench/install.sh --refresh-pytorch
-
-      - name: Install Tritonbench env
-        if: ${{ inputs.runner == 'mi350' }}
-        run: |
-          set -eux
-          if [[ "${TRITONBENCH_SIDE_A_ENV}" == "meta-triton" ]]; then
-            CMD_SUFFIX=" --meta-triton"
-          elif [[ "${TRITONBENCH_SIDE_A_ENV}" == "triton-main" ]]; then
-            CMD_SUFFIX=" --triton-main"
+          if [ "${{ inputs.runner }}" = "h100" ]; then
+            bash ./.ci/tritonbench/setup-nvidia-path.sh
+            bash ./.ci/tritonbench/install.sh --refresh-pytorch
+          elif [ "${{ inputs.runner }}" = "mi350" ]; then
+            bash ./.ci/tritonbench/setup-env.sh --hip --no-build --triton-main --meta-triton
           else
-            CMD_SUFFIX=""
+            echo "Unknown runner: ${{ inputs.runner }}"
+            exit 1
           fi
-          bash ./.ci/tritonbench/setup-env.sh --hip ${CMD_SUFFIX}
 
       - name: Setup uploader dependencies
-        if: ${{ inputs.runner == 'mi350' }}
         run: |
           set -eux
-          CONDA_ENV=${TRITONBENCH_SIDE_A_ENV} . "${SETUP_SCRIPT}"
+          . "${SETUP_SCRIPT}"
           uv pip install -r .ci/upload/requirements.txt
 
-      - name: Compile Triton
-        if: ${{ inputs.runner == 'h100' }}
+      - name: Compile Triton (Side A)
         run: |
           set -eux
           if [ "${{ inputs.test_type }}" = "periodic" ]; then
@@ -138,17 +130,11 @@ jobs:
             fi
             echo "TRITONBENCH_SIDE_A_ENV=${TRITONBENCH_SIDE_A_ENV}" >> "${GITHUB_ENV}"
           else
+            echo "single or abtest, alreadys recompile triton"
             bash ./.ci/triton/install.sh --repo ${{ inputs.side_a_triton }} --commit ${{ inputs.side_a_commit }} --side a
             echo "TRITONBENCH_SIDE_A_ENV=triton-side-a" >> "${GITHUB_ENV}"
           fi
           cat "${SETUP_SCRIPT}"
-
-      - name: Compile Triton side A (On Demand)
-        if: ${{ inputs.runner == 'mi350' && inputs.test_type != 'periodic' }}
-        run: |
-          set -eux
-          bash ./.ci/triton/install.sh --repo ${{ inputs.side_a_triton }} --commit ${{ inputs.side_a_commit }} --side a
-          echo 'TRITONBENCH_SIDE_A_ENV=triton-side-a' >> "${GITHUB_ENV}"
 
       - name: Benchmark Triton (Side A)
         run: |
@@ -156,11 +142,7 @@ jobs:
           bash .ci/tritonbench/run-benchmark.sh ${{ inputs.benchmark_name }} --conda-env "${TRITONBENCH_SIDE_A_ENV}"
           mkdir -p benchmark-output
           cp -r ".benchmarks/${{ inputs.benchmark_name }}" "benchmark-output/${TRITONBENCH_SIDE_A_ENV}"
-          if [[ "${{ inputs.runner }}" == "mi350" ]]; then
-            sudo rm -rf .benchmarks || true
-          else
-            rm -rf .benchmarks || true
-          fi
+          sudo rm -rf .benchmarks || true
 
       - name: Compile Triton side B
         if: ${{ inputs.test_type == 'abtest' && inputs.side_b_triton && inputs.side_b_commit }}
@@ -176,11 +158,7 @@ jobs:
           bash .ci/tritonbench/run-benchmark.sh ${{ inputs.benchmark_name }} --conda-env "${TRITONBENCH_SIDE_B_ENV}"
           mkdir -p benchmark-output
           cp -r ".benchmarks/${{ inputs.benchmark_name }}" "benchmark-output/${TRITONBENCH_SIDE_B_ENV}"
-          if [[ "${{ inputs.runner }}" == "mi350" ]]; then
-            sudo rm -rf .benchmarks || true
-          else
-            rm -rf .benchmarks || true
-          fi
+          sudo rm -rf .benchmarks || true
 
       - name: Upload result to GH Actions Artifact
         uses: actions/upload-artifact@v4
@@ -191,11 +169,7 @@ jobs:
       - name: Upload result to Scribe
         run: |
           set -xeu
-          if [[ "${{ inputs.runner }}" == "mi350" ]]; then
-            CONDA_ENV=${TRITONBENCH_SIDE_A_ENV} . "${SETUP_SCRIPT}"
-          else
-            . "${SETUP_SCRIPT}"
-          fi
+          . "${SETUP_SCRIPT}"
           if [[ -n "${TRITONBENCH_SIDE_A_ENV}" ]]; then
             side_a_json=$(find "./benchmark-output/${TRITONBENCH_SIDE_A_ENV}" -name "result.json" | sort -r | head -n 1)
             python3 ./.ci/upload/scribe.py --json "${side_a_json}"
@@ -208,11 +182,7 @@ jobs:
       - name: Rewrite Tritonbench json to ClickHouse style
         run: |
           set -xeu
-          if [[ "${{ inputs.runner }}" == "mi350" ]]; then
-            CONDA_ENV=${TRITONBENCH_SIDE_A_ENV} . "${SETUP_SCRIPT}"
-          else
-            . "${SETUP_SCRIPT}"
-          fi
+          . "${SETUP_SCRIPT}"
           if [[ -n "${TRITONBENCH_SIDE_A_ENV}" ]]; then
             side_a_json=$(find "./benchmark-output/${TRITONBENCH_SIDE_A_ENV}" -name "result.json" | sort -r | head -n 1)
             python3 ./.ci/test_infra/oss_ci_benchmark_v3.py --json "${side_a_json}" \
@@ -224,24 +194,7 @@ jobs:
               --output "benchmark-output/clickhouse-results/result-${TRITONBENCH_SIDE_B_ENV}.json"
           fi
 
-      - name: Setup uploader dependencies
-        if: ${{ inputs.runner == 'h100' }}
-        run: |
-          . "${SETUP_SCRIPT}"
-          uv pip install pip
-
       - name: Upload result to ClickHouse
-        if: ${{ inputs.runner == 'h100' }}
-        uses: pytorch/test-infra/.github/actions/upload-benchmark-results@main
-        with:
-          venv: ${{ env.SETUP_SCRIPT }}
-          benchmark-results-dir: benchmark-output/clickhouse-results
-          dry-run: false
-          schema-version: v3
-          github-token: ${{ secrets.GITHUB_TOKEN }}
-
-      - name: Upload result to ClickHouse
-        if: ${{ inputs.runner == 'mi350' }}
         uses: pytorch/test-infra/.github/actions/upload-benchmark-results@main
         with:
           benchmark-results-dir: benchmark-output/clickhouse-results
