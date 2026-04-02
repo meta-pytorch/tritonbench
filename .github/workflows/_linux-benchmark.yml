@@ -1,4 +1,4 @@
-name: linux-benchmark-h100
+name: linux-benchmark
 on:
   workflow_call:
     secrets:
@@ -7,6 +7,11 @@ on:
         description: |
           Tritonbench Scribe Graph Access Token
     inputs:
+      runner:
+        required: True
+        type: string
+        description: |
+          Runner to use for the benchmark
       test_type:
         required: True
         type: string
@@ -47,18 +52,20 @@ on:
           Triton commit or tag to test on side B, e.g., "main"
 
 jobs:
-  linux-benchmark-h100:
+  linux-benchmark:
     if: github.repository_owner == 'meta-pytorch'
-    runs-on: [gcp-h100-runner]
+    runs-on: ${{ inputs.runner == 'h100' && 'gcp-h100-runner' || 'amd-mi350-runner' }}
     timeout-minutes: 240
     environment: docker-s3-upload
     permissions:
       id-token: write
       contents: read
     env:
+      WORKSPACE_DIR: "/workspace"
+      UV_VENV_DIR: "/workspace/uv_venvs"
       SETUP_SCRIPT: "/workspace/setup_instance.sh"
-      RUNNER_TYPE: "gcp-h100-runner"
-      JOB_NAME: tritonbench-h100-benchmark-${{ inputs.venv_name }}-${{ inputs.test_type }}-${{ inputs.benchmark_name }}
+      RUNNER_TYPE: ${{ inputs.runner == 'h100' && 'gcp-h100-runner' || 'amd-mi350-runner' }}
+      JOB_NAME: tritonbench-${{ inputs.runner }}-benchmark-${{ inputs.venv_name }}-${{ inputs.test_type }}-${{ inputs.benchmark_name }}
       TRITONBENCH_SIDE_A_ENV: ${{ inputs.test_type == 'abtest' && 'triton-side-a' || inputs.venv_name }}
       TRITONBENCH_SIDE_B_ENV: "triton-side-b"
       TRITONBENCH_SCRIBE_GRAPHQL_ACCESS_TOKEN: ${{ secrets.TRITONBENCH_SCRIBE_GRAPHQL_ACCESS_TOKEN }}
@@ -69,27 +76,53 @@ jobs:
         uses: actions/checkout@v3
         with:
           submodules: recursive
+
       - name: Tune Nvidia GPU
+        if: ${{ inputs.runner == 'h100' }}
         run: |
           bash .ci/gpu/tune-gcp-h100.sh
           sudo ldconfig
           nvidia-smi
+
       - name: Authenticate with AWS
         uses: aws-actions/configure-aws-credentials@v4
         with:
           role-to-assume: arn:aws:iam::308535385114:role/gha_workflow_upload-benchmark-results
-          # The max duration enforced by the server side
           role-duration-seconds: 18000
           aws-region: us-east-1
+
       - name: Install PyTorch Nightly and TritonBench
+        if: ${{ inputs.runner == 'h100' }}
         run: |
           set -eux
           bash ./.ci/tritonbench/setup-nvidia-path.sh
           bash ./.ci/tritonbench/install.sh --refresh-pytorch
-      - name: Compile Triton
+
+      - name: Install Tritonbench env
+        if: ${{ inputs.runner == 'mi350' }}
         run: |
           set -eux
-          if [ ${{ inputs.test_type }} = "periodic" ]; then
+          if [[ "${TRITONBENCH_SIDE_A_ENV}" == "meta-triton" ]]; then
+            CMD_SUFFIX=" --meta-triton"
+          elif [[ "${TRITONBENCH_SIDE_A_ENV}" == "triton-main" ]]; then
+            CMD_SUFFIX=" --triton-main"
+          else
+            CMD_SUFFIX=""
+          fi
+          bash ./.ci/tritonbench/setup-env.sh --hip ${CMD_SUFFIX}
+
+      - name: Setup uploader dependencies
+        if: ${{ inputs.runner == 'mi350' }}
+        run: |
+          set -eux
+          CONDA_ENV=${TRITONBENCH_SIDE_A_ENV} . "${SETUP_SCRIPT}"
+          uv pip install -r .ci/upload/requirements.txt
+
+      - name: Compile Triton
+        if: ${{ inputs.runner == 'h100' }}
+        run: |
+          set -eux
+          if [ "${{ inputs.test_type }}" = "periodic" ]; then
             if [ "${{ inputs.venv_name }}" = "triton-main" ]; then
               bash ./.ci/triton/install-triton-main.sh --no-clone
             elif [ "${{ inputs.venv_name }}" = "meta-triton" ]; then
@@ -98,67 +131,102 @@ jobs:
               echo "Unknown venv name: ${{ inputs.venv_name }}"
               exit 1
             fi
-            export 'TRITONBENCH_SIDE_A_ENV=${{ env.TRITONBENCH_SIDE_A_ENV }}' >> $GITHUB_ENV
+            echo "TRITONBENCH_SIDE_A_ENV=${TRITONBENCH_SIDE_A_ENV}" >> "${GITHUB_ENV}"
           else
             bash ./.ci/triton/install.sh --repo ${{ inputs.side_a_triton }} --commit ${{ inputs.side_a_commit }} --side a
-            export 'TRITONBENCH_SIDE_A_ENV=triton-side-a' >> $GITHUB_ENV
+            echo "TRITONBENCH_SIDE_A_ENV=triton-side-a" >> "${GITHUB_ENV}"
           fi
-          # dump setup env script for debugging
           cat "${SETUP_SCRIPT}"
+
+      - name: Compile Triton side A (On Demand)
+        if: ${{ inputs.runner == 'mi350' && inputs.test_type != 'periodic' }}
+        run: |
+          set -eux
+          bash ./.ci/triton/install.sh --repo ${{ inputs.side_a_triton }} --commit ${{ inputs.side_a_commit }} --side a
+          echo 'TRITONBENCH_SIDE_A_ENV=triton-side-a' >> "${GITHUB_ENV}"
+
       - name: Benchmark Triton (Side A)
         run: |
-          bash ./.ci/tritonbench/run-benchmark.sh ${{ inputs.benchmark_name }} --conda-env ${TRITONBENCH_SIDE_A_ENV}
+          set -eux
+          bash .ci/tritonbench/run-benchmark.sh ${{ inputs.benchmark_name }} --conda-env "${TRITONBENCH_SIDE_A_ENV}"
           mkdir -p benchmark-output
-          cp -r .benchmarks/${{ inputs.benchmark_name }} benchmark-output/${TRITONBENCH_SIDE_A_ENV}
-          rm -rf .benchmarks || true
-      - name: Compile Triton on Demand (Side B)
+          cp -r ".benchmarks/${{ inputs.benchmark_name }}" "benchmark-output/${TRITONBENCH_SIDE_A_ENV}"
+          if [[ "${{ inputs.runner }}" == "mi350" ]]; then
+            sudo rm -rf .benchmarks || true
+          else
+            rm -rf .benchmarks || true
+          fi
+
+      - name: Compile Triton side B
         if: ${{ inputs.test_type == 'abtest' && inputs.side_b_triton && inputs.side_b_commit }}
         run: |
+          set -eux
           bash ./.ci/triton/install.sh --repo ${{ inputs.side_b_triton }} --commit ${{ inputs.side_b_commit }} --side b
-          export 'TRITONBENCH_SIDE_B_ENV=${{ env.TRITONBENCH_SIDE_B_ENV }}' >> $GITHUB_ENV
+          echo 'TRITONBENCH_SIDE_B_ENV=triton-side-b' >> "${GITHUB_ENV}"
+
       - name: Benchmark Triton (Side B)
         if: ${{ inputs.test_type == 'abtest' && inputs.side_b_triton && inputs.side_b_commit }}
         run: |
-          bash ./.ci/tritonbench/run-benchmark.sh ${{ inputs.benchmark_name }} --conda-env ${TRITONBENCH_SIDE_B_ENV}
+          set -eux
+          bash .ci/tritonbench/run-benchmark.sh ${{ inputs.benchmark_name }} --conda-env "${TRITONBENCH_SIDE_B_ENV}"
           mkdir -p benchmark-output
-          cp -r ".benchmarks/${{ inputs.benchmark_name }}" benchmark-output/${TRITONBENCH_SIDE_B_ENV}
-          rm -rf .benchmarks || true
+          cp -r ".benchmarks/${{ inputs.benchmark_name }}" "benchmark-output/${TRITONBENCH_SIDE_B_ENV}"
+          if [[ "${{ inputs.runner }}" == "mi350" ]]; then
+            sudo rm -rf .benchmarks || true
+          else
+            rm -rf .benchmarks || true
+          fi
+
       - name: Upload result to GH Actions Artifact
         uses: actions/upload-artifact@v4
         with:
           name: ${{ env.JOB_NAME }}
           path: benchmark-output/
+
       - name: Upload result to Scribe
         run: |
           set -xeu
-          . "${SETUP_SCRIPT}"
+          if [[ "${{ inputs.runner }}" == "mi350" ]]; then
+            CONDA_ENV=${TRITONBENCH_SIDE_A_ENV} . "${SETUP_SCRIPT}"
+          else
+            . "${SETUP_SCRIPT}"
+          fi
           if [[ -n "${TRITONBENCH_SIDE_A_ENV}" ]]; then
-            triton_side_a_json=$(find ./benchmark-output/${TRITONBENCH_SIDE_A_ENV} -name "result.json"  | sort -r | head -n 1)
-            python ./.ci/upload/scribe.py --json ${triton_side_a_json}
+            side_a_json=$(find "./benchmark-output/${TRITONBENCH_SIDE_A_ENV}" -name "result.json" | sort -r | head -n 1)
+            python3 ./.ci/upload/scribe.py --json "${side_a_json}"
           fi
           if [[ -n "${TRITONBENCH_SIDE_B_ENV}" ]] && [[ -e "./benchmark-output/${TRITONBENCH_SIDE_B_ENV}" ]]; then
-            triton_side_b_json=$(find ./benchmark-output/${TRITONBENCH_SIDE_B_ENV} -name "result.json"  | sort -r | head -n 1)
-            python ./.ci/upload/scribe.py --json ${triton_side_b_json}
+            side_b_json=$(find "./benchmark-output/${TRITONBENCH_SIDE_B_ENV}" -name "result.json" | sort -r | head -n 1)
+            python3 ./.ci/upload/scribe.py --json "${side_b_json}"
           fi
+
       - name: Rewrite Tritonbench json to ClickHouse style
         run: |
           set -xeu
-          . "${SETUP_SCRIPT}"
+          if [[ "${{ inputs.runner }}" == "mi350" ]]; then
+            CONDA_ENV=${TRITONBENCH_SIDE_A_ENV} . "${SETUP_SCRIPT}"
+          else
+            . "${SETUP_SCRIPT}"
+          fi
           if [[ -n "${TRITONBENCH_SIDE_A_ENV}" ]]; then
-            triton_side_a_json=$(find ./benchmark-output/${TRITONBENCH_SIDE_A_ENV} -name "result.json"  | sort -r | head -n 1)
-            python ./.ci/test_infra/oss_ci_benchmark_v3.py --json "${triton_side_a_json}" \
-                 --output "benchmark-output/clickhouse-results/result-${TRITONBENCH_SIDE_A_ENV}.json"
+            side_a_json=$(find "./benchmark-output/${TRITONBENCH_SIDE_A_ENV}" -name "result.json" | sort -r | head -n 1)
+            python3 ./.ci/test_infra/oss_ci_benchmark_v3.py --json "${side_a_json}" \
+              --output "benchmark-output/clickhouse-results/result-${TRITONBENCH_SIDE_A_ENV}.json"
           fi
           if [[ -n "${TRITONBENCH_SIDE_B_ENV}" ]] && [[ -e "./benchmark-output/${TRITONBENCH_SIDE_B_ENV}" ]]; then
-            triton_side_a_json=$(find ./benchmark-output/${TRITONBENCH_SIDE_B_ENV} -name "result.json"  | sort -r | head -n 1)
-            python ./.ci/test_infra/oss_ci_benchmark_v3.py --json "${triton_side_a_json}" \
-                 --output "benchmark-output/clickhouse-results/result-${TRITONBENCH_SIDE_B_ENV}.json"
+            side_b_json=$(find "./benchmark-output/${TRITONBENCH_SIDE_B_ENV}" -name "result.json" | sort -r | head -n 1)
+            python3 ./.ci/test_infra/oss_ci_benchmark_v3.py --json "${side_b_json}" \
+              --output "benchmark-output/clickhouse-results/result-${TRITONBENCH_SIDE_B_ENV}.json"
           fi
+
       - name: Setup uploader dependencies
+        if: ${{ inputs.runner == 'h100' }}
         run: |
           . "${SETUP_SCRIPT}"
           uv pip install pip
+
       - name: Upload result to ClickHouse
+        if: ${{ inputs.runner == 'h100' }}
         uses: pytorch/test-infra/.github/actions/upload-benchmark-results@main
         with:
           venv: ${{ env.SETUP_SCRIPT }}
@@ -166,8 +234,18 @@ jobs:
           dry-run: false
           schema-version: v3
           github-token: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Upload result to ClickHouse
+        if: ${{ inputs.runner == 'mi350' }}
+        uses: pytorch/test-infra/.github/actions/upload-benchmark-results@main
+        with:
+          benchmark-results-dir: benchmark-output/clickhouse-results
+          dry-run: false
+          schema-version: v3
+          github-token: ${{ secrets.GITHUB_TOKEN }}
+
       - name: Restore Nvidia GPU
-        if: always()
+        if: ${{ always() && inputs.runner == 'h100' }}
         run: |
           bash .ci/gpu/reset-gcp-h100.sh
           sudo ldconfig

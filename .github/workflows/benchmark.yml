@@ -16,10 +16,14 @@ on:
         description: 'Comma-separated Triton channels to run. Valid values: meta-triton,triton-main'
         default: ''
       runners:
-        type: string
-        required: false
-        description: 'Comma-separated runners to run. Valid values: h100,mi350'
-        default: ''
+        type: choice
+        required: true
+        description: 'Runner selection'
+        default: 'all'
+        options:
+          - 'all'
+          - 'h100'
+          - 'mi350'
       test_type:
         type: choice
         required: true
@@ -55,18 +59,15 @@ on:
       - benchmarks/compile_time/**
       - benchmarks/tlx/**
       - .github/scripts/generate_tritonbench_matrix.py
-      - .github/workflows/_linux-benchmark-*.yml
-      - .github/workflows/tritonbench.yml
+      - .github/workflows/_linux-benchmark.yml
+      - .github/workflows/benchmark.yml
 
 jobs:
   set-parameters:
     runs-on: ubuntu-latest
     outputs:
       benchmark_matrix: ${{ steps.set-parameters.outputs.benchmark_matrix }}
-      h100_matrix: ${{ steps.set-parameters.outputs.h100_matrix }}
-      mi350_matrix: ${{ steps.set-parameters.outputs.mi350_matrix }}
-      has_h100: ${{ steps.set-parameters.outputs.has_h100 }}
-      has_mi350: ${{ steps.set-parameters.outputs.has_mi350 }}
+      has_benchmarks: ${{ steps.set-parameters.outputs.has_benchmarks }}
     steps:
       - name: Checkout repository
         uses: actions/checkout@v4
@@ -110,38 +111,21 @@ jobs:
             --event-name "${EVENT_NAME}" \
             --changed-files "${CHANGED_FILES}"
 
-  h100-benchmarks:
+  benchmarks:
     needs: set-parameters
-    if: ${{ needs.set-parameters.outputs.has_h100 == 'true' }}
+    if: ${{ needs.set-parameters.outputs.has_benchmarks == 'true' }}
     strategy:
       fail-fast: false
-      matrix: ${{ fromJSON(needs.set-parameters.outputs.h100_matrix) }}
-    uses: ./.github/workflows/_linux-benchmark-h100.yml
+      matrix: ${{ fromJSON(needs.set-parameters.outputs.benchmark_matrix) }}
+    uses: ./.github/workflows/_linux-benchmark.yml
     with:
+      runner: ${{ matrix.runner }}
       test_type: ${{ inputs.test_type || 'periodic' }}
       benchmark_name: ${{ matrix.benchmark }}
       venv_name: ${{ matrix.triton_channel }}
       side_a_triton: ${{ inputs.side_a_triton || (matrix.triton_channel == 'meta-triton' && 'facebookexperimental/triton' || 'triton-lang/triton') }}
       side_a_commit: ${{ inputs.side_a_commit || 'main' }}
       side_b_triton: ${{ inputs.side_b_triton || (matrix.triton_channel == 'meta-triton' && 'facebookexperimental/triton' || 'triton-lang/triton') }}
-      side_b_commit: ${{ inputs.side_b_commit || 'main' }}
-    secrets:
-      TRITONBENCH_SCRIBE_GRAPHQL_ACCESS_TOKEN: ${{ secrets.TRITONBENCH_SCRIBE_GRAPHQL_ACCESS_TOKEN }}
-
-  mi350-benchmarks:
-    needs: set-parameters
-    if: ${{ needs.set-parameters.outputs.has_mi350 == 'true' }}
-    strategy:
-      fail-fast: false
-      matrix: ${{ fromJSON(needs.set-parameters.outputs.mi350_matrix) }}
-    uses: ./.github/workflows/_linux-benchmark-mi350.yml
-    with:
-      test_type: ${{ inputs.test_type || 'periodic' }}
-      benchmark_name: ${{ matrix.benchmark }}
-      venv_name: ${{ matrix.triton_channel }}
-      side_a_triton: ${{ inputs.side_a_triton || 'triton-lang/triton' }}
-      side_a_commit: ${{ inputs.side_a_commit || 'main' }}
-      side_b_triton: ${{ inputs.side_b_triton || 'triton-lang/triton' }}
       side_b_commit: ${{ inputs.side_b_commit || 'main' }}
     secrets:
       TRITONBENCH_SCRIBE_GRAPHQL_ACCESS_TOKEN: ${{ secrets.TRITONBENCH_SCRIBE_GRAPHQL_ACCESS_TOKEN }}

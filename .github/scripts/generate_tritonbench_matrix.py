@@ -32,9 +32,10 @@ BENCHMARK_CONFIG = {
 CI_BENCHMARKS = ["nightly", "compile_time", "tlx"]
 INFRA_TRIGGER_PATHS = {
     ".github/scripts/generate_tritonbench_matrix.py",
-    ".github/workflows/tritonbench.yml",
+    ".github/workflows/benchmark.yml",
+    ".github/workflows/_linux-benchmark.yml",
 }
-SUPPORTED_RUNNERS = {"h100", "mi350"}
+SUPPORTED_RUNNERS = {"h100", "mi350", "all"}
 SUPPORTED_TRITON_CHANNELS = {"meta-triton", "triton-main"}
 
 
@@ -42,6 +43,12 @@ def parse_csv(raw: str) -> list[str]:
     if not raw:
         return []
     return [item.strip() for item in raw.split(",") if item.strip()]
+
+
+def normalize_runners(runners: list[str]) -> list[str]:
+    if not runners or "all" in runners:
+        return []
+    return runners
 
 
 def validate_requested_values(
@@ -73,9 +80,7 @@ def benchmarks_from_pr_changes(changed_files: list[str]) -> list[str]:
         return CI_BENCHMARKS
 
     changed = set(changed_files)
-    if changed & INFRA_TRIGGER_PATHS or any(
-        path.startswith(".github/workflows/_linux-benchmark-") for path in changed
-    ):
+    if changed & INFRA_TRIGGER_PATHS:
         return CI_BENCHMARKS
 
     benchmarks: list[str] = []
@@ -175,7 +180,7 @@ def main() -> int:
 
     requested_benchmarks = parse_csv(args.benchmarks)
     requested_triton_channels = parse_csv(args.triton_channels)
-    requested_runners = parse_csv(args.runners)
+    requested_runners = normalize_runners(parse_csv(args.runners))
     changed_files = parse_csv(args.changed_files)
 
     validate_requested_values(
@@ -197,18 +202,8 @@ def main() -> int:
             )
         )
 
-    h100_entries = [
-        entry for entry in full_matrix_entries if entry["runner"] == "h100"
-    ]
-    mi350_entries = [
-        entry for entry in full_matrix_entries if entry["runner"] == "mi350"
-    ]
-
     write_output("benchmark_matrix", to_matrix(full_matrix_entries))
-    write_output("h100_matrix", to_matrix(h100_entries))
-    write_output("mi350_matrix", to_matrix(mi350_entries))
-    write_output("has_h100", str(bool(h100_entries)).lower())
-    write_output("has_mi350", str(bool(mi350_entries)).lower())
+    write_output("has_benchmarks", str(bool(full_matrix_entries)).lower())
 
     if not full_matrix_entries:
         sys.stderr.write("No benchmark matrix entries were generated.\n")
