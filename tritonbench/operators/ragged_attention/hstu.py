@@ -1,30 +1,19 @@
 import torch
+from generative_recommenders.common import (
+    apply_sampling,
+    generate_sparse_seq_len,
+    set_use_runtime_max_seq_len,
+)
+from generative_recommenders.ops.triton.triton_hstu_attention import triton_hstu_mha
 from tritonbench.utils.env_utils import is_fbcode
-from tritonbench.utils.path_utils import add_path, get_hstu_path
 
 if is_fbcode():
-    from generative_recommenders.common import (
-        apply_sampling,
-        generate_sparse_seq_len,
-        set_use_runtime_max_seq_len,
-    )
-    from generative_recommenders.ops.triton.triton_hstu_attention import triton_hstu_mha
     from hammer.ops.triton.triton_ragged_attn_interface import triton_ragged_hstu_mha
 
     HAS_HAMMER = True
 else:
-    with add_path(str(get_hstu_path())):
-        from generative_recommenders.common import (
-            apply_sampling,
-            generate_sparse_seq_len,
-            set_use_runtime_max_seq_len,
-        )
-        from generative_recommenders.ops.triton.triton_hstu_attention import (
-            triton_hstu_mha,
-        )
-
-        HAS_HAMMER = False
-        triton_ragged_hstu_mha = None
+    HAS_HAMMER = False
+    triton_ragged_hstu_mha = None
 
 from typing import Tuple
 

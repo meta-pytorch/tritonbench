@@ -54,6 +54,7 @@ addmm_bench.run()
 
 We depend on the following projects as a source of customized Triton or CUTLASS kernels:
 
+* (CUDA, HIP) [generative-recommenders](https://github.com/facebookresearch/generative-recommenders)
 * (CUDA, HIP) [Liger-Kernel](https://github.com/linkedin/Liger-Kernel)
 * (CUDA, HIP) [tilelang](https://github.com/tile-ai/tilelang)
 * (CUDA) [xformers](https://github.com/facebookresearch/xformers)
@@ -61,8 +62,6 @@ We depend on the following projects as a source of customized Triton or CUTLASS 
 * (CUDA) [FBGEMM](https://github.com/pytorch/FBGEMM)
 * (CUDA) [ThunderKittens](https://github.com/HazyResearch/ThunderKittens)
 * (HIP) [AITer](https://github.com/ROCm/aiter)
-
-The HSTU kernels are installed separately with `python install.py --hstu`.
 
 
 ## License

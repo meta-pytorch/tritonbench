@@ -5,7 +5,6 @@ from typing import List, Optional, Union
 
 REPO_PATH = Path(os.path.abspath(__file__)).parent.parent.parent
 SUBMODULE_PATH = REPO_PATH.joinpath("submodules")
-INSTALL_PATH = REPO_PATH.joinpath(".install")
 
 
 class add_path:
@@ -36,18 +35,6 @@ class add_ld_library_path:
 
     def __exit__(self, exc_type, exc_value, traceback):
         os.environ = self.os_environ.copy()
-
-
-def get_hstu_path() -> Path:
-    default_hstu = INSTALL_PATH.joinpath("hstu")
-    hstu_path = Path(os.environ.get("TRITONBENCH_HSTU_PATH", default_hstu)).resolve()
-    if not hstu_path.joinpath("generative_recommenders").exists():
-        raise FileNotFoundError(
-            f"Invalid TRITONBENCH_HSTU_PATH: {hstu_path}\n"
-            "Set TRITONBENCH_HSTU_PATH to a generative-recommenders checkout or "
-            "run 'python install.py --hstu'."
-        )
-    return hstu_path
 
 
 def _find_param_loc(params, key: str) -> int:

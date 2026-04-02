@@ -78,8 +78,7 @@ class Operator(BenchmarkOperator):
         super().__init__(tb_args, extra_args=extra_args)
         if not HAS_HSTU:
             raise FileNotFoundError(
-                "HSTU kernels are not installed. Run 'python install.py --hstu' "
-                "or set TRITONBENCH_HSTU_PATH to a generative-recommenders checkout."
+                "HSTU kernels are not installed. Run 'python install.py --hstu'."
             )
         args = parse_op_args(self.extra_args)
         prod_config = get_prod_config(args.config)
