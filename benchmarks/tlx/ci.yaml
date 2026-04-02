@@ -1,12 +1,11 @@
 # TLX Benchmarks
 # Add or disable TLX benchmarks that are not covered by the static analyzer
-common_args: --latency-measure-mode=profiler
+common_args: --latency-measure-mode=profiler --warmup 3000 --rep 3000
 
 bf16_gemm_fwd:
   op: gemm
-  args: --op gemm --only tlx_matmul_ws,tlx_matmul_clc,tlx_matmul_2cta,tlx_matmul_pipelined --precision bf16
+  args: --op gemm --only tlx_matmul_ws,tlx_matmul_clc,tlx_matmul_2cta,tlx_matmul_pipelined,aten_matmul --precision bf16
 
 fp16_gemm_fwd:
   op: gemm
-  args: --op gemm --only tlx_matmul_ws,tlx_matmul_clc,tlx_matmul_2cta,tlx_matmul_pipelined --precision fp16
-
+  args: --op gemm --only tlx_matmul_ws,tlx_matmul_clc,tlx_matmul_2cta,tlx_matmul_pipelined,aten_matmul --precision fp16
