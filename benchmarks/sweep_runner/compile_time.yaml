@@ -14,14 +14,9 @@ run_configs:
     # only run one input per kernel
     extra_args: --num-inputs 1
 # override some ops
-# fp16_softmax_fwd/bwd: measure compiled version (pt2)
 # bf16_flex_attention_fwd/bwd: measure compiled version (pt2)
 overrides:
   bf16_flex_attention_fwd:
     args: --op flex_attention --metrics latency,tflops --only compiled
   bf16_flex_attention_bwd:
     args: --op flex_attention --metrics latency,tflops --only compiled
-  fp16_softmax_fwd:
-    args: --op softmax --only triton_softmax,torch_compile_softmax --baseline naive_softmax --metrics latency,speedup
-  fp16_softmax_bwd:
-    args: --op softmax --only triton_softmax,torch_compile_softmax --bwd --baseline naive_softmax --metrics latency,speedup

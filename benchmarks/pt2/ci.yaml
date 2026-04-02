@@ -1,12 +1,4 @@
 fp16_softmax_fwd:
-  args: --op softmax --only triton_softmax,torch_compile_softmax --baseline naive_softmax
-    --metrics latency,speedup
+  args: --op softmax --only torch_compile_softmax --metrics latency,compile_time
 fp16_softmax_bwd:
-  args: --op softmax --only triton_softmax,torch_compile_softmax --bwd --baseline
-    naive_softmax --metrics latency,speedup
-compile_time_fp16_softmax_fwd:
-  args: --op softmax --only triton_softmax,torch_compile_softmax --baseline naive_softmax
-    --metrics latency,speedup --num-inputs 1
-compile_time_fp16_softmax_bwd:
-  args: --op softmax --only triton_softmax,torch_compile_softmax --bwd --baseline
-    naive_softmax --metrics latency,speedup --num-inputs 1
+  args: --op softmax --only torch_compile_softmax --bwd --metrics latency,compile_time
