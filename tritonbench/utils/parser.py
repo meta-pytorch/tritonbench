@@ -59,6 +59,21 @@ def get_parser(args=None):
         help="Device to benchmark.",
     )
     parser.add_argument(
+        "--devices",
+        type=str,
+        default=None,
+        help="GPU device IDs to benchmark on, in CUDA_VISIBLE_DEVICES format "
+        "(e.g., '0-2,5' means GPUs 0,1,2,5). "
+        "When specified with --shard-by-inputs, inputs are distributed across devices in parallel.",
+    )
+    parser.add_argument(
+        "--shard-by-inputs",
+        action="store_true",
+        default=False,
+        help="Shard benchmark inputs evenly across the devices specified by --devices. "
+        "Each device runs a disjoint subset of inputs in parallel using --input-id and --num-inputs.",
+    )
+    parser.add_argument(
         "--warmup",
         type=int,
         default=DEFAULT_WARMUP,
@@ -499,4 +514,17 @@ def get_parser(args=None):
 
     if args.metrics and "walltime_kineto_trace" in args.metrics and args.repcnt is None:
         parser.error("Walltime Kineto trace requires --repcnt to be specified")
+
+    if args.shard_by_inputs and not args.devices:
+        parser.error("--shard-by-inputs requires --devices to be specified")
+    if args.devices and args.device != "cuda":
+        parser.error("--devices is only supported with --device cuda")
+    if args.devices:
+        from tritonbench.utils.device_utils import parse_device_range
+
+        try:
+            parse_device_range(args.devices)
+        except ValueError as e:
+            parser.error(f"Invalid --devices value: {e}")
+
     return parser

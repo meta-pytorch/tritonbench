@@ -1,15 +1,18 @@
 import argparse
 import copy
+import csv
+import json
 import logging
 import os
 import re
 import shlex
 import subprocess
 import sys
+import tempfile
 import time
 from datetime import datetime
 from pathlib import Path
-from typing import Any, Callable, Dict, List, Optional
+from typing import Any, Callable, Dict, List, Optional, Tuple
 
 import torch
 import yaml
@@ -70,6 +73,7 @@ SPECIAL_CONFIG_FIELDS = {"common_args"}
 
 logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger(__name__)
+logger.setLevel(logging.INFO)
 
 
 def get_run_env(
@@ -158,6 +162,303 @@ def _get_helion_root():
     return helion_root
 
 
+def _get_total_available_inputs(
+    args: argparse.Namespace, extra_args: List[str]
+) -> Tuple[int, int]:
+    """Determine the total number of inputs to shard, respecting --input-id and --num-inputs.
+
+    Returns (start_input_id, total_inputs_to_run).
+    """
+    probe_args = copy.deepcopy(args)
+    probe_args.input_id = "0"
+    probe_args.num_inputs = 1
+
+    if is_loader_op(probe_args.op):
+        Opbench = get_op_loader_bench_cls_by_name(probe_args.op)
+    else:
+        Opbench = load_opbench_by_name(probe_args.op)
+    opbench = Opbench(tb_args=probe_args, extra_args=list(extra_args))
+    available = opbench._available_num_inputs
+    del opbench
+
+    start_id = int(args.input_id) if args.input_id else 0
+    if args.num_inputs is not None:
+        total = min(args.num_inputs, available - start_id)
+    else:
+        total = available - start_id
+
+    return start_id, total
+
+
+def _build_device_cmd(
+    base_argv: List[str],
+    input_id_start: int,
+    num_inputs: int,
+    output_dir: str,
+    use_csv: bool = True,
+) -> List[str]:
+    """Build a subprocess command for a single device shard."""
+    cmd = list(base_argv)
+    cmd = remove_cmd_parameter(cmd, "--devices")
+    cmd = remove_cmd_parameter(cmd, "--shard-by-inputs")
+    cmd = remove_cmd_parameter(cmd, "--input-id")
+    cmd = remove_cmd_parameter(cmd, "--num-inputs")
+    cmd = remove_cmd_parameter(cmd, "--output")
+    cmd = remove_cmd_parameter(cmd, "--output-dir")
+    cmd = remove_cmd_parameter(cmd, "--output-json")
+    cmd = remove_cmd_parameter(cmd, "--skip-print")
+    cmd = remove_cmd_parameter(cmd, "--csv")
+    cmd.extend(["--input-id", str(input_id_start)])
+    cmd.extend(["--num-inputs", str(num_inputs)])
+    cmd.extend(["--output-dir", output_dir])
+    if use_csv:
+        cmd.extend(["--csv"])
+    cmd.extend(["--skip-print"])
+    return cmd
+
+
+def _merge_csv_files(csv_files: List[str], output_path: str) -> None:
+    """Merge multiple semicolon-delimited CSV files into one, preserving header from the first."""
+    header = None
+    all_rows = []
+    for csv_file in csv_files:
+        if not os.path.exists(csv_file):
+            continue
+        with open(csv_file, "r", newline="") as f:
+            reader = csv.reader(f, delimiter=";")
+            rows = list(reader)
+            if not rows:
+                continue
+            if header is None:
+                header = rows[0]
+            all_rows.extend(rows[1:])
+
+    if header is None:
+        logger.warning("[tritonbench] No CSV output files found to merge.")
+        return
+
+    with open(output_path, "w", newline="") as f:
+        writer = csv.writer(f, delimiter=";", quoting=csv.QUOTE_MINIMAL)
+        writer.writerow(header)
+        writer.writerows(all_rows)
+
+
+def _merge_json_files(json_files: List[str], output_path: str) -> None:
+    """Merge multiple JSON benchmark output files into one by combining their metric dicts."""
+    merged: Dict[str, Any] = {}
+    for json_file in json_files:
+        if not os.path.exists(json_file):
+            continue
+        try:
+            with open(json_file, "r") as f:
+                data = json.load(f)
+        except (json.JSONDecodeError, OSError):
+            logger.warning(f"[tritonbench] Skipping unreadable JSON file: {json_file}")
+            continue
+        if isinstance(data, dict):
+            merged.update(data)
+
+    if not merged:
+        logger.warning("[tritonbench] No JSON output files found to merge.")
+        return
+
+    with open(output_path, "w") as f:
+        json.dump(merged, f, indent=4)
+
+
+def run_multi_device(
+    args: argparse.Namespace,
+    extra_args: List[str],
+) -> None:
+    """Run benchmarks across multiple GPU devices with input sharding."""
+    from tritonbench.utils.device_utils import (
+        compute_input_shards,
+        MIN_INPUTS_PER_DEVICE,
+        parse_device_range,
+        validate_device_ids,
+    )
+
+    device_ids = parse_device_range(args.devices)
+    validate_device_ids(device_ids)
+
+    if not args.shard_by_inputs:
+        raise NotImplementedError(
+            "--devices without --shard-by-inputs is not yet supported. "
+            "Currently, multi-device mode requires --shard-by-inputs."
+        )
+
+    start_id, total_inputs = _get_total_available_inputs(args, extra_args)
+    shards = compute_input_shards(total_inputs, len(device_ids))
+
+    if len(shards) < len(device_ids):
+        logger.warning(
+            f"[tritonbench] Reducing devices from {len(device_ids)} to {len(shards)} "
+            f"to ensure each device gets at least {MIN_INPUTS_PER_DEVICE} inputs "
+            f"(total_inputs={total_inputs})"
+        )
+        device_ids = device_ids[: len(shards)]
+
+    use_csv = bool(getattr(args, "csv", False))
+    output_ext = "csv" if use_csv else "json"
+
+    logger.info(
+        f"[tritonbench] Multi-device mode: {len(device_ids)} devices, "
+        f"{total_inputs} total inputs (starting from id {start_id}), "
+        f"output format: {output_ext}"
+    )
+    for device_id, (shard_offset, shard_size) in zip(device_ids, shards):
+        logger.info(
+            f"[tritonbench]   Device {device_id}: input_id={start_id + shard_offset}, "
+            f"num_inputs={shard_size}"
+        )
+
+    base_argv = [] if is_fbcode() else [sys.executable]
+    base_argv.extend(copy.deepcopy(sys.argv))
+    if not is_fbcode() and len(base_argv) > 1 and base_argv[1] != "run.py":
+        base_argv.insert(1, "run.py")
+
+    top_level_output_dir = tempfile.mkdtemp(prefix="tritonbench_multi_device_")
+    user_output = args.output
+    user_output_json = getattr(args, "output_json", None)
+    user_output_dir = args.output_dir
+
+    processes = []
+    device_output_dirs = []
+    for device_id, (shard_offset, shard_size) in zip(device_ids, shards):
+        if shard_size == 0:
+            continue
+
+        device_dir = os.path.join(top_level_output_dir, f"device_{device_id}")
+        os.makedirs(device_dir, exist_ok=True)
+        device_output_dirs.append((device_id, device_dir))
+
+        cmd = _build_device_cmd(
+            base_argv,
+            input_id_start=start_id + shard_offset,
+            num_inputs=shard_size,
+            output_dir=device_dir,
+            use_csv=use_csv,
+        )
+
+        subprocess_env = os.environ.copy()
+        subprocess_env["CUDA_VISIBLE_DEVICES"] = str(device_id)
+
+        stdout_path = os.path.join(device_dir, "stdout.log")
+        stderr_path = os.path.join(device_dir, "stderr.log")
+
+        stdout_f = open(stdout_path, "w")
+        stderr_f = open(stderr_path, "w")
+
+        logger.info(f"[tritonbench] Launching device {device_id}: " + " ".join(cmd))
+
+        try:
+            proc = subprocess.Popen(
+                cmd,
+                stdout=stdout_f,
+                stderr=stderr_f,
+                cwd=REPO_PATH,
+                env=subprocess_env,
+            )
+        except Exception:
+            stdout_f.close()
+            stderr_f.close()
+            raise
+        processes.append((device_id, proc, stdout_f, stderr_f))
+
+    failures = []
+    successes = []
+    for device_id, proc, stdout_f, stderr_f in processes:
+        proc.wait()
+        stdout_f.close()
+        stderr_f.close()
+        if proc.returncode != 0:
+            device_dir = os.path.join(top_level_output_dir, f"device_{device_id}")
+            stderr_path = os.path.join(device_dir, "stderr.log")
+            try:
+                with open(stderr_path, "r") as f:
+                    stderr_content = f.read()
+            except OSError:
+                stderr_content = "<unable to read stderr>"
+            failures.append((device_id, proc.returncode, stderr_content))
+            logger.error(
+                f"[tritonbench] Device {device_id} failed with return code "
+                f"{proc.returncode}:\n{stderr_content}"
+            )
+        else:
+            successes.append(device_id)
+
+    op_name = args.op
+    per_device_outputs = []
+    for device_id, device_dir in device_output_dirs:
+        output_file = os.path.join(device_dir, f"{op_name}.{output_ext}")
+        if os.path.exists(output_file):
+            per_device_outputs.append(output_file)
+
+    merged_path = None
+    if per_device_outputs:
+        if user_output:
+            merged_path = user_output
+        elif user_output_json and not use_csv:
+            merged_path = user_output_json
+        elif user_output_dir:
+            os.makedirs(user_output_dir, exist_ok=True)
+            merged_path = os.path.join(user_output_dir, f"{op_name}.{output_ext}")
+        else:
+            merged_path = os.path.join(
+                top_level_output_dir, f"{op_name}_merged.{output_ext}"
+            )
+
+        if use_csv:
+            _merge_csv_files(per_device_outputs, merged_path)
+        else:
+            _merge_json_files(per_device_outputs, merged_path)
+
+    _print_multi_device_summary(
+        op_name=op_name,
+        device_ids=device_ids,
+        successes=successes,
+        failures=failures,
+        merged_path=merged_path,
+        output_format=output_ext,
+        top_level_output_dir=top_level_output_dir,
+    )
+
+    if len(failures) == len(processes):
+        raise RuntimeError(
+            f"[tritonbench] All {len(failures)} device(s) failed. "
+            f"Check logs in {top_level_output_dir}"
+        )
+
+
+def _print_multi_device_summary(
+    op_name: str,
+    device_ids: List[int],
+    successes: List[int],
+    failures: List[Tuple[int, int, str]],
+    merged_path: Optional[str],
+    output_format: str,
+    top_level_output_dir: str,
+) -> None:
+    """Print a consolidated summary of the multi-device benchmark run."""
+    print(f"\n{'=' * 60}")
+    print(f"Multi-Device Benchmark Summary: {op_name}")
+    print(f"{'=' * 60}")
+    print(f"Devices:    {len(device_ids)} ({', '.join(str(d) for d in device_ids)})")
+    print(f"Succeeded:  {len(successes)}")
+    print(f"Failed:     {len(failures)}")
+    if merged_path and os.path.exists(merged_path):
+        print(f"Output:     {merged_path} ({output_format})")
+    if failures:
+        print(f"\nFailed devices:")
+        for device_id, returncode, _ in failures:
+            stderr_log = os.path.join(
+                top_level_output_dir, f"device_{device_id}", "stderr.log"
+            )
+            print(f"  Device {device_id}: exit code {returncode} (see {stderr_log})")
+    print(f"Logs:       {top_level_output_dir}")
+    print(f"{'=' * 60}\n")
+
+
 def tritonbench_run(args: Optional[List[str]] = None):
     if args == None or args == []:
         args = sys.argv[1:]
@@ -173,6 +474,11 @@ def tritonbench_run(args: Optional[List[str]] = None):
     args, extra_args = parser.parse_known_args(args)
 
     tritonparse_init(args.tritonparse)
+
+    if args.devices:
+        run_multi_device(args, extra_args)
+        tritonparse_parse(args.tritonparse)
+        return
 
     if args.device == "mtia":
         import mtia.host_runtime.torch_mtia.dynamic_library  # noqa
