@@ -1,4 +1,4 @@
-# Run config file for nightly benchmark
+# Run config file for pt2 benchmark
 # First, collect all ops and backends with tags "triton"
 # Measure latency, flops, and speedup metrics in the best effort
 # Some operators might not support flops or speedup metrics

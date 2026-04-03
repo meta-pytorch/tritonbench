@@ -14,12 +14,7 @@ run_configs:
     skip_tests:
       - test/test_gpu/skip_tests.yaml
 # override some ops
-# 1. launch_latency_fwd: measure walltime instead of latency
-# 2. bf16_flex_attention_fwd/bwd: measure compiled version (pt2)
+# launch_latency_fwd: measure walltime instead of latency
 overrides:
   launch_latency_fwd:
     args: --op launch_latency --metrics walltime
-  bf16_flex_attention_fwd:
-    args: --op flex_attention --metrics latency,tflops --only compiled
-  bf16_flex_attention_bwd:
-    args: --op flex_attention --metrics latency,tflops --only compiled
