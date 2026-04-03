@@ -8,7 +8,7 @@ on:
       benchmarks:
         type: string
         required: false
-        description: 'Comma-separated benchmarks to run. Valid values: nightly,compile_time,tlx,timing_accuracy,pt2'
+        description: 'Comma-separated benchmarks to run.'
         default: 'nightly'
       triton_channels:
         type: choice
