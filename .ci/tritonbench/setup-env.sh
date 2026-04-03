@@ -50,8 +50,8 @@ if [ -n "${UV_VENV_DIR:-}" ]; then
 else
     echo "conda activate \${CONDA_ENV}" >> "${SETUP_SCRIPT}"
     . "${SETUP_SCRIPT}"
-    python -m tools.cuda_utils --install-torch-deps
 fi
+python -m tools.cuda_utils --install-torch-deps
 
 bash .ci/tritonbench/install-pytorch-source.sh
 
