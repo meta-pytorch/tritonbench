@@ -8,7 +8,7 @@ on:
       benchmarks:
         type: string
         required: false
-        description: 'Comma-separated benchmarks to run. Valid values: nightly,compile_time,tlx,timing_accuracy'
+        description: 'Comma-separated benchmarks to run. Valid values: nightly,compile_time,tlx,timing_accuracy,pt2'
         default: 'nightly'
       triton_channels:
         type: choice
@@ -62,6 +62,7 @@ on:
       - benchmarks/nightly/**
       - benchmarks/compile_time/**
       - benchmarks/tlx/**
+      - benchmarks/pt2/**
       - .github/scripts/generate_tritonbench_matrix.py
       - .github/workflows/_linux-benchmark.yml
       - .github/workflows/benchmark.yml

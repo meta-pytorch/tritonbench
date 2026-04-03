@@ -27,9 +27,14 @@ BENCHMARK_CONFIG = {
         "runners": ["h100"],
         "manual_only": True,
     },
+    "pt2": {
+        "triton_channels": ["triton-main"],
+        "runners": ["h100", "mi350"],
+        "manual_only": False,
+    },
 }
 
-CI_BENCHMARKS = ["nightly", "compile_time", "tlx"]
+CI_BENCHMARKS = ["nightly", "compile_time", "tlx", "pt2"]
 RUNNER_FULL_NAMES = {
     "h100": "gcp-h100-runner",
     "mi350": "amd-mi350-runner",
