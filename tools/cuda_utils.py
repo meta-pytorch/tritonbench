@@ -9,7 +9,7 @@ from .torch_utils import install_pytorch_nightly
 from .python_utils import get_pip_cmd, USE_UV
 
 # defines the default CUDA version to compile against
-DEFAULT_CUDA_VERSION = "12.8"
+DEFAULT_CUDA_VERSION = "13.0"
 DEFAULT_HIP_VERSION = "7.2"
 
 # the key is the value of `torch.version.cuda`
