@@ -590,6 +590,22 @@ class Operator(BenchmarkOperator):
     def tlx_matmul_ws(self, a, b, bias) -> Callable:
         target_dtype = a.dtype
 
+        # TLX kernel requires inputs that are either row-major contiguous or
+        # column-major (stride-1 on the first dim). Non-contiguous inputs
+        # (e.g. sliced from a larger tensor with stride gaps) must be made
+        # contiguous to satisfy TMA's 16-byte stride alignment.
+        def _ensure_valid_layout(t):
+            if t.is_contiguous():
+                return t  # row-major, fine
+            # Check if it's column-major: .T should be contiguous
+            if t.T.is_contiguous():
+                return t  # column-major, kernel handles via .T
+            # Neither row-major nor column-major — make contiguous
+            return t.contiguous()
+
+        a = _ensure_valid_layout(a)
+        b = _ensure_valid_layout(b)
+
         # Reject unaligned strides: TMA TensorDescriptor requires 16-byte alignment.
         # The loop checks non-unit input strides, which depend on layout:
         #   row-major a → checks K,  column-major a → checks M
