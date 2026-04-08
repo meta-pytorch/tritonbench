@@ -87,7 +87,7 @@ class Operator(BenchmarkOperator):
     @register_benchmark(baseline=True)
     def apply_rotary_pos_emb(self, hidden_size, seq_length) -> Callable:
         q, k, cos, sin, pos_ids = self.prepare_input(hidden_size, seq_length)
-        return lambda: apply_rotary_pos_emb(q, k, cos, sin, pos_ids)
+        return lambda: apply_rotary_pos_emb(q, k, cos, sin)
 
     @register_benchmark()
     def liger_rotary_pos_emb(self, hidden_size, seq_length) -> Callable:
@@ -109,7 +109,7 @@ class Operator(BenchmarkOperator):
         compiled_func = torch.compile(
             apply_rotary_pos_emb, mode="max-autotune-no-cudagraphs"
         )
-        return lambda: compiled_func(q, k, cos, sin, pos_ids)
+        return lambda: compiled_func(q, k, cos, sin)
 
     @register_x_val(label="(H, T)")
     def get_x_val(self, example_inputs) -> Tuple[int, int]:
