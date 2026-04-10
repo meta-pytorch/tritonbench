@@ -42,7 +42,8 @@ class TestDependencyGroups(unittest.TestCase):
         self.assertEqual(
             set(self.groups["dev-numpy"]),
             {
-                "numpy==2.0.2; python_version < '3.11'",
-                "numpy==2.1.0; python_version >= '3.11'",
+                "numpy==2.0.2; python_version < '3.10'",
+                "numpy==2.1.0; python_version >= '3.10' and python_version < '3.14'",
+                "numpy==2.3.4; python_version >= '3.14'",
             },
         )
