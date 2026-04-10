@@ -19,8 +19,8 @@ logger = logging.getLogger(__name__)
 
 # [Optional] CuTe
 try:
-    from mslk.attention.flash_attn.interface import (
-        flash_attn_func as facute_flash_attn_func,
+    from mslk.fb.mslk.attention.flash_attn.interface import (
+        _flash_attn_fwd as facute_flash_attn_func,
     )
 
     HAS_FLASH_CUTE = True
@@ -33,10 +33,7 @@ except SystemError as e:
 
 # [Optional] OSS Flash Attention v4
 try:
-    from flash_attn.cute import (
-        flash_attn_func as oss_fa4_flash_attn_func,
-        flash_attn_varlen_func as oss_fa4_flash_attn_varlen_func,
-    )
+    from flash_attn.cute.interface import _flash_attn_fwd as oss_fa4_flash_attn_func
 
     HAS_OSS_FA4 = True
 except (ImportError, IOError, AttributeError):
@@ -113,8 +110,8 @@ def detach_inputs(*args):
 
 
 def multi_input_wrapper(fn):
-    def wrapper(self, *args):
-        preproc_fn, benchmark_fn = fn(self, *args)
+    def wrapper(self, *args, **kwargs):
+        preproc_fn, benchmark_fn = fn(self, *args, **kwargs)
         arg_len = len(args)
         # Determine input group size:
         # - 8 for paged attention (q, k_cache, v_cache, cu_seqlens_q, max_seqlen_q, max_seqlen_k, page_table, seqused_k)
@@ -161,6 +158,17 @@ def preproc_permute(*args):
     # Regular attention: q, k, v (BHSD -> BSHD for flash_attn_func)
     q, k, v = args
     return [t.contiguous() for t in permute_qkv(q, k, v, perm=(0, 2, 1, 3))]
+
+
+def preproc_permute_varlen(*args):
+    # Regular attention: q, k, v (BHSD -> (B*S, H, D) for varlen/flash_attn_fwd)
+    q, k, v = args
+    q, k, v = permute_qkv(q, k, v, perm=(0, 2, 1, 3))
+    return [
+        q.reshape(-1, q.shape[2], q.shape[3]).contiguous(),
+        k.reshape(-1, k.shape[2], k.shape[3]).contiguous(),
+        v.reshape(-1, v.shape[2], v.shape[3]).contiguous(),
+    ]
 
 
 def preproc_paged_attention(
@@ -229,21 +237,62 @@ class Operator(BenchmarkOperator):
             return True
         return self.current_shape.causal
 
-    def _get_window_size(self) -> Tuple[int, int]:
+    def _get_window_size(self) -> Tuple[Optional[int], Optional[int]]:
         """Get window size from current shape."""
         if self.current_shape is None:
-            return (-1, -1)
-        return self.current_shape.window_size
+            return (None, None)
+
+        window_size = self.current_shape.window_size
+
+        def _extract_window_size(w):
+            return w if w >= 0 else None
+
+        return (
+            _extract_window_size(window_size[0]),
+            _extract_window_size(window_size[1]),
+        )
 
     def _get_local(self) -> bool:
         """Check if sliding window is enabled."""
-        return self._get_window_size() != (-1, -1)
+        return self._get_window_size() != (None, None)
 
     def _get_sm_scale(self) -> float:
         """Get softmax scale from current shape's d_head."""
         if self.current_shape is None:
             return 1.0 / math.sqrt(64)  # default
         return 1.0 / math.sqrt(self.current_shape.d_head)
+
+    def _get_cu_seqlens_q(self) -> Optional[torch.Tensor]:
+        """Get cu_seqlens_q tensor from current shape, or None if not set."""
+        if self.current_shape is None or self.current_shape.cu_seqlens_q is None:
+            return None
+        return torch.tensor(
+            self.current_shape.cu_seqlens_q, dtype=torch.int32, device=self.device
+        )
+
+    def _get_cu_seqlens_k(self) -> Optional[torch.Tensor]:
+        """Get cu_seqlens_k tensor from current shape, or None if not set."""
+        if self.current_shape is None or self.current_shape.cu_seqlens_k is None:
+            return None
+        return torch.tensor(
+            self.current_shape.cu_seqlens_k, dtype=torch.int32, device=self.device
+        )
+
+    def _get_seqused_k(self) -> Optional[torch.Tensor]:
+        """Get seqused_k tensor from current shape, or None if not set."""
+        if self.current_shape is None or self.current_shape.seqused_k is None:
+            return None
+        return torch.tensor(
+            self.current_shape.seqused_k, dtype=torch.int32, device=self.device
+        )
+
+    def _get_seqused_q(self) -> Optional[torch.Tensor]:
+        """Get seqused_q tensor from current shape, or None if not set."""
+        if self.current_shape is None or self.current_shape.seqused_q is None:
+            return None
+        return torch.tensor(
+            self.current_shape.seqused_q, dtype=torch.int32, device=self.device
+        )
 
     def _is_paged_attention(self) -> bool:
         """Check if current shape uses paged attention."""
@@ -275,26 +324,36 @@ class Operator(BenchmarkOperator):
             return self._cutedsl_blackwell_paged(*args)
         return self._cutedsl_blackwell(*args)
 
+    @register_benchmark(enabled=(IS_BLACKWELL and HAS_FLASH_CUTE), label="FAv4-varlen")
+    def cutedsl_blackwell_varlen(self, *args) -> Callable:
+        varlen_args = {
+            "cu_seqlens_q": self._get_cu_seqlens_q(),
+            "cu_seqlens_k": self._get_cu_seqlens_k(),
+            "seqused_q": self._get_seqused_q(),
+            "seqused_k": self._get_seqused_k(),
+        }
+        return self._cutedsl_blackwell(*args, **varlen_args)
+
     @multi_input_wrapper
-    def _cutedsl_blackwell(self, *args) -> Tuple[Callable, Callable]:
-        causal = self._get_causal()
-        local = self._get_local()
+    def _cutedsl_blackwell(self, *args, **varlen_args) -> Tuple[Callable, Callable]:
         window_size = self._get_window_size()
+
         fn = partial(
             facute_flash_attn_func,
             softmax_scale=self._get_sm_scale(),
-            causal=causal,
-            window_size=window_size if local else (None, None),
-            deterministic=self.deterministic,
+            causal=self._get_causal(),
+            window_size_left=window_size[0],
+            window_size_right=window_size[1],
+            return_lse=self._get_return_lse(),
+            page_table=None,
             bottom_right=True,
+            **varlen_args,
         )
-        return preproc_permute, fn
+        return preproc_permute_varlen if len(varlen_args) > 0 else preproc_permute, fn
 
     @multi_input_wrapper
     def _cutedsl_blackwell_paged(self, *args) -> Tuple[Callable, Callable]:
-        causal = self._get_causal()
         window_size = self._get_window_size()
-        local = self._get_local()
 
         def paged_attn_fn(
             q,
@@ -312,12 +371,14 @@ class Operator(BenchmarkOperator):
                 v_cache,
                 cu_seqlens_q=cu_seqlens_q,
                 cu_seqlens_k=None,
-                seqlen_kv=seqused_k,
+                seqlen_q=None,
+                seqused_k=seqused_k,
                 max_seq_len_q=max_seqlen_q,
                 max_seq_len_k=max_seqlen_k,
                 softmax_scale=self._get_sm_scale(),
-                causal=causal,
-                window_size=window_size if local else (None, None),
+                causal=self._get_causal(),
+                window_size_left=window_size[0],
+                window_size_right=window_size[1],
                 page_table=page_table,
                 deterministic=self.deterministic,
                 bottom_right=True,
@@ -331,27 +392,37 @@ class Operator(BenchmarkOperator):
             return self._oss_fa4_paged(*args)
         return self._oss_fa4(*args)
 
+    @register_benchmark(enabled=(IS_BLACKWELL and HAS_OSS_FA4), label="OSS-FAv4-varlen")
+    def oss_fa4_varlen(self, *args) -> Callable:
+        varlen_args = {
+            "cu_seqlens_q": self._get_cu_seqlens_q(),
+            "cu_seqlens_k": self._get_cu_seqlens_k(),
+            "seqused_q": self._get_seqused_q(),
+            "seqused_k": self._get_seqused_k(),
+        }
+        return self._oss_fa4(*args, **varlen_args)
+
     @multi_input_wrapper
-    def _oss_fa4(self, *args) -> Tuple[Callable, Callable]:
-        causal = self._get_causal()
-        local = self._get_local()
+    def _oss_fa4(self, *args, **varlen_args) -> Tuple[Callable, Callable]:
         window_size = self._get_window_size()
-        # OSS FA4 may not support bottom_right or return_lse parameters
+        # OSS FA4 may not support bottom_right
         fn = partial(
             oss_fa4_flash_attn_func,
             softmax_scale=self._get_sm_scale(),
-            causal=causal,
-            window_size=window_size if local else (None, None),
-            deterministic=self.deterministic,
+            causal=self._get_causal(),
+            window_size_left=window_size[0],
+            window_size_right=window_size[1],
+            return_lse=self._get_return_lse(),
+            page_table=None,
+            **varlen_args,
         )
-        return preproc_permute, fn
+        return preproc_permute_varlen if len(varlen_args) > 0 else preproc_permute, fn
 
     @multi_input_wrapper
     def _oss_fa4_paged(self, *args) -> Tuple[Callable, Callable]:
         # Paged attention uses flash_attn_varlen_func with page_table
         causal = self._get_causal()
         window_size = self._get_window_size()
-        local = self._get_local()
 
         def paged_attn_fn(
             q,
@@ -363,7 +434,7 @@ class Operator(BenchmarkOperator):
             page_table,
             seqused_k,
         ):
-            return oss_fa4_flash_attn_varlen_func(
+            return oss_fa4_flash_attn_func(
                 q,
                 k_cache,
                 v_cache,
@@ -376,8 +447,8 @@ class Operator(BenchmarkOperator):
                 page_table=page_table,
                 softmax_scale=self._get_sm_scale(),
                 causal=causal,
-                window_size=window_size if local else (None, None),
-                deterministic=self.deterministic,
+                window_size_left=window_size[0],
+                window_size_right=window_size[1],
             )
 
         return preproc_paged_attention, paged_attn_fn

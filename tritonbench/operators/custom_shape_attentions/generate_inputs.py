@@ -7,7 +7,7 @@
 import importlib.util
 import math
 from dataclasses import dataclass
-from typing import Generator, List, Optional, Tuple, Union
+from typing import Generator, List, Optional, Sequence, Tuple, Union
 
 import torch
 
@@ -34,6 +34,11 @@ class AttentionShape:
     d_head: int
     causal: bool = True
     window_size: Tuple[int, int] = (-1, -1)  # (-1, -1) means no sliding window
+    # Optional cumulative sequence length / seqused fields (as lists, converted to tensors by operator)
+    cu_seqlens_q: Optional[List[int]] = None
+    cu_seqlens_k: Optional[List[int]] = None
+    seqused_k: Optional[List[int]] = None
+    seqused_q: Optional[List[int]] = None
     # Page attention fields
     paged_attention: bool = False
     block_size: int = 16  # Default block size for paged attention
@@ -129,6 +134,10 @@ def _convert_to_attention_shapes(shapes_data: List) -> List[AttentionShape]:
                     d_head=shape_item["d_head"],
                     causal=shape_item.get("causal", True),
                     window_size=tuple(shape_item.get("window_size", (-1, -1))),
+                    cu_seqlens_q=shape_item.get("cu_seqlens_q", None),
+                    cu_seqlens_k=shape_item.get("cu_seqlens_k", None),
+                    seqused_k=shape_item.get("seqused_k", None),
+                    seqused_q=shape_item.get("seqused_q", None),
                     paged_attention=shape_item.get("paged_attention", False),
                     block_size=shape_item.get("block_size", 16),
                     max_model_seq_len=shape_item.get("max_model_seq_len", 32768),
