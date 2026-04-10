@@ -33,6 +33,31 @@ def nop_with_args_kernel(
     pass
 
 
+@triton.jit
+def nop_with_kwargs_kernel(
+    t1,
+    t2,
+    t3,
+    t4,
+    t5,
+    i1,
+    i2,
+    i3,
+    i4,
+    i5,
+    i6,
+    i7,
+    i8,
+    i9,
+    BLOCK_C1: tl.constexpr = 32,
+    BLOCK_C2: tl.constexpr = 32,
+    BLOCK_C3: tl.constexpr = 32,
+    BLOCK_C4: tl.constexpr = 32,
+    BLOCK_C5: tl.constexpr = 32,
+):
+    pass
+
+
 def get_trivial_add_kernel():
     @torch.compile
     def trivial_add_kernel(*args):

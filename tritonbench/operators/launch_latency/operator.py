@@ -18,7 +18,12 @@ with try_import("HAS_CUTEDSL"):
 
     from .cutedsl import cutedsl_nop_kernel, cutedsl_nop_with_args_kernel
 
-from .kernels import get_trivial_add_kernel, nop_kernel, nop_with_args_kernel
+from .kernels import (
+    get_trivial_add_kernel,
+    nop_kernel,
+    nop_with_args_kernel,
+    nop_with_kwargs_kernel,
+)
 
 
 def _patch_triton_run_profiling():
@@ -185,6 +190,22 @@ class Operator(BenchmarkOperator):
         if len(args) == 0:
             return lambda: nop_kernel[1,]()
         return lambda: nop_with_args_kernel[1,](*args)
+
+    @register_benchmark()
+    def nop_triton_kernel_kwargs(self, *args):
+        """Same as nop_triton_kernel but passes constexpr params as kwargs."""
+        if len(args) == 0:
+            return lambda: nop_kernel[1,]()
+        pos_args = args[:14]
+        kw_vals = args[14:] if len(args) > 14 else (32, 32, 32, 32, 32)
+        return lambda: nop_with_kwargs_kernel[1,](
+            *pos_args,
+            BLOCK_C1=kw_vals[0],
+            BLOCK_C2=kw_vals[1],
+            BLOCK_C3=kw_vals[2],
+            BLOCK_C4=kw_vals[3],
+            BLOCK_C5=kw_vals[4],
+        )
 
     @register_benchmark()
     def nop_triton_compiled_kernel_run(self, *args):
