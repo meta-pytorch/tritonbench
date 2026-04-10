@@ -24,3 +24,4 @@ autotuner.log
 .install/
 .venvs/
 bisect_logs/
+.codex
