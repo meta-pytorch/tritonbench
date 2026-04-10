@@ -30,6 +30,7 @@ dev-amd = [
     "tabulate",
     "matplotlib",
     "pyyaml",
+    "transformers==5.0.0rc3",
 ]
 dev-cpu = [
     "packaging",
@@ -37,6 +38,7 @@ dev-cpu = [
     "tabulate",
     "matplotlib",
     "pyyaml",
+    "transformers==5.0.0rc3",
 ]
 dev-numpy = [
     "numpy==2.0.2; python_version < '3.11'",
