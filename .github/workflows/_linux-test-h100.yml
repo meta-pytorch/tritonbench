@@ -33,7 +33,7 @@ jobs:
           . "${SETUP_SCRIPT}"
           mkdir -p /workspace/tritonbench/.data
           ln -s /workspace/tritonbench/.data .
-          uv pip install -r requirements.txt
+          uv pip install --group dev-nvidia
       - name: Test Tritonbench operators on H100 GPU
         run: |
           bash ./.ci/tritonbench/test-gpu.sh

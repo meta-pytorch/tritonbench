@@ -39,6 +39,11 @@ dev-numpy = [
     "numpy==2.0.2; python_version < '3.11'",
     "numpy==2.1.0; python_version >= '3.11'",
 ]
+ci = [
+    "boto3",
+    "pyyaml",
+    "requests",
+]
 
 [tool.setuptools.packages.find]
 include = ["tritonbench*"]

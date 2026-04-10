@@ -114,7 +114,7 @@ jobs:
         run: |
           set -eux
           . "${SETUP_SCRIPT}"
-          uv pip install -r .ci/upload/requirements.txt
+          uv pip install --group ci
 
       - name: Compile Triton (Side A)
         run: |
