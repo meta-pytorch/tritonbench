@@ -21,6 +21,61 @@ with try_import("HAS_CUTEDSL"):
 from .kernels import get_trivial_add_kernel, nop_kernel, nop_with_args_kernel
 
 
+def _prepare_direct_culaunch(bin, args):
+    """
+    Pre-extract everything needed for a direct cuLaunchKernel call via ctypes.
+    Simulates what TritonCC/AOT-T/AOTI do: all handles pre-cached,
+    no Python binder, no PyArg_ParseTuple, no cuPointerGetAttribute.
+    """
+    import ctypes
+
+    libcuda = ctypes.CDLL("libcuda.so.1")
+    _cuLaunchKernel = libcuda.cuLaunchKernel
+    _cuLaunchKernel.restype = ctypes.c_int
+
+    cu_function = bin.function
+    stream_handle = torch.cuda.current_stream().cuda_stream
+
+    if hasattr(bin, "packed_metadata"):
+        pm = bin.packed_metadata
+        num_warps, shared_mem = pm[0], pm[2]
+    else:
+        num_warps = bin.metadata.num_warps
+        shared_mem = bin.metadata.shared
+
+    # Pre-cast all values to ctypes — no Python object creation per call
+    _func = ctypes.c_void_p(cu_function)
+    _g1 = ctypes.c_uint(1)
+    _bx = ctypes.c_uint(32 * num_warps)
+    _b1 = ctypes.c_uint(1)
+    _shared = ctypes.c_uint(shared_mem)
+    _stream = ctypes.c_void_p(stream_handle)
+    _null = ctypes.c_void_p(0)
+
+    if len(args) == 0:
+        return lambda: _cuLaunchKernel(
+            _func, _g1, _g1, _g1, _bx, _b1, _b1, _shared, _stream, _null, _null
+        )
+    else:
+        # Pre-extract device pointers and scalars (one-time, like [3][4][5] build time)
+        param_values = []
+        for arg in args:
+            if isinstance(arg, torch.Tensor):
+                param_values.append(ctypes.c_uint64(arg.data_ptr()))
+            elif isinstance(arg, int):
+                param_values.append(ctypes.c_int32(arg))
+            else:
+                param_values.append(ctypes.c_int32(int(arg)))
+        n = len(param_values)
+        ParamsArray = ctypes.c_void_p * n
+        param_ptrs = ParamsArray(
+            *[ctypes.cast(ctypes.pointer(v), ctypes.c_void_p) for v in param_values]
+        )
+        return lambda _pv=param_values: _cuLaunchKernel(
+            _func, _g1, _g1, _g1, _bx, _b1, _b1, _shared, _stream, param_ptrs, _null
+        )
+
+
 def _patch_triton_run_profiling():
     """Monkey-patch JITFunction.run to profile launch overhead breakdown."""
     from triton.runtime.jit import JITFunction
@@ -209,6 +264,20 @@ class Operator(BenchmarkOperator):
             return lambda: bin.run(
                 1, 1, 1, 1, 1, 1, 1, 1, 0, 0, function, None, None, metadata, *args
             )
+
+    @register_benchmark()
+    def nop_triton_direct_culaunch(self, *args):
+        """Simulate [3][4][5] (TritonCC/AOT-T/AOTI) style launch:
+        pre-compile kernel, pre-extract all handles, call cuLaunchKernel
+        directly via ctypes. No Python binder, no PyArg_ParseTuple, no
+        cuPointerGetAttribute — just the raw CUDA driver call."""
+        if len(args) == 0:
+            bin = nop_kernel[1,]()
+        else:
+            bin = nop_with_args_kernel[1,](*args)
+            if not triton_version_uses_attrs_dict():
+                args = args[:-5]
+        return _prepare_direct_culaunch(bin, args)
 
     @register_benchmark()
     def nop_inductor_kernel(self, *args):
