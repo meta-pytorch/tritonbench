@@ -12,7 +12,6 @@ from tools.python_utils import (
     get_pip_cmd,
     get_pkg_versions,
     has_pkg,
-    pip_install_requirements,
 )
 
 logging.basicConfig(level=logging.INFO)
@@ -132,14 +131,15 @@ if __name__ == "__main__":
         setup_hip(args)
 
     if args.numpy or not has_pkg("numpy"):
-        pip_install_requirements("requirements-numpy.txt", add_build_constraints=False)
+        subprocess.check_call(get_pip_cmd() + ["install", "--group", "dev-numpy"])
 
     # generate build constraints before installing anything
     deps = get_pkg_versions(TRITONBENCH_DEPS)
     generate_build_constraints(deps)
 
-    # install framework dependencies
-    pip_install_requirements("requirements.txt")
+    # install framework dependencies from pyproject.toml
+    dependency_group = "dev-amd" if is_hip() else "dev-nvidia"
+    subprocess.check_call(get_pip_cmd() + ["install", "--group", dependency_group])
     # checkout submodules
     checkout_submodules(REPO_PATH)
     # install submodules

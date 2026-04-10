@@ -1,4 +1,0 @@
-# We need to pin numpy version to the same as the torch testing environment
-# Reference: https://github.com/pytorch/pytorch/blob/fcbde24c1cb54f3e0417e123bdb9ae09da134c8d/.ci/manywheel/build_common.sh#L103
-numpy==2.0.2; python_version < '3.11'
-numpy==2.1.0; python_version >= '3.11'

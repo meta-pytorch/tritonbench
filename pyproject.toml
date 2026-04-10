@@ -14,6 +14,32 @@ dependencies = [
     "packaging",
 ]
 
+[dependency-groups]
+dev-nvidia = [
+    "packaging",
+    "psutil",
+    "tabulate",
+    "matplotlib",
+    "nvidia-ml-py",
+    "transformers==5.0.0rc3",
+]
+dev-amd = [
+    "packaging",
+    "psutil",
+    "tabulate",
+    "matplotlib",
+]
+dev-cpu = [
+    "packaging",
+    "psutil",
+    "tabulate",
+    "matplotlib",
+]
+dev-numpy = [
+    "numpy==2.0.2; python_version < '3.11'",
+    "numpy==2.1.0; python_version >= '3.11'",
+]
+
 [tool.setuptools.packages.find]
 include = ["tritonbench*"]
 

@@ -8,7 +8,7 @@ If you run `python install.py` without any argument, it will do the following:
 
 
 1. If PyTorch is missing, install the latest PyTorch nightly package.
-2. Install other dependencies from requirements.txt and requirements_numpy.txt.
+2. Install the `dev-nvidia` or `dev-amd` dependency group from `pyproject.toml`, depending on the platform.
 3. Checkout all submodules
 
 ## Advanced Usage
