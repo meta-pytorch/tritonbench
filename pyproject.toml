@@ -20,6 +20,7 @@ dev-nvidia = [
     "psutil",
     "tabulate",
     "matplotlib",
+    "pyyaml",
     "nvidia-ml-py",
     "transformers==5.0.0rc3",
 ]
@@ -28,12 +29,14 @@ dev-amd = [
     "psutil",
     "tabulate",
     "matplotlib",
+    "pyyaml",
 ]
 dev-cpu = [
     "packaging",
     "psutil",
     "tabulate",
     "matplotlib",
+    "pyyaml",
 ]
 dev-numpy = [
     "numpy==2.0.2; python_version < '3.11'",
