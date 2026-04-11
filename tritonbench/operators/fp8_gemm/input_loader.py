@@ -15,6 +15,7 @@ Expected op_inputs format:
 }
 """
 
+from ast import literal_eval
 from typing import Any, Callable
 
 from tritonbench.operator_loader.aten.input_loader import OperatorInputLoader
@@ -28,7 +29,7 @@ class InputLoader(OperatorInputLoader):
     def get_input_iter(
         self,
     ) -> Callable:
-        shapes = [eval(inp)[1] for inp, _cnt in self.operator_db[self.op_name].items()]
+        shapes = [literal_eval(inp)[1] for inp, _cnt in self.operator_db[self.op_name].items()]
         all_shapes = []
         for entry in shapes:
             M = int(entry["M"])
