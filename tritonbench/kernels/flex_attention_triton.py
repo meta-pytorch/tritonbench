@@ -59,18 +59,19 @@ def get_ws_configs():
     """Configs for warp-specialized kernels, following the Blackwell FA reference."""
     configs = []
     for BLOCK_M, BLOCK_N, num_stages, num_warps, maxreg in [
-        (128, 64, 2, 4, 152),
-        (128, 64, 3, 4, 152),
+        # (128, 64, 2, 4, 152),
+        # (128, 64, 3, 4, 152),
+        # (128, 128, 2, 4, 152),
+        # (128, 128, 3, 4, 152),
+        # (128, 128, 2, 4, 192),
+        # (128, 128, 3, 4, 192),
+        # (64, 128, 2, 4, 152),
+        # (64, 128, 3, 4, 152),
+        # (64, 64, 2, 4, 152),
+        # (64, 64, 3, 4, 152),
+        # (256, 64, 2, 4, 152),
+        # (256, 128, 2, 4, 192),  # Requires SPARSE_Q_BLOCK_SIZE >= 256
         (128, 128, 2, 4, 152),
-        (128, 128, 3, 4, 152),
-        (128, 128, 2, 4, 192),
-        (128, 128, 3, 4, 192),
-        (64, 128, 2, 4, 152),
-        (64, 128, 3, 4, 152),
-        (64, 64, 2, 4, 152),
-        (64, 64, 3, 4, 152),
-        # (256, 64, 2, 4, 152),   # may OOR on TMEM
-        # (256, 128, 2, 4, 192),  # may OOR on TMEM
     ]:
         extra_kwargs = dict(num_stages=num_stages, num_warps=num_warps)
         if HAS_REG_AUTO_WS:
@@ -246,11 +247,12 @@ def forward_block_mn(
         post_mod_scores = tl.where(offs_n < KV_LEN, post_mod_scores, float("-inf"))
 
     # Mask mod (causal: m >= n)
-    if not IS_FULL_BLOCKS:
-        mask_mod_output = m >= n
-        if CHECK_BLOCK_BOUNDARY:
-            mask_mod_output = tl.where(offs_n < KV_LEN, mask_mod_output, False)
-        post_mod_scores = tl.where(mask_mod_output, post_mod_scores, float("-inf"))
+    # Use branchless logic to avoid scf.if with else blocks (unsupported by autoWS).
+    # When IS_FULL_BLOCKS is true, mask_mod_output is all-true so tl.where is a no-op.
+    mask_mod_output = IS_FULL_BLOCKS | (m >= n)
+    if CHECK_BLOCK_BOUNDARY:
+        mask_mod_output = tl.where(offs_n < KV_LEN, mask_mod_output, IS_FULL_BLOCKS)
+    post_mod_scores = tl.where(mask_mod_output, post_mod_scores, float("-inf"))
 
     if not PRESCALE_QK:
         post_mod_scores *= RCP_LN2
@@ -341,6 +343,7 @@ def forward_inner(
     FLOAT32_PRECISION: tl.constexpr = "ieee",
     USE_TMA: tl.constexpr = False,
     WARP_SPECIALIZE: tl.constexpr = False,
+    DP_FACTOR: tl.constexpr = 1,
 ):
     """Iterate over a single set of KV blocks (partial or full only)."""
     SPARSE_KV_MULTIPLE: tl.constexpr = SPARSE_KV_BLOCK_SIZE // BLOCK_N
@@ -352,7 +355,11 @@ def forward_inner(
     kv_offset = 0
 
     for start_n in tl.range(
-        block_n_start, block_n_end, warp_specialize=WARP_SPECIALIZE
+        block_n_start,
+        block_n_end,
+        warp_specialize=WARP_SPECIALIZE,
+        data_partition_factor=DP_FACTOR,
+        merge_epilogue=WARP_SPECIALIZE,
     ):
         if IS_DIVISIBLE:
             acc, l_i, m_i = forward_block_mn(
@@ -497,6 +504,7 @@ def forward_inner_with_full_blocks(
     FLOAT32_PRECISION: tl.constexpr = "ieee",
     USE_TMA: tl.constexpr = False,
     WARP_SPECIALIZE: tl.constexpr = False,
+    DP_FACTOR: tl.constexpr = 1,
 ):
     """Iterate over both partial and full KV blocks in a single merged loop."""
     SPARSE_KV_MULTIPLE: tl.constexpr = SPARSE_KV_BLOCK_SIZE // BLOCK_N
@@ -513,7 +521,13 @@ def forward_inner_with_full_blocks(
     kv_num_blocks = partial_kv_num_blocks
     kv_offset = 0
 
-    for start_n in tl.range(0, total_iters, warp_specialize=WARP_SPECIALIZE):
+    for start_n in tl.range(
+        0,
+        total_iters,
+        warp_specialize=WARP_SPECIALIZE,
+        data_partition_factor=DP_FACTOR,
+        merge_epilogue=WARP_SPECIALIZE,
+    ):
         is_full = start_n >= partial_block_n_end
 
         if start_n == partial_block_n_end:
@@ -604,7 +618,7 @@ def forward_inner_with_full_blocks(
             )
 
         offset = get_offset_for_next_block(
-            start_n - (partial_block_n_end if is_full else 0),
+            start_n - tl.where(is_full, partial_block_n_end, 0),
             kv_indices,
             kv_num_blocks,
             SPARSE_KV_BLOCK_SIZE,
@@ -678,6 +692,7 @@ def _flex_attention_fwd_tile(
     FLOAT32_PRECISION: tl.constexpr = "ieee",
     USE_TMA: tl.constexpr = False,
     WARP_SPECIALIZE: tl.constexpr = False,
+    DP_FACTOR: tl.constexpr = 1,
 ):
     """Process one Q-tile. Shared by standard and persistent kernels."""
     INDEX_DTYPE: tl.constexpr = tl.int32
@@ -825,6 +840,7 @@ def _flex_attention_fwd_tile(
             FLOAT32_PRECISION=FLOAT32_PRECISION,
             USE_TMA=USE_TMA,
             WARP_SPECIALIZE=WARP_SPECIALIZE,
+            DP_FACTOR=DP_FACTOR,
         )
     else:
         acc, l_i, m_i = forward_inner(
@@ -869,6 +885,7 @@ def _flex_attention_fwd_tile(
             FLOAT32_PRECISION=FLOAT32_PRECISION,
             USE_TMA=USE_TMA,
             WARP_SPECIALIZE=WARP_SPECIALIZE,
+            DP_FACTOR=DP_FACTOR,
         )
 
     # Handle fully masked out rows
@@ -959,6 +976,7 @@ def flex_attention_fwd_kernel(
     FLOAT32_PRECISION: tl.constexpr = "ieee",
     USE_TMA: tl.constexpr = False,
     WARP_SPECIALIZE: tl.constexpr = False,
+    DP_FACTOR: tl.constexpr = 2,
 ):
     INDEX_DTYPE: tl.constexpr = tl.int32
     q_start = tl.program_id(0)
@@ -1021,6 +1039,7 @@ def flex_attention_fwd_kernel(
         FLOAT32_PRECISION=FLOAT32_PRECISION,
         USE_TMA=USE_TMA,
         WARP_SPECIALIZE=WARP_SPECIALIZE,
+        DP_FACTOR=DP_FACTOR,
     )
 
 
@@ -1082,6 +1101,7 @@ def flex_attention_fwd_kernel_ws(
     FLOAT32_PRECISION: tl.constexpr = "ieee",
     USE_TMA: tl.constexpr = True,
     WARP_SPECIALIZE: tl.constexpr = True,
+    DP_FACTOR: tl.constexpr = 1,
 ):
     INDEX_DTYPE: tl.constexpr = tl.int32
     q_start = tl.program_id(0)
@@ -1144,6 +1164,7 @@ def flex_attention_fwd_kernel_ws(
         FLOAT32_PRECISION=FLOAT32_PRECISION,
         USE_TMA=USE_TMA,
         WARP_SPECIALIZE=WARP_SPECIALIZE,
+        DP_FACTOR=DP_FACTOR,
     )
 
 
@@ -1205,6 +1226,7 @@ def flex_attention_fwd_kernel_persistent(
     BLOCK_N: tl.constexpr = 64,
     FLOAT32_PRECISION: tl.constexpr = "ieee",
     WARP_SPECIALIZE: tl.constexpr = False,
+    DP_FACTOR: tl.constexpr = 1,
 ):
     INDEX_DTYPE: tl.constexpr = tl.int32
 
@@ -1220,7 +1242,13 @@ def flex_attention_fwd_kernel_persistent(
 
     tile_idx = prog_id
 
-    for _ in tl.range(0, tiles_per_sm, warp_specialize=WARP_SPECIALIZE):
+    for _ in tl.range(
+        0,
+        tiles_per_sm,
+        warp_specialize=WARP_SPECIALIZE,
+        data_partition_factor=DP_FACTOR,
+        merge_epilogue=WARP_SPECIALIZE,
+    ):
         q_start = (tile_idx % n_tile_num).to(INDEX_DTYPE)
         off_hz = tile_idx // n_tile_num
         off_zq = (off_hz // HQ).to(INDEX_DTYPE)
@@ -1282,6 +1310,7 @@ def flex_attention_fwd_kernel_persistent(
             FLOAT32_PRECISION=FLOAT32_PRECISION,
             USE_TMA=True,
             WARP_SPECIALIZE=WARP_SPECIALIZE,
+            DP_FACTOR=DP_FACTOR,
         )
 
         tile_idx += num_progs
@@ -1299,6 +1328,7 @@ def flex_attention_fwd(
     persistent: bool = False,
     use_tma: bool = False,
     warp_specialize: bool = False,
+    dp_factor: int = 1,
 ) -> torch.Tensor:
     """
     Standalone flex attention forward pass.
@@ -1415,6 +1445,7 @@ def flex_attention_fwd(
             NUM_SMS,
             **common_kwargs,
             WARP_SPECIALIZE=warp_specialize,
+            DP_FACTOR=dp_factor,
         )
     elif warp_specialize:
 
@@ -1424,6 +1455,7 @@ def flex_attention_fwd(
         flex_attention_fwd_kernel_ws[grid_ws](
             *common_args,
             **common_kwargs,
+            DP_FACTOR=dp_factor,
         )
     else:
 
@@ -1435,6 +1467,7 @@ def flex_attention_fwd(
             **common_kwargs,
             USE_TMA=use_tma,
             WARP_SPECIALIZE=warp_specialize,
+            DP_FACTOR=dp_factor,
         )
 
     return out

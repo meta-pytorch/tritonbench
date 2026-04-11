@@ -489,7 +489,9 @@ class Operator(BenchmarkOperator):
         if block_mask is None:
             return unsupported_fn
 
-        return lambda: flex_attention_fwd(q, k, v, block_mask, warp_specialize=True)
+        return lambda: flex_attention_fwd(
+            q, k, v, block_mask, warp_specialize=True, dp_factor=1
+        )
 
     def get_grad_to_none(self, args) -> List[torch.Tensor]:
         """Return tensors whose gradients should be set to None between iterations."""
