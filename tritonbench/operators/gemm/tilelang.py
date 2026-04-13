@@ -1,7 +1,6 @@
-import torch
-
 import tilelang
 import tilelang.language as T
+import torch
 from tilelang.carver.arch import driver
 
 tilelang.disable_cache()
