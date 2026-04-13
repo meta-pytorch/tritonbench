@@ -6,6 +6,7 @@ from torch import zeros
 from torch._inductor.utils import triton_version_uses_attrs_dict
 from triton.compiler import CompiledKernel
 from tritonbench.utils.python_utils import try_import
+from tritonbench.utils.env_utils import is_cuda
 from tritonbench.utils.triton_op import BenchmarkOperator, register_benchmark
 
 with try_import("HAS_TILELANG"):
@@ -435,7 +436,7 @@ class Operator(BenchmarkOperator):
                 1, 1, 1, 1, 1, 1, 1, 1, 0, 0, function, None, None, metadata, *args
             )
 
-    @register_benchmark()
+    @register_benchmark(enabled=is_cuda())
     def nop_triton_direct_culaunch(self, *args):
         """Simulate [3][4][5] (TritonCC/AOT-T/AOTI) style launch:
         pre-compile kernel, pre-extract all handles, call cuLaunchKernel
