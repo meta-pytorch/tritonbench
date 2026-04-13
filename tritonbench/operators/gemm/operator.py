@@ -55,8 +55,8 @@ else:
         raise RuntimeError("TLX not available in this Triton version")
 
 
-from tritonbench.utils.python_utils import try_import
 from tritonbench.utils.path_utils import ensure_build_subdir_on_sys_path
+from tritonbench.utils.python_utils import try_import
 
 with try_import("HAS_TILELANG"):
     from .tilelang import tilelang_matmul_func
