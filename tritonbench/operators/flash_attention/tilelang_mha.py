@@ -10,9 +10,6 @@ from functools import partial
 # Licensed under the MIT License.
 import torch
 import torch.nn.functional as F
-from tritonbench.utils.tilelang_utils import preload_cuda_driver
-
-preload_cuda_driver()
 
 import tilelang
 import tilelang.language as T

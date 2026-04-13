@@ -2,8 +2,6 @@ import os
 import subprocess
 import sys
 
-from tritonbench.utils.tilelang_utils import preload_cuda_driver
-
 from ..python_utils import pip_install_requirements
 
 REQUIREMENTS_FILE = os.path.join(
@@ -18,13 +16,8 @@ def install_requirements(requirements_txt: str):
 
 
 def check_install():
-    env = os.environ.copy()
-    libcuda = preload_cuda_driver()
-    if libcuda:
-        ld_preload = env.get("LD_PRELOAD")
-        env["LD_PRELOAD"] = f"{libcuda}:{ld_preload}" if ld_preload else libcuda
     cmd = [sys.executable, "-c", "import tilelang"]
-    subprocess.check_call(cmd, env=env)
+    subprocess.check_call(cmd)
 
 
 def install_tile():
