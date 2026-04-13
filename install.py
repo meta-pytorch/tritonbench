@@ -17,6 +17,39 @@ from tools.python_utils import (
 logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger(__name__)
 
+
+def prepend_toolchain_libstdcpp():
+    try:
+        libstdcpp = subprocess.check_output(
+            ["g++", "--print-file-name=libstdc++.so.6"], text=True
+        ).strip()
+    except (subprocess.SubprocessError, FileNotFoundError):
+        return
+    if not libstdcpp or libstdcpp == "libstdc++.so.6":
+        return
+
+    lib_dir = str(Path(libstdcpp).resolve().parent)
+    if os.environ.get("TRITONBENCH_LIBSTDCPP_PRELOADED") == "1":
+        return
+
+    ld_library_path = os.environ.get("LD_LIBRARY_PATH")
+    if ld_library_path:
+        paths = ld_library_path.split(":")
+        if lib_dir in paths:
+            os.environ["TRITONBENCH_LIBSTDCPP_PRELOADED"] = "1"
+            return
+        ld_library_path = f"{lib_dir}:{ld_library_path}"
+    else:
+        ld_library_path = lib_dir
+
+    environ = os.environ.copy()
+    environ["LD_LIBRARY_PATH"] = ld_library_path
+    environ["TRITONBENCH_LIBSTDCPP_PRELOADED"] = "1"
+    os.execvpe(sys.executable, [sys.executable, *sys.argv], environ)
+
+
+prepend_toolchain_libstdcpp()
+
 # Install the latest pytorch nightly with default cuda/hip version
 # if torch does not exist
 if not has_pkg("torch"):

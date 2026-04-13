@@ -56,10 +56,16 @@ else:
 
 
 from tritonbench.utils.python_utils import try_import
+from tritonbench.utils.path_utils import ensure_build_subdir_on_sys_path
 
 with try_import("HAS_TILELANG"):
     from .tilelang import tilelang_matmul_func
 
+with try_import("HAS_THUNDERKITTENS"):
+    ensure_build_subdir_on_sys_path("")
+    import thunderkittens as tk
+
+    _ = tk.bf16_b200_gemm
 
 from tritonbench.data.llama import llama_shapes
 from tritonbench.utils.data_utils import get_production_shapes
@@ -730,6 +736,23 @@ class Operator(BenchmarkOperator):
             return lambda: blackwell_matmul_descriptor_persistent(
                 a, b, warp_specialize=False
             )
+
+    @register_benchmark(enabled=IS_BLACKWELL and HAS_THUNDERKITTENS, fwd_only=True)
+    def tk_bf16_b200_gemm(self, a, b, bias) -> Callable:
+        assert bias is None, "ThunderKittens bf16_b200_gemm does not support bias"
+        if a.dtype != torch.bfloat16 or b.dtype != torch.bfloat16:
+            return None
+
+        a_contig = a.contiguous()
+        b_contig = b.contiguous()
+        if a_contig.size(0) % 512 != 0:
+            return None
+        if b_contig.size(1) % 256 != 0:
+            return None
+        if a_contig.size(1) % 64 != 0:
+            return None
+
+        return lambda: tk.bf16_b200_gemm(a_contig, b_contig)
 
     @register_benchmark(enabled=IS_BLACKWELL and HAS_TILELANG and is_cu130())
     def tilelang_blackwell_matmul(self, a, b, bias) -> Callable:

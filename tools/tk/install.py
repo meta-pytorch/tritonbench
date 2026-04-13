@@ -1,6 +1,7 @@
 import os
 import subprocess
 import sys
+import sysconfig
 from pathlib import Path
 
 import torch
@@ -10,52 +11,185 @@ CUDA_HOME = (
 )
 REPO_PATH = Path(os.path.abspath(__file__)).parent.parent.parent
 TK_PATH = REPO_PATH.joinpath("submodules", "ThunderKittens")
-PATCH_FILE = os.path.join(os.path.dirname(os.path.abspath(__file__)), "tk.patch")
-
+TK_TOOLS_PATH = REPO_PATH.joinpath("tools", "tk")
 TORCH_BASE_PATH = Path(torch.__file__).parent
+TK_BUILD_PATH = REPO_PATH.joinpath("build")
+TK_PACKAGE_PATH = TK_BUILD_PATH.joinpath("thunderkittens")
+
+PACKAGE_SOURCES = {
+    "__init__.py": """from .bf16_b200 import bf16_b200_gemm
+from .fp8_h100 import fp8_gemm
+from .mha_h100 import mha_backward, mha_forward
+
+__all__ = [
+    "bf16_b200_gemm",
+    "fp8_gemm",
+    "mha_backward",
+    "mha_forward",
+]
+""",
+    "_runtime.py": """import ctypes
+from pathlib import Path
+
+import torch
+
+_PRELOADED = False
 
 
-def patch_tk():
+def preload_torch_deps():
+    global _PRELOADED
+    if _PRELOADED:
+        return
+
+    torch_lib_dir = Path(torch.__file__).resolve().parent / "lib"
+    for lib_name in (
+        "libc10.so",
+        "libc10_cuda.so",
+        "libtorch_cpu.so",
+        "libtorch_cuda.so",
+        "libtorch_python.so",
+    ):
+        lib_path = torch_lib_dir / lib_name
+        if lib_path.exists():
+            ctypes.CDLL(str(lib_path), mode=ctypes.RTLD_GLOBAL)
+
+    _PRELOADED = True
+""",
+    "bf16_b200/__init__.py": """from .._runtime import preload_torch_deps
+
+preload_torch_deps()
+
+from ._C import bf16_b200_gemm as _bf16_b200_gemm_impl
+
+
+def bf16_b200_gemm(a, b):
+    return _bf16_b200_gemm_impl(a, b.transpose(0, 1).contiguous())
+
+
+__all__ = ["bf16_b200_gemm"]
+""",
+    "fp8_h100/__init__.py": """from .._runtime import preload_torch_deps
+
+preload_torch_deps()
+
+from ._C import fp8_gemm as _fp8_gemm_impl
+
+
+def fp8_gemm(a, b):
+    return _fp8_gemm_impl(a, b.transpose(0, 1).contiguous())
+
+
+__all__ = ["fp8_gemm"]
+""",
+    "mha_h100/__init__.py": """from .._runtime import preload_torch_deps
+
+preload_torch_deps()
+
+from ._C import mha_backward, mha_forward
+
+__all__ = ["mha_backward", "mha_forward"]
+""",
+}
+
+
+def _toolchain_lib_dir():
     try:
-        subprocess.check_output(
-            [
-                "patch",
-                "-p1",
-                "--forward",
-                "-i",
-                PATCH_FILE,
-                "-r",
-                "/tmp/rej",
-            ],
-            cwd=TK_PATH,
-        )
-    except subprocess.SubprocessError as e:
-        output_str = str(e.output)
-        if "previously applied" in output_str:
-            return
-        else:
-            print(str(output_str))
-            sys.exit(1)
+        libstdcpp = subprocess.check_output(
+            ["g++", "--print-file-name=libstdc++.so.6"], text=True
+        ).strip()
+    except (subprocess.SubprocessError, FileNotFoundError):
+        return None
+    if not libstdcpp or libstdcpp == "libstdc++.so.6":
+        return None
+    return str(Path(libstdcpp).resolve().parent)
 
 
-def test_tk_attn_h100_fwd():
+def _get_env():
     environ = os.environ.copy()
+    toolchain_lib_dir = _toolchain_lib_dir()
+    if toolchain_lib_dir:
+        if environ.get("LD_LIBRARY_PATH"):
+            environ["LD_LIBRARY_PATH"] = (
+                f"{toolchain_lib_dir}:{environ['LD_LIBRARY_PATH']}"
+            )
+        else:
+            environ["LD_LIBRARY_PATH"] = toolchain_lib_dir
     if not environ.get("LD_LIBRARY_PATH"):
         environ["LD_LIBRARY_PATH"] = f"{CUDA_HOME}/lib64:{TORCH_BASE_PATH}/lib"
     else:
         environ["LD_LIBRARY_PATH"] = (
             f"{CUDA_HOME}/lib64:{TORCH_BASE_PATH}/lib:{environ['LD_LIBRARY_PATH']}"
         )
+    build_path = str(TK_BUILD_PATH)
+    if environ.get("PYTHONPATH"):
+        environ["PYTHONPATH"] = f"{build_path}:{environ['PYTHONPATH']}"
+    else:
+        environ["PYTHONPATH"] = build_path
+    return environ
+
+
+def _ensure_pybind11():
+    try:
+        subprocess.check_call(
+            [sys.executable, "-m", "pybind11", "--includes"],
+            stdout=subprocess.DEVNULL,
+            stderr=subprocess.DEVNULL,
+        )
+    except subprocess.CalledProcessError:
+        subprocess.check_call([sys.executable, "-m", "pip", "install", "pybind11"])
+
+
+def _ext_suffix() -> str:
+    ext_suffix = sysconfig.get_config_var("EXT_SUFFIX")
+    if not ext_suffix:
+        raise RuntimeError("Unable to determine Python extension suffix")
+    return ext_suffix
+
+
+def _build_extension(
+    *,
+    makefile: Path,
+    output_dir: Path,
+):
+    output_dir.mkdir(parents=True, exist_ok=True)
+    output_path = output_dir.joinpath(f"_C{_ext_suffix()}")
+    if output_path.exists():
+        output_path.unlink()
+
+    cmd = ["make", "-f", str(makefile), f"OUT={output_path}", "CONFIG=pytorch"]
+    subprocess.check_call(cmd, cwd=TK_TOOLS_PATH, env=_get_env())
+
+
+def _prepare_package_layout():
+    TK_PACKAGE_PATH.mkdir(parents=True, exist_ok=True)
+    for relative_path, content in PACKAGE_SOURCES.items():
+        target = TK_PACKAGE_PATH.joinpath(relative_path)
+        target.parent.mkdir(parents=True, exist_ok=True)
+        target.write_text(content)
+
+
+def test_tk_attn_h100_fwd():
     cmd = [
         sys.executable,
         "-c",
-        "import thunderkittens as tk; tk.mha_forward; tk.fp8_gemm",
+        "import thunderkittens as tk; tk.mha_forward; tk.fp8_gemm; tk.bf16_b200_gemm",
     ]
-    subprocess.check_call(cmd, env=environ)
+    subprocess.check_call(cmd, cwd=REPO_PATH, env=_get_env())
 
 
 def install_tk():
-    patch_tk()
-    cmd = [sys.executable, "setup.py", "install"]
-    subprocess.check_call(cmd, cwd=TK_PATH)
+    _ensure_pybind11()
+    _prepare_package_layout()
+    _build_extension(
+        makefile=TK_TOOLS_PATH.joinpath("mha_h100.Makefile"),
+        output_dir=TK_PACKAGE_PATH.joinpath("mha_h100"),
+    )
+    _build_extension(
+        makefile=TK_TOOLS_PATH.joinpath("fp8_h100.Makefile"),
+        output_dir=TK_PACKAGE_PATH.joinpath("fp8_h100"),
+    )
+    _build_extension(
+        makefile=TK_TOOLS_PATH.joinpath("bf16_b200.Makefile"),
+        output_dir=TK_PACKAGE_PATH.joinpath("bf16_b200"),
+    )
     test_tk_attn_h100_fwd()

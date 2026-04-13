@@ -5,6 +5,7 @@ from typing import List, Optional, Union
 
 REPO_PATH = Path(os.path.abspath(__file__)).parent.parent.parent
 SUBMODULE_PATH = REPO_PATH.joinpath("submodules")
+BUILD_PATH = REPO_PATH.joinpath("build")
 
 
 class add_path:
@@ -35,6 +36,13 @@ class add_ld_library_path:
 
     def __exit__(self, exc_type, exc_value, traceback):
         os.environ = self.os_environ.copy()
+
+
+def ensure_build_subdir_on_sys_path(subdir: str) -> str:
+    path = str(BUILD_PATH.joinpath(subdir))
+    if path not in sys.path:
+        sys.path.insert(0, path)
+    return path
 
 
 def _find_param_loc(params, key: str) -> int:
