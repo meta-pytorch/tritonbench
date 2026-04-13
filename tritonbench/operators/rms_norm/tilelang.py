@@ -1,9 +1,8 @@
 # Original source:
 # https://github.com/tile-ai/tilelang/blob/main/examples/norm/test_rms_norm.py
-import torch
-
 import tilelang
 import tilelang.language as T
+import torch
 
 tilelang.disable_cache()
 

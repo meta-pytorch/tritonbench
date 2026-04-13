@@ -6,13 +6,13 @@ import argparse
 import itertools
 from functools import partial
 
+import tilelang
+import tilelang.language as T
+
 # Copyright (c) Tile-AI Corporation.
 # Licensed under the MIT License.
 import torch
 import torch.nn.functional as F
-
-import tilelang
-import tilelang.language as T
 from tilelang.autotuner import autotune, jit
 
 
