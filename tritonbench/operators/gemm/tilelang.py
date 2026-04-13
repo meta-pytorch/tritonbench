@@ -69,7 +69,9 @@ def gemm_persistent_2cta(
                 tile_id = num_clusters * w + cluster_id
                 bx_cluster = (tile_id // group_size) % m_clusters
                 bx = bx_cluster * 2 + cta_id
-                by = (tile_id % group_size) + (tile_id // group_size) // m_clusters * group_size
+                by = (tile_id % group_size) + (
+                    tile_id // group_size
+                ) // m_clusters * group_size
 
                 if bx * block_M < M and by * block_N < N:
                     for k in T.serial(k_blocks):
@@ -89,7 +91,9 @@ def gemm_persistent_2cta(
                         T.tma_copy(
                             B[
                                 k * block_K : (k + 1) * block_K,
-                                (by * 2 + cta_id) * block_N // 2 : (by * 2 + cta_id + 1) * block_N // 2,
+                                (by * 2 + cta_id) * block_N // 2 : (by * 2 + cta_id + 1)
+                                * block_N
+                                // 2,
                             ],
                             B_shared[phase % num_stages, :, :],
                             barrier=loaded[phase % num_stages],
@@ -102,7 +106,9 @@ def gemm_persistent_2cta(
                 tile_id = num_clusters * w + cluster_id
                 bx_cluster = (tile_id // group_size) % m_clusters
                 bx = bx_cluster * 2 + cta_id
-                by = (tile_id % group_size) + (tile_id // group_size) // m_clusters * group_size
+                by = (tile_id % group_size) + (
+                    tile_id // group_size
+                ) // m_clusters * group_size
 
                 if bx * block_M < M and by * block_N < N:
                     T.mbarrier_wait_parity(tmem_empty[w & 1], ((w // 2) & 1) ^ 1)
@@ -139,7 +145,9 @@ def gemm_persistent_2cta(
                 tile_id = num_clusters * w + cluster_id
                 bx_cluster = (tile_id // group_size) % m_clusters
                 bx = bx_cluster * 2 + cta_id
-                by = (tile_id % group_size) + (tile_id // group_size) // m_clusters * group_size
+                by = (tile_id % group_size) + (
+                    tile_id // group_size
+                ) // m_clusters * group_size
 
                 if bx * block_M < M and by * block_N < N:
                     T.mbarrier_wait_parity(tmem_full[w & 1], (w // 2) & 1)

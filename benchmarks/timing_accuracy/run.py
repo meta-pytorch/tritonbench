@@ -11,7 +11,7 @@ from typing import Any, Callable, Dict, List, Optional
 import torch
 import triton
 
-from ..common import setup_tritonbench_cwd, run_benchmark_config_ci
+from ..common import run_benchmark_config_ci, setup_tritonbench_cwd
 
 setup_tritonbench_cwd()
 
@@ -404,33 +404,29 @@ def transform_single_result(result) -> Dict[str, Any]:
     out[f"{prefix}rep"] = result["config"]["rep"]
     for method_name, method_stats in result["results"].items():
         method_key = method_stats["method_name"]
-        out[f"{prefix}{method_key}-benchmark_time_s"] = method_stats[
-            "benchmark_time_s"
-        ]
+        out[f"{prefix}{method_key}-benchmark_time_s"] = method_stats["benchmark_time_s"]
         out[f"{prefix}{method_key}-intra_test_avg_median_ms"] = method_stats[
             "intra_test"
         ]["avg_median_ms"]
-        out[f"{prefix}{method_key}-intra_test_avg_std_ms"] = method_stats[
-            "intra_test"
-        ]["avg_std_ms"]
+        out[f"{prefix}{method_key}-intra_test_avg_std_ms"] = method_stats["intra_test"][
+            "avg_std_ms"
+        ]
         out[f"{prefix}{method_key}-intra_test_avg_cv"] = method_stats["intra_test"][
             "avg_cv"
         ]
-        out[f"{prefix}{method_key}-intra_test_avg_min_ms"] = method_stats[
-            "intra_test"
-        ]["avg_min_ms"]
-        out[f"{prefix}{method_key}-intra_test_avg_max_ms"] = method_stats[
-            "intra_test"
-        ]["avg_max_ms"]
-        out[f"{prefix}{method_key}-inter_test_median_ms"] = method_stats[
-            "inter_test"
-        ]["median_ms"]
+        out[f"{prefix}{method_key}-intra_test_avg_min_ms"] = method_stats["intra_test"][
+            "avg_min_ms"
+        ]
+        out[f"{prefix}{method_key}-intra_test_avg_max_ms"] = method_stats["intra_test"][
+            "avg_max_ms"
+        ]
+        out[f"{prefix}{method_key}-inter_test_median_ms"] = method_stats["inter_test"][
+            "median_ms"
+        ]
         out[f"{prefix}{method_key}-inter_test_std_ms"] = method_stats["inter_test"][
             "std_ms"
         ]
-        out[f"{prefix}{method_key}-inter_test_cv"] = method_stats["inter_test"][
-            "cv"
-        ]
+        out[f"{prefix}{method_key}-inter_test_cv"] = method_stats["inter_test"]["cv"]
         out[f"{prefix}{method_key}-inter_test_min_ms"] = method_stats["inter_test"][
             "min_ms"
         ]
@@ -469,7 +465,9 @@ def run(args: Optional[List[str]] = None):
         action="store_true",
         help="Log results to Scuba",
     )
-    parser.add_argument("--output-json", type=str, default=None, help="Output JSON file")
+    parser.add_argument(
+        "--output-json", type=str, default=None, help="Output JSON file"
+    )
     parser.add_argument("--quiet", action="store_true")
 
     if not torch.cuda.is_available():
@@ -493,7 +491,6 @@ def run(args: Optional[List[str]] = None):
 
     tb_args, extra_args = tb_parser.parse_known_args(extra_args)
     _run(args, tb_args, extra_args)
-
 
 
 if __name__ == "__main__":

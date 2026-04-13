@@ -720,13 +720,15 @@ class Operator(BenchmarkOperator):
 
         return preproc_noop, fn
 
-    @register_benchmark(enabled=IS_BLACKWELL and HAS_TILELANG)
+    @register_benchmark(enabled=IS_BLACKWELL and HAS_TILELANG, fwd_only=True)
     @multi_input_wrapper
     def tilelang_blackwell_mha(self, *args) -> Tuple[Callable, Callable]:
         if self.varlen:
             raise NotImplementedError("TileLang Blackwell MHA does not support varlen")
         if self.local:
-            raise NotImplementedError("TileLang Blackwell MHA does not support local attention")
+            raise NotImplementedError(
+                "TileLang Blackwell MHA does not support local attention"
+            )
 
         def fn(q, k, v):
             if q.shape != k.shape or q.shape != v.shape:

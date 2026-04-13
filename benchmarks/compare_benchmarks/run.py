@@ -323,7 +323,9 @@ def run_benchmarks(config: BenchmarkConfig) -> None:
                 continue
 
             lhs_benchmark, rhs_benchmark = config.benchmark_map[op]
-            input_loaders = get_input_loader(gpu, config.workloads, op, config.input_filter)
+            input_loaders = get_input_loader(
+                gpu, config.workloads, op, config.input_filter
+            )
 
             if not input_loaders:
                 print(
