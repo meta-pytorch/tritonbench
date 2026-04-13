@@ -1,9 +1,8 @@
 import functools
 
-import torch
-
 import tilelang
 import tilelang.language as T
+import torch
 
 PASS_CFG = {
     tilelang.PassConfigKey.TL_ENABLE_FAST_MATH: True,
