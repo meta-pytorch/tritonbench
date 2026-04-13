@@ -10,7 +10,7 @@ REPO_PATH = Path(__file__).resolve().parents[2]
 if str(REPO_PATH) not in sys.path:
     sys.path.insert(0, str(REPO_PATH))
 
-from tools.tk.install import TK_TOOLS_PATH, _ensure_pybind11, _ext_suffix, _get_env
+from tools.tk.install import TK_TOOLS_PATH, _ext_suffix, _get_env
 
 MODULE_SPECS = (
     {
@@ -96,7 +96,6 @@ def _run_b300_smoke(module_dir: Path, expected_exports: tuple[str, ...]) -> None
 
 
 def main() -> None:
-    _ensure_pybind11()
     with tempfile.TemporaryDirectory(prefix="tk_b300_bindings_") as tmpdir:
         tmpdir_path = Path(tmpdir)
         if _supports_b300_compile():

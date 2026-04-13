@@ -16,6 +16,7 @@ dependencies = [
 
 [dependency-groups]
 dev-nvidia = [
+    "pybind11",
     "packaging",
     "psutil",
     "tabulate",

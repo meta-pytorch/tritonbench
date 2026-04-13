@@ -98,17 +98,6 @@ def _get_env():
     return environ
 
 
-def _ensure_pybind11():
-    try:
-        subprocess.check_call(
-            [sys.executable, "-m", "pybind11", "--includes"],
-            stdout=subprocess.DEVNULL,
-            stderr=subprocess.DEVNULL,
-        )
-    except subprocess.CalledProcessError:
-        subprocess.check_call([sys.executable, "-m", "pip", "install", "pybind11"])
-
-
 def _ext_suffix() -> str:
     ext_suffix = sysconfig.get_config_var("EXT_SUFFIX")
     if not ext_suffix:
@@ -148,7 +137,6 @@ def test_tk_attn_h100_fwd():
 
 
 def install_tk():
-    _ensure_pybind11()
     _prepare_package_layout()
     _build_extension(
         makefile=TK_TOOLS_PATH.joinpath("mha_h100.Makefile"),
