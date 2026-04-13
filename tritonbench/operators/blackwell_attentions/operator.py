@@ -37,7 +37,9 @@ from tritonbench.kernels.triton_fused_attention import (
 
 try:
     import importlib.util
+
     import triton as _triton
+
     _triton_tutorial_path = os.path.join(
         os.path.dirname(os.path.dirname(_triton.__file__)),
         "tutorials",
@@ -695,6 +697,7 @@ class Operator(BenchmarkOperator):
     @multi_input_wrapper
     def triton_tutorial_FA2(self, *args) -> Tuple[Callable, Callable]:
         _triton_tutorial_fa2 = triton_tutorial_FA2
+
         def fn(q, k, v):
             return _triton_tutorial_fa2(
                 q.to(torch.float16),
@@ -813,9 +816,9 @@ class Operator(BenchmarkOperator):
         atol = self.tb_args.atol if self.tb_args.atol is not None else 1e-2
         prefix = f"{mode}: " if mode else ""
 
-        assert len(grads) == len(baseline_grads), (
-            f"{prefix}Mismatch in number of grad tensors"
-        )
+        assert len(grads) == len(
+            baseline_grads
+        ), f"{prefix}Mismatch in number of grad tensors"
 
         has_gradient = False
         for i, (grad, baseline_grad) in enumerate(zip(grads, baseline_grads)):
