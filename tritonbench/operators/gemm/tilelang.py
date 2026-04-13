@@ -15,10 +15,8 @@ TILELANG_DTYPE_MAP = {
 }
 
 
-@tilelang.jit(
-    pass_configs={tilelang.PassConfigKey.TL_DISABLE_LOOP_UNSWITCHING: True}
-)
-def _sm100_persistent_gemm(
+@tilelang.jit
+def gemm_persistent_2cta(
     A,
     B,
     block_M,
@@ -38,103 +36,121 @@ def _sm100_persistent_gemm(
     C = T.empty((M, N), out_dtype)
 
     sm_num = driver.get_num_sms()
+    num_clusters = sm_num // 2
     m_blocks = T.ceildiv(M, block_M)
+    m_clusters = m_blocks // 2
     n_blocks = T.ceildiv(N, block_N)
     assert K % (2 * block_K) == 0
     k_blocks = T.ceildiv(K, block_K)
     waves = T.ceildiv(m_blocks * n_blocks, sm_num)
     group_size = 8
+    assert n_blocks % (2 * group_size) == 0
 
-    with T.Kernel(sm_num, threads=256) as (block_id):
+    with T.Kernel(sm_num, threads=256, cluster_dims=2) as (block_id):
         A_shared = T.alloc_shared((num_stages, block_M, block_K), in_dtype)
-        B_shared = T.alloc_shared((num_stages, block_K, block_N), in_dtype)
+        B_shared = T.alloc_shared((num_stages, block_K, block_N // 2), in_dtype)
         C_tmem_0 = T.alloc_tmem([block_M, block_N], accum_dtype)
         C_tmem_1 = T.alloc_tmem([block_M, block_N], accum_dtype)
         C_local = T.alloc_fragment((block_M, block_N), accum_dtype)
         C_local_cast = T.alloc_fragment((block_M, block_N), out_dtype)
         C_shared = T.alloc_shared((block_M, store_block_N), out_dtype)
-        loaded = T.alloc_barrier([32] * num_stages)
-        consumed = T.alloc_barrier([1] * num_stages)
-        tmem_full = T.alloc_barrier([1] * 2)
-        tmem_empty = T.alloc_barrier([128] * 2)
+        loaded = T.alloc_cluster_barrier([32 * 2] * num_stages)
+        consumed = T.alloc_cluster_barrier([1] * num_stages)
+        tmem_full = T.alloc_cluster_barrier([1] * 2)
+        tmem_empty = T.alloc_cluster_barrier([128 * 2] * 2)
 
         tx = T.get_thread_binding()
+        cta_id = T.block_rank_in_cluster()
+        T.assume(cta_id < 2)
 
         if tx < 32:
             for w in T.unroll(waves):
-                tile_id = sm_num * w + block_id
-                bx = (tile_id // group_size) % m_blocks
-                by = (tile_id % group_size) + (tile_id // group_size) // m_blocks * group_size
+                cluster_id = block_id // 2
+                tile_id = num_clusters * w + cluster_id
+                bx_cluster = (tile_id // group_size) % m_clusters
+                bx = bx_cluster * 2 + cta_id
+                by = (tile_id % group_size) + (tile_id // group_size) // m_clusters * group_size
 
                 if bx * block_M < M and by * block_N < N:
                     for k in T.serial(k_blocks):
+                        phase = w * k_blocks + k
                         T.mbarrier_wait_parity(
-                            consumed[k % num_stages], ((k // num_stages) & 1) ^ 1
+                            consumed[phase % num_stages],
+                            ((phase // num_stages) & 1) ^ 1,
                         )
-                        T.copy(
+                        T.tma_copy(
                             A[
                                 bx * block_M : (bx + 1) * block_M,
                                 k * block_K : (k + 1) * block_K,
                             ],
-                            A_shared[k % num_stages, :, :],
+                            A_shared[phase % num_stages, :, :],
+                            barrier=loaded[phase % num_stages],
                         )
-                        T.copy(
+                        T.tma_copy(
                             B[
                                 k * block_K : (k + 1) * block_K,
-                                by * block_N : (by + 1) * block_N,
+                                (by * 2 + cta_id) * block_N // 2 : (by * 2 + cta_id + 1) * block_N // 2,
                             ],
-                            B_shared[k % num_stages, :, :],
+                            B_shared[phase % num_stages, :, :],
+                            barrier=loaded[phase % num_stages],
                         )
-                        T.mbarrier_arrive(loaded[k % num_stages])
+                        T.mbarrier_arrive(loaded[phase % num_stages], 0)
 
-        elif tx < 64:
+        elif tx < 64 and cta_id == 0:
             for w in T.unroll(waves):
-                tile_id = sm_num * w + block_id
-                bx = (tile_id // group_size) % m_blocks
-                by = (tile_id % group_size) + (tile_id // group_size) // m_blocks * group_size
+                cluster_id = block_id // 2
+                tile_id = num_clusters * w + cluster_id
+                bx_cluster = (tile_id // group_size) % m_clusters
+                bx = bx_cluster * 2 + cta_id
+                by = (tile_id % group_size) + (tile_id // group_size) // m_clusters * group_size
 
                 if bx * block_M < M and by * block_N < N:
                     T.mbarrier_wait_parity(tmem_empty[w & 1], ((w // 2) & 1) ^ 1)
+                    T.tcgen05_after_thread_sync()
                     for k in T.serial(k_blocks):
-                        T.mbarrier_wait_parity(loaded[k % num_stages], (k // num_stages) & 1)
+                        phase = w * k_blocks + k
+                        T.mbarrier_wait_parity(
+                            loaded[phase % num_stages], (phase // num_stages) & 1
+                        )
+                        T.tcgen05_after_thread_sync()
                         if w & 1 == 0:
-                            T.gemm(
-                                A_shared[k % num_stages, :, :],
-                                B_shared[k % num_stages, :, :],
+                            T.tcgen05_gemm(
+                                A_shared[phase % num_stages, :, :],
+                                B_shared[phase % num_stages, :, :],
                                 C_tmem_0,
-                                False,
-                                False,
-                                mbar=consumed[k % num_stages],
-                                wg_wait=-1,
+                                mbar=consumed[phase % num_stages],
                                 clear_accum=k == 0,
+                                use_2cta=True,
                             )
                         else:
-                            T.gemm(
-                                A_shared[k % num_stages, :, :],
-                                B_shared[k % num_stages, :, :],
+                            T.tcgen05_gemm(
+                                A_shared[phase % num_stages, :, :],
+                                B_shared[phase % num_stages, :, :],
                                 C_tmem_1,
-                                False,
-                                False,
-                                mbar=consumed[k % num_stages],
-                                wg_wait=-1,
+                                mbar=consumed[phase % num_stages],
                                 clear_accum=k == 0,
+                                use_2cta=True,
                             )
-                    T.tcgen05_mma_arrive(tmem_full[w & 1])
+                    T.tcgen05_mma_arrive(tmem_full[w & 1], arrive_2cta=True)
 
         elif 128 <= tx < 256:
             for w in T.unroll(waves):
-                tile_id = sm_num * w + block_id
-                bx = (tile_id // group_size) % m_blocks
-                by = (tile_id % group_size) + (tile_id // group_size) // m_blocks * group_size
+                cluster_id = block_id // 2
+                tile_id = num_clusters * w + cluster_id
+                bx_cluster = (tile_id // group_size) % m_clusters
+                bx = bx_cluster * 2 + cta_id
+                by = (tile_id % group_size) + (tile_id // group_size) // m_clusters * group_size
 
                 if bx * block_M < M and by * block_N < N:
                     T.mbarrier_wait_parity(tmem_full[w & 1], (w // 2) & 1)
+                    T.tcgen05_after_thread_sync()
                     T.sync_threads(1, 128)
                     if (w & 1) == 0:
                         T.copy(C_tmem_0, C_local)
                     else:
                         T.copy(C_tmem_1, C_local)
-                    T.mbarrier_arrive(tmem_empty[w & 1])
+                    T.tcgen05_before_thread_sync()
+                    T.mbarrier_arrive(tmem_empty[w & 1], 0)
 
                     if use_tma_store:
                         for i in T.unroll(T.ceildiv(block_N, store_block_N)):
@@ -161,10 +177,13 @@ def tilelang_matmul_func(a, b):
     if a.dim() != 2 or b.dim() != 2:
         raise NotImplementedError("TileLang Blackwell matmul only supports 2D inputs")
 
-    block_M, block_N, store_block_N, block_K = 128, 256, 128, 64
-    num_stages = 4
+    a = a.contiguous()
+    b = b.contiguous()
 
-    return lambda: _sm100_persistent_gemm(
+    block_M, block_N, store_block_N, block_K = 128, 256, 64, 64
+    num_stages = 6
+
+    return lambda: gemm_persistent_2cta(
         a,
         b,
         block_M,
