@@ -816,9 +816,9 @@ class Operator(BenchmarkOperator):
         atol = self.tb_args.atol if self.tb_args.atol is not None else 1e-2
         prefix = f"{mode}: " if mode else ""
 
-        assert len(grads) == len(
-            baseline_grads
-        ), f"{prefix}Mismatch in number of grad tensors"
+        assert len(grads) == len(baseline_grads), (
+            f"{prefix}Mismatch in number of grad tensors"
+        )
 
         has_gradient = False
         for i, (grad, baseline_grad) in enumerate(zip(grads, baseline_grads)):
