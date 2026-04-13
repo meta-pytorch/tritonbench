@@ -68,9 +68,6 @@ blackwell_attentions:
   sdpa:
     tags:
     - pt2
-  tlx_blackwell_ws_pipelined_fwd:
-    tags:
-    - tlx
   tlx_blackwell_ws_pipelined_persistent_fwd:
     tags:
     - tlx

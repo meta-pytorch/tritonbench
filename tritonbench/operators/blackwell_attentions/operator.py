@@ -683,24 +683,6 @@ class Operator(BenchmarkOperator):
 
         return preproc_noop, fn
 
-    # Only works with triton beta, forward only.
-    @register_benchmark(enabled=HAS_TLX)
-    @multi_input_wrapper
-    def tlx_blackwell_ws_pipelined_fwd(self, *args) -> Tuple[Callable, Callable]:
-        if self.D_HEAD < 128:
-            raise NotImplementedError("TLX only supports d_head >= 128")
-
-        def fn(q, k, v):
-            return tlx_blackwell(
-                q,
-                k,
-                v,
-                self.sm_scale,
-                self.causal,
-            )
-
-        return preproc_noop, fn
-
     # Only works with triton beta.
     @register_benchmark(enabled=HAS_TLX)
     @multi_input_wrapper
