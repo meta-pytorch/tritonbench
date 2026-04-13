@@ -16,6 +16,7 @@ import torch
 from torch.nn.attention import sdpa_kernel, SDPBackend
 from torch.nn.functional import scaled_dot_product_attention as sdpa
 from tritonbench.kernels.attention_utils import SUPPORT_GLUON
+from tritonbench.utils.python_utils import try_import
 
 try:
     from tritonbench.kernels.blackwell_triton_fused_attention import (
@@ -133,6 +134,9 @@ if HAS_TLX:
     from triton.language.extra.tlx.tutorials.blackwell_fa_ws_pipelined_persistent import (
         attention as tlx_blackwell,
     )
+
+with try_import("HAS_TILELANG"):
+    from .tilelang import tilelang_blackwell_attention
 
 
 from typing import Any, Generator, List
@@ -715,6 +719,23 @@ class Operator(BenchmarkOperator):
             )
 
         return preproc_noop, fn
+
+    @register_benchmark(enabled=IS_BLACKWELL and HAS_TILELANG)
+    @multi_input_wrapper
+    def tilelang_blackwell_mha(self, *args) -> Tuple[Callable, Callable]:
+        if self.varlen:
+            raise NotImplementedError("TileLang Blackwell MHA does not support varlen")
+        if self.local:
+            raise NotImplementedError("TileLang Blackwell MHA does not support local attention")
+
+        def fn(q, k, v):
+            if q.shape != k.shape or q.shape != v.shape:
+                raise NotImplementedError(
+                    "TileLang Blackwell MHA only supports non-GQA MHA inputs"
+                )
+            return tilelang_blackwell_attention(q, k, v, self.causal)
+
+        return preproc_permute, fn
 
     @register_metric(x_only=True)
     def flops(

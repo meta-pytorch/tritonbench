@@ -1,4 +1,11 @@
-git+https://github.com/tile-ai/tilelang.git@e2b10c580b32cd31f384917d0ce31b7610f4e5e4
+git+https://github.com/tile-ai/tilelang.git@19236b44c07104f7453013081f6bc01ad3ca5aa5
+apache-tvm-ffi>=0.1.2,<0.2
+z3-solver>=4.13.0,<4.15.5
+torch-c-dlpack-ext
+ml-dtypes
+psutil
 Cython
 decorator
 cloudpickle
+tqdm>=4.62.3
+typing-extensions>=4.10.0

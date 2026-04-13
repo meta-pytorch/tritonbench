@@ -1,8 +1,12 @@
 # Original source:
 # https://github.com/tile-ai/tilelang/blob/main/examples/norm/test_rms_norm.py
+import torch
+from tritonbench.utils.tilelang_utils import preload_cuda_driver
+
+preload_cuda_driver()
+
 import tilelang
 import tilelang.language as T
-import torch
 
 tilelang.disable_cache()
 
