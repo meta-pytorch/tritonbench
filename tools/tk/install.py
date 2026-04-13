@@ -6,13 +6,9 @@ from pathlib import Path
 
 import torch
 
-CUDA_HOME = (
-    "/usr/local/cuda" if "CUDA_HOME" not in os.environ else os.environ["CUDA_HOME"]
-)
 REPO_PATH = Path(os.path.abspath(__file__)).parent.parent.parent
 TK_PATH = REPO_PATH.joinpath("submodules", "ThunderKittens")
 TK_TOOLS_PATH = REPO_PATH.joinpath("tools", "tk")
-TORCH_BASE_PATH = Path(torch.__file__).parent
 TK_BUILD_PATH = REPO_PATH.joinpath("build")
 TK_PACKAGE_PATH = TK_BUILD_PATH.joinpath("thunderkittens")
 
@@ -92,34 +88,8 @@ __all__ = ["mha_backward", "mha_forward"]
 }
 
 
-def _toolchain_lib_dir():
-    try:
-        libstdcpp = subprocess.check_output(
-            ["g++", "--print-file-name=libstdc++.so.6"], text=True
-        ).strip()
-    except (subprocess.SubprocessError, FileNotFoundError):
-        return None
-    if not libstdcpp or libstdcpp == "libstdc++.so.6":
-        return None
-    return str(Path(libstdcpp).resolve().parent)
-
-
 def _get_env():
     environ = os.environ.copy()
-    toolchain_lib_dir = _toolchain_lib_dir()
-    if toolchain_lib_dir:
-        if environ.get("LD_LIBRARY_PATH"):
-            environ["LD_LIBRARY_PATH"] = (
-                f"{toolchain_lib_dir}:{environ['LD_LIBRARY_PATH']}"
-            )
-        else:
-            environ["LD_LIBRARY_PATH"] = toolchain_lib_dir
-    if not environ.get("LD_LIBRARY_PATH"):
-        environ["LD_LIBRARY_PATH"] = f"{CUDA_HOME}/lib64:{TORCH_BASE_PATH}/lib"
-    else:
-        environ["LD_LIBRARY_PATH"] = (
-            f"{CUDA_HOME}/lib64:{TORCH_BASE_PATH}/lib:{environ['LD_LIBRARY_PATH']}"
-        )
     build_path = str(TK_BUILD_PATH)
     if environ.get("PYTHONPATH"):
         environ["PYTHONPATH"] = f"{build_path}:{environ['PYTHONPATH']}"
@@ -189,7 +159,7 @@ def install_tk():
         output_dir=TK_PACKAGE_PATH.joinpath("fp8_h100"),
     )
     _build_extension(
-        makefile=TK_TOOLS_PATH.joinpath("bf16_b200.Makefile"),
+        makefile=TK_TOOLS_PATH.joinpath("bf16_b200_gemm.Makefile"),
         output_dir=TK_PACKAGE_PATH.joinpath("bf16_b200"),
     )
     test_tk_attn_h100_fwd()
