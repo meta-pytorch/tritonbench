@@ -35,6 +35,24 @@ from tritonbench.kernels.triton_fused_attention import (
     attention_opt as triton_tutorial_FA2_opt,
 )
 
+try:
+    import importlib.util
+    import triton as _triton
+    _triton_tutorial_path = os.path.join(
+        os.path.dirname(os.path.dirname(_triton.__file__)),
+        "tutorials",
+        "06-fused-attention.py",
+    )
+    _spec = importlib.util.spec_from_file_location(
+        "triton_tutorial_fused_attention", _triton_tutorial_path
+    )
+    _mod = importlib.util.module_from_spec(_spec)
+    _spec.loader.exec_module(_mod)
+    triton_tutorial_FA2 = _mod.attention
+    HAS_TRITON_TUTORIAL_FA2 = True
+except Exception:
+    HAS_TRITON_TUTORIAL_FA2 = False
+
 if SUPPORT_GLUON:
     from tritonbench.kernels.gluon_attention_forward import (
         attention_forward as gluon_blackwell_fwd,
@@ -669,6 +687,21 @@ class Operator(BenchmarkOperator):
                 self.causal,
                 self.sm_scale,
                 "ws_persistent",
+            )
+
+        return preproc_noop, fn
+
+    @register_benchmark(enabled=HAS_TRITON_TUTORIAL_FA2)
+    @multi_input_wrapper
+    def triton_tutorial_FA2(self, *args) -> Tuple[Callable, Callable]:
+        _triton_tutorial_fa2 = triton_tutorial_FA2
+        def fn(q, k, v):
+            return _triton_tutorial_fa2(
+                q.to(torch.float16),
+                k.to(torch.float16),
+                v.to(torch.float16),
+                self.causal,
+                self.sm_scale,
             )
 
         return preproc_noop, fn
