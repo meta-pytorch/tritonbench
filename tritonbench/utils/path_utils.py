@@ -1,3 +1,4 @@
+from contextlib import contextmanager
 import os
 import sys
 from pathlib import Path
@@ -38,11 +39,22 @@ class add_ld_library_path:
         os.environ = self.os_environ.copy()
 
 
-def ensure_build_subdir_on_sys_path(subdir: str = "") -> str:
-    path = str(BUILD_PATH.joinpath(subdir))
-    if path not in sys.path:
-        sys.path.insert(0, path)
-    return path
+@contextmanager
+def ensure_build_subdir_on_sys_path(subdir: str = ""):
+    path = BUILD_PATH.joinpath(subdir)
+    path_str = str(path)
+    added = False
+    if path.exists() and path_str not in sys.path:
+        sys.path.insert(0, path_str)
+        added = True
+    try:
+        yield path_str
+    finally:
+        if added:
+            try:
+                sys.path.remove(path_str)
+            except ValueError:
+                pass
 
 
 def _find_param_loc(params, key: str) -> int:

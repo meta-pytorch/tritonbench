@@ -62,8 +62,8 @@ with try_import("HAS_TILELANG"):
     from .tilelang import tilelang_matmul_func
 
 with try_import("HAS_THUNDERKITTENS"):
-    ensure_build_subdir_on_sys_path()
-    import thunderkittens as tk
+    with ensure_build_subdir_on_sys_path():
+        import thunderkittens as tk
 
     _ = tk.bf16_b200_gemm
 

@@ -2,10 +2,10 @@ from typing import Tuple
 
 from tritonbench.utils.path_utils import ensure_build_subdir_on_sys_path
 
-ensure_build_subdir_on_sys_path()
-
-import thunderkittens as tk
 import torch
+
+with ensure_build_subdir_on_sys_path():
+    import thunderkittens as tk
 
 
 class _TKAttn(torch.autograd.Function):
