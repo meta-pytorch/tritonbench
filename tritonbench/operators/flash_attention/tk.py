@@ -1,8 +1,7 @@
 from typing import Tuple
 
-from tritonbench.utils.path_utils import ensure_build_subdir_on_sys_path
-
 import torch
+from tritonbench.utils.path_utils import ensure_build_subdir_on_sys_path
 
 with ensure_build_subdir_on_sys_path():
     import thunderkittens as tk
