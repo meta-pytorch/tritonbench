@@ -70,8 +70,7 @@ def get_ws_configs():
         # (64, 64, 2, 4, 152),
         # (64, 64, 3, 4, 152),
         # (256, 64, 2, 4, 152),
-        # (256, 128, 2, 4, 192),  # Requires SPARSE_Q_BLOCK_SIZE >= 256
-        (128, 128, 2, 4, 152),
+        (256, 128, 2, 4, 192),
     ]:
         extra_kwargs = dict(num_stages=num_stages, num_warps=num_warps)
         if HAS_REG_AUTO_WS:
@@ -1365,6 +1364,12 @@ def flex_attention_fwd(
         full_kv_indices = torch.zeros(1, device=q.device, dtype=torch.int32)
 
     SPARSE_Q_BLOCK_SIZE, SPARSE_KV_BLOCK_SIZE = block_mask.BLOCK_SIZE
+    # dp_factor=2 requires BLOCK_M=256 (for 128×128 TMEM blocks per dp).
+    # Ensure SPARSE_Q_BLOCK_SIZE >= max autotuned BLOCK_M to avoid
+    # division by zero in SPARSE_Q_MULTIPLE = SPARSE_Q_BLOCK_SIZE // BLOCK_M.
+    if warp_specialize:
+        max_block_m = max(c.kwargs.get("BLOCK_M", 128) for c in get_ws_configs())
+        SPARSE_Q_BLOCK_SIZE = max(SPARSE_Q_BLOCK_SIZE, max_block_m)
     GQA_SHARED_HEADS = Hq // Hkv
     IS_DIVISIBLE = (M % SPARSE_Q_BLOCK_SIZE == 0) and (N % SPARSE_KV_BLOCK_SIZE == 0)
 
