@@ -62,7 +62,7 @@ with try_import("HAS_TILELANG"):
     from .tilelang import tilelang_matmul_func
 
 with try_import("HAS_THUNDERKITTENS"):
-    ensure_build_subdir_on_sys_path("")
+    ensure_build_subdir_on_sys_path()
     import thunderkittens as tk
 
     _ = tk.bf16_b200_gemm
@@ -745,12 +745,6 @@ class Operator(BenchmarkOperator):
 
         a_contig = a.contiguous()
         b_contig = b.contiguous()
-        if a_contig.size(0) % 512 != 0:
-            return None
-        if b_contig.size(1) % 256 != 0:
-            return None
-        if a_contig.size(1) % 64 != 0:
-            return None
 
         return lambda: tk.bf16_b200_gemm(a_contig, b_contig)
 

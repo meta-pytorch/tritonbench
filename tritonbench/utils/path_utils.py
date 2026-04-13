@@ -38,7 +38,7 @@ class add_ld_library_path:
         os.environ = self.os_environ.copy()
 
 
-def ensure_build_subdir_on_sys_path(subdir: str) -> str:
+def ensure_build_subdir_on_sys_path(subdir: str = "") -> str:
     path = str(BUILD_PATH.joinpath(subdir))
     if path not in sys.path:
         sys.path.insert(0, path)
