@@ -1,5 +1,4 @@
 import os
-import time
 
 import torch
 from torch import zeros
@@ -20,7 +19,9 @@ with try_import("HAS_CUTEDSL"):
     from .cutedsl import cutedsl_nop_kernel, cutedsl_nop_with_args_kernel
 
 from .kernels import (
-    get_trivial_add_kernel,
+    get_inductor_nop_kernel_0arg,
+    get_inductor_nop_kernel_19arg,
+    get_inductor_nop_multi_kernel,
     nop_kernel,
     nop_with_args_kernel,
     nop_with_kwargs_kernel,
@@ -452,8 +453,33 @@ class Operator(BenchmarkOperator):
 
     @register_benchmark()
     def nop_inductor_kernel(self, *args):
-        trivial_add_kernel = get_trivial_add_kernel()
-        return lambda: trivial_add_kernel(*args)
+        """Inductor nop kernel via torch.compile.
+
+        Uses a proper nop kernel (t1.add_(0)) with the same arg count as the
+        triton benchmarks, for a fair apples-to-apples comparison.
+        """
+        if len(args) == 0:
+            nop_fn = get_inductor_nop_kernel_0arg()
+            nop_fn()
+            return nop_fn
+        nop_fn = get_inductor_nop_kernel_19arg()
+        nop_fn(*args)
+        return lambda: nop_fn(*args)
+
+    @register_benchmark()
+    def nop_inductor_per_kernel(self, *args):
+        """Pure per-kernel overhead: CachingAutotuner.run() only.
+
+        Extracts the CachingAutotuner from a compiled inductor nop kernel and
+        calls kernel.run() directly — bypassing guard check, DeviceGuard, and
+        assert_size_stride. This measures what each kernel costs in a multi-kernel
+        compiled graph where per-graph overhead is amortized.
+
+        Compare with nop_inductor_kernel (full e2e including guard) to see
+        how much overhead is per-graph vs per-kernel.
+        """
+        nop_fn = get_inductor_nop_multi_kernel(n_kernels=1)
+        return nop_fn
 
     @register_benchmark(enabled=HAS_TILELANG)
     def nop_tilelang(self, *args):
