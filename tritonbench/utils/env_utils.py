@@ -165,6 +165,17 @@ def is_b200() -> bool:
     return "B200" in gpu_model
 
 
+def is_gb300() -> bool:
+    """Check if running on an NVIDIA GB300 GPU."""
+    if not is_cuda_available():
+        return False
+    gpu_model = get_nvidia_gpu_model()
+    return "B300" in gpu_model
+
+
+IS_GB300 = is_gb300()
+
+
 def supports_tma():
     if not is_cuda_available():
         return False

@@ -65,7 +65,7 @@ if SUPPORT_GLUON:
 
 import logging
 
-from tritonbench.utils.env_utils import IS_BLACKWELL, is_blackwell
+from tritonbench.utils.env_utils import IS_BLACKWELL, IS_GB300, is_blackwell
 
 logger = logging.getLogger(__name__)
 
@@ -154,6 +154,23 @@ if HAS_TLX:
     from triton.language.extra.tlx.tutorials.blackwell_fa_ws_pipelined_persistent import (
         attention as tlx_blackwell,
     )
+
+# [Optional] TK B300 MHA kernels
+try:
+    from tritonbench.utils.path_utils import ensure_build_subdir_on_sys_path
+
+    with ensure_build_subdir_on_sys_path():
+        from thunderkittens.bf16_b300_mha_causal import (
+            forward as tk_b300_causal_fwd,
+            forward_persistent as tk_b300_causal_persistent_fwd,
+        )
+        from thunderkittens.bf16_b300_mha_noncausal import (
+            forward as tk_b300_noncausal_fwd,
+        )
+
+    HAS_TK_B300 = True
+except (ImportError, IOError, AttributeError):
+    HAS_TK_B300 = False
 
 with try_import("HAS_TILELANG"):
     from .tilelang import tilelang_blackwell_attention
@@ -756,6 +773,38 @@ class Operator(BenchmarkOperator):
             return tilelang_blackwell_attention(q, k, v, self.causal)
 
         return preproc_permute, fn
+
+    @register_benchmark(enabled=IS_GB300 and HAS_TK_B300, fwd_only=True)
+    @multi_input_wrapper
+    def bf16_b300_mha(self, *args) -> Tuple[Callable, Callable]:
+        def preproc(q, k, v):
+            q, k, v = [
+                t.contiguous() for t in permute_qkv(q, k, v, perm=(0, 2, 1, 3))
+            ]
+            B, S, H, D = q.shape
+            o = torch.zeros_like(v)
+            lse = torch.zeros(B, H, 1, S, dtype=torch.float32, device=q.device)
+            return [q, k, v, o, lse]
+
+        if self.causal:
+
+            def fn(q, k, v, o, lse):
+                S = q.shape[1]
+                fwd = (
+                    tk_b300_causal_persistent_fwd
+                    if S <= 4096
+                    else tk_b300_causal_fwd
+                )
+                fwd(q, k, v, o, lse)
+                return o
+
+        else:
+
+            def fn(q, k, v, o, lse):
+                tk_b300_noncausal_fwd(q, k, v, o, lse)
+                return o
+
+        return preproc, fn
 
     @register_metric(x_only=True)
     def flops(

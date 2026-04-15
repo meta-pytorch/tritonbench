@@ -85,6 +85,22 @@ from ._C import mha_backward, mha_forward
 
 __all__ = ["mha_backward", "mha_forward"]
 """,
+    "bf16_b300_mha_causal/__init__.py": """from .._runtime import preload_torch_deps
+
+preload_torch_deps()
+
+from ._C import forward, forward_persistent
+
+__all__ = ["forward", "forward_persistent"]
+""",
+    "bf16_b300_mha_noncausal/__init__.py": """from .._runtime import preload_torch_deps
+
+preload_torch_deps()
+
+from ._C import forward
+
+__all__ = ["forward"]
+""",
 }
 
 
@@ -127,6 +143,18 @@ def _prepare_package_layout():
         target.write_text(content)
 
 
+def _nvcc_supports_sm103a():
+    try:
+        result = subprocess.run(
+            ["nvcc", "--list-gpu-arch"],
+            capture_output=True,
+            text=True,
+        )
+        return "sm_103a" in result.stdout
+    except Exception:
+        return False
+
+
 def test_tk_attn_h100_fwd():
     cmd = [
         sys.executable,
@@ -150,4 +178,13 @@ def install_tk():
         makefile=TK_TOOLS_PATH.joinpath("bf16_b200_gemm.Makefile"),
         output_dir=TK_PACKAGE_PATH.joinpath("bf16_b200"),
     )
+    if _nvcc_supports_sm103a():
+        _build_extension(
+            makefile=TK_TOOLS_PATH.joinpath("bf16_b300_mha_causal.Makefile"),
+            output_dir=TK_PACKAGE_PATH.joinpath("bf16_b300_mha_causal"),
+        )
+        _build_extension(
+            makefile=TK_TOOLS_PATH.joinpath("bf16_b300_mha_noncausal.Makefile"),
+            output_dir=TK_PACKAGE_PATH.joinpath("bf16_b300_mha_noncausal"),
+        )
     test_tk_attn_h100_fwd()
