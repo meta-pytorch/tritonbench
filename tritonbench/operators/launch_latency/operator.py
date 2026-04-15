@@ -1,5 +1,4 @@
 import os
-import time
 
 import torch
 from torch import zeros
@@ -20,7 +19,9 @@ with try_import("HAS_CUTEDSL"):
     from .cutedsl import cutedsl_nop_kernel, cutedsl_nop_with_args_kernel
 
 from .kernels import (
-    get_trivial_add_kernel,
+    get_inductor_nop_kernel,
+    get_inductor_nop_kernel_0arg,
+    get_inductor_nop_kernel_19arg,
     nop_kernel,
     nop_with_args_kernel,
     nop_with_kwargs_kernel,
@@ -451,9 +452,41 @@ class Operator(BenchmarkOperator):
         return _prepare_direct_culaunch(bin, args)
 
     @register_benchmark()
-    def nop_inductor_kernel(self, *args):
-        trivial_add_kernel = get_trivial_add_kernel()
-        return lambda: trivial_add_kernel(*args)
+    def nop_inductor_e2e(self, *args):
+        """End-to-end inductor launch via torch.compile.
+
+        Measures the full compiled-function call path: guard check,
+        DeviceGuard, assert_size_stride, CachingAutotuner dispatch, and
+        the kernel launch itself.  Compare with nop_inductor_per_kernel
+        (CachingAutotuner.run() only) to isolate per-graph overhead.
+        """
+        if len(args) == 0:
+            nop_fn = get_inductor_nop_kernel_0arg()
+            nop_fn()  # Warm up
+            return nop_fn
+        nop_fn = get_inductor_nop_kernel_19arg()
+        nop_fn(*args)  # Warm up
+        return lambda: nop_fn(*args)
+
+    @register_benchmark()
+    def nop_inductor_per_kernel(self, *args):
+        """Pure per-kernel overhead: a single CachingAutotuner.run() call.
+
+        Extracts the CachingAutotuner from a compiled inductor nop kernel and
+        calls kernel.run() directly — bypassing guard check, DeviceGuard, and
+        assert_size_stride. This measures what each kernel costs in a multi-kernel
+        compiled graph where per-graph overhead is amortized.
+
+        For x_val=0 (no args): compiles a minimal 1-tensor kernel (~3 kernel args).
+        For x_val=19 (5 tensors + scalars): compiles a 5-tensor sum kernel
+        (~7 kernel args) to measure arg-scaling overhead.
+
+        Compare with nop_inductor_e2e (full e2e including guard) to see
+        how much overhead is per-graph vs per-kernel.
+        """
+        tensor_args = [a for a in args if isinstance(a, torch.Tensor)] or None
+        nop_fn = get_inductor_nop_kernel(tensor_args=tensor_args)
+        return nop_fn
 
     @register_benchmark(enabled=HAS_TILELANG)
     def nop_tilelang(self, *args):
