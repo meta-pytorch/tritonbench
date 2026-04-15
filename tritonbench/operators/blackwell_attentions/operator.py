@@ -65,7 +65,7 @@ if SUPPORT_GLUON:
 
 import logging
 
-from tritonbench.utils.env_utils import IS_BLACKWELL, IS_GB300, is_blackwell
+from tritonbench.utils.env_utils import IS_BLACKWELL, is_blackwell, IS_GB300
 
 logger = logging.getLogger(__name__)
 
@@ -776,11 +776,9 @@ class Operator(BenchmarkOperator):
 
     @register_benchmark(enabled=IS_GB300 and HAS_TK_B300, fwd_only=True)
     @multi_input_wrapper
-    def bf16_b300_mha(self, *args) -> Tuple[Callable, Callable]:
+    def tk_bf16_b300_mha(self, *args) -> Tuple[Callable, Callable]:
         def preproc(q, k, v):
-            q, k, v = [
-                t.contiguous() for t in permute_qkv(q, k, v, perm=(0, 2, 1, 3))
-            ]
+            q, k, v = [t.contiguous() for t in permute_qkv(q, k, v, perm=(0, 2, 1, 3))]
             B, S, H, D = q.shape
             o = torch.zeros_like(v)
             lse = torch.zeros(B, H, 1, S, dtype=torch.float32, device=q.device)
@@ -790,11 +788,7 @@ class Operator(BenchmarkOperator):
 
             def fn(q, k, v, o, lse):
                 S = q.shape[1]
-                fwd = (
-                    tk_b300_causal_persistent_fwd
-                    if S <= 4096
-                    else tk_b300_causal_fwd
-                )
+                fwd = tk_b300_causal_persistent_fwd if S <= 4096 else tk_b300_causal_fwd
                 fwd(q, k, v, o, lse)
                 return o
 
