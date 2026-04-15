@@ -9,7 +9,7 @@ KERNEL_METADATA_PATH = os.path.join(CURRENT_DIR, "oss_cuda_kernels.yaml")
 BACKWARD_METADATA_PATH = os.path.join(CURRENT_DIR, "backward_operators.yaml")
 DTYPE_METADATA_PATH = os.path.join(CURRENT_DIR, "dtype_operators.yaml")
 TFLOPS_OPS_PATH = os.path.join(CURRENT_DIR, "tflops_operators.yaml")
-BASELINE_OPS_PATH: Dict[str, str] = os.path.join(CURRENT_DIR, "baseline_operators.yaml")
+BASELINE_OPS_PATH: str = os.path.join(CURRENT_DIR, "baseline_operators.yaml")
 
 SKIP_DTYPE = ["bypass", "fp8", "int4", "bf16xint16"]
 
@@ -22,9 +22,15 @@ def load_metadata(metadata_path: str) -> Any:
 def _has_meaningful_baseline(
     op: str, backends: List[str], baseline_metadata: Dict[str, Any]
 ) -> bool:
-    return op in baseline_metadata and not (
-        baseline_metadata[op] in backends and len(backends) == 1
-    )
+    if op not in baseline_metadata:
+        return False
+    baselines = baseline_metadata[op]
+    if isinstance(baselines, str):
+        baselines = [baselines]
+    # Meaningful if at least one baseline is present and there are non-baseline backends
+    has_baseline_present = any(b in backends for b in baselines)
+    has_non_baseline = any(b not in baselines for b in backends)
+    return has_baseline_present and has_non_baseline
 
 
 def get_metric_args(op: str, backends: List[str], required_metrics: List[str]) -> str:
@@ -41,7 +47,10 @@ def get_metric_args(op: str, backends: List[str], required_metrics: List[str]) -
         baseline_metadata = load_metadata(BASELINE_OPS_PATH)
         if _has_meaningful_baseline(op, backends, baseline_metadata):
             valid_metrics.append("speedup")
-            baseline_prefix = f"--baseline {baseline_metadata[op]} "
+            baselines = baseline_metadata[op]
+            if isinstance(baselines, str):
+                baselines = [baselines]
+            baseline_prefix = f"--baseline {','.join(baselines)} "
     return baseline_prefix + "--metrics " + ",".join(valid_metrics)
 
 

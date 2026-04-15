@@ -100,7 +100,7 @@ REGISTERED_BENCHMARKS: Dict[str, OrderedDict[str, BenchmarkOperatorBackend]] = {
 REGISTERED_METRICS: defaultdict[str, List[str]] = defaultdict(list)
 OVERRIDDEN_METRICS: defaultdict[str, List[str]] = defaultdict(list)
 REGISTERED_X_VALS: Dict[str, str] = {}
-BASELINE_BENCHMARKS: Dict[str, str] = {}
+BASELINE_BENCHMARKS: Dict[str, List[str]] = {}
 BASELINE_SKIP_METRICS = {
     "speedup",
     "accuracy",
@@ -305,14 +305,11 @@ class BenchmarkOperatorResult:
             return headers, table
         y_val = self.result[0][1]
         backends = list(y_val.keys())
-        # move the baseline benchmark to the front of the list if exists
-        if (
-            self.op_name in BASELINE_BENCHMARKS
-            and BASELINE_BENCHMARKS[self.op_name] in backends
-        ):
-            backends.insert(
-                0, backends.pop(backends.index(BASELINE_BENCHMARKS[self.op_name]))
-            )
+        # move the baseline benchmarks to the front of the list if they exist
+        if self.op_name in BASELINE_BENCHMARKS:
+            for i, bl in enumerate(BASELINE_BENCHMARKS[self.op_name]):
+                if bl in backends:
+                    backends.insert(i, backends.pop(backends.index(bl)))
         key_metrics = {}
         # Add header for x_only_metrics
         x_only_metrics = sorted(
@@ -325,9 +322,8 @@ class BenchmarkOperatorResult:
             def select_metric(backend, m):
                 if m in x_only_metrics:
                     return False
-                if (
-                    m in BASELINE_SKIP_METRICS
-                    and backend == BASELINE_BENCHMARKS[self.op_name]
+                if m in BASELINE_SKIP_METRICS and backend in BASELINE_BENCHMARKS.get(
+                    self.op_name, []
                 ):
                     return False
                 if m == "all_configs":
@@ -650,7 +646,10 @@ def register_benchmark(
             REGISTERED_BENCHMARKS[op_name] = OrderedDict()
         REGISTERED_BENCHMARKS[op_name][fn_name] = backend_config
         if backend_config.baseline:
-            BASELINE_BENCHMARKS[op_name] = fn_name
+            if op_name not in BASELINE_BENCHMARKS:
+                BASELINE_BENCHMARKS[op_name] = []
+            if fn_name not in BASELINE_BENCHMARKS[op_name]:
+                BASELINE_BENCHMARKS[op_name].append(fn_name)
 
         def _inner(self, *args, **kwargs):
             return function(self, *args, **kwargs)
@@ -813,7 +812,9 @@ class BenchmarkOperator(metaclass=PostInitProcessor):
             self.tb_args.precision = self.DEFAULT_PRECISION
         self.dtype = PRECISION_DTYPE_MAPPING.get(self.tb_args.precision, None)
         if self.tb_args.baseline:
-            BASELINE_BENCHMARKS[self.name] = self.tb_args.baseline
+            BASELINE_BENCHMARKS[self.name] = _split_params_by_comma(
+                self.tb_args.baseline
+            )
         self._only = _split_params_by_comma(self.tb_args.only)
         self._skip = _split_params_by_comma(self.tb_args.skip)
         self._force = self.tb_args.force
@@ -1022,7 +1023,10 @@ class BenchmarkOperator(metaclass=PostInitProcessor):
 
         # Set baseline if needed
         if backend_config.baseline:
-            BASELINE_BENCHMARKS[self.name] = bm_func_name
+            if self.name not in BASELINE_BENCHMARKS:
+                BASELINE_BENCHMARKS[self.name] = []
+            if bm_func_name not in BASELINE_BENCHMARKS[self.name]:
+                BASELINE_BENCHMARKS[self.name].append(bm_func_name)
 
         # Bind the method to the instance
         bound_method = types.MethodType(_inner, self)
@@ -1111,6 +1115,8 @@ class BenchmarkOperator(metaclass=PostInitProcessor):
                         torch.accelerator.synchronize()
                 self.baseline_fn = None
                 self.baseline_metrics = None
+                self.baseline_fns = {}
+                self.baseline_metrics_map = {}
                 self._op_flops = {}
                 if self._only:
                     if self._only_match_mode == "prefix-with-baseline":
@@ -1128,13 +1134,14 @@ class BenchmarkOperator(metaclass=PostInitProcessor):
                         only_benchmarks = list(
                             dict.fromkeys(self._only)
                         )  # remove duplicates while preserving order
-                        # append baseline if it is not in the list of only_benchmarks yet
+                        # append baselines if not in the list of only_benchmarks yet
                         if (
                             set(self.required_metrics) & BASELINE_SKIP_METRICS
                             and self.name in BASELINE_BENCHMARKS
-                            and BASELINE_BENCHMARKS[self.name] not in only_benchmarks
                         ):
-                            only_benchmarks.append(BASELINE_BENCHMARKS[self.name])
+                            for bl in BASELINE_BENCHMARKS[self.name]:
+                                if bl not in only_benchmarks:
+                                    only_benchmarks.append(bl)
                         enabled_benchmarks = find_enabled_benchmarks(
                             self.mode, REGISTERED_BENCHMARKS[self.name], []
                         )
@@ -1156,25 +1163,39 @@ class BenchmarkOperator(metaclass=PostInitProcessor):
                     self._only_match_mode == "prefix-with-baseline"
                     and self.name in BASELINE_BENCHMARKS
                 ):
-                    baseline_name = BASELINE_BENCHMARKS[self.name]
-                    if baseline_name not in benchmarks:
-                        benchmarks.append(baseline_name)
+                    for bl in BASELINE_BENCHMARKS[self.name]:
+                        if bl not in benchmarks:
+                            benchmarks.append(bl)
 
-                # Run the baseline first, if baseline exists
-                baseline_name = (
+                # Run all baselines first, if baselines exist
+                baseline_names = (
                     BASELINE_BENCHMARKS[self.name]
                     if self.name in BASELINE_BENCHMARKS
-                    else None
+                    else []
                 )
-                if baseline_name and baseline_name in benchmarks:
-                    benchmarks.remove(baseline_name)
-                    benchmarks.insert(0, baseline_name)
+                # Accuracy-like metrics require a single baseline because they
+                # compare output tensors and it is ambiguous which baseline to
+                # use when multiple are configured.
+                _SINGLE_BASELINE_METRICS = {"accuracy", "cosine_similarity", "snr"}
+                conflicting = set(self.required_metrics) & _SINGLE_BASELINE_METRICS
+                if len(baseline_names) > 1 and conflicting:
+                    raise ValueError(
+                        f"Multiple baselines ({', '.join(baseline_names)}) are not supported "
+                        f"with accuracy-like metrics ({', '.join(sorted(conflicting))}). "
+                        f"These metrics compare output tensors against a single baseline "
+                        f"and it is ambiguous which baseline to use. Please specify a "
+                        f"single baseline with --baseline."
+                    )
+                for i, bl in enumerate(baseline_names):
+                    if bl in benchmarks:
+                        benchmarks.remove(bl)
+                        benchmarks.insert(i, bl)
 
                 # get metrics for for each registered benchmark
                 def _reduce_benchmarks(acc, bm_name: str):
                     self._cur_backend_name = bm_name
                     baseline = (
-                        bm_name == BASELINE_BENCHMARKS[self.name]
+                        bm_name in BASELINE_BENCHMARKS[self.name]
                         if self.name in BASELINE_BENCHMARKS
                         else False
                     )
@@ -1202,7 +1223,8 @@ class BenchmarkOperator(metaclass=PostInitProcessor):
                     if torch.accelerator.is_available():
                         torch.accelerator.synchronize()
                     if baseline:
-                        self.baseline_metrics = acc[bm_name]
+                        self.baseline_metrics_map[bm_name] = acc[bm_name]
+                        self._update_best_baseline()
                     if sleep:
                         logging.debug(f"Sleeping for {sleep} seconds before next run")
                         time.sleep(sleep)
@@ -1849,6 +1871,32 @@ class BenchmarkOperator(metaclass=PostInitProcessor):
             logger.warning(f"Exception during SNR computation: {e}")
             return 0.0
 
+    def _update_best_baseline(self):
+        """Update self.baseline_metrics to the baseline with the best (min) p50 latency."""
+        if not self.baseline_metrics_map:
+            return
+        best_name = None
+        best_latency = None
+        for name, metrics in self.baseline_metrics_map.items():
+            if metrics and metrics.latency:
+                lat = (
+                    metrics.latency.p50
+                    if hasattr(metrics.latency, "p50")
+                    else metrics.latency
+                )
+                if best_latency is None or lat < best_latency:
+                    best_latency = lat
+                    best_name = name
+        if best_name is not None:
+            self.baseline_metrics = self.baseline_metrics_map[best_name]
+        # baseline_fn is set to the first baseline's fn for accuracy/cosine/snr
+        baseline_names = BASELINE_BENCHMARKS.get(self.name, [])
+        if baseline_names and not self.baseline_fn:
+            for bl in baseline_names:
+                if bl in self.baseline_fns:
+                    self.baseline_fn = self.baseline_fns[bl]
+                    break
+
     def _do_bench(
         self,
         input_id: int,
@@ -1880,7 +1928,9 @@ class BenchmarkOperator(metaclass=PostInitProcessor):
         try:
             fn = self._get_bm_func(fn_name)
             if baseline:
-                self.baseline_fn = fn
+                self.baseline_fns[fn_name] = fn
+                if self.baseline_fn is None:
+                    self.baseline_fn = fn
             if {"latency", "tflops", "gbps", "speedup", "compile_time"} & set(
                 self.required_metrics
             ):
@@ -2655,7 +2705,7 @@ class BenchmarkOperator(metaclass=PostInitProcessor):
         return not cls.FWD_ONLY
 
     @classmethod
-    def has_baseline(cls) -> Optional[str]:
+    def has_baseline(cls) -> Optional[List[str]]:
         operator_name = cls.name
         return BASELINE_BENCHMARKS.get(operator_name, None)
 

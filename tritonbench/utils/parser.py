@@ -215,7 +215,10 @@ def get_parser(args=None):
         help="Match mode for --only argument. 'exact' for full string match, 'prefix-with-baseline' for prefix match as well as the existing baseline. Default: exact",
     )
     parser.add_argument(
-        "--baseline", type=str, default=None, help="Override default baseline."
+        "--baseline",
+        type=str,
+        default=None,
+        help="Override default baseline. Comma-separated list for multiple baselines (e.g., 'aten_matmul,cublas_matmul'). Speedup is computed against the best (min latency) baseline.",
     )
     parser.add_argument(
         "--num-inputs",
