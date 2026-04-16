@@ -23,6 +23,13 @@ def get_parser(args=None):
         help="Operators to benchmark. Split with comma if multiple.",
     )
     parser.add_argument(
+        "--graph",
+        type=str,
+        required=False,
+        help="Subgraph to benchmark. Format: <collection>/<graph_name>, "
+        "e.g. model_extractor-aps-xxx/graph_0_fwd",
+    )
+    parser.add_argument(
         "--op-collection",
         default="default",
         type=str,

@@ -100,3 +100,50 @@ def load_opbench_by_name(op_name: str):
     if not hasattr(Operator, "name"):
         Operator.name = op_name
     return Operator
+
+
+GRAPH_DIR = "graphs"
+
+
+def load_graph_by_name(graph_path: str):
+    """Load a graph operator by path.
+
+    Args:
+        graph_path: Path in the form "<collection>/<graph_name>",
+            e.g. "model_extractor-aps-xxx/graph_0_fwd"
+    """
+    parts = graph_path.strip("/").split("/")
+    if len(parts) != 2:
+        raise RuntimeError(
+            f"Invalid --graph format: '{graph_path}'. "
+            "Expected '<collection>/<graph_name>'"
+        )
+    collection, graph_name = parts
+
+    graph_root = pathlib.Path(__file__).parent.parent.joinpath(GRAPH_DIR)
+    graph_dir = None
+    for search_dir in [graph_root, graph_root.joinpath("fb")]:
+        candidate = search_dir.joinpath(collection).joinpath(graph_name)
+        if candidate.exists() and candidate.joinpath("__init__.py").exists():
+            graph_dir = candidate
+            break
+    if graph_dir is None:
+        raise RuntimeError(
+            f"Graph not found: {graph_path}. "
+            f"Searched {GRAPH_DIR}/ and {GRAPH_DIR}/fb/ for "
+            f"{collection}/{graph_name}/"
+        )
+
+    graph_py = graph_dir.joinpath("graph.py")
+    spec = importlib.util.spec_from_file_location(
+        f"tritonbench.{GRAPH_DIR}.{collection}.{graph_name}.graph",
+        graph_py,
+    )
+    module = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(module)
+    Graph = getattr(module, "Graph", None)
+    if Graph is None:
+        raise RuntimeError(f"Graph {graph_path} does not define a Graph class")
+    if not hasattr(Graph, "name"):
+        Graph.name = graph_name
+    return Graph

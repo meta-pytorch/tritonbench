@@ -489,6 +489,15 @@ def tritonbench_run(args: Optional[List[str]] = None):
         torch.mtia.init()
         mtia_triton_launcher.init()
 
+    if getattr(args, "graph", None):
+        # --graph mode: run a single subgraph directly
+        # Set args.op from graph name for output/logging compatibility
+        if not args.op:
+            args.op = args.graph.strip("/").replace("/", "_")
+        _run(args, extra_args)
+        tritonparse_parse(args.tritonparse)
+        return
+
     if args.op:
         ops = args.op.split(",")
     else:
@@ -553,7 +562,11 @@ def tritonbench_run(args: Optional[List[str]] = None):
 
 def _run(args: argparse.Namespace, extra_args: List[str]) -> BenchmarkOperatorResult:
     run_timestamp = datetime.fromtimestamp(time.time()).strftime("%Y%m%d%H%M%S")
-    if is_loader_op(args.op):
+    if getattr(args, "graph", None):
+        from tritonbench.operators.op import load_graph_by_name
+
+        Opbench = load_graph_by_name(args.graph)
+    elif is_loader_op(args.op):
         Opbench = get_op_loader_bench_cls_by_name(args.op)
     else:
         Opbench = load_opbench_by_name(args.op)

@@ -211,10 +211,23 @@ def _find_op_name_from_module_path(module_path: str) -> str:
     PATH_PREFIX = "tritonbench.operators."
     # We have a separate operator loader for aten operator benchmark.
     PATH_PREFIX_LOADER = "tritonbench.operator_loader."
-    assert PATH_PREFIX in module_path or PATH_PREFIX_LOADER in module_path, (
-        f"We rely on module path prefix to identify operator name. Expected {PATH_PREFIX}<operator_name>, get {module_path}."
+    PATH_PREFIX_GRAPH = "tritonbench.graphs."
+    assert (
+        PATH_PREFIX in module_path
+        or PATH_PREFIX_LOADER in module_path
+        or PATH_PREFIX_GRAPH in module_path
+    ), (
+        f"We rely on module path prefix to identify operator name. "
+        f"Expected {PATH_PREFIX}<operator_name>, get {module_path}."
     )
-    if PATH_PREFIX_LOADER in module_path:
+    if PATH_PREFIX_GRAPH in module_path:
+        # graphs.<collection>.<graph_name>.graph -> graph_name
+        suffix = module_path.partition(PATH_PREFIX_GRAPH)[2]
+        parts = suffix.split(".")
+        if len(parts) >= 2:
+            return parts[-2] if parts[-1] == "graph" else parts[-1]
+        return parts[0]
+    elif PATH_PREFIX_LOADER in module_path:
         suffix = module_path.partition(PATH_PREFIX_LOADER)[2]
         suffix = suffix.partition(".")[2]
     else:
