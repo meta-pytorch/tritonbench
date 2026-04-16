@@ -537,6 +537,7 @@ def matmul_kernel_tma_persistent(
             warp_specialize=WARP_SPECIALIZE,
             data_partition_factor=DATA_PARTITION_FACTOR,
             smem_alloc_algo=1,
+            separate_epilogue_store=True,
         ):
             tile_id_c = _matmul_tma_persistent_loop_body(
                 tile_id,

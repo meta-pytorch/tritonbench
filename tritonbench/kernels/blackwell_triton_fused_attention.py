@@ -173,6 +173,8 @@ def _attn_fwd_inner_oss_dp(
         hi,
         BLOCK_N,
         warp_specialize=warp_specialize,
+        merge_epilogue=True,
+        separate_epilogue_store=True,
         # disallow_acc_multi_buffer=True,
     ):
         start_n = tl.multiple_of(start_n, BLOCK_N)
@@ -648,6 +650,8 @@ def _attn_fwd_persist(
         0,
         tiles_per_sm,
         warp_specialize=warp_specialize and OUTER_LOOP,
+        merge_epilogue=True,
+        separate_epilogue_store=True,
         data_partition_factor=DP_FACTOR,
     ):
         pid = tile_idx % n_tile_num
@@ -905,7 +909,7 @@ def _attn_bwd_dkdv(
             0,
             num_steps,
             warp_specialize=True,
-            merge_epilogue=True,
+            merge_epilogue_to_computation=True,
             tmem_alloc_algo=2,
             smem_alloc_algo=1,
             smem_budget=200000,
@@ -1307,7 +1311,7 @@ def _attn_bwd_persist(
         0,
         tiles_per_sm,
         warp_specialize=True,
-        merge_epilogue=True,
+        merge_epilogue_to_computation=True,
         tmem_alloc_algo=2,
         smem_alloc_algo=1,
         smem_budget=200000,
