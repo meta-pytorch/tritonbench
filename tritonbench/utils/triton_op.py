@@ -829,7 +829,7 @@ class BenchmarkOperator(metaclass=PostInitProcessor):
         self._num_inputs = self.tb_args.num_inputs
         self._input_sample_mode = self.tb_args.input_sample_mode
         self.prod_shapes = self.tb_args.prod_shapes
-        self.old_diode_configs = (
+        self.old_diode_topk = (
             None  # Updated in _reduce_benchmarks if running the Diode benchmark
         )
         self.old_allow_tf32 = set_allow_tf32(self.tb_args.allow_tf32)
@@ -1205,7 +1205,7 @@ class BenchmarkOperator(metaclass=PostInitProcessor):
                             diode_model_config = deserialize_model_config(
                                 self.tb_args.diode_model_config
                             )
-                        self.old_diode_configs = setup_diode_model(
+                        self.old_diode_topk = setup_diode_model(
                             self.tb_args.diode_version,
                             topk=self.tb_args.diode_topk,
                             model_config=diode_model_config,
@@ -1228,9 +1228,9 @@ class BenchmarkOperator(metaclass=PostInitProcessor):
                     if sleep:
                         logging.debug(f"Sleeping for {sleep} seconds before next run")
                         time.sleep(sleep)
-                    if self.old_diode_configs:
-                        teardown_diode_model(self.old_diode_configs)
-                        self.old_diode_configs = None
+                    if self.old_diode_topk is not None:
+                        teardown_diode_model(self.old_diode_topk)
+                        self.old_diode_topk = None
                     return acc
 
                 y_vals: Dict[str, BenchmarkOperatorMetrics] = functools.reduce(

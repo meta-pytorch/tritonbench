@@ -62,16 +62,13 @@ def deserialize_model_config(json_str: str) -> "ModelConfig":
 def setup_diode_model(
     diode_version: str,
     topk: int = 1,
-    expand_search_space: bool = True,
     model_config: "ModelConfig | None" = None,
-) -> tuple[int, bool]:
+) -> int:
     logger.info("[DIODE][TritonBench] Setup Diode model.")
 
     old_topk = diode_config.topk
-    old_expand_search_space = diode_config.expand_search_space
 
     diode_config.topk = topk
-    diode_config.expand_search_space = expand_search_space
 
     if model_config is None:
         model_config = MODEL_CONFIGS[diode_version]
@@ -81,14 +78,12 @@ def setup_diode_model(
 
     V.set_choices_handler(DiodeInductorChoices())
 
-    return old_topk, old_expand_search_space
+    return old_topk
 
 
-def teardown_diode_model(old_configs):
+def teardown_diode_model(old_diode_topk: int):
     logger.info("[DIODE][TritonBench] Teardown Diode model.")
 
-    old_topk, old_expand_search_space = old_configs
-    diode_config.topk = old_topk
-    diode_config.expand_search_space = old_expand_search_space
+    diode_config.topk = old_diode_topk
     get_registry().clear()
     V.set_choices_handler(InductorChoices())
