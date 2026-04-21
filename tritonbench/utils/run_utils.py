@@ -614,7 +614,7 @@ def _run(args: argparse.Namespace, extra_args: List[str]) -> BenchmarkOperatorRe
 
             kwargs = {
                 "metrics": metrics,
-                "benchmark_name": args.op,
+                "benchmark_name": args.benchmark_name or args.op,
                 "device": args.device,
                 "logging_group": args.logging_group or args.op,
                 "precision": args.precision,
