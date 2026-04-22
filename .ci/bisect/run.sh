@@ -53,6 +53,7 @@ echo "Triton installation dir: ${TRITON_SRC_DIR}"
 echo "Regression threshold: ${REGRESSION_THRESHOLD}"
 echo "Functional bisect: ${FUNCTIONAL}"
 echo "Repo command line: ${REPRO_CMDLINE}"
+echo "PyTorch version: $(python -c 'import torch; print(torch.__version__)')"
 echo "=================================================="
 
 # refresh triton repo to the latest commit
