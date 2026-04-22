@@ -476,7 +476,10 @@ class Operator(BenchmarkOperator):
 
         return lambda: compiled(a, b)
 
-    @register_benchmark(enabled=supports_tma())
+    # TODO: this backend fails in CI with "PickleError"
+    # _pickle.PicklingError: Can't pickle <function triton_tem_fused_mm_0>:
+    # it's not the same object as torch._inductor.runtime.compile_tasks.<HASH>.triton_tem_fused_mm_0
+    @register_benchmark(enabled=supports_tma() and False)
     def pt2_matmul_maxautotune_tma_only(self, a, b, bias) -> Callable:
         from torch._inductor.template_heuristics.triton import (
             CUDAMMTemplateConfigHeuristic,
