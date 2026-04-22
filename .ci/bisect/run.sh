@@ -55,16 +55,6 @@ echo "Functional bisect: ${FUNCTIONAL}"
 echo "Repo command line: ${REPRO_CMDLINE}"
 echo "=================================================="
 
-# Checkout tritonparse
-TRITONPARSE_DIR="${WORKSPACE_DIR}/tritonparse"
-git clone https://github.com/meta-pytorch/tritonparse.git ${TRITONPARSE_DIR}
-
-cd ${WORKSPACE_DIR}/tritonparse
-git checkout -t origin/xz9/pr11-uv
-
-# install tritonparse
-uv pip install -e .
-
 # refresh triton repo to the latest commit
 cd "${TRITON_SRC_DIR}"
 git checkout main

@@ -81,8 +81,3 @@ jobs:
       bad_commit: ${{ inputs.bad_commit }}
       functional: ${{ inputs.bisect_type == 'functional' }}
       regression_threshold: ${{ inputs.regression_threshold }}
-
-
-concurrency:
-  group: ${{ github.workflow }}-${{ github.event.pull_request.number || github.sha }}-${{ github.event_name == 'workflow_dispatch' }}
-  cancel-in-progress: true

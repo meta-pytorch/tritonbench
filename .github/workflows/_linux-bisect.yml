@@ -64,6 +64,12 @@ jobs:
         uses: actions/checkout@v3
         with:
           submodules: recursive
+      - name: Checkout tritonparse
+        uses: actions/checkout@v3
+        with:
+          repository: meta-pytorch/tritonparse
+          ref: main
+          path: tritonparse
       - name: Install Tritonbench env
         run: |
           set -eux
@@ -85,6 +91,11 @@ jobs:
             exit 1
           fi
           bash ./.ci/tritonbench/setup-env.sh ${CMD_SUFFIX}
+      - name: Install tritonparse
+        run: |
+          set -eux
+          . "${SETUP_SCRIPT}"
+          uv pip install -e "${GITHUB_WORKSPACE}/tritonparse"
       - name: Run Bisection
         run: |
           set -eux
