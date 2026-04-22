@@ -102,7 +102,7 @@ git submodule update --init --recursive
 cd "${TRITONBENCH_DIR}"
 
 # Run the baseline commit first!
-BISECT_LOG_DIR="${TRITONBENCH_DIR}/bisect_logs"
+BISECT_LOG_DIR="${WORKSPACE_DIR}/bisect_logs"
 BASELINE_LOG="${BISECT_LOG_DIR}/baseline.log"
 mkdir -p "${BISECT_LOG_DIR}"
 . .ci/triton/triton_install_utils.sh

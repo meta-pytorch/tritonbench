@@ -52,11 +52,11 @@ install_triton() {
     if [ -n "${UV_VENV_DIR:-}" ]; then
         uv pip install ninja cmake wheel pybind11; # build-time dependencies
         uv pip install -r python/requirements.txt
-        uv pip install -e .
+        uv pip install -e . --no-build-isolation
     else
         pip install ninja cmake wheel pybind11; # build-time dependencies
         pip install -r python/requirements.txt
-        pip install -e .
+        pip install -e . --no-build-isolation
     fi
     cd -
 }
