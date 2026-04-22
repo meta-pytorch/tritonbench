@@ -6,7 +6,10 @@ if [ -z "${SETUP_SCRIPT}" ]; then
   exit 1
 fi
 
-source .ci/tritonbench/setup-nvidia-path.sh
+if python -c "import re, sys, torch; sys.exit(0 if re.search(r'\+cu[0-9]+', torch.__version__) else 1)"; then
+  source .ci/tritonbench/setup-nvidia-path.sh
+fi
+
 source "${SETUP_SCRIPT}"
 
 # print pytorch and triton versions for debugging
