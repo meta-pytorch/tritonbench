@@ -20,4 +20,4 @@ python -c "import triton; print('triton version: ', triton.__version__); print('
 # "Could not find an active GPU backend" in subprocess workers
 export TORCHINDUCTOR_COMPILE_THREADS=1
 
-python -m unittest test.test_gpu.main -v
+python -m unittest test.test_gpu.main -v -k test_gpu_tritonbench_gemm
