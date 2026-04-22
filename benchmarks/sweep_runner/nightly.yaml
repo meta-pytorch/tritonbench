@@ -18,3 +18,9 @@ run_configs:
 overrides:
   launch_latency_fwd:
     args: --op launch_latency --metrics walltime
+  bf16_gdpa_fwd:
+    args: --op gdpa --only gdpa,gdpa_opt,gdpa_opt_sorted,tlx_gdpa --baseline eager_gdpa --metrics
+      latency,speedup,gbps
+  bf16_gdpa_bwd:
+    args: --op gdpa --only gdpa,gdpa_opt_sorted,gdpa_opt --bwd --baseline eager_gdpa
+      --metrics latency,speedup,gbps

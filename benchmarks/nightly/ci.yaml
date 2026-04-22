@@ -67,11 +67,11 @@ gather_gemv_fwd:
   args: --op gather_gemv --only triton_gather_gemv --baseline eager_gather_gemv --metrics
     latency,speedup
 bf16_gdpa_fwd:
-  args: --op gdpa --only gdpa,gdpa_opt,gdpa_opt_sorted --baseline eager_gdpa --metrics
-    latency,speedup
+  args: --op gdpa --only gdpa,gdpa_opt,gdpa_opt_sorted,tlx_gdpa --baseline eager_gdpa --metrics
+    latency,speedup,gbps
 bf16_gdpa_bwd:
   args: --op gdpa --only gdpa,gdpa_opt_sorted,gdpa_opt --bwd --baseline eager_gdpa
-    --metrics latency,speedup
+    --metrics latency,speedup,gbps
 geglu_fwd:
   args: --op geglu --only liger_geglu --baseline torch_geglu --metrics latency,speedup
 geglu_bwd:
