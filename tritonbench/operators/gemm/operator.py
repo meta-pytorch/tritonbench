@@ -479,6 +479,8 @@ class Operator(BenchmarkOperator):
     # TODO: this backend fails in CI with "PickleError"
     # _pickle.PicklingError: Can't pickle <function triton_tem_fused_mm_0>:
     # it's not the same object as torch._inductor.runtime.compile_tasks.<HASH>.triton_tem_fused_mm_0
+    # Example failure:
+    # https://github.com/meta-pytorch/tritonbench/actions/runs/24798335876/job/72573975614
     @register_benchmark(enabled=supports_tma() and False)
     def pt2_matmul_maxautotune_tma_only(self, a, b, bias) -> Callable:
         from torch._inductor.template_heuristics.triton import (
