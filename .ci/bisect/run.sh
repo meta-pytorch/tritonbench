@@ -44,6 +44,41 @@ REGRESSION_THRESHOLD="${REGRESSION_THRESHOLD:-10}"
 
 TRITONBENCH_DIR=$(dirname "$(readlink -f "$0")")/../..
 
+parse_repro_cmdline() {
+    local token
+
+    eval "REPRO_CMD_TOKENS=(${REPRO_CMDLINE})"
+    REPRO_CMD_ENV_ASSIGNMENTS=()
+    REPRO_CMD=()
+
+    local parsing_env_assignments=1
+    for token in "${REPRO_CMD_TOKENS[@]}"; do
+        if [ "${parsing_env_assignments}" -eq 1 ] && [[ "${token}" =~ ^[A-Za-z_][A-Za-z0-9_]*=.*$ ]]; then
+            REPRO_CMD_ENV_ASSIGNMENTS+=("${token}")
+        else
+            parsing_env_assignments=0
+            REPRO_CMD+=("${token}")
+        fi
+    done
+
+    if [ "${#REPRO_CMD[@]}" -eq 0 ]; then
+        echo "ERROR: REPRO_CMDLINE does not contain an executable command: ${REPRO_CMDLINE}"
+        exit 1
+    fi
+}
+
+export_repro_cmd_env() {
+    local assignment
+
+    for assignment in "${REPRO_CMD_ENV_ASSIGNMENTS[@]}"; do
+        export "${assignment}"
+    done
+}
+
+parse_repro_cmdline
+export_repro_cmd_env
+REPRO_CMDLINE="${REPRO_CMD[*]}"
+
 echo "===== TritonBench Bisect Driver Script START ====="
 echo "Good commit: ${GOOD_COMMIT}"
 echo "Bad commit: ${BAD_COMMIT}"
@@ -53,6 +88,7 @@ echo "Triton installation dir: ${TRITON_SRC_DIR}"
 echo "Regression threshold: ${REGRESSION_THRESHOLD}"
 echo "Functional bisect: ${FUNCTIONAL}"
 echo "Repo command line: ${REPRO_CMDLINE}"
+echo "Exported repro env: ${REPRO_CMD_ENV_ASSIGNMENTS[*]:-<none>}"
 echo "PyTorch version: $(python -c 'import torch; print(torch.__version__)')"
 echo "=================================================="
 
@@ -75,7 +111,7 @@ checkout_triton_commit "${TRITON_SRC_DIR}" "${GOOD_COMMIT}"
 install_triton "${TRITON_SRC_DIR}"
 sudo ldconfig
 cd "${TRITONBENCH_DIR}"
-eval ${REPRO_CMDLINE} 2>&1 | tee "${BASELINE_LOG}"
+"${REPRO_CMD[@]}" 2>&1 | tee "${BASELINE_LOG}"
 
 # pre-flight check: install and run on the bad commit to validate regression exists
 checkout_triton_commit "${TRITON_SRC_DIR}" "${BAD_COMMIT}"
