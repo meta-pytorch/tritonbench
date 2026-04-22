@@ -108,6 +108,11 @@ elif [ ${PREFLIGHT_RC} -ne 1 ] && [ ${FUNCTIONAL} -ne 1 ]; then
 fi
 
 # kick off the bisect!
+TRITONPARSE_REPO_ARG=()
+if [ "${CONDA_ENV}" = "meta-triton" ]; then
+    TRITONPARSE_REPO_ARG=(--triton-repo meta)
+fi
+
 BASELINE_LOG="${BASELINE_LOG}" PER_COMMIT_LOG=1 USE_UV=1 CONDA_DIR="${WORKSPACE_DIR}/uv_venvs/${CONDA_ENV}" \
 tritonparseoss bisect --triton-dir "${TRITON_SRC_DIR}" --test-script ./.ci/bisect/regression_detector.py \
-    --good ${GOOD_COMMIT} --bad ${BAD_COMMIT} --per-commit-log --log-dir "${BISECT_LOG_DIR}"
+    "${TRITONPARSE_REPO_ARG[@]}" --good ${GOOD_COMMIT} --bad ${BAD_COMMIT} --per-commit-log --log-dir "${BISECT_LOG_DIR}"
