@@ -6,8 +6,6 @@ if [ -z "${SETUP_SCRIPT}" ]; then
   exit 1
 fi
 
-source "${SETUP_SCRIPT}"
-
 source .ci/tritonbench/setup-nvidia-path.sh
 source "${SETUP_SCRIPT}"
 
