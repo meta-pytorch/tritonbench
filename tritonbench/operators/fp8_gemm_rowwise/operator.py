@@ -7,6 +7,7 @@ from tritonbench.utils.data_utils import get_production_shapes
 from tritonbench.utils.env_utils import (
     get_nvidia_gpu_model,
     IS_BLACKWELL,
+    IS_BLACKWELL_ANY,
     is_cuda,
     is_fbcode,
     is_hip,
@@ -184,7 +185,7 @@ class Operator(BenchmarkOperator):
 
         # This is the only config currently tested in b200.
         # TODO: Remove it when the other variants are supported.
-        if IS_BLACKWELL:
+        if IS_BLACKWELL_ANY:
             self.fp8_fast_accum = True
             self.use_tma = True
             self.no_use_persistent = False

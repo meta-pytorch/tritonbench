@@ -121,7 +121,15 @@ def is_hip_mi350():
 
 
 def is_blackwell() -> bool:
-    """Check if running on an NVIDIA Blackwell GPU (B200 or B300 series)."""
+    """Check if running on a datacenter Blackwell GPU (B200/B300, sm_100).
+
+    Kernels gated on this flag assume TMEM / tcgen05 (5th-gen tensor cores
+    with tensor memory), which exist on sm_100 only. Consumer/workstation
+    Blackwell (sm_120, e.g. RTX 5090 / RTX PRO 6000) has 5th-gen tensor cores
+    but no TMEM, so those kernels will not compile there. Use
+    ``is_blackwell_consumer()`` for sm_120, or ``IS_BLACKWELL_ANY`` when you
+    only care that the arch is some flavor of Blackwell.
+    """
     if not is_cuda_available():
         return False
     gpu_model = get_nvidia_gpu_model()
@@ -134,6 +142,41 @@ def is_blackwell() -> bool:
 
 
 IS_BLACKWELL = is_blackwell()
+
+
+def is_blackwell_consumer() -> bool:
+    """Check if running on consumer/workstation Blackwell (sm_120: GB202 etc).
+
+    Covers RTX 5090, RTX PRO 6000 Blackwell Workstation, and other GB20x
+    parts. These have 5th-gen tensor cores and NVFP4/MXFP4 support but
+    lack TMEM and cluster DSM, so kernels written for sm_100 (TMEM/tcgen05)
+    will not run here.
+    """
+    if not is_cuda_available():
+        return False
+    try:
+        if torch.cuda.get_device_capability()[0] == 12:
+            return True
+    except Exception:
+        pass
+    gpu_model = get_nvidia_gpu_model()
+    if not gpu_model:
+        return False
+    return (
+        "RTX PRO 6000" in gpu_model
+        or "RTX 5090" in gpu_model
+        or "RTX 5080" in gpu_model
+        or "RTX 5070" in gpu_model
+    )
+
+
+IS_BLACKWELL_CONSUMER = is_blackwell_consumer()
+
+# True for any Blackwell arch (sm_100 datacenter or sm_120 consumer).
+# Use this ONLY for gates that don't depend on TMEM/tcgen05 (e.g. config
+# defaults, NVFP4 paths). Kernel-level gates that rely on tensor memory
+# must keep using IS_BLACKWELL.
+IS_BLACKWELL_ANY = IS_BLACKWELL or IS_BLACKWELL_CONSUMER
 
 
 def is_hopper() -> bool:
