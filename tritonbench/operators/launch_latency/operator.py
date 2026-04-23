@@ -395,25 +395,6 @@ class Operator(BenchmarkOperator):
         )
 
     @register_benchmark()
-    def nop_triton_kernel_new_tensors(self, *args):
-        """Layer 1 misses (different tensor objects each call), Layer 2 should hit."""
-        if len(args) == 0:
-            return lambda: nop_kernel[1,]()
-        # Pre-allocate N sets of cloned tensors to avoid allocation in the hot loop.
-        N = 100
-        targs = args[:5]
-        rest_args = args[5:]
-        tensor_sets = [tuple(t.clone() for t in targs) for _ in range(N)]
-        idx = [0]
-
-        def fn():
-            i = idx[0] % N
-            idx[0] += 1
-            nop_with_args_kernel[1,](*tensor_sets[i], *rest_args)
-
-        return fn
-
-    @register_benchmark()
     def nop_triton_compiled_kernel_run(self, *args):
         if len(args) == 0:
             bin = nop_kernel[1,]()
