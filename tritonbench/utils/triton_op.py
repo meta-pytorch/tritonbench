@@ -164,7 +164,14 @@ class TimerContext:
 
 
 def do_bench_walltime(fn, warmup=None, rep=None):
-    estimate_ms = estimate_cuda_runtime_ms(fn)
+    fn()
+    torch.cuda.synchronize()
+
+    with TimerContext() as timer:
+        for _ in range(5):
+            fn()
+        torch.cuda.synchronize()
+    estimate_ms = timer.elapsed_ms / 5
     warmup, rep = resolve_warmup_and_rep(warmup, rep, estimate_ms)
 
     # compute number of warmup and repeat
