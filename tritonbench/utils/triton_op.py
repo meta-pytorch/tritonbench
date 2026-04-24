@@ -29,15 +29,19 @@ import triton
 from torch.utils._pytree import tree_map
 from triton.runtime.errors import OutOfResources as TritonOutOfResources
 from tritonbench.components.do_bench import do_bench_wrapper, Latency
+from tritonbench.components.do_bench.utils import (
+    estimate_cuda_runtime_ms,
+    resolve_warmup_and_rep,
+)
 from tritonbench.components.export import export_data
 from tritonbench.components.power import PowerManagerTask
 from tritonbench.data import get_input_loader
 from tritonbench.utils.constants import (
+    DEFAULT_N_REP,
+    DEFAULT_N_WARMUP,
     DEFAULT_POWER_REPCNT,
     DEFAULT_QUANTILES,
-    DEFAULT_REP,
     DEFAULT_SLEEP,
-    DEFAULT_WARMUP,
 )
 from tritonbench.utils.cudagraph_utils import CudaGraphConfig, CudaGraphError
 from tritonbench.utils.diode_utils import (
@@ -159,19 +163,17 @@ class TimerContext:
             self.elapsed_ms = (end_time - self._start_time) * 1e3
 
 
-def do_bench_walltime(fn, warmup=25, rep=DEFAULT_REP):
-    fn()
-    torch.cuda.synchronize()
-
-    with TimerContext() as timer:
-        for _ in range(5):
-            fn()
-        torch.cuda.synchronize()
-    estimate_ms = timer.elapsed_ms / 5
+def do_bench_walltime(fn, warmup=None, rep=None):
+    estimate_ms = estimate_cuda_runtime_ms(fn)
+    warmup, rep = resolve_warmup_and_rep(warmup, rep, estimate_ms)
 
     # compute number of warmup and repeat
-    n_warmup = max(1, int(warmup / estimate_ms))
-    n_repeat = max(1, int(rep / estimate_ms))
+    if estimate_ms == 0:
+        n_warmup = DEFAULT_N_WARMUP
+        n_repeat = DEFAULT_N_REP
+    else:
+        n_warmup = max(1, int(warmup / estimate_ms))
+        n_repeat = max(1, int(rep / estimate_ms))
 
     # Warm-up
     for _ in range(n_warmup):
@@ -1034,8 +1036,8 @@ class BenchmarkOperator(metaclass=PostInitProcessor):
 
     def run(
         self,
-        warmup=DEFAULT_WARMUP,
-        rep=DEFAULT_REP,
+        warmup=None,
+        rep=None,
         quantiles=DEFAULT_QUANTILES,
         sleep=DEFAULT_SLEEP,
     ) -> None:
@@ -1901,8 +1903,8 @@ class BenchmarkOperator(metaclass=PostInitProcessor):
         self,
         input_id: int,
         fn_name: str,
-        warmup=DEFAULT_WARMUP,
-        rep=DEFAULT_REP,
+        warmup=None,
+        rep=None,
         repcnt=None,
         quantiles=DEFAULT_QUANTILES,
         baseline: bool = False,

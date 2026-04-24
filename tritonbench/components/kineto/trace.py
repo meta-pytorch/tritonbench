@@ -8,6 +8,10 @@ from typing import Callable, Optional
 
 import torch
 import torch.profiler as profiler
+from tritonbench.components.do_bench.utils import (
+    estimate_cuda_runtime_ms,
+    resolve_warmup_and_rep,
+)
 from tritonbench.utils.constants import DEFAULT_N_REP, DEFAULT_N_WARMUP
 from tritonbench.utils.env_utils import has_manifold
 
@@ -122,8 +126,8 @@ def do_bench_kineto_cudagraph(
 
 def do_bench_kineto(
     fn: Callable,
-    warmup: int,
-    rep: int,
+    warmup: Optional[int],
+    rep: Optional[int],
     grad_to_none=None,
     fast_flush=True,
     profile_opts=None,
@@ -150,11 +154,6 @@ def do_bench_kineto(
     """
     if profile_opts is None:
         profile_opts = DEFAULT_PROFILE_OPTS
-    import torch
-
-    fn()
-    torch.cuda.synchronize()
-
     # We maintain a buffer of 256 MB that we clear
     # before each kernel call to make sure that the L2
     # doesn't contain any input data before the run
@@ -167,16 +166,8 @@ def do_bench_kineto(
     else:
         clear_cache = lambda *args: None
 
-    # Estimate the runtime of the function
-    start_event = torch.cuda.Event(enable_timing=True)
-    end_event = torch.cuda.Event(enable_timing=True)
-    start_event.record()
-    for _ in range(5):
-        clear_cache()
-        fn()
-    end_event.record()
-    torch.cuda.synchronize()
-    estimate_ms = start_event.elapsed_time(end_event) / 5
+    estimate_ms = estimate_cuda_runtime_ms(fn, clear_cache_fn=clear_cache)
+    warmup, rep = resolve_warmup_and_rep(warmup, rep, estimate_ms)
 
     # Calculate number of iterations based on target rep time
     if estimate_ms == 0:
@@ -230,10 +221,6 @@ def do_bench_kineto(
 def do_bench_kineto_walltime(fn, repcnt=5, profile_opts=None, output_dir=None):
     if profile_opts is None:
         profile_opts = DEFAULT_PROFILE_OPTS
-    import torch
-
-    fn()
-    torch.cuda.synchronize()
 
     activity_groups = [
         profiler.ProfilerActivity.CUDA,

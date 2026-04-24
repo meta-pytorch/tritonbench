@@ -7,8 +7,6 @@ from tritonbench.utils.constants import (
     DEFAULT_ENTROPY_MAX_SAMPLES,
     DEFAULT_ENTROPY_MIN_R2,
     DEFAULT_ENTROPY_WINDOW_SIZE,
-    DEFAULT_REP,
-    DEFAULT_WARMUP,
 )
 from tritonbench.utils.env_utils import AVAILABLE_PRECISIONS, is_fbcode
 from tritonbench.utils.gpu_utils import get_gpu_device_name
@@ -76,14 +74,14 @@ def get_parser(args=None):
     parser.add_argument(
         "--warmup",
         type=int,
-        default=DEFAULT_WARMUP,
-        help="Num of warmup runs for each benchmark run.",
+        default=None,
+        help="Warmup time in ms for each benchmark run. Default: auto by estimated kernel latency.",
     )
     parser.add_argument(
         "--rep",
         type=int,
-        default=DEFAULT_REP,
-        help="The rep time for each benchmark run.",
+        default=None,
+        help="Target measurement time in ms for each benchmark run. Default: auto by estimated kernel latency.",
     )
     parser.add_argument(
         "--autotune-warmup",

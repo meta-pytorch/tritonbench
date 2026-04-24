@@ -1,6 +1,10 @@
 from typing import Callable
 
 import torch
+from tritonbench.components.do_bench.utils import (
+    estimate_cuda_runtime_ms,
+    resolve_warmup_and_rep,
+)
 
 
 class cuda_profiler_range:
@@ -40,20 +44,12 @@ def do_bench_in_task(
 
     cache = torch.empty(int(256e6 // 4), dtype=torch.int, device="cuda")
 
-    if warmup:
-        # Estimate the runtime of the function
-        start_event = torch.cuda.Event(enable_timing=True)
-        end_event = torch.cuda.Event(enable_timing=True)
-        start_event.record()
-        for _ in range(5):
-            cache.zero_()
-            fn()
-        end_event.record()
-        torch.cuda.synchronize()
-        estimate_ms = start_event.elapsed_time(end_event) / 5
+    if warmup is None or warmup:
+        estimate_ms = estimate_cuda_runtime_ms(fn, clear_cache_fn=cache.zero_)
+        warmup, _ = resolve_warmup_and_rep(warmup, None, estimate_ms)
 
         # compute number of warmup and repeat
-        n_warmup = max(1, int(warmup / estimate_ms))
+        n_warmup = 1 if estimate_ms == 0 else max(1, int(warmup / estimate_ms))
         # Warm-up
         for _ in range(n_warmup):
             fn()
