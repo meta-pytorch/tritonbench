@@ -116,7 +116,6 @@ if __name__ == "__main__":
     parser.add_argument("--tk", action="store_true", help="Install ThunderKittens")
     parser.add_argument("--liger", action="store_true", help="Install Liger-kernel")
     parser.add_argument("--quack", action="store_true", help="Install quack")
-    parser.add_argument("--xformers", action="store_true", help="Install xformers")
     parser.add_argument("--tile", action="store_true", help="install tile lang")
     parser.add_argument("--aiter", action="store_true", help="install AMD's aiter")
     parser.add_argument(
@@ -196,11 +195,6 @@ if __name__ == "__main__":
         from tools.helion.install import install_helion
 
         install_helion()
-    if args.xformers:
-        logger.info("[tritonbench] installing xformers...")
-        from tools.xformers.install import install_xformers
-
-        install_xformers()
     if args.aiter and is_hip():
         logger.info("[tritonbench] installing aiter...")
         from tools.aiter.install import install_aiter

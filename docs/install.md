@@ -23,6 +23,5 @@ If you run `python install.py` without any argument, it will do the following:
 - `--jax`: Install JAX (Pallas and Mosaic).
 - `--tk`: Install [ThunderKittens](https://github.com/HazyResearch/ThunderKittens).
 - `--tile`: Install [Tile Lang](https://github.com/tile-ai/tilelang).
-- `--xformers`: Install [XFormers](https://github.com/facebookresearch/xformers).
 - `--aiter`: Install [AITer](https://github.com/ROCm/aiter).
 - `--all`: Install all of the above.
