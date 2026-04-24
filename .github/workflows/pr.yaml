@@ -10,10 +10,6 @@ on:
       - main
 
 jobs:
-  h100-meta-triton-test:
-    uses: ./.github/workflows/_linux-test-h100.yml
-    with:
-      conda_env: "meta-triton"
   h100-triton-main-test:
     uses: ./.github/workflows/_linux-test-h100.yml
     with:
