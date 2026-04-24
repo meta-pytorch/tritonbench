@@ -44,7 +44,7 @@ def do_bench_in_task(
 
     cache = torch.empty(int(256e6 // 4), dtype=torch.int, device="cuda")
 
-    if warmup is None or warmup:
+    if warmup == True:
         estimate_ms = estimate_cuda_runtime_ms(fn, clear_cache_fn=cache.zero_)
         warmup, _ = resolve_warmup_and_rep(warmup, None, estimate_ms)
 

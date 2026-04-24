@@ -1043,8 +1043,8 @@ class BenchmarkOperator(metaclass=PostInitProcessor):
 
     def run(
         self,
-        warmup=None,
-        rep=None,
+        warmup: int | None=None,
+        rep: int | None=None,
         quantiles=DEFAULT_QUANTILES,
         sleep=DEFAULT_SLEEP,
     ) -> None:
@@ -1910,8 +1910,8 @@ class BenchmarkOperator(metaclass=PostInitProcessor):
         self,
         input_id: int,
         fn_name: str,
-        warmup=None,
-        rep=None,
+        warmup: int | None,
+        rep: int | None,
         repcnt=None,
         quantiles=DEFAULT_QUANTILES,
         baseline: bool = False,

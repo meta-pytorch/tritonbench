@@ -431,7 +431,7 @@ def _do_bench_profiler(
 
 
 def _do_bench_cpu(
-    fn, warmup, rep=20, grad_to_none=None, quantiles=None, return_mode="mean"
+    fn, warmup, rep, grad_to_none=None, quantiles=None, return_mode="mean"
 ):
     """Measure latency of a function on CPU."""
     assert return_mode in ["min", "max", "mean", "median", "all"]

@@ -154,6 +154,10 @@ def do_bench_kineto(
     """
     if profile_opts is None:
         profile_opts = DEFAULT_PROFILE_OPTS
+    import torch
+
+    fn()
+    torch.cuda.synchronize()
     # We maintain a buffer of 256 MB that we clear
     # before each kernel call to make sure that the L2
     # doesn't contain any input data before the run
@@ -221,6 +225,10 @@ def do_bench_kineto(
 def do_bench_kineto_walltime(fn, repcnt=5, profile_opts=None, output_dir=None):
     if profile_opts is None:
         profile_opts = DEFAULT_PROFILE_OPTS
+    import torch
+
+    fn()
+    torch.cuda.synchronize()
 
     activity_groups = [
         profiler.ProfilerActivity.CUDA,
