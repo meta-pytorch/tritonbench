@@ -7,9 +7,6 @@
 [submodule "submodules/ThunderKittens"]
 	path = submodules/ThunderKittens
 	url = https://github.com/HazyResearch/ThunderKittens.git
-[submodule "submodules/cutlass"]
-	path = submodules/cutlass
-	url = https://github.com/NVIDIA/cutlass.git
 [submodule "submodules/aiter"]
 	path = submodules/aiter
 	url = https://github.com/ROCm/aiter.git
