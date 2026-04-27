@@ -677,10 +677,11 @@ def do_bench_wrapper(
         and not repcnt
         and latency_measure_mode == "triton_do_bench"
     ):
+        estimate_runtime = estimate_cuda_runtime_ms(fn, grad_to_none=grad_to_none)
         warmup, rep = resolve_warmup_and_rep(
             warmup,
             rep,
-            estimate_cuda_runtime_ms(fn, grad_to_none=grad_to_none),
+            estimate_runtime,
         )
 
     try:
