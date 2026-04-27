@@ -155,6 +155,15 @@ if HAS_TLX:
         attention as tlx_blackwell,
     )
 
+try:
+    from hammer.v2.ops.triton.template.tlx_bw_hstu_attention import (
+        tlx_bw_hstu_mha_wrapper,
+    )
+
+    HAS_TLX_HSTU = True
+except (ImportError, IOError, AttributeError):
+    HAS_TLX_HSTU = False
+
 with try_import("HAS_TILELANG"):
     from .tilelang import tilelang_blackwell_attention
 
@@ -335,6 +344,19 @@ def preproc_permute(q, k, v, varlen=False):
     k_packed = k.reshape(-1, H_KV, D).contiguous()
     v_packed = v.reshape(-1, H_KV, D).contiguous()
     return [q_packed, k_packed, v_packed, cu_seqlens_q, cu_seqlens_k, S_Q, S_KV]
+
+
+def preproc_hstu(q, k, v):
+    q, k, v = [t.contiguous() for t in permute_qkv(q, k, v, perm=(0, 2, 1, 3))]
+    B, S, H, D = q.shape
+    seq_offsets = torch.arange(0, (B + 1) * S, S, dtype=torch.int64, device=q.device)
+    return [
+        q.reshape(-1, H, D).contiguous(),
+        k.reshape(-1, k.shape[2], k.shape[3]).contiguous(),
+        v.reshape(-1, v.shape[2], v.shape[3]).contiguous(),
+        seq_offsets,
+        S,
+    ]
 
 
 def _sdpa_cudnn_attention(q, k, v, is_causal=False, scale=False):
@@ -737,6 +759,32 @@ class Operator(BenchmarkOperator):
             )
 
         return preproc_noop, fn
+
+    @register_benchmark(enabled=IS_BLACKWELL and HAS_TLX_HSTU, label="tlx-hstu")
+    @multi_input_wrapper
+    def tlx_hstu(self, *args) -> Tuple[Callable, Callable]:
+        if self.varlen:
+            raise NotImplementedError("TLX HSTU does not support varlen interface")
+        if self.local:
+            raise NotImplementedError("TLX HSTU does not support local attention")
+
+        alpha = 1.0 / self.D_HEAD
+
+        def fn(q, k, v, seq_offsets, max_seq_len):
+            if q.shape != k.shape or q.shape != v.shape:
+                raise NotImplementedError("TLX HSTU only supports non-GQA MHA inputs")
+            return tlx_bw_hstu_mha_wrapper(
+                max_seq_len=max_seq_len,
+                alpha=alpha,
+                q=q,
+                k=k,
+                v=v,
+                seq_offsets=seq_offsets,
+                attn_scale=torch.tensor(1.0 / max_seq_len, device=q.device),
+                sort_by_length=False,
+            )
+
+        return preproc_hstu, fn
 
     @register_benchmark(enabled=IS_BLACKWELL and HAS_TILELANG, fwd_only=True)
     @multi_input_wrapper
