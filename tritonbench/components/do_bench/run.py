@@ -159,8 +159,8 @@ def _do_bench_inductor(fn, warmup, rep, return_mode="all", grad_to_none=None):
     Returns:
         List of measured times in milliseconds (if return_mode="all") or single value.
     """
+    # First, estimate the runtime with a single measurement
     estimate_ms = benchmarker.benchmark_gpu(fn, estimation_iters=5, benchmark_iters=10)
-    warmup, rep = resolve_warmup_and_rep(warmup, rep, estimate_ms)
 
     # Calculate number of iterations based on target rep time
     # Similar to how triton.testing.do_bench calculates iterations
@@ -309,7 +309,6 @@ def _do_bench_profiler(
         grad_to_none=grad_to_none,
         clear_cache_fn=clear_cache_fn,
     )
-    warmup, rep = resolve_warmup_and_rep(warmup, rep, estimate_ms)
 
     # Calculate number of iterations based on target rep time
     if estimate_ms == 0:
@@ -442,7 +441,6 @@ def _do_bench_cpu(
         fn()
     t1 = time.time_ns()
     estimate_ms = (t1 - t0) * NS_TO_MS / 5
-    warmup, rep = resolve_warmup_and_rep(warmup, rep, estimate_ms)
 
     # compute number of warmup and repeat
     if estimate_ms == 0:
@@ -474,8 +472,8 @@ def _do_bench_cpu(
 
 def _do_bench_entropy(
     fn,
-    warmup=25,
-    rep=100,
+    warmup,
+    rep,
     grad_to_none=None,
     quantiles=None,
     return_mode="mean",
@@ -529,15 +527,6 @@ def _do_bench_entropy(
 
     cache = triton.runtime.driver.active.get_empty_cache_for_benchmark()
     clear_cache_fn = lambda: triton.runtime.driver.active.clear_cache(cache)
-    warmup, rep = resolve_warmup_and_rep(
-        warmup,
-        rep,
-        estimate_cuda_runtime_ms(
-            fn,
-            grad_to_none=grad_to_none,
-            clear_cache_fn=clear_cache_fn,
-        ),
-    )
 
     # Adaptive warmup loop with batched synchronization
     while True:
@@ -673,9 +662,7 @@ def do_bench_wrapper(
     """
     if (
         (warmup is None or rep is None)
-        and device != "cpu"
         and not repcnt
-        and latency_measure_mode == "triton_do_bench"
     ):
         estimate_runtime = estimate_cuda_runtime_ms(fn, grad_to_none=grad_to_none)
         warmup, rep = resolve_warmup_and_rep(

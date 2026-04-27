@@ -10,7 +10,6 @@ from tritonbench.utils.env_utils import is_hip
 from tritonbench.utils.gpu_utils import sleep_amd
 
 from .common import summarize_statistics
-from .utils import resolve_warmup_and_rep
 
 _kernel_unblock_stream = None
 
@@ -306,7 +305,6 @@ def do_bench_events(
     torch.cuda.synchronize()
 
     estimate_ms = time_events[0].elapsed_time(time_events[1]) / n_repeat
-    warmup, rep = resolve_warmup_and_rep(warmup, rep, estimate_ms)
 
     # Calculate number of warmup iterations based on target rep time
     if estimate_ms == 0:
