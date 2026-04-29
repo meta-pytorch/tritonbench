@@ -162,6 +162,8 @@ def _do_bench_inductor(fn, warmup, rep, return_mode="all", grad_to_none=None):
     # First, estimate the runtime with a single measurement
     estimate_ms = benchmarker.benchmark_gpu(fn, estimation_iters=5, benchmark_iters=10)
 
+    _, rep = resolve_warmup_and_rep(warmup, rep, estimate_ms)
+
     # Calculate number of iterations based on target rep time
     # Similar to how triton.testing.do_bench calculates iterations
     if estimate_ms == 0:
