@@ -442,6 +442,8 @@ def _do_bench_cpu(
     t1 = time.time_ns()
     estimate_ms = (t1 - t0) * NS_TO_MS / 5
 
+    warmup, rep = resolve_warmup_and_rep(warmup, rep, estimate_ms)
+
     # compute number of warmup and repeat
     if estimate_ms == 0:
         n_repeat = 1000
@@ -660,7 +662,8 @@ def do_bench_wrapper(
         entropy_window_size: Size of rolling window for entropy tracking
         entropy_max_samples: Maximum samples before stopping warmup (safety limit)
     """
-    if (warmup is None or rep is None) and not repcnt:
+    # estimate_cuda_runtime_ms is not supported for CPU
+    if (warmup is None or rep is None) and not repcnt and not device == "cpu":
         estimate_runtime = estimate_cuda_runtime_ms(fn, grad_to_none=grad_to_none)
         warmup, rep = resolve_warmup_and_rep(
             warmup,
