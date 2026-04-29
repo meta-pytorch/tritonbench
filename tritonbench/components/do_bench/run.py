@@ -311,8 +311,10 @@ def _do_bench_profiler(
     )
 
     # Calculate number of iterations based on target rep time
-    n_warmup = max(1, int(warmup / estimate_ms)) if estimate_ms > 0 else DEFAULT_N_WARMUP
-    n_repeat = max(1, int(rep / estimate_ms)) if estimate_ms > 0 else DEFAULT_N_REP
+    if estimate_ms == 0:
+        n_repeat = DEFAULT_N_REP  # Default if function is very fast
+    else:
+        n_repeat = max(1, int(rep / estimate_ms))
 
     # Helper function to execute one iteration
     def run_iteration():
@@ -331,6 +333,10 @@ def _do_bench_profiler(
         torch.cuda.synchronize()
     else:
         # Regular mode warmup
+        n_warmup = (
+            max(1, int(warmup / estimate_ms)) if estimate_ms > 0 else DEFAULT_N_WARMUP
+        )
+
         torch.cuda.synchronize()
         for _ in range(n_warmup):
             run_iteration()
@@ -436,12 +442,13 @@ def _do_bench_cpu(
     t1 = time.time_ns()
     estimate_ms = (t1 - t0) * NS_TO_MS / 5
 
-    warmup, rep = resolve_warmup_and_rep(warmup, rep, estimate_ms)
-
     # compute number of warmup and repeat
-    n_warmup = max(1, int(warmup / estimate_ms)) if estimate_ms > 0 else DEFAULT_N_WARMUP
-    n_repeat = max(1, int(rep / estimate_ms)) if estimate_ms > 0 else DEFAULT_N_REP
-
+    if estimate_ms == 0:
+        n_repeat = 1000
+        n_warmup = 1000
+    else:
+        n_warmup = max(1, int(warmup / estimate_ms))
+        n_repeat = max(1, int(rep / estimate_ms))
     # Warm-up
     for _ in range(n_warmup):
         fn()
@@ -653,8 +660,7 @@ def do_bench_wrapper(
         entropy_window_size: Size of rolling window for entropy tracking
         entropy_max_samples: Maximum samples before stopping warmup (safety limit)
     """
-    # estimate_cuda_runtime_ms is not supported for CPU
-    if (warmup is None or rep is None) and not repcnt and not device == "cpu":
+    if (warmup is None or rep is None) and not repcnt:
         estimate_runtime = estimate_cuda_runtime_ms(fn, grad_to_none=grad_to_none)
         warmup, rep = resolve_warmup_and_rep(
             warmup,
