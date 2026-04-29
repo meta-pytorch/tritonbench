@@ -25,3 +25,4 @@ autotuner.log
 .venvs/
 bisect_logs/
 .codex
+default.profraw
