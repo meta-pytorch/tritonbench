@@ -3,6 +3,7 @@ from typing import Callable, Iterable, Optional, Tuple
 import torch
 from tritonbench.utils.constants import DEFAULT_WARMUP_REP_BY_ESTIMATED_KERNEL_MS
 
+
 def resolve_warmup_and_rep(
     warmup: Optional[int], rep: Optional[int], estimate_ms: float
 ) -> Tuple[int, int]:
