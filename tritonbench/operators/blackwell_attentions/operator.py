@@ -154,6 +154,13 @@ if HAS_TLX:
     from triton.language.extra.tlx.tutorials.blackwell_fa_ws_pipelined_persistent import (
         attention as tlx_blackwell,
     )
+try:
+    HAS_TRITON_AUTOWS_FA = True
+    from triton.language.extra.tlx.tutorials.fused_attention_ws_device_tma import (
+        attention as autows_blackwell,
+    )
+except Exception:
+    HAS_TRITON_AUTOWS_FA = False
 
 try:
     from hammer.v2.ops.triton.template.tlx_bw_hstu_attention import (
@@ -711,6 +718,27 @@ class Operator(BenchmarkOperator):
                 self.causal,
                 self.sm_scale,
                 "ws_persistent",
+            )
+
+        return preproc_noop, fn
+
+    @register_benchmark(enabled=is_blackwell() and HAS_TRITON_AUTOWS_FA)
+    @multi_input_wrapper
+    def triton_autows_flash_persistent_blackwell(
+        self, *args
+    ) -> Tuple[Callable, Callable]:
+        def fn(q, k, v):
+            return autows_blackwell(
+                q,
+                k,
+                v,
+                self.causal,
+                self.sm_scale,
+                "ws_persistent",
+                True,  # SUBTILING for fwd, EPILOGUE_SUBTILE for bwd is tunable
+                1,  # VECT_MUL for fwd [0, 1]
+                False,  # FADD2_REDUCE for fwd
+                False,  # early_tma_store_lowering for bwd
             )
 
         return preproc_noop, fn
