@@ -117,8 +117,12 @@ cd "${TRITONBENCH_DIR}"
 "${REPRO_CMD[@]}" 2>&1 | tee "${BASELINE_LOG}"
 
 # pre-flight check: install and run on the bad commit to validate regression exists
+# Clean up old build artifacts (if exists)
+rm -rf ${HOME}/.triton || true
+rm -rf ${TRITON_SRC_DIR}/build || true
 checkout_triton_commit "${TRITON_SRC_DIR}" "${BAD_COMMIT}"
 install_triton "${TRITON_SRC_DIR}"
+
 sudo ldconfig
 cd "${TRITONBENCH_DIR}"
 # allow the regression detector to exit with error code
