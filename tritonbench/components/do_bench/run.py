@@ -663,7 +663,11 @@ def do_bench_wrapper(
     """
     # skip runtime estimation when using triton_do_bench
     # all other benchmarkers are using their own runtime estimation
-    if (warmup is None or rep is None) and not repcnt and latency_measure_mode == "triton_do_bench":
+    if (
+        (warmup is None or rep is None)
+        and not repcnt
+        and latency_measure_mode == "triton_do_bench"
+    ):
         estimate_runtime = estimate_cuda_runtime_ms(fn, grad_to_none=grad_to_none)
         warmup, rep = resolve_warmup_and_rep(
             warmup,

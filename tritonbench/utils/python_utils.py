@@ -9,5 +9,5 @@ def try_import(cond_name: str):
     try:
         yield
         _caller_globals[cond_name] = True
-    except (ImportError, ModuleNotFoundError, OSError) as e:
+    except (ImportError, ModuleNotFoundError, OSError, AttributeError) as e:
         _caller_globals[cond_name] = False

@@ -1,3 +1,4 @@
+common_args: --num-inputs 1
 fp16_addmm_fwd:
   args: --op addmm --only streamk_addmm,triton_addmm --metrics compile_time
 fp16_addmm_bwd:
