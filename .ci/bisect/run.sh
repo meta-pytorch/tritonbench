@@ -97,6 +97,9 @@ cd "${TRITON_SRC_DIR}"
 git checkout main
 git pull origin main
 git submodule update --init --recursive
+# Clean up old build artifacts (if exists)
+rm -rf ${HOME}/.triton || true
+rm -rf ${TRITON_SRC_DIR}/build || true
 
 # switch back to tritonbench dir
 cd "${TRITONBENCH_DIR}"
