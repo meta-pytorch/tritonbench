@@ -9,6 +9,7 @@ from collections import defaultdict
 from typing import Any, Dict, List, Optional
 
 import requests
+from tritonbench.utils.env_utils import is_fbcode
 from tritonbench.utils.gpu_utils import get_nvidia_gpu_states, has_nvidia_smi
 from tritonbench.utils.path_utils import REPO_PATH
 
@@ -166,7 +167,7 @@ def decorate_benchmark_data(
     }
     aggregated_obj = {
         "name": name,
-        "env": get_run_env(run_timestamp, repo_locs),
+        "env": get_run_env(run_timestamp, repo_locs) if not is_fbcode() else {},
         "metrics": {},
     }
     if has_nvidia_smi():

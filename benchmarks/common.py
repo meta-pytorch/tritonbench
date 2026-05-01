@@ -35,6 +35,7 @@ def setup_tritonbench_cwd():
 setup_tritonbench_cwd()
 
 
+from tritonbench.utils.env_utils import is_fbcode
 from tritonbench.utils.path_utils import REPO_PATH
 
 BENCHMARKS_OUTPUT_DIR = REPO_PATH.joinpath(".benchmarks")
@@ -67,6 +68,7 @@ def run_benchmark_config_ci(
     op: str | None = None,
     ci: bool = False,
     log_scuba: bool = False,
+    logging_group: str | None = None,
 ):
     from tritonbench.utils.run_utils import run_config, SPECIAL_CONFIG_FIELDS
     from tritonbench.utils.scuba_utils import decorate_benchmark_data, log_benchmark
@@ -99,9 +101,11 @@ def run_benchmark_config_ci(
             ),
         }
     # Run the config file w/per-benchmark extra args and callback
+    maybe_scuba_args = ["--log-scuba"] if log_scuba and is_fbcode() else []
+    maybe_logging_group = ["--logging-group", logging_group] if logging_group else []
     run_config(
         config_file=benchmark_config_file,
-        args=None,
+        args=["--worker-mode"] + maybe_scuba_args + maybe_logging_group,
         per_config_entry=per_benchmark_map,
     )
     # Reduce all operator CSV outputs to a single output json
@@ -115,11 +119,10 @@ def run_benchmark_config_ci(
     logger.info(
         f"[{benchmark_group_name}] logging result json file to {result_json_file}."
     )
-    if log_scuba:
+    # when in oss, log to scuba at the end of the run
+    if log_scuba and not is_fbcode():
         log_benchmark(aggregated_obj)
-        logger.info(
-            f"[{benchmark_group_name}] logging results to scuba table pytorch_user_benchmarks."
-        )
+        logger.info(f"[{benchmark_group_name}] logging results to scuba table.")
 
 
 def setup_output_dir(bm_name: str, ci: bool = False, output_dir: str | None = None):

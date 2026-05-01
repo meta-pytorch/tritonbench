@@ -164,6 +164,11 @@ def get_parser(args=None):
         help="Run in the CI mode.",
     )
     parser.add_argument(
+        "--worker-mode",
+        action="store_true",
+        help="Indicates that the benchmark is running in the worker mode.",
+    )
+    parser.add_argument(
         "--metrics",
         default=None,
         help="Metrics to collect, split with comma. E.g., --metrics latency,tflops,speedup.",
