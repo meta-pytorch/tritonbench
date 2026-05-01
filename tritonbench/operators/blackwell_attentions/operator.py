@@ -253,6 +253,24 @@ def parse_op_args(args: List[str]):
         action="store_true",
         help="Use variable-length (varlen) interface with packed tensors and cu_seqlens",
     )
+    parser.add_argument(
+        "--sparsity",
+        type=float,
+        default=0.0,
+        help="Sparsity of sequence lengths for HSTU (0.0-1.0, 0=uniform)",
+    )
+    parser.add_argument(
+        "--target-size",
+        type=int,
+        default=0,
+        help="Max number of target items per sequence for HSTU (0=no targets)",
+    )
+    parser.add_argument(
+        "--max-attn-len",
+        type=int,
+        default=0,
+        help="Maximum attention length for HSTU (0=no limit)",
+    )
     return parser.parse_args(args)
 
 
@@ -346,17 +364,66 @@ def preproc_permute(q, k, v, varlen=False):
     return [q_packed, k_packed, v_packed, cu_seqlens_q, cu_seqlens_k, S_Q, S_KV]
 
 
-def preproc_hstu(q, k, v):
+def preproc_hstu(q, k, v, sparsity=0.0, target_size=0):
     q, k, v = [t.contiguous() for t in permute_qkv(q, k, v, perm=(0, 2, 1, 3))]
     B, S, H, D = q.shape
-    seq_offsets = torch.arange(0, (B + 1) * S, S, dtype=torch.int64, device=q.device)
-    return [
-        q.reshape(-1, H, D).contiguous(),
-        k.reshape(-1, k.shape[2], k.shape[3]).contiguous(),
-        v.reshape(-1, v.shape[2], v.shape[3]).contiguous(),
-        seq_offsets,
-        S,
-    ]
+
+    num_targets = None
+    if target_size > 0:
+        num_targets = torch.randint(1, target_size + 1, (B,), device=q.device)
+
+    if sparsity > 0.0:
+        if sparsity >= 1.0:
+            lengths = torch.full((B,), S, dtype=torch.int64, device=q.device)
+        elif sparsity >= 0.5:
+            min_len = int((2 * sparsity - 1.0) * S)
+            lengths = torch.randint(
+                min_len, S + 1, (B,), dtype=torch.int64, device=q.device
+            )
+        else:
+            max_len = max(int(2 * sparsity * S), 1)
+            lengths = torch.randint(
+                0, max_len + 1, (B,), dtype=torch.int64, device=q.device
+            )
+
+        if num_targets is not None:
+            lengths = torch.maximum(lengths, num_targets.to(torch.int64) + 1)
+        lengths = torch.clamp(lengths, min=1, max=S)
+
+        seq_offsets = torch.zeros(B + 1, dtype=torch.int64, device=q.device)
+        seq_offsets[1:] = torch.cumsum(lengths, dim=0)
+        total_len = int(seq_offsets[-1].item())
+        max_seq_len = int(lengths.max().item())
+
+        q_packed = torch.empty(
+            (total_len, H, D), dtype=q.dtype, device=q.device
+        )
+        k_packed = torch.empty(
+            (total_len, k.shape[2], k.shape[3]), dtype=k.dtype, device=k.device
+        )
+        v_packed = torch.empty(
+            (total_len, v.shape[2], v.shape[3]), dtype=v.dtype, device=v.device
+        )
+        for i in range(B):
+            length = int(lengths[i].item())
+            start = int(seq_offsets[i].item())
+            q_packed[start : start + length] = q[i, :length]
+            k_packed[start : start + length] = k[i, :length]
+            v_packed[start : start + length] = v[i, :length]
+
+        return [q_packed, k_packed, v_packed, seq_offsets, max_seq_len, num_targets]
+    else:
+        seq_offsets = torch.arange(
+            0, (B + 1) * S, S, dtype=torch.int64, device=q.device
+        )
+        return [
+            q.reshape(-1, H, D).contiguous(),
+            k.reshape(-1, k.shape[2], k.shape[3]).contiguous(),
+            v.reshape(-1, v.shape[2], v.shape[3]).contiguous(),
+            seq_offsets,
+            S,
+            num_targets,
+        ]
 
 
 def _sdpa_cudnn_attention(q, k, v, is_causal=False, scale=False):
@@ -429,6 +496,9 @@ class Operator(BenchmarkOperator):
         self.gen_cache_size_inputs = args.gen_cache_size_inputs
         self.max_inputs_per_iter = args.max_inputs_per_iter
         self.varlen = args.varlen
+        self.sparsity = args.sparsity
+        self.target_size = args.target_size
+        self.max_attn_len = args.max_attn_len
         self.optims = {}
 
     @register_benchmark(baseline=True)
@@ -769,8 +839,9 @@ class Operator(BenchmarkOperator):
             raise NotImplementedError("TLX HSTU does not support local attention")
 
         alpha = 1.0 / self.D_HEAD
+        max_attn_len = self.max_attn_len
 
-        def fn(q, k, v, seq_offsets, max_seq_len):
+        def fn(q, k, v, seq_offsets, max_seq_len, num_targets):
             if q.shape != k.shape or q.shape != v.shape:
                 raise NotImplementedError("TLX HSTU only supports non-GQA MHA inputs")
             return tlx_bw_hstu_mha_wrapper(
@@ -782,9 +853,18 @@ class Operator(BenchmarkOperator):
                 seq_offsets=seq_offsets,
                 attn_scale=torch.tensor(1.0 / max_seq_len, device=q.device),
                 sort_by_length=False,
+                num_targets=num_targets,
+                max_attn_len=max_attn_len,
             )
 
-        return preproc_hstu, fn
+        return (
+            partial(
+                preproc_hstu,
+                sparsity=self.sparsity,
+                target_size=self.target_size,
+            ),
+            fn,
+        )
 
     @register_benchmark(enabled=IS_BLACKWELL and HAS_TILELANG, fwd_only=True)
     @multi_input_wrapper
