@@ -54,6 +54,22 @@ try:
 except ImportError:
     usage_report_logger = lambda *args, **kwargs: None
 
+try:
+    if is_fbcode():
+        from .fb.ai_analysis_export import (  # @manual
+            _gate_for_unsupported_modes as _ai_analysis_gate,
+            build_ai_analysis_url,
+            format_clickable_link as _format_ai_analysis_link,
+        )
+    else:
+        build_ai_analysis_url = lambda *args, **kwargs: None
+        _ai_analysis_gate = lambda *args, **kwargs: None
+        _format_ai_analysis_link = lambda url, label: f"{label}: {url}"
+except ImportError:
+    build_ai_analysis_url = lambda *args, **kwargs: None
+    _ai_analysis_gate = lambda *args, **kwargs: None
+    _format_ai_analysis_link = lambda url, label: f"{label}: {url}"
+
 ENV_CHECK_MAP = {
     "devices": {
         "h100": is_h100,
@@ -475,6 +491,10 @@ def tritonbench_run(args: Optional[List[str]] = None):
 
     tritonparse_init(args.tritonparse)
 
+    # Strip `--ai-analysis` from sys.argv when in unsupported modes (multi-device,
+    # multi-op, A/B) so subprocess children don't emit links into log files.
+    _ai_analysis_gate(args)
+
     if args.devices:
         run_multi_device(args, extra_args)
         tritonparse_parse(args.tritonparse)
@@ -664,6 +684,19 @@ def _run(args: argparse.Namespace, extra_args: List[str]) -> BenchmarkOperatorRe
                 metrics.write_csv_to_file(sys.stdout)
             else:
                 print(metrics)
+
+        # AI analysis link last on stdout; failure prints to stderr but never
+        # blocks `return metrics`.
+        if getattr(args, "ai_analysis", False):
+            try:
+                url = build_ai_analysis_url(metrics, args)
+                if url is not None:
+                    print("\n" + _format_ai_analysis_link(url, "Open AI Analysis"))
+            except Exception as e:  # noqa: BLE001
+                print(
+                    f"[ai-analysis] failed to build link ({e}); skipping",
+                    file=sys.stderr,
+                )
         return metrics
 
 

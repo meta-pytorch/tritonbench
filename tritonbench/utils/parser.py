@@ -484,6 +484,16 @@ def get_parser(args=None):
             default=1,
             help="Top K kernels to return for Diode. Default: 1",
         )
+        parser.add_argument(
+            "--ai-analysis",
+            action="store_true",
+            help=(
+                "Print a clickable URL after the benchmark, pre-loaded with the "
+                "run's CSV and a prompt requesting an interactive chart and a "
+                "per-shape table. Single-op single-device only in v0; ignored "
+                "with a warning for --devices, multi --op, or --side-a/--side-b."
+            ),
+        )
 
     args, extra_args = parser.parse_known_args(args)
     if args.op and args.ci:
