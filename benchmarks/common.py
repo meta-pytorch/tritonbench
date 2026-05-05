@@ -2,6 +2,7 @@ import json
 import logging
 import os
 import sys
+import tempfile
 import time
 from datetime import datetime
 from functools import partial
@@ -129,7 +130,11 @@ def setup_output_dir(bm_name: str, ci: bool = False, output_dir: str | None = No
     current_timestamp = datetime.fromtimestamp(time.time()).strftime("%Y%m%d%H%M%S")
     if output_dir:
         return current_timestamp, output_dir
-    output_dir = BENCHMARKS_OUTPUT_DIR.joinpath(bm_name, f"run-{current_timestamp}")
+    if is_fbcode():
+        base_dir = Path(tempfile.mkdtemp(prefix="tritonbench_benchmarks_"))
+    else:
+        base_dir = BENCHMARKS_OUTPUT_DIR
+    output_dir = base_dir.joinpath(bm_name, f"run-{current_timestamp}")
     Path.mkdir(output_dir, parents=True, exist_ok=True)
     # set writable permission for all users (used by the ci env)
     if ci:
