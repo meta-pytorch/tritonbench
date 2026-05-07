@@ -82,6 +82,9 @@ def get_nvidia_gpu_model() -> str:
     Returns:
         str: The model of the NVIDIA GPU or empty str if not found.
     """
+    zgpu_gpu_name = os.environ.get("ZGPU_GPU_NAME", "")
+    if zgpu_gpu_name:
+        return zgpu_gpu_name
     try:
         model = subprocess.check_output(
             ["nvidia-smi", "--query-gpu=name", "--format=csv,noheader,nounits"]
