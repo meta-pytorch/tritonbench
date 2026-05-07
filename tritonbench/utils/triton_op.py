@@ -781,6 +781,11 @@ class BenchmarkOperator(metaclass=PostInitProcessor):
             self.name = _find_op_name_from_module_path(self.__class__.__module__)
         self._raw_extra_args = copy.deepcopy(extra_args)
         self.tb_args = tb_args
+        if self.tb_args.test_only:
+            # Keep test-only runs bounded even when callers pass the namespace
+            # values through to BenchmarkOperator.run().
+            self.tb_args.warmup = 1
+            self.tb_args.rep = 1
         self.add_production_shapes = (
             self.tb_args.production_shapes if is_fbcode() else False
         )
