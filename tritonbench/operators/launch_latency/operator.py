@@ -22,6 +22,7 @@ from .kernels import (
     get_inductor_nop_kernel,
     get_inductor_nop_kernel_0arg,
     get_inductor_nop_kernel_19arg,
+    nop_hstu_args_kernel,
     nop_kernel,
     nop_with_args_kernel,
     nop_with_kwargs_kernel,
@@ -353,6 +354,11 @@ class Operator(BenchmarkOperator):
         iargs = [1 for _ in range(9)]
         cargs = [32 for _ in range(5)]
         yield tuple([*targs, *iargs, *cargs])
+        # HSTU-like input: 14 pointers + 26 scalars + 18 constexprs = 58 args
+        hstu_ptrs = [zeros(1, device="cuda") for _ in range(14)]
+        hstu_scalars = [1 for _ in range(26)]
+        hstu_constexprs = [1 for _ in range(18)]
+        yield tuple([*hstu_ptrs, *hstu_scalars, *hstu_constexprs])
 
     def get_x_val(self, example_inputs) -> float:
         return len(example_inputs)
@@ -364,8 +370,12 @@ class Operator(BenchmarkOperator):
             _profiled_run_samples.clear()
             if len(args) == 0:
                 fn = lambda: nop_kernel[1,]()
-            else:
+            elif len(args) == 19:
                 fn = lambda: nop_with_args_kernel[1,](*args)
+            elif len(args) >= 58:
+                fn = lambda: nop_hstu_args_kernel[1,](*args)
+            else:
+                fn = lambda: nop_kernel[1,]()
 
             def profiled_fn():
                 fn()
@@ -376,12 +386,18 @@ class Operator(BenchmarkOperator):
             return profiled_fn
         if len(args) == 0:
             return lambda: nop_kernel[1,]()
-        return lambda: nop_with_args_kernel[1,](*args)
+        if len(args) == 19:
+            return lambda: nop_with_args_kernel[1,](*args)
+        if len(args) >= 58:
+            return lambda: nop_hstu_args_kernel[1,](*args)
+        return lambda: nop_kernel[1,]()
 
     @register_benchmark()
     def nop_triton_kernel_kwargs(self, *args):
         """Same as nop_triton_kernel but passes constexpr params as kwargs."""
         if len(args) == 0:
+            return lambda: nop_kernel[1,]()
+        if len(args) != 19:
             return lambda: nop_kernel[1,]()
         pos_args = args[:14]
         kw_vals = args[14:] if len(args) > 14 else (32, 32, 32, 32, 32)
@@ -396,15 +412,19 @@ class Operator(BenchmarkOperator):
 
     @register_benchmark()
     def nop_triton_compiled_kernel_run(self, *args):
+        """Directly calls CompiledKernel.run() — bypasses jit.py dispatch."""
         if len(args) == 0:
             bin = nop_kernel[1,]()
-
-        else:
+        elif len(args) == 19:
             bin = nop_with_args_kernel[1,](*args)
-            # triton <= 3.3 does not include tl.constexpr args in call
-            # but triton 3.4 does
             if not triton_version_uses_attrs_dict():
                 args = args[:-5]
+        elif len(args) >= 58:
+            bin = nop_hstu_args_kernel[1,](*args)
+            if not triton_version_uses_attrs_dict():
+                args = args[:-18]
+        else:
+            return lambda: nop_kernel[1,]()
         function = bin.function
         metadata = (
             bin.packed_metadata if hasattr(bin, "packed_metadata") else bin.metadata
@@ -420,17 +440,78 @@ class Operator(BenchmarkOperator):
 
     @register_benchmark(enabled=is_cuda())
     def nop_triton_direct_culaunch(self, *args):
-        """Simulate [3][4][5] (TritonCC/AOT-T/AOTI) style launch:
+        """Simulate TritonCC/AOT-T/AOTI style launch:
         pre-compile kernel, pre-extract all handles, call cuLaunchKernel
         directly via ctypes. No Python binder, no PyArg_ParseTuple, no
         cuPointerGetAttribute — just the raw CUDA driver call."""
         if len(args) == 0:
             bin = nop_kernel[1,]()
-        else:
+        elif len(args) == 19:
             bin = nop_with_args_kernel[1,](*args)
             if not triton_version_uses_attrs_dict():
                 args = args[:-5]
+        elif len(args) >= 58:
+            bin = nop_hstu_args_kernel[1,](*args)
+            # Runtime args only (strip constexprs)
+            args = args[:40]
+        else:
+            return lambda: nop_kernel[1,]()
         return _prepare_direct_culaunch(bin, args)
+
+    @register_benchmark()
+    def cold_start_e2e(self, *args):
+        """Per-kernel cold start: Triton compile + launcher init.
+
+        Each invocation uses a unique constexpr AND a unique type signature
+        (bit pattern over 14 runtime args). This guarantees both a fresh
+        Triton compile and a new launcher build on every single call.
+
+        With D103454938 (shared launcher): ~23ms (Triton compile only)
+        Without D103454938 (gcc launcher): ~40ms (Triton compile + gcc)
+        """
+        import shutil
+
+        x = torch.zeros(1, device="cuda")
+
+        # Clear triton cache
+        import triton.knobs
+
+        cache_dir = triton.knobs.cache.dir
+        if os.path.isdir(cache_dir):
+            shutil.rmtree(cache_dir)
+            os.makedirs(cache_dir, exist_ok=True)
+
+        # Warmup: cold compile a different kernel to init compiler pipeline
+        nop_kernel[(1,)]()
+
+        counter = [8]
+        # Pre-compute type-sig permutations: always exactly 3 ptrs out of 14 slots
+        # C(14,3) = 364 unique combinations — enough for any warmup+rep
+        from itertools import combinations
+
+        ptr_positions_list = list(combinations(range(14), 3))
+
+        def cold_start_fn():
+            c = counter[0]
+            counter[0] += 1
+            # Fixed number of ptrs (3) but different positions → unique type sig
+            ptr_positions = set(ptr_positions_list[c % len(ptr_positions_list)])
+            runtime_args = []
+            for bit in range(14):
+                if bit in ptr_positions:
+                    runtime_args.append(x)
+                else:
+                    runtime_args.append(1)
+            nop_with_args_kernel[(1,)](
+                *runtime_args,  # t1-t5 + i1-i9 (14 args, unique type sig)
+                c,
+                1,
+                1,
+                1,
+                1,  # c1-c5 (c1=unique → Triton cache miss)
+            )
+
+        return cold_start_fn
 
     @register_benchmark()
     def nop_inductor_e2e(self, *args):
@@ -445,6 +526,8 @@ class Operator(BenchmarkOperator):
             nop_fn = get_inductor_nop_kernel_0arg()
             nop_fn()  # Warm up
             return nop_fn
+        if len(args) != 19:
+            return lambda: None
         nop_fn = get_inductor_nop_kernel_19arg()
         nop_fn(*args)  # Warm up
         return lambda: nop_fn(*args)
@@ -474,6 +557,8 @@ class Operator(BenchmarkOperator):
         if len(args) == 0:
             kernel = tilelang_nop_kernel()
             return lambda: kernel()
+        if len(args) != 19:
+            return lambda: None
         kernel = tilelang_nop_with_args_kernel()
         return lambda: kernel(*args)
 
@@ -482,6 +567,8 @@ class Operator(BenchmarkOperator):
         if len(args) == 0:
             kernel = cute.compile(cutedsl_nop_kernel)
             return lambda: kernel()
+        if len(args) != 19:
+            return lambda: None
         cute_args = []
         for arg in args:
             if isinstance(arg, torch.Tensor):
@@ -498,6 +585,8 @@ class Operator(BenchmarkOperator):
         if len(args) == 0:
             kernel = cute.compile(cutedsl_nop_kernel)
             return lambda: kernel()
+        if len(args) != 19:
+            return lambda: None
         cute_args = []
         for arg in args:
             if isinstance(arg, torch.Tensor):

@@ -34,6 +34,75 @@ def nop_with_args_kernel(
 
 
 @triton.jit
+def nop_hstu_args_kernel(
+    # 14 pointer args (simulating Q, K, V, seq_offsets, TS, TW, PW, Bias,
+    # seq2_offsets, delta_x_offsets, num_targets, attn_scale, Out, M_buffer)
+    p1,
+    p2,
+    p3,
+    p4,
+    p5,
+    p6,
+    p7,
+    p8,
+    p9,
+    p10,
+    p11,
+    p12,
+    p13,
+    p14,
+    # 8 stride args (int)
+    stride_qm,
+    stride_qh,
+    stride_kn,
+    stride_kh,
+    stride_vn,
+    stride_vh,
+    stride_ts,
+    stride_om,
+    # 18 scalar args (int/float)
+    alpha,
+    Z,
+    AUTOTUNE_Z,
+    H,
+    MAX_SEQ_LEN,
+    AUTOTUNE_MAX_SEQ_LEN,
+    DimQ,
+    DimV,
+    DeltaSize,
+    num_buckets,
+    max_pos_ind,
+    time_bucket_incr,
+    time_bucket_div,
+    time_delta,
+    contextual_seq_len,
+    max_attn_len,
+    full_attn_size,
+    num_softmax_heads,
+    # 18 constexpr args
+    INVALID_MASK_TYPE: tl.constexpr,
+    CAUSAL: tl.constexpr,
+    BUCKET_FN: tl.constexpr,
+    ATTN_BIAS_TYPE: tl.constexpr,
+    ATTN_SCALE_TYPE: tl.constexpr,
+    USE_TIME_BIAS: tl.constexpr,
+    USE_POS_BIAS: tl.constexpr,
+    HAS_MAX_POS_IND: tl.constexpr,
+    HAS_MULTIPLE_TARGETS: tl.constexpr,
+    IS_DELTA_Q: tl.constexpr,
+    ALLOW_TF32: tl.constexpr,
+    BLOCK_D_Q: tl.constexpr,
+    BLOCK_D_V: tl.constexpr,
+    BLOCK_M: tl.constexpr,
+    BLOCK_N: tl.constexpr,
+    HAS_MAX_ATTN_LEN: tl.constexpr,
+    HAS_CONTEXTUAL_SEQ_LEN: tl.constexpr,
+    HAS_FULL_ATTN_SIZE: tl.constexpr,
+):
+    pass
+
+
+@triton.jit
 def nop_with_kwargs_kernel(
     t1,
     t2,
