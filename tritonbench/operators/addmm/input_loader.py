@@ -57,12 +57,16 @@ class InputLoader(OperatorInputLoader):
                 dtype = PRECISION_DTYPE_MAPPING[obj["dtype"]]
                 strides = obj["strides"]
                 m, k, n = shapes
+                original_a_rows = max(m, strides[0][1])
+                original_a_cols = max(n, strides[0][0])
                 original_m = max(m, strides[1][1])
                 original_k = max(k, strides[1][0], strides[2][1])
                 original_n = max(n, strides[2][0])
-                a = torch.randn((m, n), device=device, dtype=dtype).requires_grad_(
-                    requires_grad
-                )
+                a = torch.randn(
+                    (original_a_rows, original_a_cols),
+                    device=device,
+                    dtype=dtype,
+                ).requires_grad_(requires_grad)
                 mat1 = torch.randn(
                     (original_m, original_k), device=device, dtype=dtype
                 ).requires_grad_(requires_grad)
