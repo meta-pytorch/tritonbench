@@ -40,7 +40,7 @@ else
     . "${SETUP_SCRIPT}"
 fi
 
-if [ -n "${CONDA_ENV:-}" ]; then
+if [ -z "${CONDA_ENV:-}" ]; then
     export CONDA_ENV=pytorch
 fi
 echo "if [ -z \${CONDA_ENV} ]; then export CONDA_ENV=${CONDA_ENV}; fi" >> "${SETUP_SCRIPT}"
