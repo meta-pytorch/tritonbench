@@ -482,8 +482,6 @@ def tritonbench_run(args: Optional[List[str]] = None):
         run_config(config, args)
         return
 
-    set_torchrun_env()
-
     # Log the tool usage
     usage_report_logger(benchmark_name="tritonbench")
     parser = get_parser()
@@ -572,132 +570,137 @@ def tritonbench_run(args: Optional[List[str]] = None):
 
 
 def _run(args: argparse.Namespace, extra_args: List[str]) -> BenchmarkOperatorResult:
-    run_timestamp = datetime.fromtimestamp(time.time()).strftime("%Y%m%d%H%M%S")
-    if is_loader_op(args.op):
-        Opbench = get_op_loader_bench_cls_by_name(args.op)
-    else:
-        Opbench = load_opbench_by_name(args.op)
-    opbench = Opbench(
-        tb_args=args,
-        extra_args=extra_args,
-    )
+    with set_torchrun_env():
+        run_timestamp = datetime.fromtimestamp(time.time()).strftime("%Y%m%d%H%M%S")
+        if is_loader_op(args.op):
+            Opbench = get_op_loader_bench_cls_by_name(args.op)
+        else:
+            Opbench = load_opbench_by_name(args.op)
+        opbench = Opbench(
+            tb_args=args,
+            extra_args=extra_args,
+        )
 
-    # Set up GPU telemetry observer if enabled
-    gpu_telemetry_enabled = getattr(args, "gpu_telemetry", False)
-    telemetry_ctx = None
-    if gpu_telemetry_enabled:
-        try:
-            interval_ms = getattr(args, "gpu_telemetry_interval_ms", 50.0)
-            telemetry_ctx = TelemetryContext(gpu_id=0, sample_interval_ms=interval_ms)
-            logger.info(
-                f"[tritonbench] GPU telemetry enabled (interval={interval_ms}ms)"
-            )
-        except Exception:
-            logger.warning(
-                "[tritonbench] GPU telemetry requested but observer not available"
-            )
-
-    try:
-        # Start telemetry if enabled
-        if telemetry_ctx is not None:
-            telemetry_ctx.__enter__()
-            telemetry_ctx.annotate("benchmark_start")
-
-        opbench.run(args.warmup, args.rep, sleep=args.sleep)
-    finally:
-        metrics = opbench.output
-
-        # Stop telemetry and save data
-        if telemetry_ctx is not None:
-            telemetry_ctx.annotate("benchmark_end")
-            telemetry_ctx.__exit__(None, None, None)
-
-            if telemetry_ctx.data is not None and telemetry_ctx.data.samples:
-                telemetry_output = getattr(args, "gpu_telemetry_output", None)
-                if telemetry_output:
-                    telemetry_base = telemetry_output
-                else:
-                    telemetry_base = f"/tmp/gpu_telemetry_{args.op}_{run_timestamp}"
-
-                telemetry_csv = f"{telemetry_base}.csv"
-                telemetry_png = f"{telemetry_base}.png"
-
-                telemetry_ctx.save_csv(telemetry_csv)
-                telemetry_ctx.plot(telemetry_png, title=f"GPU Telemetry: {args.op}")
-
+        # Set up GPU telemetry observer if enabled
+        gpu_telemetry_enabled = getattr(args, "gpu_telemetry", False)
+        telemetry_ctx = None
+        if gpu_telemetry_enabled:
+            try:
+                interval_ms = getattr(args, "gpu_telemetry_interval_ms", 50.0)
+                telemetry_ctx = TelemetryContext(
+                    gpu_id=0, sample_interval_ms=interval_ms
+                )
                 logger.info(
-                    f"[tritonbench] GPU telemetry saved to {telemetry_csv} and {telemetry_png} "
-                    f"({len(telemetry_ctx.data.samples)} samples)"
+                    f"[tritonbench] GPU telemetry enabled (interval={interval_ms}ms)"
                 )
-        if is_fbcode() and args.log_scuba:
-            from .fb.utils import log_benchmark  # @manual
+            except Exception:
+                logger.warning(
+                    "[tritonbench] GPU telemetry requested but observer not available"
+                )
 
-            kwargs = {
-                "metrics": metrics,
-                "benchmark_name": args.benchmark_name or args.op,
-                "device": args.device,
-                "logging_group": args.logging_group or args.op,
-                "precision": args.precision,
-            }
-            if args.production_shapes:
-                from tritonbench.utils.fb.durin_data import productionDataLoader
+        try:
+            # Start telemetry if enabled
+            if telemetry_ctx is not None:
+                telemetry_ctx.__enter__()
+                telemetry_ctx.annotate("benchmark_start")
 
-                kwargs["weights_loader"] = productionDataLoader
+            opbench.run(args.warmup, args.rep, sleep=args.sleep)
+        finally:
+            metrics = opbench.output
 
-            if "hardware" in args:
-                kwargs["hardware"] = args.hardware
-            if "triton_type" in args:
-                kwargs["triton_type"] = args.triton_type
-            log_benchmark(**kwargs)
-        # Log benchmark output to scuba even if not in fbcode
-        if args.log_scuba and not is_fbcode():
-            from tritonbench.utils.scuba_utils import log_benchmark
+            # Stop telemetry and save data
+            if telemetry_ctx is not None:
+                telemetry_ctx.annotate("benchmark_end")
+                telemetry_ctx.__exit__(None, None, None)
 
-            log_benchmark(
-                benchmark_data=None, run_timestamp=run_timestamp, opbench=opbench
-            )
+                if telemetry_ctx.data is not None and telemetry_ctx.data.samples:
+                    telemetry_output = getattr(args, "gpu_telemetry_output", None)
+                    if telemetry_output:
+                        telemetry_base = telemetry_output
+                    else:
+                        telemetry_base = f"/tmp/gpu_telemetry_{args.op}_{run_timestamp}"
 
-        if args.plot:
-            try:
-                opbench.plot()
-            except NotImplementedError:
-                logger.error(f"Plotting is not implemented for {args.op}")
+                    telemetry_csv = f"{telemetry_base}.csv"
+                    telemetry_png = f"{telemetry_base}.png"
 
-        if args.output:
-            with open(args.output, "w") as f:
-                metrics.write_csv_to_file(f)
-            logger.info(f"[tritonbench] Output result csv to {args.output}")
-        if args.output_json:
-            with open(args.output_json, "w") as f:
-                metrics.write_json_to_file(f)
-        if args.output_dir:
-            if args.csv:
-                output_file = os.path.join(args.output_dir, f"{args.op}.csv")
-                with open(output_file, "w") as f:
+                    telemetry_ctx.save_csv(telemetry_csv)
+                    telemetry_ctx.plot(telemetry_png, title=f"GPU Telemetry: {args.op}")
+
+                    logger.info(
+                        f"[tritonbench] GPU telemetry saved to {telemetry_csv} and {telemetry_png} "
+                        f"({len(telemetry_ctx.data.samples)} samples)"
+                    )
+            if is_fbcode() and args.log_scuba:
+                from .fb.utils import log_benchmark  # @manual
+
+                kwargs = {
+                    "metrics": metrics,
+                    "benchmark_name": args.benchmark_name or args.op,
+                    "device": args.device,
+                    "logging_group": args.logging_group or args.op,
+                    "precision": args.precision,
+                }
+                if args.production_shapes:
+                    from tritonbench.utils.fb.durin_data import productionDataLoader
+
+                    kwargs["weights_loader"] = productionDataLoader
+
+                if "hardware" in args:
+                    kwargs["hardware"] = args.hardware
+                if "triton_type" in args:
+                    kwargs["triton_type"] = args.triton_type
+                log_benchmark(**kwargs)
+            # Log benchmark output to scuba even if not in fbcode
+            if args.log_scuba and not is_fbcode():
+                from tritonbench.utils.scuba_utils import log_benchmark
+
+                log_benchmark(
+                    benchmark_data=None,
+                    run_timestamp=run_timestamp,
+                    opbench=opbench,
+                )
+
+            if args.plot:
+                try:
+                    opbench.plot()
+                except NotImplementedError:
+                    logger.error(f"Plotting is not implemented for {args.op}")
+
+            if args.output:
+                with open(args.output, "w") as f:
                     metrics.write_csv_to_file(f)
-            else:
-                output_file = os.path.join(args.output_dir, f"{args.op}.json")
-                with open(output_file, "w") as f:
+                logger.info(f"[tritonbench] Output result csv to {args.output}")
+            if args.output_json:
+                with open(args.output_json, "w") as f:
                     metrics.write_json_to_file(f)
-        if not args.skip_print:
-            if args.csv:
-                metrics.write_csv_to_file(sys.stdout)
-            else:
-                print(metrics)
+            if args.output_dir:
+                if args.csv:
+                    output_file = os.path.join(args.output_dir, f"{args.op}.csv")
+                    with open(output_file, "w") as f:
+                        metrics.write_csv_to_file(f)
+                else:
+                    output_file = os.path.join(args.output_dir, f"{args.op}.json")
+                    with open(output_file, "w") as f:
+                        metrics.write_json_to_file(f)
+            if not args.skip_print:
+                if args.csv:
+                    metrics.write_csv_to_file(sys.stdout)
+                else:
+                    print(metrics)
 
-        # AI analysis link last on stdout; failure prints to stderr but never
-        # blocks `return metrics`.
-        if getattr(args, "ai_analysis", False):
-            try:
-                url = build_ai_analysis_url(metrics, args)
-                if url is not None:
-                    print("\n" + _format_ai_analysis_link(url, "Open AI Analysis"))
-            except Exception as e:  # noqa: BLE001
-                print(
-                    f"[ai-analysis] failed to build link ({e}); skipping",
-                    file=sys.stderr,
-                )
-        return metrics
+            # AI analysis link last on stdout; failure prints to stderr but never
+            # blocks `return metrics`.
+            if getattr(args, "ai_analysis", False):
+                try:
+                    url = build_ai_analysis_url(metrics, args)
+                    if url is not None:
+                        print("\n" + _format_ai_analysis_link(url, "Open AI Analysis"))
+                except Exception as e:  # noqa: BLE001
+                    print(
+                        f"[ai-analysis] failed to build link ({e}); skipping",
+                        file=sys.stderr,
+                    )
+            return metrics
 
 
 def _process_common_args(common_args: str) -> List[str]:

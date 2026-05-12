@@ -404,8 +404,10 @@ def get_logger(name, level: int = logging.INFO):
     return logger
 
 
+@contextmanager
 def set_torchrun_env():
     """Set the environment variables that are relevant to running TritonBench with torchrun (torch.distributed.run)."""
+    initialized = False
     if "TORCHELASTIC_RUN_ID" in os.environ and "LOCAL_RANK" in os.environ:
         os.environ["CUDA_VISIBLE_DEVICES"] = os.environ["LOCAL_RANK"]
         torch.cuda.set_device(int(os.environ["LOCAL_RANK"]))
@@ -414,3 +416,9 @@ def set_torchrun_env():
             f"Set current device to: {torch.cuda.current_device()}"
         )
         torch.distributed.init_process_group("nccl")
+        initialized = True
+    try:
+        yield
+    finally:
+        if initialized:
+            torch.distributed.destroy_process_group()
