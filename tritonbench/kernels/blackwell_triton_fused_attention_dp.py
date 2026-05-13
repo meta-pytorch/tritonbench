@@ -223,7 +223,13 @@ def _attn_fwd_inner_oss_dp(
 
     # loop over k, v and update accumulator
     for start_n in tl.range(
-        lo, hi, BLOCK_N, warp_specialize=warp_specialize, disallow_acc_multi_buffer=True
+        lo,
+        hi,
+        BLOCK_N,
+        warp_specialize=warp_specialize,
+        merge_epilogue=True,
+        separate_epilogue_store=True,
+        disallow_acc_multi_buffer=True,
     ):
         start_n = tl.multiple_of(start_n, BLOCK_N)
 
@@ -726,7 +732,13 @@ def _attn_fwd_persist(
     )
 
     # inner loop warpspec vs. outer loop warpspec
-    for _ in tl.range(0, tiles_per_sm, warp_specialize=warp_specialize and OUTER_LOOP):
+    for _ in tl.range(
+        0,
+        tiles_per_sm,
+        warp_specialize=warp_specialize and OUTER_LOOP,
+        merge_epilogue=True,
+        separate_epilogue_store=True,
+    ):
         group_id = tile_idx // num_pid_in_group
         first_pid_n = group_id * GROUP_SIZE_N
         group_size_n = min(num_pid_n - first_pid_n, GROUP_SIZE_N)
