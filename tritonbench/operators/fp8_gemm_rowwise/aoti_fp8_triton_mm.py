@@ -4,8 +4,8 @@
 import torch
 import triton
 import triton.language as tl
-from tritonbench.utils.python_utils import try_import
 from triton import Config
+from tritonbench.utils.python_utils import try_import
 
 with try_import("HAS_FP8_UTILS"):
     from mslk.utils.triton.fp8_utils import get_fp8_constants
