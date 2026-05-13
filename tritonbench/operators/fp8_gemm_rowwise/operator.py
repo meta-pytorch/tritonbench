@@ -12,6 +12,7 @@ from tritonbench.utils.env_utils import (
     is_fbcode,
     is_hip,
 )
+from tritonbench.utils.python_utils import try_import
 from tritonbench.utils.triton_op import (
     BenchmarkOperator,
     BenchmarkOperatorMetrics,
@@ -21,7 +22,8 @@ from tritonbench.utils.triton_op import (
     register_x_val,
 )
 
-from .aoti_fp8_triton_mm import aoti_fp8_triton_mm
+with try_import("HAS_AOTI_FP8"):
+    from .aoti_fp8_triton_mm import aoti_fp8_triton_mm
 
 
 def parse_args(args: List[str]) -> argparse.Namespace:
@@ -81,7 +83,8 @@ HAS_TRITON = False
 HAS_CUTLASS_OR_CK = False
 HAS_CUBLAS = False
 
-from mslk.utils.triton.fp8_utils import get_fp8_constants
+with try_import("HAS_FP8_UTILS"):
+    from mslk.utils.triton.fp8_utils import get_fp8_constants
 
 try:
     from mslk.gemm.triton.fp8_gemm import matmul_fp8_row as triton_fp8_row
@@ -138,7 +141,10 @@ BUILDIN_SHAPES = [
     (16384, 8192, 13312),
 ]
 
-FP8_DTYPE, _, _, _ = get_fp8_constants()
+if HAS_FP8_UTILS:
+    FP8_DTYPE, _, _, _ = get_fp8_constants()
+else:
+    FP8_DTYPE = torch.float8_e4m3fn
 E4M3_MAX_POS: float = torch.finfo(FP8_DTYPE).max
 EPS: float = 1e-12
 FP16_MAX_POS: float = torch.finfo(torch.float16).max
