@@ -28,6 +28,20 @@ except (FileNotFoundError, AttributeError):
 if HAS_CUDA:
     from .fb.hstu import cuda_hstu_mha
 
+HAS_CUDA_BLACKWELL = False
+try:
+    HAS_CUDA_BLACKWELL = is_fbcode() and is_cuda() and IS_BLACKWELL
+except (FileNotFoundError, AttributeError):
+    HAS_CUDA_BLACKWELL = False
+
+if HAS_CUDA_BLACKWELL:
+    try:
+        from generative_recommenders.fb.ultra.ops.blackwell.hstu_mha_blackwell import (
+            hstu_mha_blackwell,
+        )
+    except ImportError:
+        HAS_CUDA_BLACKWELL = False
+
 if is_fbcode():
     from tritonbench.utils.fb.hstu_prod import get_prod_config
 else:
@@ -158,6 +172,25 @@ class Operator(BenchmarkOperator):
     def hstu_cuda(self, q, k, v, seq_offsets, num_targets, max_seq_len, sparsity):
         return lambda: cuda_hstu_mha(
             max_seq_len,
+            alpha=self.alpha,
+            q=q,
+            k=k,
+            v=v,
+            seq_offsets=seq_offsets,
+            causal=self.causal,
+            num_targets=num_targets,
+            max_attn_len=self.max_attn_len,
+            min_full_attn_seq_len=self.min_full_attn_seq_len,
+            contextual_seq_len=self.contextual_seq_len,
+            sort_by_length=True,
+        )
+
+    @register_benchmark(enabled=HAS_CUDA_BLACKWELL)
+    def hstu_cuda_blackwell(
+        self, q, k, v, seq_offsets, num_targets, max_seq_len, sparsity
+    ):
+        return lambda: hstu_mha_blackwell(
+            max_seq_len=max_seq_len,
             alpha=self.alpha,
             q=q,
             k=k,
