@@ -2,7 +2,7 @@ from typing import Dict, Tuple
 
 DEFAULT_WARMUP_REP_BY_ESTIMATED_KERNEL_MS: Dict[str, Tuple[int, int]] = {
     "1": (25, 100),
-    "10": (100, 400),
+    "10": (100, 200),
     "100": (3000, 3000),
 }
 DEFAULT_POWER_REPCNT = 2000
