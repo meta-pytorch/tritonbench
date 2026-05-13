@@ -23,6 +23,7 @@ from .kernels import (
     get_inductor_nop_kernel_0arg,
     get_inductor_nop_kernel_19arg,
     nop_hstu_args_kernel,
+    nop_hstu_args_kernel_nocache,
     nop_kernel,
     nop_with_args_kernel,
     nop_with_kwargs_kernel,
@@ -393,6 +394,22 @@ class Operator(BenchmarkOperator):
         return lambda: nop_kernel[1,]()
 
     @register_benchmark()
+    def nop_triton_kernel_nocache(self, *args):
+        """Same kernel but without c_cache — measures pure Python dict-based dispatch."""
+        from .kernels import nop_kernel_nocache, nop_with_args_kernel_nocache
+
+        if len(args) == 0:
+            nop_kernel_nocache[1,]()
+            return lambda: nop_kernel_nocache[1,]()
+        if len(args) == 19:
+            nop_with_args_kernel_nocache[1,](*args)
+            return lambda: nop_with_args_kernel_nocache[1,](*args)
+        if len(args) >= 58:
+            nop_hstu_args_kernel_nocache[1,](*args)
+            return lambda: nop_hstu_args_kernel_nocache[1,](*args)
+        return lambda: nop_kernel_nocache[1,]()
+
+    @register_benchmark()
     def nop_triton_kernel_kwargs(self, *args):
         """Same as nop_triton_kernel but passes constexpr params as kwargs."""
         if len(args) == 0:
@@ -409,6 +426,46 @@ class Operator(BenchmarkOperator):
             BLOCK_C4=kw_vals[3],
             BLOCK_C5=kw_vals[4],
         )
+
+    @register_benchmark()
+    def nop_triton_kernel_fc_miss(self, *args):
+        """Measures C fast cache MISS overhead (fc_build_key cost).
+
+        Calls native_fast_dispatch with a wrong options_hash to force
+        fc_build_key to compute the full key, then miss in the hash table.
+        This isolates the wasted work on cache miss.
+        """
+        if len(args) == 0:
+            return lambda: None
+        try:
+            from triton._C.libtriton import native_fast_dispatch
+        except ImportError:
+            return lambda: None
+
+        from triton.runtime import driver
+
+        # Pick the right kernel based on arg count
+        if len(args) >= 58:
+            jit_fn = nop_hstu_args_kernel
+        elif len(args) >= 19:
+            jit_fn = nop_with_args_kernel
+        else:
+            return lambda: None
+
+        # Warm up to populate the C fast cache
+        jit_fn[1,](*args)
+
+        args_tuple = args
+        params = jit_fn.params
+        wrong_hash = jit_fn._fc_options_hash + 1  # Different hash → guaranteed miss
+        grid = (1,)
+        device = driver.active.get_current_device()
+        stream = driver.active.get_current_stream(device)
+
+        def miss_fn():
+            native_fast_dispatch(jit_fn, args_tuple, params, wrong_hash, grid, stream)
+
+        return miss_fn
 
     @register_benchmark()
     def nop_triton_compiled_kernel_run(self, *args):

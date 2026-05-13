@@ -1,14 +1,26 @@
+import inspect
+
 import torch
 import triton
 import triton.language as tl
 
+# Compatibility: c_cache kwarg was added in a newer Triton version.
+# When tritonbench pins an older Triton, fall back to plain @triton.jit.
+_jit_supports_c_cache = "c_cache" in inspect.signature(triton.jit).parameters
 
-@triton.jit
+
+def _jit(**kwargs):
+    if not _jit_supports_c_cache:
+        kwargs.pop("c_cache", None)
+    return triton.jit(**kwargs)
+
+
+@_jit(c_cache=True)
 def nop_kernel():
     pass
 
 
-@triton.jit
+@_jit(c_cache=True)
 def nop_with_args_kernel(
     t1,
     t2,
@@ -33,7 +45,7 @@ def nop_with_args_kernel(
     pass
 
 
-@triton.jit
+@_jit(c_cache=True)
 def nop_hstu_args_kernel(
     # 14 pointer args (simulating Q, K, V, seq_offsets, TS, TW, PW, Bias,
     # seq2_offsets, delta_x_offsets, num_targets, attn_scale, Out, M_buffer)
@@ -102,7 +114,102 @@ def nop_hstu_args_kernel(
     pass
 
 
-@triton.jit
+# Same kernels without C cache — for baseline comparison
+@_jit(c_cache=True)
+def nop_kernel_nocache():
+    pass
+
+
+@_jit(c_cache=True)
+def nop_with_args_kernel_nocache(
+    t1,
+    t2,
+    t3,
+    t4,
+    t5,
+    i1,
+    i2,
+    i3,
+    i4,
+    i5,
+    i6,
+    i7,
+    i8,
+    i9,
+    c1: tl.constexpr,
+    c2: tl.constexpr,
+    c3: tl.constexpr,
+    c4: tl.constexpr,
+    c5: tl.constexpr,
+):
+    pass
+
+
+@_jit(c_cache=True)
+def nop_hstu_args_kernel_nocache(
+    p1,
+    p2,
+    p3,
+    p4,
+    p5,
+    p6,
+    p7,
+    p8,
+    p9,
+    p10,
+    p11,
+    p12,
+    p13,
+    p14,
+    stride_qm,
+    stride_qh,
+    stride_kn,
+    stride_kh,
+    stride_vn,
+    stride_vh,
+    stride_ts,
+    stride_om,
+    alpha,
+    Z,
+    AUTOTUNE_Z,
+    H,
+    MAX_SEQ_LEN,
+    AUTOTUNE_MAX_SEQ_LEN,
+    DimQ,
+    DimV,
+    DeltaSize,
+    num_buckets,
+    max_pos_ind,
+    time_bucket_incr,
+    time_bucket_div,
+    time_delta,
+    contextual_seq_len,
+    max_attn_len,
+    full_attn_size,
+    num_softmax_heads,
+    INVALID_MASK_TYPE: tl.constexpr,
+    CAUSAL: tl.constexpr,
+    BUCKET_FN: tl.constexpr,
+    ATTN_BIAS_TYPE: tl.constexpr,
+    ATTN_SCALE_TYPE: tl.constexpr,
+    USE_TIME_BIAS: tl.constexpr,
+    USE_POS_BIAS: tl.constexpr,
+    HAS_MAX_POS_IND: tl.constexpr,
+    HAS_MULTIPLE_TARGETS: tl.constexpr,
+    IS_DELTA_Q: tl.constexpr,
+    ALLOW_TF32: tl.constexpr,
+    BLOCK_D_Q: tl.constexpr,
+    BLOCK_D_V: tl.constexpr,
+    BLOCK_M: tl.constexpr,
+    BLOCK_N: tl.constexpr,
+    HAS_MAX_ATTN_LEN: tl.constexpr,
+    HAS_CONTEXTUAL_SEQ_LEN: tl.constexpr,
+    HAS_FULL_ATTN_SIZE: tl.constexpr,
+):
+    pass
+
+
+@_jit(c_cache=True)
 def nop_with_kwargs_kernel(
     t1,
     t2,
