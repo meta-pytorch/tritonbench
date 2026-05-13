@@ -55,6 +55,7 @@ import torch
 import triton
 from tritonbench.utils.data_utils import get_production_shapes
 from tritonbench.utils.env_utils import is_fbcode
+from tritonbench.utils.python_utils import try_import
 from tritonbench.utils.triton_op import (
     BenchmarkOperator,
     BenchmarkOperatorMetrics,
@@ -156,7 +157,8 @@ HAS_CUBLAS = False  # TODO: add cublas kernel
 HAS_TRITON = False
 HAS_CUTLASS_OR_CK = False
 
-from mslk.utils.triton.fp8_utils import get_fp8_constants
+with try_import("HAS_FP8_UTILS"):
+    from mslk.utils.triton.fp8_utils import get_fp8_constants
 
 # Try to import Triton grouped GEMM module
 try:
@@ -222,7 +224,10 @@ GROUP_SIZES = [
     4,
 ]  # 8, 16]
 
-FP8_DTYPE, _, _, _ = get_fp8_constants()
+if HAS_FP8_UTILS:
+    FP8_DTYPE, _, _, _ = get_fp8_constants()
+else:
+    FP8_DTYPE = torch.float8_e4m3fn
 E4M3_MAX_POS: float = torch.finfo(FP8_DTYPE).max
 EPS: float = 1e-12
 FP16_MAX_POS: float = torch.finfo(torch.float16).max
