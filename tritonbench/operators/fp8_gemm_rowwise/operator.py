@@ -94,7 +94,7 @@ try:
             "TMA is required by the Triton kernel."
         )
     HAS_TRITON = True
-except (ImportError, AssertionError):
+except (ImportError, AssertionError, OSError):
     HAS_TRITON = False
 
 try:

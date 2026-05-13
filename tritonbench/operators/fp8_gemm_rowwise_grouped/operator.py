@@ -152,35 +152,18 @@ def parse_args(args: List[str]) -> argparse.Namespace:
     return parsed_args
 
 
-# Define flags to track the availability of different kernels
 HAS_CUBLAS = False  # TODO: add cublas kernel
-HAS_TRITON = False
-HAS_CUTLASS_OR_CK = False
 
 with try_import("HAS_FP8_UTILS"):
     from mslk.utils.triton.fp8_utils import get_fp8_constants
 
-# Try to import Triton grouped GEMM module
-try:
+with try_import("HAS_TRITON"):
     from mslk.gemm.triton.grouped_gemm import grouped_gemm_fp8_rowwise
 
-    # If import succeeds, set HAS_TRITON to True
-    HAS_TRITON = True
-except (ImportError, AssertionError):
-    # If import fails, set HAS_TRITON to False
-    HAS_TRITON = False
-
-# Try to import Cutlass or CK module
-try:
+with try_import("HAS_CUTLASS_OR_CK"):
     import mslk.gemm  # noqa: F401
 
-    # Define the Cutlass or CK FP8 grouped MM operator
     cutlass_or_ck_fp8_grouped_mm = torch.ops.mslk.f8f8bf16_rowwise_grouped_stacked
-    # Set HAS_CUTLASS_OR_CK to True if import succeeds
-    HAS_CUTLASS_OR_CK = True
-except (ImportError, AttributeError, OSError):
-    # Set HAS_CUTLASS_OR_CK to False if import fails
-    HAS_CUTLASS_OR_CK = False
 
 
 BUILTIN_SHAPES = [
