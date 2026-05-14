@@ -400,7 +400,7 @@ def gdpa_kernel_tma_ws_blackwell(
 
     with tlx.async_tasks():
         # activation calculation
-        with tlx.async_task("default", registers=ACT_REGS):
+        with tlx.async_task("default"):
             accum_cnt = 0
             accum_cnt_outer = 0
             for idx in range(0, tiles_per_sm):
