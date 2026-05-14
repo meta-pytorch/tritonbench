@@ -19,12 +19,12 @@ try:
         silu_mul,
         silu_mul_fp8_rowwise_quant,
     )
-    from mslk.quantize.triton.fp8_quantize import quantize_fp8_row
 
     HAS_FB_IMPORT = True
 except ImportError:
     HAS_FB_IMPORT = False
 
+from mslk.quantize.triton.fp8_quantize import quantize_fp8_row
 from tritonbench.utils.triton_op import (
     BenchmarkOperator,
     BenchmarkOperatorMetrics,

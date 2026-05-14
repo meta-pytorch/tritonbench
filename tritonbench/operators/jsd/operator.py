@@ -63,6 +63,8 @@ class Operator(BenchmarkOperator):
         self.B = 4
         self.T = 2048
         self.baseline_op = TorchJSD()
+        if LigerJSD is None:
+            raise NotImplementedError("LigerJSD is not available")
         self.liger_op = LigerJSD()
 
     def get_input_iter(self) -> Generator:

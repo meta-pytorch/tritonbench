@@ -18,7 +18,6 @@ logging.basicConfig(level=logging.INFO)
 
 from ..common import setup_tritonbench_cwd
 
-
 setup_tritonbench_cwd()
 
 import inspect
@@ -128,7 +127,11 @@ def merge_decorator_tags(op_name, backend_name, tags_dict):
     return tags_dict
 
 
-def prevalidate_backends(backend_edges, op_name=None):
+def prevalidate_backends(backend_edges, op_name=None, opbench_file=None):
+    if opbench_file:
+        from .ast_analyzer import _strip_link_tree_prefix
+
+        opbench_file = _strip_link_tree_prefix(opbench_file)
     op_with_tags = {}
     # heuristic: do not search torch.nn, torch.compile, and xformers backends
     for backend, callees in backend_edges.items():
@@ -148,6 +151,8 @@ def prevalidate_backends(backend_edges, op_name=None):
                 "tags": ["native_custom_ops"],
                 "kernels": custom_op_category,
             }
+            if opbench_file:
+                op_with_tags[backend]["files"] = [opbench_file]
             if any(["fbgemm" in callee for callee in callees]):
                 op_with_tags[backend]["tags"].append("fbgemm")
             if any(["mslk" in callee for callee in callees]):
@@ -169,7 +174,11 @@ def prevalidate_backends(backend_edges, op_name=None):
 
 def trace_op(op):
     op_with_tags = {op: {}}
-    opbench = load_operator_by_args(task_args=["--op", op])
+    try:
+        opbench = load_operator_by_args(task_args=["--op", op])
+    except (ModuleNotFoundError, NotImplementedError) as e:
+        logger.warning(f"Failed to load operator '{op}': {e}. Skipping.")
+        return op_with_tags
     opbench_file = inspect.getfile(opbench.__class__)
     opbench_file_name = Path(opbench_file).name
     module_name = opbench.__module__
@@ -187,7 +196,9 @@ def trace_op(op):
         backends=backends,
     )
     assert len(backend_edges) == len(backends)
-    op_with_tags[op] = prevalidate_backends(backend_edges, op_name=op)
+    op_with_tags[op] = prevalidate_backends(
+        backend_edges, op_name=op, opbench_file=opbench_file
+    )
     remaining_backends = [
         backend for backend in backends if backend not in op_with_tags[op]
     ]

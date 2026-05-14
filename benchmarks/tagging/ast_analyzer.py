@@ -381,7 +381,8 @@ class CallGraph(ast.NodeVisitor):
                     isinstance(fn.value.func, ast.Name)
                     and fn.value.func.id == "capture_triton"
                 ) or (
-                    isinstance(fn.value.func.value, ast.Attribute)
+                    isinstance(fn.value.func, ast.Attribute)
+                    and isinstance(fn.value.func.value, ast.Attribute)
                     and fn.value.func.value.attr == "_library"
                     and fn.value.func.attr == "capture_triton"
                 ):
@@ -394,6 +395,13 @@ class CallGraph(ast.NodeVisitor):
                     else:
                         callee_func = "unknown"
                     callee = f"<torch._library.capture_triton({callee_func})>"
+                else:
+                    if isinstance(fn.value.func, ast.Name):
+                        callee = self._resolve_name(fn.value.func.id)
+                    elif isinstance(fn.value.func, ast.Attribute):
+                        callee = self._resolve_attr(fn.value.func)
+                    else:
+                        callee = "<dynamic_call>"
             else:
                 callee = "<dynamic_call>"
             maybe_triton = True  # FIXME: this could also be cute, see blackwell_attentions cute dsl
@@ -404,30 +412,47 @@ class CallGraph(ast.NodeVisitor):
         self.generic_visit(node)
 
 
-def validate_edges(edges) -> Dict[str, str]:
+def _strip_link_tree_prefix(path: str) -> str:
+    marker = "#link-tree/"
+    idx = path.find(marker)
+    if idx != -1:
+        return path[idx + len(marker) :]
+    return path
+
+
+def validate_edges(edges, source_file: str = "") -> Dict[str, str]:
+    source_file = _strip_link_tree_prefix(source_file) if source_file else ""
     result_tags = {}
     result_tags["tags"] = []
     result_tags["kernels"] = []
+    result_tags["files"] = []
     for edge in edges:
         if edge.callee == "cutlass.cute.compile":
             result_tags["tags"].append("cutedsl")
             result_tags["kernels"].append(edge.caller)
+            if source_file:
+                result_tags["files"].append(source_file)
         if edge.callee_descriptor and (
             "triton.jit" in edge.callee_descriptor.decorators
             or "<dynamic_decorator_triton.jit>" in edge.callee_descriptor.decorators
         ):
             result_tags["tags"].append("triton")
             result_tags["kernels"].append(edge.callee)
+            if source_file:
+                result_tags["files"].append(source_file)
         if edge.callee.startswith("<torch._library.capture_triton"):
             result_tags["tags"].append("triton")
             result_tags["kernels"].append(edge.callee)
+            if source_file:
+                result_tags["files"].append(source_file)
         if (
             edge.callee.startswith("torch.ops.")
             and not "cutedsl" in result_tags["tags"]
         ):
             result_tags["tags"].append("native_custom_ops")
-            # definition is in cpp, so we don't have the definition site
             result_tags["kernels"].append(edge.callee)
+            if source_file:
+                result_tags["files"].append(source_file)
         if edge.callee.startswith("triton.experimental.gluon"):
             result_tags["tags"].append("gluon")
         if edge.callee.startswith("torch.nn."):
@@ -436,6 +461,8 @@ def validate_edges(edges) -> Dict[str, str]:
         if edge.callee.startswith("tilelang.compile"):
             result_tags["tags"].append("tilelang")
             result_tags["kernels"].append(edge.caller)
+            if source_file:
+                result_tags["files"].append(source_file)
         if "torch.ops.fbgemm" in edge.callee:
             result_tags["tags"].append("fbgemm")
         if "torch.ops.mslk" in edge.callee:
@@ -448,11 +475,16 @@ def validate_edges(edges) -> Dict[str, str]:
         ):
             result_tags["tags"].append("triton")
             result_tags["kernels"].append(edge.callee)
+            if source_file:
+                result_tags["files"].append(source_file)
     # remove duplicates
     result_tags["tags"] = list(set(result_tags["tags"]))
     result_tags["kernels"] = list(set(result_tags["kernels"]))
+    result_tags["files"] = list(set(result_tags["files"]))
     if not result_tags["kernels"] and not result_tags["tags"]:
         return None
+    if not result_tags["files"]:
+        del result_tags["files"]
     return result_tags
 
 
@@ -567,7 +599,7 @@ def trace_callees(callees_with_module: List[Tuple[str, str]], depth=8):
         # get next level callees
         print(cg.edges)
         # validate the edges: if any of them uses triton, apply triton tag and stop searching
-        tags = validate_edges(cg.edges)
+        tags = validate_edges(cg.edges, source_file=source_file)
         if tags:
             return tags
         next_level_callees = [edge.callee for edge in cg.edges]
