@@ -861,10 +861,10 @@ class BenchmarkOperator(metaclass=PostInitProcessor):
                     f"When specifying multiple IDs (e.g., --input-id 0,2,4), the number of inputs "
                     f"is determined by the number of IDs provided ({len(self._input_ids)} in this case)."
                 )
-            if self._input_sample_mode == "equally-spaced-k":
+            if self._input_sample_mode in ("equally-spaced-k", "random-k"):
                 raise ValueError(
-                    f"Cannot use --input-sample-mode equally-spaced-k with multiple input IDs. "
-                    f"Either specify multiple IDs directly or use equally-spaced-k with --num-inputs."
+                    f"Cannot use --input-sample-mode {self._input_sample_mode} with multiple input IDs. "
+                    f"Either specify multiple IDs directly or use {self._input_sample_mode} with --num-inputs."
                 )
             # Validate that all IDs are within range
             invalid_ids = [
@@ -911,6 +911,33 @@ class BenchmarkOperator(metaclass=PostInitProcessor):
             print(
                 f"Equally-spaced-k mode: Selected {len(self._input_ids)} equally spaced inputs (total available: {self._available_num_inputs})",
                 file=sys.stderr,
+            )
+        elif self._input_sample_mode == "random-k":
+            if self._num_inputs is None:
+                raise ValueError(
+                    "--num-inputs must be specified when using --input-sample-mode random-k"
+                )
+            if self._input_ids[0] != 0:
+                raise ValueError(
+                    "--input-id must be 0 or omitted when using --input-sample-mode random-k"
+                )
+
+            if self._num_inputs > self._available_num_inputs:
+                logger.warning(
+                    f"Requested {self._num_inputs} inputs but only {self._available_num_inputs} available. "
+                    f"Using all available inputs.",
+                )
+                self._num_inputs = self._available_num_inputs
+
+            # Dedicated Random instance so we don't reuse the globally-seeded MAIN_RANDOM_SEED.
+            sampler = random.Random(self.tb_args.input_sample_seed)
+            self._input_ids = sorted(
+                sampler.sample(range(self._available_num_inputs), self._num_inputs)
+            )
+
+            logger.warning(
+                f"Random-k mode: Selected {len(self._input_ids)} random inputs "
+                f"(total available: {self._available_num_inputs}, seed={self.tb_args.input_sample_seed})",
             )
         else:
             # First-k mode (default) - construct sequential range based on start ID and num_inputs

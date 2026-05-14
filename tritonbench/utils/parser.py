@@ -252,9 +252,16 @@ def get_parser(args=None):
         "--input-sample-mode",
         type=str,
         default="first-k",
-        choices=["first-k", "equally-spaced-k"],
+        choices=["first-k", "equally-spaced-k", "random-k"],
         help="Input sampling mode. 'first-k' (default) uses the first k inputs starting from --input-id. "
-        "'equally-spaced-k' selects k equally spaced inputs from the entire input range, where k is specified by --num-inputs.",
+        "'equally-spaced-k' selects k equally spaced inputs across the input range. "
+        "'random-k' selects k random inputs (non-deterministic by default; pass --input-sample-seed for reproducibility).",
+    )
+    parser.add_argument(
+        "--input-sample-seed",
+        type=int,
+        default=None,
+        help="Optional seed for --input-sample-mode random-k. If unset, each run picks a different subset.",
     )
     parser.add_argument(
         "--test-only",

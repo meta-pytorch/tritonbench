@@ -6,7 +6,8 @@ In TritonBench, users can customize the input data to run. Here is an overview o
 |-----------------------|----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------|
 | `--input-id`          | Input ID to run, starting from 0.      Default is 0.                                                                                                                                                                 |
 | `--num-inputs`        | Number of inputs to run. By default, run all available inputs.                                                                                                                                                       |
-| `--input-sample-mode` | Input sampling mode. 'first-k' (default) uses the first k inputs starting from `--input-id`.  "'equally-spaced-k' selects k equally spaced inputs from the entire input range, where k is specified by --num-inputs. |
+| `--input-sample-mode` | Input sampling mode. `first-k` (default), `equally-spaced-k`, or `random-k`. `random-k` picks a different subset each run unless `--input-sample-seed` is set. |
+| `--input-sample-seed`  | Optional seed for `random-k` mode for reproducibility. |
 | `--input-loader`      | Specify a json file (or wildcard pattern) to load inputs from input json file(s).                                                                                                                                    |
 
 
