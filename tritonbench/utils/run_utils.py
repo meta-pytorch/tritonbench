@@ -475,12 +475,28 @@ def _print_multi_device_summary(
     print(f"{'=' * 60}\n")
 
 
-def _run_in_task_single_mode(op: str, mode: str) -> None:
+def _add_mode_suffix(filepath: str, mode: str) -> str:
+    """Insert a mode suffix before the file extension.
+
+    E.g. 'result.csv' + 'bwd' -> 'result_bwd.csv'
+    """
+    base, ext = os.path.splitext(filepath)
+    return f"{base}_{mode}{ext}"
+
+
+def _run_in_task_single_mode(
+    op: str,
+    mode: str,
+    output: Optional[str] = None,
+    output_json: Optional[str] = None,
+    output_dir: Optional[str] = None,
+) -> None:
     """Run a single op+mode in an isolated subprocess.
 
     When the user passes --mode fwd,bwd, sys.argv still contains the
     original multi-mode value.  We replace it with the single mode so
-    the child process only runs one mode.
+    the child process only runs one mode.  Output paths are also
+    replaced to avoid different modes overwriting each other.
     """
     saved_argv = sys.argv[:]
     try:
@@ -489,6 +505,16 @@ def _run_in_task_single_mode(op: str, mode: str) -> None:
         # Also strip legacy boolean mode flags so they don't override --mode
         for legacy_flag in ("--bwd", "--fwd-bwd", "--fwd-no-grad"):
             sys.argv = remove_cmd_parameter(sys.argv, legacy_flag)
+        # Replace output paths so each mode writes to a distinct file
+        if output is not None:
+            sys.argv = remove_cmd_parameter(sys.argv, "--output")
+            add_cmd_parameter(sys.argv, "--output", output)
+        if output_json is not None:
+            sys.argv = remove_cmd_parameter(sys.argv, "--output-json")
+            add_cmd_parameter(sys.argv, "--output-json", output_json)
+        if output_dir is not None:
+            sys.argv = remove_cmd_parameter(sys.argv, "--output-dir")
+            add_cmd_parameter(sys.argv, "--output-dir", output_dir)
         run_in_task(op)
     finally:
         sys.argv = saved_argv
@@ -582,14 +608,39 @@ def tritonbench_run(args: Optional[List[str]] = None):
         if len(ops) >= 2:
             args.isolate = True
 
+        multi_mode = len(modes) > 1
+        orig_output = args.output
+        orig_output_json = args.output_json
+        orig_output_dir = args.output_dir
+
         lockdown_enabled = args.gpu_lockdown or (args.gpu_lock_clock_mhz is not None)
         with gpu_lockdown(lockdown_enabled, args.gpu_lock_clock_mhz):
             for op in ops:
                 args.op = op
                 for mode in modes:
                     args.mode = mode
+                    if multi_mode:
+                        args.output = (
+                            _add_mode_suffix(orig_output, mode)
+                            if orig_output
+                            else None
+                        )
+                        args.output_json = (
+                            _add_mode_suffix(orig_output_json, mode)
+                            if orig_output_json
+                            else None
+                        )
+                        if orig_output_dir:
+                            args.output_dir = os.path.join(orig_output_dir, mode)
+                            os.makedirs(args.output_dir, exist_ok=True)
                     if args.isolate:
-                        _run_in_task_single_mode(op, mode)
+                        _run_in_task_single_mode(
+                            op,
+                            mode,
+                            output=args.output,
+                            output_json=args.output_json,
+                            output_dir=args.output_dir,
+                        )
                     else:
                         _run(args, extra_args)
 
