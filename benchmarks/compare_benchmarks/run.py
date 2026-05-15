@@ -58,16 +58,11 @@ def build_op_args(
     ]
 
     if config.custom_bench == "diode" and "diode" in benchmark_name:
-        args.extend(
-            [
-                "--diode-version",
-                config.diode_version,
-                "--diode-topk",
-                str(config.diode_topk),
-            ]
-        )
         if config.diode_model_config is not None:
             args.extend(["--diode-model-config", config.diode_model_config])
+        else:
+            args.extend(["--diode-version", config.diode_version])
+        args.extend(["--diode-topk", str(config.diode_topk)])
 
     return args
 
