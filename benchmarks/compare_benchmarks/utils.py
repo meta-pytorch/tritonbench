@@ -1,6 +1,7 @@
 """Utils for compare_benchmarks custom TritonBench benchmark"""
 
 import asyncio
+import json
 import logging
 import os
 from dataclasses import dataclass, field
@@ -170,6 +171,13 @@ def log_benchmark(
     triton_type = get_triton_type()
     diode_version = getattr(config, "diode_version", None)
     diode_topk = getattr(config, "diode_topk", None)
+    diode_model_config_str = getattr(config, "diode_model_config", None)
+    if diode_model_config_str is not None:
+        try:
+            parsed = json.loads(diode_model_config_str)
+            diode_version = parsed.get("feature_version", diode_version)
+        except (json.JSONDecodeError, TypeError):
+            pass
 
     async def log_row(row: pd.Series) -> None:
         try:
