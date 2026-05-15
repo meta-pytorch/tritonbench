@@ -594,9 +594,7 @@ def tritonbench_run(args: Optional[List[str]] = None):
 
                     config_a_args = parse_ab_config(args.side_a)
                     config_b_args = parse_ab_config(args.side_b)
-                    compare_ab_results(
-                        result_a, result_b, config_a_args, config_b_args
-                    )
+                    compare_ab_results(result_a, result_b, config_a_args, config_b_args)
 
                 except Exception as e:
                     print(f"A/B test failed: {e}")
@@ -621,9 +619,7 @@ def tritonbench_run(args: Optional[List[str]] = None):
                     args.mode = mode
                     if multi_mode:
                         args.output = (
-                            _add_mode_suffix(orig_output, mode)
-                            if orig_output
-                            else None
+                            _add_mode_suffix(orig_output, mode) if orig_output else None
                         )
                         args.output_json = (
                             _add_mode_suffix(orig_output_json, mode)
