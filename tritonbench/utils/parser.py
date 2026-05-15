@@ -29,9 +29,9 @@ def get_parser(args=None):
     )
     parser.add_argument(
         "--mode",
-        choices=["fwd", "bwd", "fwd_bwd", "fwd_no_grad"],
         default="fwd",
-        help="Test mode (fwd, bwd, fwd_bwd, or fwd_no_grad).",
+        help="Test mode. Comma-separated list of: fwd, bwd, fwd_bwd, fwd_no_grad. "
+        "E.g., --mode fwd,bwd to run multiple modes sequentially.",
     )
     parser.add_argument("--bwd", action="store_true", help="Run backward pass.")
     parser.add_argument(
@@ -534,6 +534,13 @@ def get_parser(args=None):
             )
         if args.isolate:
             parser.error("A/B testing is not compatible with --isolate mode")
+
+    valid_modes = {"fwd", "bwd", "fwd_bwd", "fwd_no_grad"}
+    for mode in args.mode.split(","):
+        if mode not in valid_modes:
+            parser.error(
+                f"invalid mode '{mode}'. Valid modes: {', '.join(sorted(valid_modes))}"
+            )
 
     if args.metrics and "walltime_kineto_trace" in args.metrics and args.repcnt is None:
         parser.error("Walltime Kineto trace requires --repcnt to be specified")

@@ -475,6 +475,25 @@ def _print_multi_device_summary(
     print(f"{'=' * 60}\n")
 
 
+def _run_in_task_single_mode(op: str, mode: str) -> None:
+    """Run a single op+mode in an isolated subprocess.
+
+    When the user passes --mode fwd,bwd, sys.argv still contains the
+    original multi-mode value.  We replace it with the single mode so
+    the child process only runs one mode.
+    """
+    saved_argv = sys.argv[:]
+    try:
+        sys.argv = remove_cmd_parameter(copy.deepcopy(sys.argv), "--mode")
+        add_cmd_parameter(sys.argv, "--mode", mode)
+        # Also strip legacy boolean mode flags so they don't override --mode
+        for legacy_flag in ("--bwd", "--fwd-bwd", "--fwd-no-grad"):
+            sys.argv = remove_cmd_parameter(sys.argv, legacy_flag)
+        run_in_task(op)
+    finally:
+        sys.argv = saved_argv
+
+
 def tritonbench_run(args: Optional[List[str]] = None):
     if args == None or args == []:
         args = sys.argv[1:]
@@ -523,6 +542,8 @@ def tritonbench_run(args: Optional[List[str]] = None):
         )
         return
 
+    modes = args.mode.split(",")
+
     # Check if A/B testing mode is enabled
     if args.side_a is not None and args.side_b is not None:
         # A/B testing mode - only support single operator
@@ -538,19 +559,23 @@ def tritonbench_run(args: Optional[List[str]] = None):
 
         lockdown_enabled = args.gpu_lockdown or (args.gpu_lock_clock_mhz is not None)
         with gpu_lockdown(lockdown_enabled, args.gpu_lock_clock_mhz):
-            try:
-                result_a, result_b = run_ab_test(args, extra_args, _run)
+            for mode in modes:
+                args.mode = mode
+                try:
+                    result_a, result_b = run_ab_test(args, extra_args, _run)
 
-                from tritonbench.utils.ab_test import parse_ab_config
+                    from tritonbench.utils.ab_test import parse_ab_config
 
-                config_a_args = parse_ab_config(args.side_a)
-                config_b_args = parse_ab_config(args.side_b)
-                compare_ab_results(result_a, result_b, config_a_args, config_b_args)
+                    config_a_args = parse_ab_config(args.side_a)
+                    config_b_args = parse_ab_config(args.side_b)
+                    compare_ab_results(
+                        result_a, result_b, config_a_args, config_b_args
+                    )
 
-            except Exception as e:
-                print(f"A/B test failed: {e}")
-                if not args.bypass_fail:
-                    raise
+                except Exception as e:
+                    print(f"A/B test failed: {e}")
+                    if not args.bypass_fail:
+                        raise
     else:
         # Normal mode
         # Force isolation in subprocess if testing more than one op.
@@ -561,10 +586,12 @@ def tritonbench_run(args: Optional[List[str]] = None):
         with gpu_lockdown(lockdown_enabled, args.gpu_lock_clock_mhz):
             for op in ops:
                 args.op = op
-                if args.isolate:
-                    run_in_task(op)
-                else:
-                    _run(args, extra_args)
+                for mode in modes:
+                    args.mode = mode
+                    if args.isolate:
+                        _run_in_task_single_mode(op, mode)
+                    else:
+                        _run(args, extra_args)
 
     tritonparse_parse(args.tritonparse)
 
