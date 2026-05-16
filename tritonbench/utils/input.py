@@ -23,6 +23,14 @@ def input_cast(cond, action, example_inputs):
         return example_inputs
     elif isinstance(example_inputs, BlockMask):
         return example_inputs
+    # Triton TensorDescriptor is a non-primitive runtime object that should be
+    # passed through unchanged during input casting.
+    elif (
+        example_inputs.__class__.__name__ == "TensorDescriptor"
+        and hasattr(example_inputs, "base")
+        and hasattr(example_inputs, "block_shape")
+    ):
+        return example_inputs
     # FlexAttention passes around functions as inputs
     elif callable(example_inputs):
         return example_inputs

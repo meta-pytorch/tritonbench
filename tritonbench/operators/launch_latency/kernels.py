@@ -3,6 +3,7 @@ import inspect
 import torch
 import triton
 import triton.language as tl
+from triton.tools.tensor_descriptor import TensorDescriptor
 
 # Compatibility: c_cache kwarg was added in a newer Triton version.
 # When tritonbench pins an older Triton, fall back to plain @triton.jit.
@@ -207,6 +208,35 @@ def nop_hstu_args_kernel_nocache(
     HAS_FULL_ATTN_SIZE: tl.constexpr,
 ):
     pass
+
+
+@_jit(c_cache=True)
+def nop_tensordesc_kernel(
+    out_ptr, desc, M, N, M_BLOCK: tl.constexpr, N_BLOCK: tl.constexpr
+):
+    block = desc.load([0, 0])
+    idx = tl.arange(0, M_BLOCK)[:, None] * N_BLOCK + tl.arange(0, N_BLOCK)[None, :]
+    tl.store(out_ptr + idx, block)
+
+
+@_jit(c_cache=False)
+def nop_tensordesc_kernel_nocache(
+    out_ptr, desc, M, N, M_BLOCK: tl.constexpr, N_BLOCK: tl.constexpr
+):
+    block = desc.load([0, 0])
+    idx = tl.arange(0, M_BLOCK)[:, None] * N_BLOCK + tl.arange(0, N_BLOCK)[None, :]
+    tl.store(out_ptr + idx, block)
+
+
+def make_tensordesc_inputs(m_block: int = 8, n_block: int = 32):
+    M = m_block * 3
+    N = n_block * 4
+    t = torch.zeros((M, N), device="cuda", dtype=torch.float16)
+    out = torch.zeros((m_block, n_block), device="cuda", dtype=torch.float16)
+    desc = TensorDescriptor(
+        t, shape=t.shape, strides=t.stride(), block_shape=[m_block, n_block]
+    )
+    return out, desc, M, N, m_block, n_block
 
 
 @_jit(c_cache=True)

@@ -22,9 +22,12 @@ from .kernels import (
     get_inductor_nop_kernel,
     get_inductor_nop_kernel_0arg,
     get_inductor_nop_kernel_19arg,
+    make_tensordesc_inputs,
     nop_hstu_args_kernel,
     nop_hstu_args_kernel_nocache,
     nop_kernel,
+    nop_tensordesc_kernel,
+    nop_tensordesc_kernel_nocache,
     nop_with_args_kernel,
     nop_with_kwargs_kernel,
 )
@@ -360,6 +363,8 @@ class Operator(BenchmarkOperator):
         hstu_scalars = [1 for _ in range(26)]
         hstu_constexprs = [1 for _ in range(18)]
         yield tuple([*hstu_ptrs, *hstu_scalars, *hstu_constexprs])
+        # TensorDescriptor input: (desc, out_ptr)
+        yield make_tensordesc_inputs()
 
     def get_x_val(self, example_inputs) -> float:
         return len(example_inputs)
@@ -391,6 +396,8 @@ class Operator(BenchmarkOperator):
             return lambda: nop_with_args_kernel[1,](*args)
         if len(args) >= 58:
             return lambda: nop_hstu_args_kernel[1,](*args)
+        if len(args) == 6 and args[1].__class__.__name__ == "TensorDescriptor":
+            return lambda: nop_tensordesc_kernel[(1,)](*args)
         return lambda: nop_kernel[1,]()
 
     @register_benchmark()
@@ -407,6 +414,9 @@ class Operator(BenchmarkOperator):
         if len(args) >= 58:
             nop_hstu_args_kernel_nocache[1,](*args)
             return lambda: nop_hstu_args_kernel_nocache[1,](*args)
+        if len(args) == 6 and args[1].__class__.__name__ == "TensorDescriptor":
+            nop_tensordesc_kernel_nocache[(1,)](*args)
+            return lambda: nop_tensordesc_kernel_nocache[(1,)](*args)
         return lambda: nop_kernel_nocache[1,]()
 
     @register_benchmark()
@@ -449,11 +459,16 @@ class Operator(BenchmarkOperator):
             jit_fn = nop_hstu_args_kernel
         elif len(args) >= 19:
             jit_fn = nop_with_args_kernel
+        elif len(args) == 6 and args[1].__class__.__name__ == "TensorDescriptor":
+            jit_fn = nop_tensordesc_kernel
         else:
             return lambda: None
 
         # Warm up to populate the C fast cache
-        jit_fn[1,](*args)
+        if jit_fn is nop_tensordesc_kernel:
+            jit_fn[(1,)](*args)
+        else:
+            jit_fn[1,](*args)
 
         args_tuple = args
         params = jit_fn.params
