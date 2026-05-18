@@ -239,6 +239,105 @@ def make_tensordesc_inputs(m_block: int = 8, n_block: int = 32):
     return out, desc, M, N, m_block, n_block
 
 
+# --- Autotuned kernel for benchmarking c_cache + autotune interaction ---
+
+
+@triton.autotune(
+    configs=[
+        triton.Config(
+            {
+                "BLOCK_C1": 32,
+                "BLOCK_C2": 32,
+                "BLOCK_C3": 32,
+                "BLOCK_C4": 32,
+                "BLOCK_C5": 32,
+            }
+        ),
+        triton.Config(
+            {
+                "BLOCK_C1": 64,
+                "BLOCK_C2": 64,
+                "BLOCK_C3": 64,
+                "BLOCK_C4": 64,
+                "BLOCK_C5": 64,
+            }
+        ),
+    ],
+    key=[],
+)
+@_jit(c_cache=True)
+def nop_autotuned_kernel(
+    t1,
+    t2,
+    t3,
+    t4,
+    t5,
+    i1,
+    i2,
+    i3,
+    i4,
+    i5,
+    i6,
+    i7,
+    i8,
+    i9,
+    BLOCK_C1: tl.constexpr,
+    BLOCK_C2: tl.constexpr,
+    BLOCK_C3: tl.constexpr,
+    BLOCK_C4: tl.constexpr,
+    BLOCK_C5: tl.constexpr,
+):
+    pass
+
+
+@triton.autotune(
+    configs=[
+        triton.Config(
+            {
+                "BLOCK_C1": 32,
+                "BLOCK_C2": 32,
+                "BLOCK_C3": 32,
+                "BLOCK_C4": 32,
+                "BLOCK_C5": 32,
+            }
+        ),
+        triton.Config(
+            {
+                "BLOCK_C1": 64,
+                "BLOCK_C2": 64,
+                "BLOCK_C3": 64,
+                "BLOCK_C4": 64,
+                "BLOCK_C5": 64,
+            }
+        ),
+    ],
+    key=[],
+)
+@_jit(c_cache=False)
+def nop_autotuned_kernel_nocache(
+    t1,
+    t2,
+    t3,
+    t4,
+    t5,
+    i1,
+    i2,
+    i3,
+    i4,
+    i5,
+    i6,
+    i7,
+    i8,
+    i9,
+    BLOCK_C1: tl.constexpr,
+    BLOCK_C2: tl.constexpr,
+    BLOCK_C3: tl.constexpr,
+    BLOCK_C4: tl.constexpr,
+    BLOCK_C5: tl.constexpr,
+):
+    pass
+
+
 @_jit(c_cache=True)
 def nop_with_kwargs_kernel(
     t1,

@@ -23,6 +23,8 @@ from .kernels import (
     get_inductor_nop_kernel_0arg,
     get_inductor_nop_kernel_19arg,
     make_tensordesc_inputs,
+    nop_autotuned_kernel,
+    nop_autotuned_kernel_nocache,
     nop_hstu_args_kernel,
     nop_hstu_args_kernel_nocache,
     nop_kernel,
@@ -436,6 +438,23 @@ class Operator(BenchmarkOperator):
             BLOCK_C4=kw_vals[3],
             BLOCK_C5=kw_vals[4],
         )
+
+    @register_benchmark()
+    def nop_triton_kernel_autotuned(self, *args):
+        """Autotuned kernel — measures autotune + c_cache interaction."""
+        if len(args) != 19:
+            return lambda: nop_kernel[1,]()
+        # Warmup: trigger autotune config selection
+        nop_autotuned_kernel[(1,)](*args[:14])
+        return lambda: nop_autotuned_kernel[(1,)](*args[:14])
+
+    @register_benchmark()
+    def nop_triton_kernel_autotuned_nocache(self, *args):
+        """Autotuned kernel without c_cache — baseline for autotune overhead."""
+        if len(args) != 19:
+            return lambda: nop_kernel[1,]()
+        nop_autotuned_kernel_nocache[(1,)](*args[:14])
+        return lambda: nop_autotuned_kernel_nocache[(1,)](*args[:14])
 
     @register_benchmark()
     def nop_triton_kernel_fc_miss(self, *args):
