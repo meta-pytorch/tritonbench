@@ -134,6 +134,7 @@ if [ -n "${USE_TRITON_MAIN:-}" ]; then
     if [ -n "${TRITON_MAIN_COMMIT:-}" ]; then
         TRITON_MAIN_INSTALL_ARGS+=(--commit "${TRITON_MAIN_COMMIT}")
     fi
+    export CONDA_ENV="triton-main"
     bash ./.ci/triton/install-triton-main.sh "${TRITON_MAIN_INSTALL_ARGS[@]}"
 fi
 if [ -n "${USE_META_TRITON:-}" ]; then
@@ -141,14 +142,19 @@ if [ -n "${USE_META_TRITON:-}" ]; then
     if [ -n "${META_TRITON_COMMIT:-}" ]; then
         META_TRITON_INSTALL_ARGS+=(--commit "${META_TRITON_COMMIT}")
     fi
+    export CONDA_ENV="meta-triton"
     bash ./.ci/triton/install-meta-triton.sh "${META_TRITON_INSTALL_ARGS[@]}"
 fi
 if [ -n "${CUSTOM_TRITON_DIR:-}" ]; then
     CUSTOM_TRITON_INSTALL_ARGS=("${COMMON_INSTALL_ARGS[@]}" --no-checkout)
-    bash ./.ci/triton/install.sh --conda-env "custom-triton" \
+    export CONDA_ENV="custom_triton"
+    bash ./.ci/triton/install.sh --conda-env "${CONDA_ENV}" \
         --side single --install-dir "${CUSTOM_TRITON_DIR}" \
         "${CUSTOM_TRITON_INSTALL_ARGS[@]}"
 fi
+
+# switch to the new conda env
+. "${SETUP_SCRIPT}"
 
 bash .ci/tritonbench/install.sh
 
