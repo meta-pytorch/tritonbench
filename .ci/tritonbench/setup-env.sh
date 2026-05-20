@@ -3,7 +3,7 @@
 set -xeuo pipefail
 
 usage() {
-    echo "Usage: $0 [--cuda|--hip] [--triton-main] [--meta-triton] [--no-build] [--test-nvidia-driver] [--install-torch-wheel <wheel-url>] [--triton-main-commit <hash-or-ref>] [--meta-triton-commit <hash-or-ref>]"
+    echo "Usage: $0 [--cuda|--hip] [--triton-main] [--meta-triton] [--custom-triton <triton-dir>] [--no-build] [--test-nvidia-driver] [--install-torch-wheel <wheel-url>] [--triton-main-commit <hash-or-ref>] [--meta-triton-commit <hash-or-ref>]"
     exit 1
 }
 
@@ -22,6 +22,14 @@ while [[ "$#" -gt 0 ]]; do
         --hip) USE_HIP="1"; ;;
         --triton-main) USE_TRITON_MAIN="1"; ;;
         --meta-triton) USE_META_TRITON="1"; ;;
+        --custom-triton)
+            if [ -z "${2:-}" ]; then
+                echo "ERROR: --custom-triton requires a value"
+                usage
+            fi
+            CUSTOM_TRITON_DIR="$2"
+            shift
+            ;;
         --install-torch-wheel)
             if [ -z "${2:-}" ]; then
                 echo "ERROR: --install-torch-wheel requires a value"
@@ -116,13 +124,6 @@ else
     exit 1
 fi
 
-bash .ci/tritonbench/install.sh
-
-if [ -n "${USE_CUDA:-}" ] && [ -n "${TEST_NVIDIA_DRIVER:-}" ]; then
-    sudo apt-get purge -y '^libnvidia-'
-    sudo apt-get purge -y '^nvidia-'
-fi
-
 COMMON_INSTALL_ARGS=()
 if [ -n "${NO_BUILD:-}" ]; then
     COMMON_INSTALL_ARGS+=(--no-build)
@@ -141,6 +142,19 @@ if [ -n "${USE_META_TRITON:-}" ]; then
         META_TRITON_INSTALL_ARGS+=(--commit "${META_TRITON_COMMIT}")
     fi
     bash ./.ci/triton/install-meta-triton.sh "${META_TRITON_INSTALL_ARGS[@]}"
+fi
+if [ -n "${CUSTOM_TRITON_DIR:-}" ]; then
+    CUSTOM_TRITON_INSTALL_ARGS=("${COMMON_INSTALL_ARGS[@]}" --no-checkout)
+    bash ./.ci/triton/install.sh --conda-env "${CONDA_ENV}" \
+        --side single --install-dir "${CUSTOM_TRITON_DIR}" \
+        "${CUSTOM_TRITON_INSTALL_ARGS[@]}"
+fi
+
+bash .ci/tritonbench/install.sh
+
+if [ -n "${USE_CUDA:-}" ] && [ -n "${TEST_NVIDIA_DRIVER:-}" ]; then
+    sudo apt-get purge -y '^libnvidia-'
+    sudo apt-get purge -y '^nvidia-'
 fi
 
 cat "${SETUP_SCRIPT}"
