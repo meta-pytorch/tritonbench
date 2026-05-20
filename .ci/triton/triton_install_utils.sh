@@ -1,7 +1,21 @@
 # remove triton installations
 remove_triton() {
     # delete the original triton directory
-    TRITON_PKG_DIR=$(python -c "import triton; import os; print(os.path.dirname(triton.__file__))")
+    TRITON_PKG_DIR=$(
+        python - <<'PY'
+import os
+
+try:
+    import triton
+except ModuleNotFoundError:
+    raise SystemExit(0)
+
+print(os.path.dirname(triton.__file__))
+PY
+    )
+    if [ -z "${TRITON_PKG_DIR}" ]; then
+        return 0
+    fi
     # make sure all pytorch triton has been uninstalled
     if [ -n "${UV_VENV_DIR:-}" ]; then
         uv pip uninstall triton
