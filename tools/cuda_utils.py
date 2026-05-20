@@ -95,9 +95,15 @@ def setup_cuda_softlink(cuda_version: str):
 
 
 def install_torch_deps():
+    """Install pytorch dependencies. Need to run when install pytorch from a wheel."""
     # install torch dependencies
     torch_deps = [
         "packaging",
+        "typing_extensions",
+        "numpy",
+        "sympy",
+        "filelock",
+        "pyyaml",
     ]
     cmd = get_pip_cmd() + ["install"] + torch_deps
     subprocess.check_call(cmd)
@@ -200,15 +206,18 @@ if __name__ == "__main__":
         (args.install_torch_nightly or args.install_torch_wheel)
         and args.check_torch_nightly_version
     ), "Error: Can't install torch and check the nightly version in the same command."
+    torch_deps_installed = False
     if args.setup_cuda_softlink:
         assert IS_CUDA, "Error: CUDA is not available on this machine."
         setup_cuda_softlink(cuda_version=args.toolkit_version)
-    if args.install_torch_deps:
+    if args.install_torch_deps or args.install_torch_wheel:
         install_torch_deps()
+        torch_deps_installed = True
     if args.install_torch_build_deps:
         from .torch_utils import install_torch_build_deps
 
-        install_torch_deps()
+        if not torch_deps_installed:
+            install_torch_deps()
         install_torch_build_deps()
     if args.install_torch_nightly:
         toolkit_version = toolkit_mapping[args.toolkit_version]["pytorch_url"]
