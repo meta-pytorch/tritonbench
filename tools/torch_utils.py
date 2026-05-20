@@ -105,7 +105,12 @@ def install_pytorch_nightly(toolkit_version: str, env, dryrun=False):
 
 def install_pytorch_wheel(wheel_url: str, env, dryrun=False):
     uninstall_pytorch(dryrun=dryrun)
-    install_torch_cmd = get_pip_cmd() + ["install", "--no-cache-dir", wheel_url]
+    install_torch_cmd = get_pip_cmd() + [
+        "install",
+        "--no-cache-dir",
+        "--no-deps",
+        wheel_url,
+    ]
     if dryrun:
         print(f"Install pytorch wheel: {install_torch_cmd}")
     else:
