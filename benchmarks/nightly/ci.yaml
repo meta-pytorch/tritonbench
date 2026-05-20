@@ -31,10 +31,10 @@ embedding_bwd:
     latency,speedup
 bf16_flash_attention_fwd:
   args: --op flash_attention --only triton_tutorial_flash_v2,triton_tutorial_flash_v2_tma,triton_tutorial_flash_v2_tma_ws,triton_tutorial_flash_v2_tma_ws_persistent,triton_tutorial_flash_v2_ws
-    --baseline aten --metrics latency,tflops,speedup
+    --baseline sdpa --metrics latency,tflops,speedup
 bf16_flash_attention_bwd:
   args: --op flash_attention --only triton_tutorial_flash_v2_tma_ws,triton_tutorial_flash_v2,triton_tutorial_flash_v2_tma,triton_tutorial_flash_v2_tma_ws_persistent,triton_tutorial_flash_v2_ws
-    --bwd --baseline aten --metrics latency,tflops,speedup --causal
+    --bwd --baseline sdpa --metrics latency,tflops,speedup --causal
 fp8_attention_fwd:
   args: --op fp8_attention --only triton_flash_v2,triton_flash_v2_tma,triton_flash_v2_ws
     --baseline triton_flash_v2 --metrics latency,tflops,speedup

@@ -8,7 +8,7 @@ blackwell_attentions: sdpa
 cross_entropy: cross_entropy_loss
 decoding_attention: triton_splitk
 embedding: torch_embedding
-flash_attention: aten
+flash_attention: sdpa
 flex_attention: eager
 fp32_to_mx4: fbgemm_fp32_to_mx4
 fp8_attention: triton_flash_v2

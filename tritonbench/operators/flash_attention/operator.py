@@ -240,7 +240,7 @@ class Operator(BenchmarkOperator):
         self.gen_cache_size_inputs = args.gen_cache_size_inputs
         self.optims = {}
 
-    @register_benchmark(baseline=True)
+    @register_benchmark()
     @multi_input_wrapper
     def aten(self, *args) -> Tuple[Callable, Callable]:
         def _inner(q, k, v):
@@ -256,7 +256,7 @@ class Operator(BenchmarkOperator):
 
         return preproc_noop, _inner
 
-    @register_benchmark()
+    @register_benchmark(baseline=True)
     @multi_input_wrapper
     def sdpa(self, *args) -> Tuple[Callable, Callable]:
         def sdpa_flash_attention(q, k, v):
