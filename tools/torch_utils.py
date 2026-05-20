@@ -77,9 +77,7 @@ def check_torch_nightly_version(force_date: Optional[str] = None):
     )
 
 
-def install_pytorch_nightly(toolkit_version: str, env, dryrun=False):
-    from .torch_utils import TORCH_NIGHTLY_PACKAGES
-
+def uninstall_pytorch(dryrun=False):
     install_cmd = get_pip_cmd()
     uninstall_torch_cmd = install_cmd + ["uninstall"]
     if not USE_UV:
@@ -91,11 +89,24 @@ def install_pytorch_nightly(toolkit_version: str, env, dryrun=False):
         # uninstall multiple times to make sure the env is clean
         for _loop in range(3):
             subprocess.check_call(uninstall_torch_cmd)
+
+
+def install_pytorch_nightly(toolkit_version: str, env, dryrun=False):
+    uninstall_pytorch(dryrun=dryrun)
     pytorch_nightly_url = f"https://download.pytorch.org/whl/nightly/{toolkit_version}"
-    install_torch_cmd = install_cmd + ["install", "--pre", "--no-cache-dir"]
+    install_torch_cmd = get_pip_cmd() + ["install", "--pre", "--no-cache-dir"]
     install_torch_cmd.extend(TORCH_NIGHTLY_PACKAGES)
     install_torch_cmd.extend(["-i", pytorch_nightly_url])
     if dryrun:
         print(f"Install pytorch nightly: {install_torch_cmd}")
+    else:
+        subprocess.check_call(install_torch_cmd, env=env)
+
+
+def install_pytorch_wheel(wheel_url: str, env, dryrun=False):
+    uninstall_pytorch(dryrun=dryrun)
+    install_torch_cmd = get_pip_cmd() + ["install", "--no-cache-dir", wheel_url]
+    if dryrun:
+        print(f"Install pytorch wheel: {install_torch_cmd}")
     else:
         subprocess.check_call(install_torch_cmd, env=env)
