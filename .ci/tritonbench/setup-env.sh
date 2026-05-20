@@ -3,7 +3,7 @@
 set -xeuo pipefail
 
 usage() {
-    echo "Usage: $0 [--cuda|--hip] [--triton-main] [--meta-triton] [--no-build] [--test-nvidia-driver] [--triton-main-commit <hash-or-ref>] [--meta-triton-commit <hash-or-ref>]"
+    echo "Usage: $0 [--cuda|--hip] [--triton-main] [--meta-triton] [--no-build] [--test-nvidia-driver] [--install-torch-wheel <wheel-url>] [--triton-main-commit <hash-or-ref>] [--meta-triton-commit <hash-or-ref>]"
     exit 1
 }
 
@@ -22,6 +22,14 @@ while [[ "$#" -gt 0 ]]; do
         --hip) USE_HIP="1"; ;;
         --triton-main) USE_TRITON_MAIN="1"; ;;
         --meta-triton) USE_META_TRITON="1"; ;;
+        --install-torch-wheel)
+            if [ -z "${2:-}" ]; then
+                echo "ERROR: --install-torch-wheel requires a value"
+                usage
+            fi
+            INSTALL_TORCH_WHEEL="$2"
+            shift
+            ;;
         --triton-main-commit)
             if [ -z "${2:-}" ]; then
                 echo "ERROR: --triton-main-commit requires a value"
@@ -79,7 +87,13 @@ python -m tools.cuda_utils --install-torch-deps
 bash .ci/tritonbench/install-pytorch-source.sh
 
 if [ -n "${USE_CUDA:-}" ]; then
-    python -m tools.cuda_utils --install-torch-nightly --cuda
+    TORCH_INSTALL_ARGS=(--cuda)
+    if [ -n "${INSTALL_TORCH_WHEEL:-}" ]; then
+        TORCH_INSTALL_ARGS+=(--install-torch-wheel "${INSTALL_TORCH_WHEEL}")
+    else
+        TORCH_INSTALL_ARGS+=(--install-torch-nightly)
+    fi
+    python -m tools.cuda_utils "${TORCH_INSTALL_ARGS[@]}"
 
     bash ./.ci/tritonbench/setup-nvidia-path.sh
 
@@ -89,7 +103,13 @@ if [ -n "${USE_CUDA:-}" ]; then
     fi
 
 elif [ -n "${USE_HIP:-}" ]; then
-    python -m tools.cuda_utils --install-torch-nightly --hip
+    TORCH_INSTALL_ARGS=(--hip)
+    if [ -n "${INSTALL_TORCH_WHEEL:-}" ]; then
+        TORCH_INSTALL_ARGS+=(--install-torch-wheel "${INSTALL_TORCH_WHEEL}")
+    else
+        TORCH_INSTALL_ARGS+=(--install-torch-nightly)
+    fi
+    python -m tools.cuda_utils "${TORCH_INSTALL_ARGS[@]}"
     bash ./.ci/tritonbench/setup-rocm-path.sh
 else
     echo "Unknown backend. Only CUDA and HIP are supported."
