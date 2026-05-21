@@ -146,8 +146,7 @@ if [ -n "${USE_META_TRITON:-}" ]; then
     bash ./.ci/triton/install-meta-triton.sh "${META_TRITON_INSTALL_ARGS[@]}"
 fi
 if [ -n "${CUSTOM_TRITON_DIR:-}" ]; then
-    CUSTOM_TRITON_INSTALL_ARGS=("${COMMON_INSTALL_ARGS[@]}" --no-checkout)
-    export CONDA_ENV="custom_triton"
+    CUSTOM_TRITON_INSTALL_ARGS=("${COMMON_INSTALL_ARGS[@]}" --no-checkout --skip-conda-reset)
     bash ./.ci/triton/install.sh --conda-env "${CONDA_ENV}" \
         --side single --install-dir "${CUSTOM_TRITON_DIR}" \
         "${CUSTOM_TRITON_INSTALL_ARGS[@]}"

@@ -4,7 +4,7 @@ set -xeuo pipefail
 
 # Print usage
 usage() {
-    echo "Usage: $0 [--repo <repo-path>] [--commit <commit-hash>] --side <a|b|single> --conda-env <env-name> --install-dir <triton-install-dir> [--nightly] [--no-build] [--no-clone] [--no-checkout]"
+    echo "Usage: $0 [--repo <repo-path>] [--commit <commit-hash>] --side <a|b|single> --conda-env <env-name> --install-dir <triton-install-dir> [--nightly] [--no-build] [--no-clone] [--no-checkout] [--skip-conda-reset]"
     exit 1
 }
 
@@ -49,6 +49,7 @@ while [[ "$#" -gt 0 ]]; do
         --no-build) NO_BUILD="1"; ;;
         --no-clone) NO_CLONE="1"; ;;
         --no-checkout) NO_CHECKOUT="1"; ;;
+        --skip-conda-reset) SKIP_CONDA_RESET="1"; ;;
         --install-dir) TRITON_INSTALL_DIR="$2"; shift ;;
         *) echo "Unknown parameter passed: $1"; usage ;;
     esac
@@ -95,11 +96,12 @@ if [ -n "${NO_CHECKOUT:-}" ] && [ ! -d "${TRITON_INSTALL_DIR}" ]; then
 fi
 
 
-CONDA_ENV=pytorch . "${SETUP_SCRIPT}"
-# Remove the conda env if exists
-remove_env "${CONDA_ENV}"
-clone_env "${CONDA_ENV}" pytorch
-
+if [ -z "${SKIP_CONDA_RESET:-}" ]; then
+    CONDA_ENV=pytorch . "${SETUP_SCRIPT}"
+    # Remove the conda env if exists
+    remove_env "${CONDA_ENV}"
+    clone_env "${CONDA_ENV}" pytorch
+fi
 . "${SETUP_SCRIPT}"
 
 TRITONBENCH_DIR=$(dirname "$(readlink -f "$0")")/../..
