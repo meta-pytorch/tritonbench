@@ -17,6 +17,7 @@ from tritonbench.operators.gemm.warp_spec_persistent_matmul import (
     blackwell_matmul_descriptor_persistent,
     blackwell_matmul_tma,
     blackwell_matmul_tma_persistent,
+    blackwell_matmul_tma_persistent_splitk,
 )
 from tritonbench.utils.triton_utils import has_tlx
 
@@ -661,6 +662,20 @@ class Operator(BenchmarkOperator):
             )
         else:
             return lambda: blackwell_matmul_tma_persistent(a, b, warp_specialize=True)
+
+    @register_benchmark(enabled=IS_BLACKWELL or IS_HOPPER, fwd_only=True)
+    def triton_warpspec_tma_persistent_splitk_matmul(self, a, b, bias) -> Callable:
+        """Warp-specialized persistent split-K matmul for large-K undersaturated GEMMs.
+
+        Split-K decomposes the K dimension across multiple CTA groups so that
+        GEMMs with small M*N but large K can still saturate the GPU. Each group
+        writes a partial sum to a workspace; a reduce kernel folds them into
+        the final output.
+        """
+        if bias is not None:
+            return lambda: blackwell_matmul_tma_persistent_splitk(a, b) + bias
+        else:
+            return lambda: blackwell_matmul_tma_persistent_splitk(a, b)
 
     @register_benchmark(enabled=IS_BLACKWELL or IS_HOPPER)
     def triton_tma_persistent_matmul(self, a, b, bias) -> Callable:
