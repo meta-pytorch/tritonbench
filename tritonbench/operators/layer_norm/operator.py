@@ -4,7 +4,7 @@ from typing import Callable, List, Optional
 import torch
 import torch.nn.functional as F
 import triton
-from tritonbench.utils.env_utils import is_b200, is_h100
+from tritonbench.utils.env_utils import is_b200, is_h100, is_hip
 from tritonbench.utils.triton_op import (
     BenchmarkOperator,
     BenchmarkOperatorMetrics,
@@ -123,7 +123,7 @@ class Operator(BenchmarkOperator):
         (x, w_shape, weight, bias, eps) = args
         return lambda: LigerLayerNormFunction.apply(x, weight, bias, eps)
 
-    @register_benchmark(enabled=multi_cta_triton.HAS_MULTI_CTA)
+    @register_benchmark(enabled=multi_cta_triton.HAS_MULTI_CTA and not is_hip())
     def triton_multi_cta_layer_norm(self, *args):
         x = args[0]
         M, N = x.reshape(-1, x.shape[-1]).shape
@@ -132,7 +132,8 @@ class Operator(BenchmarkOperator):
         return lambda: multi_cta_triton.layer_norm_multi_cta(*args)
 
     @register_benchmark(
-        enabled=tlx_layernorm.HAS_TLX and (is_b200() or is_h100()), fwd_only=True
+        enabled=tlx_layernorm.HAS_TLX and (is_b200() or is_h100()) and not is_hip(),
+        fwd_only=True,
     )
     def tlx_multi_cta_layer_norm(self, *args):
         # TLX manual multi-CTA layernorm (Blackwell clusters + DSM)
