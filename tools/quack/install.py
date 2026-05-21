@@ -26,9 +26,15 @@ def install_quack():
     subprocess.check_call(git_clone_cmd, cwd=QUACK_INSTALL_PATH)
     git_checkout_cmd = ["git", "checkout", QUACK_SHA]
     subprocess.check_call(git_checkout_cmd, cwd=quack_path)
+    override_parameters = []
+    override_file = os.getenv("TRITONBENCH_UV_QUACK_OVERRIDE_FILE")
+    pip_cmd = get_pip_cmd()
+    if override_file and Path(override_file).exists() and pip_cmd[:2] == ["uv", "pip"]:
+        override_parameters = ["--overrides", override_file]
     install_quack_cmd = (
-        get_pip_cmd()
-        + ["install", "-e", ".[dev]", "--no-deps"]
+        pip_cmd
+        + ["install", "-e", ".[dev]"]
+        + override_parameters
         + constraints_parameters
     )
     subprocess.check_call(install_quack_cmd, cwd=quack_path)

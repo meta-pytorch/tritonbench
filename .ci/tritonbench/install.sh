@@ -26,5 +26,16 @@ if [ -n "${INSTALL_PYTORCH_NIGHTLY}" ]; then
   bash ./.ci/tritonbench/install-pytorch-source.sh
 fi
 
+if [ -n "${UV_VENV_DIR:-}" ] || [ -n "${VIRTUAL_ENV:-}" ]; then
+  mkdir -p build
+  export TRITONBENCH_UV_QUACK_OVERRIDE_FILE="${tritonbench_dir}/build/uv-quack-overrides.txt"
+  python - <<'PY' > "${TRITONBENCH_UV_QUACK_OVERRIDE_FILE}"
+import importlib.metadata as metadata
+
+for package in ("torch", "triton"):
+    print(f"{package}=={metadata.version(package)}")
+PY
+fi
+
 # Install Tritonbench and all its customized packages
 LD_LIBRARY_PATH=${LD_LIBRARY_PATH} python install.py --all
