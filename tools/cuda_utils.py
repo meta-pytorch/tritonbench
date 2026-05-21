@@ -105,6 +105,7 @@ def install_torch_deps():
         "filelock",
         "pyyaml",
         "networkx",
+        "jinja2",
     ]
     cmd = get_pip_cmd() + ["install"] + torch_deps
     subprocess.check_call(cmd)
