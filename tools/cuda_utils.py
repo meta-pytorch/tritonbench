@@ -104,6 +104,7 @@ def install_torch_deps():
         "sympy",
         "filelock",
         "pyyaml",
+        "networkx",
     ]
     cmd = get_pip_cmd() + ["install"] + torch_deps
     subprocess.check_call(cmd)
