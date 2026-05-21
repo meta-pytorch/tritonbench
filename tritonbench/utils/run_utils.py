@@ -910,6 +910,7 @@ def run_in_task(
     extra_envs: Optional[Dict[str, str]] = None,
     override_envs: bool = False,
     capture_output: Optional[str] = None,
+    timeout_s: int = 900,
 ) -> None:
     op_task_cmd = [] if is_fbcode() else [sys.executable]
     if not op_args:
@@ -957,29 +958,27 @@ def run_in_task(
             assert os.path.isdir(capture_output), (
                 f"specified capture output dir {capture_output} must exist"
             )
+        stdout = sys.stdout
+        stderr = sys.stderr
         if capture_output:
-            with (
-                open(os.path.join(capture_output, "stdout.log"), "w") as stdout,
-                open(os.path.join(capture_output, "stderr.log"), "w") as stderr,
-            ):
-                subprocess.check_call(
-                    op_task_cmd,
-                    stdout=stdout,
-                    stderr=stderr,
-                    cwd=cwd,
-                    env=subprocess_env,
-                )
-        else:
-            subprocess.check_call(
-                op_task_cmd,
-                stdout=sys.stdout,
-                stderr=sys.stderr,
-                cwd=cwd,
-                env=subprocess_env,
-            )
+            stdout = open(os.path.join(capture_output, "stdout.log"), "w")
+            stderr = open(os.path.join(capture_output, "stderr.log"), "w")
+        subprocess.check_call(
+            op_task_cmd,
+            stdout=stdout,
+            stderr=stderr,
+            cwd=cwd,
+            env=subprocess_env,
+            timeout=timeout_s,
+        )
         benchmark_time = time.perf_counter() - start_time
         logger.info(
             f"[tritonbench] Complete benchmark {benchmark_name} in {benchmark_time:.3f} seconds."
+        )
+        return 0
+    except subprocess.TimeoutExpired:
+        logger.warning(
+            f"[tritonbench] Benchmark {benchmark_name} timed out after {timeout_s} seconds."
         )
         return 0
     except subprocess.CalledProcessError as e:
@@ -988,3 +987,7 @@ def run_in_task(
     except KeyboardInterrupt:
         logger.warning("[tritonbench] KeyboardInterrupt received, exiting...")
         sys.exit(1)
+    finally:
+        if capture_output:
+            stdout.close()
+            stderr.close()
