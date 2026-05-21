@@ -10,7 +10,7 @@ REPO_PATH = Path(os.path.abspath(__file__)).parent.parent.parent
 CURRENT_DIR = Path(os.path.abspath(__file__)).parent
 
 QUACK_REPO = "https://github.com/Dao-AILab/quack.git"
-QUACK_SHA = "12f11462f06f8c1d79ac2c3c04e308678c81253c"
+QUACK_SHA = "5e4d024e839bf851b820887c4c5b9656f206fa08"
 
 QUACK_INSTALL_PATH = REPO_PATH.joinpath(".install")
 BUILD_CONSTRAINTS_FILE = REPO_PATH.joinpath("build", "constraints.txt")
@@ -27,6 +27,8 @@ def install_quack():
     git_checkout_cmd = ["git", "checkout", QUACK_SHA]
     subprocess.check_call(git_checkout_cmd, cwd=quack_path)
     install_quack_cmd = (
-        get_pip_cmd() + ["install", "-e", ".[dev]"] + constraints_parameters
+        get_pip_cmd()
+        + ["install", "-e", ".[dev]", "--no-deps"]
+        + constraints_parameters
     )
     subprocess.check_call(install_quack_cmd, cwd=quack_path)
