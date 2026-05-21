@@ -27,7 +27,7 @@ if not has_pkg("torch"):
     install_pytorch_nightly(toolkit_version, env)
 
 # requires torch
-from tritonbench.utils.env_utils import is_hip
+from tritonbench.utils.env_utils import is_cuda, is_hip
 
 
 REPO_PATH = Path(os.path.abspath(__file__)).parent
@@ -137,7 +137,12 @@ if __name__ == "__main__":
     generate_build_constraints(deps)
 
     # install framework dependencies from pyproject.toml
-    dependency_group = "dev-amd" if is_hip() else "dev-nvidia"
+    if is_hip():
+        dependency_group = "dev-amd"
+    elif is_cuda():
+        dependency_group = "dev-nvidia"
+    else:
+        dependency_group = "dev-cpu"
     subprocess.check_call(get_pip_cmd() + ["install", "--group", dependency_group])
     # checkout submodules
     checkout_submodules(REPO_PATH)
