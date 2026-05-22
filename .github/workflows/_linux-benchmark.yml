@@ -74,6 +74,7 @@ jobs:
       TRITONBENCH_SIDE_A_ENV: ${{ inputs.test_type == 'abtest' && 'triton-side-a' || inputs.venv_name }}
       CONDA_ENV: ${{ inputs.test_type == 'abtest' && 'triton-side-a' || inputs.venv_name }}
       TRITONBENCH_SIDE_B_ENV: "triton-side-b"
+      MI350_TORCH_WHEEL: "https://download-r2.pytorch.org/whl/nightly/rocm7.2/torch-2.13.0.dev20260513%2Brocm7.2-cp312-cp312-manylinux_2_28_x86_64.whl"
       TRITONBENCH_SCRIBE_GRAPHQL_ACCESS_TOKEN: ${{ secrets.TRITONBENCH_SCRIBE_GRAPHQL_ACCESS_TOKEN }}
       AWS_ACCESS_KEY_ID: ${{ secrets.AWS_ACCESS_KEY_ID }}
       AWS_SECRET_ACCESS_KEY: ${{ secrets.AWS_SECRET_ACCESS_KEY }}
@@ -104,7 +105,12 @@ jobs:
             bash ./.ci/tritonbench/setup-nvidia-path.sh
             bash ./.ci/tritonbench/install.sh --refresh-pytorch
           elif [ "${{ inputs.runner }}" = "mi350" ]; then
-            bash ./.ci/tritonbench/setup-env.sh --hip --no-build --triton-main --meta-triton
+            bash ./.ci/tritonbench/setup-env.sh \
+              --hip \
+              --no-build \
+              --triton-main \
+              --meta-triton \
+              --install-torch-wheel "${MI350_TORCH_WHEEL}"
           else
             echo "Unknown runner: ${{ inputs.runner }}"
             exit 1
