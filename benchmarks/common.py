@@ -74,6 +74,7 @@ def run_benchmark_config_ci(
     from tritonbench.utils.run_utils import run_config, SPECIAL_CONFIG_FIELDS
     from tritonbench.utils.scuba_utils import decorate_benchmark_data, log_benchmark
 
+    benchmark_start_time = time.time()
     output_files = []
     run_timestamp, output_dir = setup_output_dir(
         benchmark_group_name, ci=ci, output_dir=output_dir
@@ -124,6 +125,11 @@ def run_benchmark_config_ci(
     if log_scuba and not is_fbcode():
         log_benchmark(aggregated_obj)
         logger.info(f"[{benchmark_group_name}] logging results to scuba table.")
+
+    if is_fbcode():
+        from tritonbench.utils.fb.utils import log_job_summary_to_scuba
+
+        log_job_summary_to_scuba(benchmark_group_name, benchmark_start_time)
 
 
 def setup_output_dir(bm_name: str, ci: bool = False, output_dir: str | None = None):
