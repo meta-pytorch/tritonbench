@@ -82,17 +82,22 @@ if [ -z "${CONDA_ENV:-}" ]; then
 fi
 echo "if [ -z \${CONDA_ENV} ]; then export CONDA_ENV=${CONDA_ENV}; fi" >> "${SETUP_SCRIPT}"
 
-CONDA_ENV=pytorch python3 tools/python_utils.py --create-conda-env "${CONDA_ENV}"
+if [ -z "${CUSTOM_TRITON_DIR:-}" ]; then
+    export BOOTSTRAP_CONDA_ENV=pytorch
+else
+    export BOOTSTRAP_CONDA_ENV=$CONDA_ENV
+fi    
+CONDA_ENV=${BOOTSTRAP_CONDA_ENV} python3 tools/python_utils.py \
+         --create-conda-env "${CONDA_ENV}"
 if [ -n "${UV_VENV_DIR:-}" ]; then
     echo ". ${UV_VENV_DIR}/\${CONDA_ENV}/bin/activate" >> "${SETUP_SCRIPT}"
     # use pytorch conda env to bootstrap
-    CONDA_ENV=pytorch . "${SETUP_SCRIPT}"
+    CONDA_ENV=${BOOTSTRAP_CONDA_ENV} . "${SETUP_SCRIPT}"
 else
     echo "conda activate \${CONDA_ENV}" >> "${SETUP_SCRIPT}"
     # use pytorch conda env to bootstrap
-    CONDA_ENV=pytorch . "${SETUP_SCRIPT}"
+    CONDA_ENV=${BOOTSTRAP_CONDA_ENV} . "${SETUP_SCRIPT}"
 fi
-python -m tools.cuda_utils --install-torch-deps
 
 bash .ci/tritonbench/install-pytorch-source.sh
 
@@ -100,6 +105,7 @@ if [ -n "${USE_CUDA:-}" ]; then
     TORCH_INSTALL_ARGS=(--cuda)
     if [ -n "${INSTALL_TORCH_WHEEL:-}" ]; then
         TORCH_INSTALL_ARGS+=(--install-torch-wheel "${INSTALL_TORCH_WHEEL}")
+        python -m tools.cuda_utils --install-torch-deps
     else
         TORCH_INSTALL_ARGS+=(--install-torch-nightly)
     fi
@@ -116,13 +122,14 @@ elif [ -n "${USE_HIP:-}" ]; then
     TORCH_INSTALL_ARGS=(--hip)
     if [ -n "${INSTALL_TORCH_WHEEL:-}" ]; then
         TORCH_INSTALL_ARGS+=(--install-torch-wheel "${INSTALL_TORCH_WHEEL}")
+        python -m tools.cuda_utils --install-torch-deps
     else
         TORCH_INSTALL_ARGS+=(--install-torch-nightly)
     fi
     python -m tools.cuda_utils "${TORCH_INSTALL_ARGS[@]}"
     bash ./.ci/tritonbench/setup-rocm-path.sh
 else
-    echo "Unknown backend. Only CUDA and HIP are supported."
+    echo "Unknown backend. Only CUDA and HIP are supported in the CI."
     exit 1
 fi
 
