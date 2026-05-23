@@ -52,6 +52,7 @@ checkout_triton() {
     TRITON_INSTALL_DIR=$2
     NIGHTLY=$3
     cd "${TRITON_INSTALL_DIR}"
+    git fetch
     git checkout "${COMMIT}"
     if [ "${NIGHTLY}" == "1" ]; then
         # truncate the branch to the earliest commit of the current day
