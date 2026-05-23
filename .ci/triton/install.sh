@@ -4,7 +4,7 @@ set -xeuo pipefail
 
 # Print usage
 usage() {
-    echo "Usage: $0 [--repo <repo-path>] [--commit <commit-hash>] --side <a|b|single> --conda-env <env-name> --install-dir <triton-install-dir> [--nightly] [--no-build] [--no-clone] [--no-checkout] [--skip-conda-reset]"
+    echo "Usage: $0 [--repo <repo-path>] [--commit <commit-hash>] --side <a|b|single> --conda-env <env-name> --install-dir <triton-install-dir> [--nightly] [--no-build] [--no-clone] [--no-checkout|--no-check-out] [--skip-conda-reset]"
     exit 1
 }
 
@@ -48,7 +48,7 @@ while [[ "$#" -gt 0 ]]; do
         --nightly) NIGHTLY="1"; ;;
         --no-build) NO_BUILD="1"; ;;
         --no-clone) NO_CLONE="1"; ;;
-        --no-checkout) NO_CHECKOUT="1"; ;;
+        --no-checkout|--no-check-out) NO_CHECKOUT="1"; ;;
         --skip-conda-reset) SKIP_CONDA_RESET="1"; ;;
         --install-dir) TRITON_INSTALL_DIR="$2"; shift ;;
         *) echo "Unknown parameter passed: $1"; usage ;;
@@ -82,19 +82,35 @@ if [ "${SIDE}" == "single" ]; then
         exit 1
     fi
 elif [ "${SIDE}" == "a" ] || [ "${SIDE}" == "b" ]; then
-    mkdir -p ${WORKSPACE_DIR}/abtest
-    CONDA_ENV="triton-side-${SIDE}"
-    TRITON_INSTALL_DIR=${WORKSPACE_DIR}/abtest/${CONDA_ENV}
+    if [ -n "${NO_CHECKOUT:-}" ]; then
+        if [ -z "${CONDA_ENV:-}" ] || [ -z "${TRITON_INSTALL_DIR:-}" ]; then
+            echo "Must specifify --conda-env and --install-dir with --side ${SIDE} and --no-checkout."
+            exit 1
+        fi
+        if [ ! -d "${TRITON_INSTALL_DIR}" ]; then
+            echo "ERROR: --no-checkout requires an existing TRITON_INSTALL_DIR: ${TRITON_INSTALL_DIR}"
+            exit 1
+        fi
+        ABTEST_DIR="${WORKSPACE_DIR}/abtest"
+        ABTEST_TRITON_INSTALL_DIR="${ABTEST_DIR}/triton-side-${SIDE}"
+        mkdir -p "${ABTEST_DIR}"
+        if [ "${TRITON_INSTALL_DIR}" != "${ABTEST_TRITON_INSTALL_DIR}" ]; then
+            if [ -L "${ABTEST_TRITON_INSTALL_DIR}" ]; then
+                rm -f "${ABTEST_TRITON_INSTALL_DIR}" || true
+            elif [ -e "${ABTEST_TRITON_INSTALL_DIR}" ]; then
+                rm -rf "${ABTEST_TRITON_INSTALL_DIR}" || true
+            fi
+            ln -s "${TRITON_INSTALL_DIR}" "${ABTEST_TRITON_INSTALL_DIR}"
+        fi
+    else
+        mkdir -p ${WORKSPACE_DIR}/abtest
+        CONDA_ENV="triton-side-${SIDE}"
+        TRITON_INSTALL_DIR=${WORKSPACE_DIR}/abtest/${CONDA_ENV}
+    fi
 else
     echo "Unknown side: ${SIDE}"
     exit 1
 fi
-
-if [ -n "${NO_CHECKOUT:-}" ] && [ ! -d "${TRITON_INSTALL_DIR}" ]; then
-    echo "ERROR: --no-checkout requires an existing TRITON_INSTALL_DIR: ${TRITON_INSTALL_DIR}"
-    exit 1
-fi
-
 
 if [ -z "${SKIP_CONDA_RESET:-}" ]; then
     CONDA_ENV=pytorch . "${SETUP_SCRIPT}"

@@ -71,8 +71,8 @@ jobs:
       SETUP_SCRIPT: "/workspace/setup_instance.sh"
       RUNNER_TYPE: ${{ inputs.runner_full_name }}
       JOB_NAME: tritonbench-${{ inputs.runner }}-benchmark-${{ inputs.venv_name }}-${{ inputs.test_type }}-${{ inputs.benchmark_name }}
-      TRITONBENCH_SIDE_A_ENV: ${{ inputs.test_type == 'abtest' && 'triton-side-a' || inputs.venv_name }}
-      CONDA_ENV: ${{ inputs.test_type == 'abtest' && 'triton-side-a' || inputs.venv_name }}
+      TRITONBENCH_SIDE_A_ENV: ${{ inputs.test_type != 'periodic' && 'triton-side-a' || inputs.venv_name }}
+      CONDA_ENV: ${{ inputs.test_type != 'periodic' && 'triton-side-a' || inputs.venv_name }}
       TRITONBENCH_SIDE_B_ENV: "triton-side-b"
       MI350_TORCH_WHEEL: "https://download-r2.pytorch.org/whl/nightly/rocm7.2/torch-2.13.0.dev20260513%2Brocm7.2-cp312-cp312-manylinux_2_28_x86_64.whl"
       TRITONBENCH_SCRIBE_GRAPHQL_ACCESS_TOKEN: ${{ secrets.TRITONBENCH_SCRIBE_GRAPHQL_ACCESS_TOKEN }}
@@ -83,6 +83,26 @@ jobs:
         uses: actions/checkout@v3
         with:
           submodules: recursive
+
+      - name: Checkout Triton (Side A)
+        if: ${{ inputs.test_type != 'periodic' && inputs.side_a_triton && inputs.side_a_commit }}
+        uses: actions/checkout@v3
+        with:
+          repository: ${{ inputs.side_a_triton }}
+          ref: ${{ inputs.side_a_commit }}
+          path: triton-side-a
+          submodules: recursive
+          fetch-depth: 0
+
+      - name: Checkout Triton (Side B)
+        if: ${{ inputs.test_type == 'abtest' && inputs.side_b_triton && inputs.side_b_commit }}
+        uses: actions/checkout@v3
+        with:
+          repository: ${{ inputs.side_b_triton }}
+          ref: ${{ inputs.side_b_commit }}
+          path: triton-side-b
+          submodules: recursive
+          fetch-depth: 0
 
       - name: Tune Nvidia GPU
         if: ${{ inputs.runner == 'h100' }}
@@ -98,63 +118,75 @@ jobs:
           role-duration-seconds: 18000
           aws-region: us-east-1
 
-      - name: Setup pytorch and tritonbench environment
+      - name: Setup tritonbench environment and compile Triton (Side A)
         run: |
           set -eux
           if [ "${{ inputs.runner }}" = "h100" ]; then
+            if [ "${{ inputs.test_type }}" = "periodic" ]; then
+              if [ "${{ inputs.venv_name }}" = "triton-main" ]; then
+                bash ./.ci/triton/install.sh \
+                  --conda-env "triton-main" \
+                  --repo triton-lang/triton \
+                  --commit main \
+                  --side single \
+                  --nightly \
+                  --no-clone \
+                  --install-dir "${WORKSPACE_DIR}/triton-main"
+              elif [ "${{ inputs.venv_name }}" = "meta-triton" ]; then
+                bash ./.ci/triton/install.sh \
+                  --conda-env "meta-triton" \
+                  --repo facebookexperimental/triton \
+                  --commit main \
+                  --side single \
+                  --nightly \
+                  --no-clone \
+                  --install-dir "${WORKSPACE_DIR}/meta-triton"
+              else
+                echo "Unknown venv name: ${{ inputs.venv_name }}"
+                exit 1
+              fi
+            else
+              bash ./.ci/triton/install.sh \
+                --conda-env "triton-side-a" \
+                --side a \
+                --install-dir "${GITHUB_WORKSPACE}/triton-side-a" \
+                --no-checkout
+              export TRITONBENCH_SIDE_A_ENV="triton-side-a"
+            fi
             bash ./.ci/tritonbench/setup-nvidia-path.sh
             bash ./.ci/tritonbench/install.sh --refresh-pytorch
           elif [ "${{ inputs.runner }}" = "mi350" ]; then
-            bash ./.ci/tritonbench/setup-env.sh \
+            TRITON_CHANNEL_ARGS=()
+            if [ "${{ inputs.test_type }}" = "periodic" ]; then
+              if [ "${{ inputs.venv_name }}" = "triton-main" ]; then
+                TRITON_CHANNEL_ARGS+=(--triton-main)
+              elif [ "${{ inputs.venv_name }}" = "meta-triton" ]; then
+                TRITON_CHANNEL_ARGS+=(--meta-triton)
+              else
+                echo "Unknown venv name: ${{ inputs.venv_name }}"
+                exit 1
+              fi
+            else
+              TRITON_CHANNEL_ARGS+=(--custom-triton ${GITHUB_WORKSPACE}/triton-side-a)
+              export TRITONBENCH_SIDE_A_ENV="triton-side-a"
+            fi
+            CONDA_ENV="${TRITONBENCH_SIDE_A_ENV}" bash ./.ci/tritonbench/setup-env.sh \
               --hip \
-              --no-build \
-              --triton-main \
-              --meta-triton \
+              "${TRITON_CHANNEL_ARGS[@]}" \
               --install-torch-wheel "${MI350_TORCH_WHEEL}"
           else
             echo "Unknown runner: ${{ inputs.runner }}"
             exit 1
           fi
 
+          echo "TRITONBENCH_SIDE_A_ENV=${TRITONBENCH_SIDE_A_ENV}" >> "${GITHUB_ENV}"
+          cat "${SETUP_SCRIPT}"
+
       - name: Setup uploader dependencies
         run: |
           set -eux
           . "${SETUP_SCRIPT}"
           uv pip install --group ci
-
-      - name: Compile Triton (Side A)
-        run: |
-          set -eux
-          if [ "${{ inputs.test_type }}" = "periodic" ]; then
-            if [ "${{ inputs.venv_name }}" = "triton-main" ]; then
-              bash ./.ci/triton/install.sh \
-                --conda-env "triton-main" \
-                --repo triton-lang/triton \
-                --commit main \
-                --side single \
-                --nightly \
-                --no-clone \
-                --install-dir "${WORKSPACE_DIR}/triton-main"
-            elif [ "${{ inputs.venv_name }}" = "meta-triton" ]; then
-              bash ./.ci/triton/install.sh \
-                --conda-env "meta-triton" \
-                --repo facebookexperimental/triton \
-                --commit main \
-                --side single \
-                --nightly \
-                --no-clone \
-                --install-dir "${WORKSPACE_DIR}/meta-triton"
-            else
-              echo "Unknown venv name: ${{ inputs.venv_name }}"
-              exit 1
-            fi
-            echo "TRITONBENCH_SIDE_A_ENV=${TRITONBENCH_SIDE_A_ENV}" >> "${GITHUB_ENV}"
-          else
-            echo "single or abtest, alreadys recompile triton"
-            bash ./.ci/triton/install.sh --repo ${{ inputs.side_a_triton }} --commit ${{ inputs.side_a_commit }} --side a
-            echo "TRITONBENCH_SIDE_A_ENV=triton-side-a" >> "${GITHUB_ENV}"
-          fi
-          cat "${SETUP_SCRIPT}"
 
       - name: Benchmark Triton (Side A)
         run: |
@@ -168,7 +200,11 @@ jobs:
         if: ${{ inputs.test_type == 'abtest' && inputs.side_b_triton && inputs.side_b_commit }}
         run: |
           set -eux
-          bash ./.ci/triton/install.sh --repo ${{ inputs.side_b_triton }} --commit ${{ inputs.side_b_commit }} --side b
+          bash ./.ci/triton/install.sh \
+            --conda-env "triton-side-b" \
+            --side b \
+            --install-dir "${GITHUB_WORKSPACE}/triton-side-b" \
+            --no-checkout
           echo 'TRITONBENCH_SIDE_B_ENV=triton-side-b' >> "${GITHUB_ENV}"
 
       - name: Benchmark Triton (Side B)
