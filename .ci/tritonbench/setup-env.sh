@@ -124,12 +124,16 @@ else
     exit 1
 fi
 
+
 COMMON_INSTALL_ARGS=()
 if [ -n "${NO_BUILD:-}" ]; then
     COMMON_INSTALL_ARGS+=(--no-build)
 fi
 
-if [ -z "${CUSTOM_TRITON_DIR:-}" ]; then
+# when there is no custom triton or install specific pytorch wheel
+# it means we have pytorch-triton installed already
+# install tritonbench in this case
+if [ -z "${CUSTOM_TRITON_DIR:-}" ] && [ -z "${INSTALL_TORCH_WHEEL:-}" ]; then
     bash .ci/tritonbench/install.sh
 fi
 
@@ -162,8 +166,11 @@ if [ -n "${CUSTOM_TRITON_DIR:-}" ]; then
     bash ./.ci/triton/install.sh --conda-env "${CONDA_ENV}" \
         --side single --install-dir "${CUSTOM_TRITON_DIR}" \
         "${CUSTOM_TRITON_INSTALL_ARGS[@]}"
-    # When using custom triton, install tritonbench after installing triton
-    # Because it will skip conda clone
+fi
+if [ -n "${CUSTOM_TRITON_DIR:-}" ] || [ -n "${INSTALL_TORCH_WHEEL:-}" ]; then
+    # when using custom triton or using custom pytorch wheel,
+    # install tritonbench after installing triton
+    # because it will skip conda clone or ignore triton dependency
     bash .ci/tritonbench/install.sh
 fi
 
