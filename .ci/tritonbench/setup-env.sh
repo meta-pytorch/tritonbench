@@ -87,8 +87,8 @@ if [ -z "${CUSTOM_TRITON_DIR:-}" ]; then
 else
     export BOOTSTRAP_CONDA_ENV=$CONDA_ENV
 fi    
-CONDA_ENV=${BOOTSTRAP_CONDA_ENV} python3 tools/python_utils.py \
-         --create-conda-env "${CONDA_ENV}"
+python3 tools/python_utils.py \
+        --create-conda-env "${BOOTSTRAP_CONDA_ENV}"
 if [ -n "${UV_VENV_DIR:-}" ]; then
     echo ". ${UV_VENV_DIR}/\${CONDA_ENV}/bin/activate" >> "${SETUP_SCRIPT}"
     # use pytorch conda env to bootstrap
