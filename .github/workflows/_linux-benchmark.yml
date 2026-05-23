@@ -127,9 +127,23 @@ jobs:
           set -eux
           if [ "${{ inputs.test_type }}" = "periodic" ]; then
             if [ "${{ inputs.venv_name }}" = "triton-main" ]; then
-              bash ./.ci/triton/install-triton-main.sh --no-clone
+              bash ./.ci/triton/install.sh \
+                --conda-env "triton-main" \
+                --repo triton-lang/triton \
+                --commit main \
+                --side single \
+                --nightly \
+                --no-clone \
+                --install-dir "${WORKSPACE_DIR}/triton-main"
             elif [ "${{ inputs.venv_name }}" = "meta-triton" ]; then
-              bash ./.ci/triton/install-meta-triton.sh --no-clone
+              bash ./.ci/triton/install.sh \
+                --conda-env "meta-triton" \
+                --repo facebookexperimental/triton \
+                --commit main \
+                --side single \
+                --nightly \
+                --no-clone \
+                --install-dir "${WORKSPACE_DIR}/meta-triton"
             else
               echo "Unknown venv name: ${{ inputs.venv_name }}"
               exit 1

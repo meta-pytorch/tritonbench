@@ -52,7 +52,7 @@ RUN cd ${WORKSPACE_DIR}/tritonbench && \
 RUN cd "${WORKSPACE_DIR}"/tritonbench && \
     bash .ci/triton/test_ptxas_options.sh --conda-env "${CONDA_ENV_META_TRITON}"
 
-# Install Helion in the triton-meta venv
+# Install Helion in the meta-triton venv
 RUN cd "${WORKSPACE_DIR}"/tritonbench && \
     bash .ci/helion/install.sh --conda-env "${CONDA_ENV_META_TRITON}"
 

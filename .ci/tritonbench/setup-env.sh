@@ -1,4 +1,4 @@
-#/usr/bin bash
+#!/usr/bin/env bash
 
 set -xeuo pipefail
 
@@ -61,17 +61,17 @@ while [[ "$#" -gt 0 ]]; do
     shift
 done
 
-if [ ! -e ${WORKSPACE_DIR} ]; then
-    sudo mkdir -p ${WORKSPACE_DIR}
-    sudo chown -R $(whoami):$(id -gn) ${WORKSPACE_DIR}
+if [ ! -e "${WORKSPACE_DIR}" ]; then
+    sudo mkdir -p "${WORKSPACE_DIR}"
+    sudo chown -R "$(whoami):$(id -gn)" "${WORKSPACE_DIR}"
 fi
 
 touch "${SETUP_SCRIPT}"
-echo ". ${SETUP_SCRIPT}" >> ${HOME}/.bashrc
+echo ". ${SETUP_SCRIPT}" >> "${HOME}/.bashrc"
 
 if [ -n "${UV_VENV_DIR:-}" ]; then
     bash ./.ci/uv/install.sh
-    . $HOME/.local/bin/env 
+    . "${HOME}/.local/bin/env"
 else
     bash ./.ci/conda/install.sh
     . "${SETUP_SCRIPT}"
@@ -82,7 +82,7 @@ if [ -z "${CONDA_ENV:-}" ]; then
 fi
 echo "if [ -z \${CONDA_ENV} ]; then export CONDA_ENV=${CONDA_ENV}; fi" >> "${SETUP_SCRIPT}"
 
-python3 tools/python_utils.py --create-conda-env ${CONDA_ENV}
+python3 tools/python_utils.py --create-conda-env "${CONDA_ENV}"
 if [ -n "${UV_VENV_DIR:-}" ]; then
     echo ". ${UV_VENV_DIR}/\${CONDA_ENV}/bin/activate" >> "${SETUP_SCRIPT}"
     . "${SETUP_SCRIPT}"
@@ -133,17 +133,25 @@ if [ -n "${USE_TRITON_MAIN:-}" ]; then
     TRITON_MAIN_INSTALL_ARGS=("${COMMON_INSTALL_ARGS[@]}")
     if [ -n "${TRITON_MAIN_COMMIT:-}" ]; then
         TRITON_MAIN_INSTALL_ARGS+=(--commit "${TRITON_MAIN_COMMIT}")
+    else
+        TRITON_MAIN_INSTALL_ARGS+=(--commit main --nightly)
     fi
     export CONDA_ENV="triton-main"
-    bash ./.ci/triton/install-triton-main.sh "${TRITON_MAIN_INSTALL_ARGS[@]}"
+    bash ./.ci/triton/install.sh --conda-env "${CONDA_ENV}" \
+        --repo triton-lang/triton --side single \
+        --install-dir "${WORKSPACE_DIR}/triton-main" "${TRITON_MAIN_INSTALL_ARGS[@]}"
 fi
 if [ -n "${USE_META_TRITON:-}" ]; then
     META_TRITON_INSTALL_ARGS=("${COMMON_INSTALL_ARGS[@]}")
     if [ -n "${META_TRITON_COMMIT:-}" ]; then
         META_TRITON_INSTALL_ARGS+=(--commit "${META_TRITON_COMMIT}")
+    else
+        META_TRITON_INSTALL_ARGS+=(--commit main --nightly)
     fi
     export CONDA_ENV="meta-triton"
-    bash ./.ci/triton/install-meta-triton.sh "${META_TRITON_INSTALL_ARGS[@]}"
+    bash ./.ci/triton/install.sh --conda-env "${CONDA_ENV}" \
+        --repo facebookexperimental/triton --side single \
+        --install-dir "${WORKSPACE_DIR}/meta-triton" "${META_TRITON_INSTALL_ARGS[@]}"
 fi
 if [ -n "${CUSTOM_TRITON_DIR:-}" ]; then
     CUSTOM_TRITON_INSTALL_ARGS=("${COMMON_INSTALL_ARGS[@]}" --no-checkout --skip-conda-reset)
