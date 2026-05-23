@@ -82,13 +82,15 @@ if [ -z "${CONDA_ENV:-}" ]; then
 fi
 echo "if [ -z \${CONDA_ENV} ]; then export CONDA_ENV=${CONDA_ENV}; fi" >> "${SETUP_SCRIPT}"
 
-python3 tools/python_utils.py --create-conda-env "${CONDA_ENV}"
+CONDA_ENV=pytorch python3 tools/python_utils.py --create-conda-env "${CONDA_ENV}"
 if [ -n "${UV_VENV_DIR:-}" ]; then
     echo ". ${UV_VENV_DIR}/\${CONDA_ENV}/bin/activate" >> "${SETUP_SCRIPT}"
-    . "${SETUP_SCRIPT}"
+    # use pytorch conda env to bootstrap
+    CONDA_ENV=pytorch . "${SETUP_SCRIPT}"
 else
     echo "conda activate \${CONDA_ENV}" >> "${SETUP_SCRIPT}"
-    . "${SETUP_SCRIPT}"
+    # use pytorch conda env to bootstrap
+    CONDA_ENV=pytorch . "${SETUP_SCRIPT}"
 fi
 python -m tools.cuda_utils --install-torch-deps
 
