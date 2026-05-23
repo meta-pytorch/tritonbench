@@ -57,6 +57,7 @@ checkout_triton() {
         # truncate the branch to the earliest commit of the current day
         git checkout $(git rev-list --reverse --since=midnight HEAD | head -n 1)
     fi
+    cd -
 }
 
 install_triton() {
