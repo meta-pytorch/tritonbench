@@ -129,6 +129,10 @@ if [ -n "${NO_BUILD:-}" ]; then
     COMMON_INSTALL_ARGS+=(--no-build)
 fi
 
+if [ -z "${CUSTOM_TRITON_DIR:-}" ]; then
+    bash .ci/tritonbench/install.sh
+fi
+
 if [ -n "${USE_TRITON_MAIN:-}" ]; then
     TRITON_MAIN_INSTALL_ARGS=("${COMMON_INSTALL_ARGS[@]}")
     if [ -n "${TRITON_MAIN_COMMIT:-}" ]; then
@@ -158,12 +162,10 @@ if [ -n "${CUSTOM_TRITON_DIR:-}" ]; then
     bash ./.ci/triton/install.sh --conda-env "${CONDA_ENV}" \
         --side single --install-dir "${CUSTOM_TRITON_DIR}" \
         "${CUSTOM_TRITON_INSTALL_ARGS[@]}"
+    # When using custom triton, install tritonbench after installing triton
+    # Because it will skip conda clone
+    bash .ci/tritonbench/install.sh
 fi
-
-# switch to the new conda env
-. "${SETUP_SCRIPT}"
-
-bash .ci/tritonbench/install.sh
 
 if [ -n "${USE_CUDA:-}" ] && [ -n "${TEST_NVIDIA_DRIVER:-}" ]; then
     sudo apt-get purge -y '^libnvidia-'
