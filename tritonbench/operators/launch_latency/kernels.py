@@ -116,12 +116,12 @@ def nop_hstu_args_kernel(
 
 
 # Same kernels without C cache — for baseline comparison
-@_jit(c_cache=True)
+@_jit(c_cache=False)
 def nop_kernel_nocache():
     pass
 
 
-@_jit(c_cache=True)
+@_jit(c_cache=False)
 def nop_with_args_kernel_nocache(
     t1,
     t2,
@@ -146,7 +146,7 @@ def nop_with_args_kernel_nocache(
     pass
 
 
-@_jit(c_cache=True)
+@_jit(c_cache=False)
 def nop_hstu_args_kernel_nocache(
     p1,
     p2,
@@ -334,6 +334,40 @@ def nop_autotuned_kernel_nocache(
     BLOCK_C3: tl.constexpr,
     BLOCK_C4: tl.constexpr,
     BLOCK_C5: tl.constexpr,
+):
+    pass
+
+
+@triton.autotune(
+    configs=[
+        triton.Config(
+            {
+                "BLOCK_C1": 32,
+                "BLOCK_C2": 32,
+            }
+        ),
+        triton.Config(
+            {
+                "BLOCK_C1": 64,
+                "BLOCK_C2": 64,
+            }
+        ),
+    ],
+    key=[],
+)
+@_jit(c_cache=True)
+def nop_autotuned_with_none_kernel(
+    q,
+    k,
+    v,
+    out,
+    bias,
+    mask,
+    scale,
+    N,
+    H,
+    BLOCK_C1: tl.constexpr,
+    BLOCK_C2: tl.constexpr,
 ):
     pass
 

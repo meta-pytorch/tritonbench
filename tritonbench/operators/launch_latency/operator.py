@@ -25,6 +25,7 @@ from .kernels import (
     make_tensordesc_inputs,
     nop_autotuned_kernel,
     nop_autotuned_kernel_nocache,
+    nop_autotuned_with_none_kernel,
     nop_hstu_args_kernel,
     nop_hstu_args_kernel_nocache,
     nop_kernel,
@@ -455,6 +456,68 @@ class Operator(BenchmarkOperator):
             return lambda: nop_kernel[1,]()
         nop_autotuned_kernel_nocache[(1,)](*args[:14])
         return lambda: nop_autotuned_kernel_nocache[(1,)](*args[:14])
+
+    @register_benchmark()
+    def nop_autotuned_with_none_proxy(self, *args):
+        """Autotuned kernel with None pointer args via JITCacheProxy.
+
+        Reproduces the CMSL HSTU crash: autotuned kernel receives None for
+        optional tensor params on SUBSEQUENT calls (after autotuning with
+        real tensors). Tests if JITCacheProxy handles None correctly.
+        If this crashes with SystemError about data_ptr, the proxy has a bug.
+        """
+        if len(args) < 19:
+            return lambda: nop_kernel[1,]()
+        q = zeros(1, device="cuda")
+        k = zeros(1, device="cuda")
+        v = zeros(1, device="cuda")
+        out = zeros(1, device="cuda")
+        bias = zeros(1, device="cuda")
+        mask = zeros(1, device="cuda")
+        scale = zeros(1, device="cuda")
+        # First: warmup with REAL tensors to trigger autotune + compilation
+        real_args = (q, k, v, out, bias, mask, scale, 128, 8)
+        nop_autotuned_with_none_kernel[(1,)](*real_args)
+        # Now: subsequent calls pass None for optional pointers (HSTU pattern)
+        none_args = (q, k, v, out, None, None, None, 128, 8)
+        # This goes through _try_fast_path → JITCacheProxy with None args
+        return lambda: nop_autotuned_with_none_kernel[(1,)](*none_args)
+
+    @register_benchmark()
+    def nop_autotuned_proxy_vs_native(self, *args):
+        """Benchmarks JITCacheProxy path vs native_fast_dispatch for autotuned kernels.
+
+        Both use the C fast cache, but JITCacheProxy uses vectorcall proxy while
+        native_fast_dispatch is called directly. Compare to quantify proxy overhead.
+        """
+        if len(args) != 19:
+            return lambda: nop_kernel[1,]()
+        try:
+            from triton._C.libtriton import native_fast_dispatch
+        except ImportError:
+            return lambda: None
+
+        from triton.runtime import driver
+
+        # Warmup autotuned kernel to populate cache
+        nop_autotuned_kernel[(1,)](*args[:14])
+        jit_fn = nop_autotuned_kernel.fn
+        params = jit_fn.params
+        device = driver.active.get_current_device()
+        stream = driver.active.get_current_stream(device)
+        # Build full args (14 runtime + 5 constexpr from config)
+        full_args = tuple(list(args[:14]) + [32, 32, 32, 32, 32])
+        padded = (
+            full_args + (None,) * (len(params) - len(full_args))
+            if len(full_args) < len(params)
+            else full_args
+        )
+        grid = (1,)
+
+        def native_dispatch_fn():
+            native_fast_dispatch(jit_fn, padded, params, 0, grid, stream)
+
+        return native_dispatch_fn
 
     @register_benchmark()
     def nop_triton_kernel_fc_miss(self, *args):
