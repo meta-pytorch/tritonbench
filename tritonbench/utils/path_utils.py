@@ -11,7 +11,7 @@ BUILD_PATH = REPO_PATH.joinpath("build")
 
 class add_path:
     def __init__(self, path):
-        self.path = path
+        self.path = os.fspath(path)
 
     def __enter__(self):
         sys.path.insert(0, self.path)
