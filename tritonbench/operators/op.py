@@ -4,7 +4,7 @@ import pathlib
 from typing import Dict, List
 
 import yaml
-from tritonbench.utils.path_utils import SUBMODULE_PATH, add_path
+from tritonbench.utils.path_utils import add_path, SUBMODULE_PATH
 
 OPBENCH_DIR = "operators"
 INTERNAL_OPBENCH_DIR = "fb"
