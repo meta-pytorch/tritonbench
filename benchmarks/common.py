@@ -129,7 +129,27 @@ def run_benchmark_config_ci(
     if is_fbcode():
         from tritonbench.utils.fb.utils import log_job_summary_to_scuba
 
-        log_job_summary_to_scuba(benchmark_group_name, benchmark_start_time)
+        metrics = aggregated_obj.get("metrics", {})
+        failed_benchmarks = []
+        num_success = 0
+        for benchmark in per_benchmark_map:
+            pass_key = f"tritonbench_{benchmark}-pass"
+            if metrics.get(pass_key) == 1:
+                num_success += 1
+            else:
+                failed_benchmarks.append(benchmark)
+        num_total = len(per_benchmark_map)
+        num_failed = len(failed_benchmarks)
+        pass_rate = num_success / num_total if num_total > 0 else 0.0
+        log_job_summary_to_scuba(
+            benchmark_group_name,
+            benchmark_start_time,
+            num_success=num_success,
+            num_failed=num_failed,
+            num_total=num_total,
+            pass_rate=pass_rate,
+            failed_benchmarks=failed_benchmarks,
+        )
 
 
 def setup_output_dir(bm_name: str, ci: bool = False, output_dir: str | None = None):
