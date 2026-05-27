@@ -17,7 +17,14 @@ from tritonbench.utils.triton_op import (
     register_metric,
 )
 
-from .hstu import get_test_inputs, HAS_HAMMER, triton_hstu_mha, triton_ragged_hstu_mha
+from .hstu import (
+    get_test_inputs,
+    HAS_HAMMER,
+    HAS_TLX_HSTU,
+    tlx_bw_hstu_mha_wrapper,
+    triton_hstu_mha,
+    triton_ragged_hstu_mha,
+)
 
 HAS_CUDA = False
 try:
@@ -145,6 +152,27 @@ class Operator(BenchmarkOperator):
             contextual_seq_len=self.contextual_seq_len,
             sort_by_length=True,
             enable_tma=_enable_tma,
+        )
+
+    @register_benchmark(enabled=HAS_TLX_HSTU)
+    def tlx(self, q, k, v, seq_offsets, num_targets, max_seq_len, sparsity):
+        """TLX warp-specialized HSTU MHA (fwd + bwd via the autograd-aware
+        wrapper from hammer.v2). Equivalent to the `tlx` column in fbcode's
+        //generative_recommenders/ops/benchmarks:hstu_attention_bench
+        (HammerKernel.TLX dispatch inside hstu_mha)."""
+        attn_scale = torch.tensor(1.0 / max_seq_len, device=q.device)
+        return lambda: tlx_bw_hstu_mha_wrapper(
+            max_seq_len=max_seq_len,
+            alpha=self.alpha,
+            q=q,
+            k=k,
+            v=v,
+            seq_offsets=seq_offsets,
+            attn_scale=attn_scale,
+            num_targets=num_targets,
+            max_attn_len=self.max_attn_len,
+            contextual_seq_len=self.contextual_seq_len,
+            sort_by_length=True,
         )
 
     @register_benchmark(enabled=HAS_HAMMER)

@@ -26,11 +26,34 @@ else:
         HAS_HAMMER = False
         triton_ragged_hstu_mha = None
 
+# Optional TLX HSTU wrapper from hammer.v2 (vendored under submodules/hammer/).
+# Forward + backward warp-specialized kernel for jagged HSTU attention with
+# sliding window (--max-attn-len), target blocks, contextual prefix, etc.
+try:
+    if is_fbcode():
+        # @manual=//hammer/v2/ops/triton/template:tlx_bw_hstu_attention
+        from hammer.v2.ops.triton.template.tlx_bw_hstu_attention import (
+            tlx_bw_hstu_mha_wrapper,
+        )
+    else:
+        with add_path(str(SUBMODULE_PATH.joinpath("hammer"))), add_path(
+            str(SUBMODULE_PATH.joinpath("generative-recommenders"))
+        ):
+            from hammer.v2.ops.triton.template.tlx_bw_hstu_attention import (
+                tlx_bw_hstu_mha_wrapper,
+            )
+    HAS_TLX_HSTU = True
+except (ImportError, IOError, AttributeError):
+    tlx_bw_hstu_mha_wrapper = None
+    HAS_TLX_HSTU = False
+
 from typing import Tuple
 
 triton_hstu_mha = triton_hstu_mha
 triton_ragged_hstu_mha = triton_ragged_hstu_mha
+tlx_bw_hstu_mha_wrapper = tlx_bw_hstu_mha_wrapper
 HAS_HAMMER = HAS_HAMMER
+HAS_TLX_HSTU = HAS_TLX_HSTU
 
 # Always autotune based on the actual max_seq_len
 set_use_runtime_max_seq_len(True)
