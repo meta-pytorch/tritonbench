@@ -15,10 +15,13 @@ os.environ["TRITON_PRINT_AUTOTUNING"] = "1"
 import pandas as pd
 import torch
 import triton
-from dsi.logger.configs.TritonMultiOperatorBenchmarkComparisonsLoggerConfig.logger import (
-    TritonMultiOperatorBenchmarkComparisonsLogEntry,
-)
-from dsi.logger.py3.whence_logged.types import WhenceScribeLogged
+from tritonbench.utils.env_utils import is_fbcode
+
+if is_fbcode():
+    from dsi.logger.configs.TritonMultiOperatorBenchmarkComparisonsLoggerConfig.logger import (
+        TritonMultiOperatorBenchmarkComparisonsLogEntry,
+    )
+    from dsi.logger.py3.whence_logged.types import WhenceScribeLogged
 
 DEFAULT_OPS = ["gemm", "addmm", "bmm", "scaled_mm"]
 DEFAULT_METRICS = ["latency", "tflops"]
@@ -158,6 +161,9 @@ def log_benchmark(
     df: pd.DataFrame,
     config: BenchmarkConfig,
 ) -> None:
+    if not is_fbcode():
+        return
+
     pytorch_version = torch.__version__
     triton_version = triton.__version__
     cuda_version = get_cuda_version()
@@ -181,11 +187,60 @@ def log_benchmark(
 
     async def log_row(row: pd.Series) -> None:
         try:
-            m_dim, n_dim, k_dim = parse_shape(row.get("Shape"))
+            m_dim = safe_int(row.get("M"))
+            n_dim = safe_int(row.get("N"))
+            k_dim = safe_int(row.get("K"))
+            if not m_dim or not n_dim or not k_dim:
+                m_dim, n_dim, k_dim = parse_shape(row.get("Shape"))
+
+            batch = safe_int(row.get("B"), default=None)
+            op = safe_str(row.get("Operation"))
+
+            scale_a_row = safe_int(row.get("scale_a_row_dim"), default=None)
+            scale_a_col = safe_int(row.get("scale_a_col_dim"), default=None)
+            scale_b_row = safe_int(row.get("scale_b_row_dim"), default=None)
+            scale_b_col = safe_int(row.get("scale_b_col_dim"), default=None)
+            scale_a_recipe = None
+            scale_b_recipe = None
+            if (
+                op == "scaled_mm"
+                and scale_a_row is not None
+                and scale_a_col is not None
+                and scale_b_row is not None
+                and scale_b_col is not None
+            ):
+                from torch._inductor.fb.shape_logging import _scale_recipe
+
+                dtype_str = safe_str(row.get("Dtype"))
+                mat_dtype = getattr(
+                    torch,
+                    dtype_str.replace("torch.", ""),
+                    torch.float8_e4m3fn,
+                )
+                scale_dtype = torch.float32
+                scale_a_recipe = (
+                    _scale_recipe(
+                        (m_dim, k_dim),
+                        mat_dtype,
+                        (scale_a_row, scale_a_col),
+                        scale_dtype,
+                    )
+                    or None
+                )
+                scale_b_recipe = (
+                    _scale_recipe(
+                        (k_dim, n_dim),
+                        mat_dtype,
+                        (scale_b_row, scale_b_col),
+                        scale_dtype,
+                    )
+                    or None
+                )
+
             log_entry = TritonMultiOperatorBenchmarkComparisonsLogEntry(
                 eval_id=scuba_eval_id,
                 custom_bench=custom_bench,
-                op=safe_str(row.get("Operation")),
+                op=op,
                 gpu=safe_str(row.get("gpu")),
                 workload=safe_str(row.get("workload")),
                 lhs_benchmark=lhs_benchmark,
@@ -193,7 +248,7 @@ def log_benchmark(
                 m_dim=m_dim,
                 n_dim=n_dim,
                 k_dim=k_dim,
-                batch=None,
+                batch=batch,
                 bias_m=None,
                 bias_n=None,
                 dtype=safe_str(row.get("Dtype")),
@@ -202,6 +257,8 @@ def log_benchmark(
                 bias_stride=safe_str(row.get("C Stride"))
                 if row.get("C Stride")
                 else None,
+                scale_a_recipe=scale_a_recipe,
+                scale_b_recipe=scale_b_recipe,
                 lhs_best_aten_kernel=safe_str(row.get("A: Best Aten Kernel")) or None,
                 lhs_best_aten_runtime_ms=safe_float(
                     row.get("A: Best Aten Runtime (ms)")

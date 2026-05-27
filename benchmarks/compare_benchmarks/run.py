@@ -25,15 +25,19 @@ from pytorch.tritonbench.benchmarks.compare_benchmarks.utils import (
     DEFAULT_WORKLOADS,
     detect_gpu,
     DiodeBenchmarkConfig,
-    log_benchmark,
-)
-from pytorch.tritonbench.tools.fb.inductor_analyzer.autotune_parser import (
-    compare_benchmark_results,
-    parse_benchmark_results,
 )
 from tritonbench.utils.env_utils import is_fbcode
 from tritonbench.utils.path_utils import REPO_PATH
 from tritonbench.utils.run_utils import run_in_task, run_one_operator
+
+if is_fbcode():
+    from pytorch.tritonbench.benchmarks.compare_benchmarks.utils import (
+        log_benchmark,
+    )
+    from pytorch.tritonbench.tools.fb.inductor_analyzer.autotune_parser import (
+        compare_benchmark_results,
+        parse_benchmark_results,
+    )
 
 
 def build_op_args(
@@ -344,7 +348,7 @@ def run_benchmarks(config: BenchmarkConfig) -> None:
                     )
                     continue
 
-                if config.parse_autotune_logs:
+                if config.parse_autotune_logs and is_fbcode():
                     print(
                         f"[Compare Benchmarks] Parsing LHS and RHS logs with autotune parser"
                     )
@@ -373,7 +377,7 @@ def run_benchmarks(config: BenchmarkConfig) -> None:
         other_cols = [c for c in combined_df.columns if c not in priority_cols]
         combined_df = combined_df[priority_cols + other_cols]
 
-        if config.parse_autotune_logs and config.log_scuba:
+        if config.parse_autotune_logs and config.log_scuba and is_fbcode():
             log_scuba(combined_df, config)
 
 
