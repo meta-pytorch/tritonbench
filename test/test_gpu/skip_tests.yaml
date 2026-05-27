@@ -7,6 +7,8 @@
 #    channels: <list of triton channels> (options: "triton-main", "meta-triton", default: ["triton-main", "meta-triton"])
 # to override the default, specify devices and channels to limit combinations
 # we rely on the code to determine specific backends to skip
+# aoti_kernel requires --artifact arg; tested separately
+aoti_kernel:
 # cpu-op for testing
 test_op:
 # fb-only ops
