@@ -1,15 +1,49 @@
 """
-Compare TritonBench benchmarks across operators and workloads.
+Compare TritonBench benchmarks across operators.
 
-Usage:
+Runs a pair of benchmarks (LHS vs RHS) on each operator and compares
+kernel selection and runtime. Results can be logged to the
+TritonMultiOperatorBenchmarkComparisons Scuba table.
+
+Shape source (priority order):
+  1. --input-loader <file.json>    Single JSON shape file.
+  2. --input-loader <dir/>         Directory of JSON shape files. Use
+                                   --input-filter to select by filename.
+  3. ai_infra.inductor_mm_shapes   Hive table with all MM shapes logged
+                                   during torch.compile() (fbcode only).
+                                   Use --hive-job-filter to narrow by
+                                   MAST job name.
+
+Examples:
+    # Diode eval on all ops, shapes from Hive (default):
     buck2 run @mode/opt //pytorch/tritonbench/benchmarks:compare_benchmarks -- \
-        --ops gemm,addmm --workloads cmf,igctr,omnifm
+        --custom-bench diode --ops gemm,addmm,bmm,scaled_mm \
+        --parse-autotune-logs --log-scuba --scuba-eval-id my-experiment
+
+    # Diode eval, filter Hive shapes to a specific MAST job:
+    buck2 run @mode/opt //pytorch/tritonbench/benchmarks:compare_benchmarks -- \
+        --custom-bench diode --ops gemm --hive-job-filter <mast_job_name>
+
+    # Custom shape file instead of Hive:
+    buck2 run @mode/opt //pytorch/tritonbench/benchmarks:compare_benchmarks -- \
+        --custom-bench diode --ops gemm \
+        --input-loader fb/cmf/h100/shapes_mm.json
+
+    # Directory of shape files, filtered by substring:
+    buck2 run @mode/opt //pytorch/tritonbench/benchmarks:compare_benchmarks -- \
+        --custom-bench diode --ops gemm \
+        --input-loader fb/ads_omnifm_v4/ --input-filter layers_0
+
+    # Non-Diode: explicit LHS/RHS benchmarks with custom shapes:
+    buck2 run @mode/opt //pytorch/tritonbench/benchmarks:compare_benchmarks -- \
+        --ops gemm --benchmarks-lhs pt2_matmul_maxautotune \
+        --benchmarks-rhs pt2_matmul_maxautotune_v2 \
+        --input-loader my_shapes.json
 
 Assumes 1 GPU type (e.g. H100, MI350). GPU type defined by torchx job.
 """
 
 import argparse
-import json
 import os
 import sys
 import tempfile
@@ -22,7 +56,6 @@ from pytorch.tritonbench.benchmarks.compare_benchmarks.utils import (
     BenchmarkConfig,
     DEFAULT_METRICS,
     DEFAULT_OPS,
-    DEFAULT_WORKLOADS,
     detect_gpu,
     DiodeBenchmarkConfig,
     log_benchmark,
@@ -32,7 +65,6 @@ from pytorch.tritonbench.tools.fb.inductor_analyzer.autotune_parser import (
     parse_benchmark_results,
 )
 from tritonbench.utils.env_utils import is_fbcode
-from tritonbench.utils.path_utils import REPO_PATH
 from tritonbench.utils.run_utils import run_in_task, run_one_operator
 
 
@@ -65,127 +97,6 @@ def build_op_args(
         args.extend(["--diode-topk", str(config.diode_topk)])
 
     return args
-
-
-def _check_input_config(
-    file_path: Path, op: str, gpu: str
-) -> tuple[bool, Optional[str]]:
-    """
-    Check if a JSON input config file matches the given op and GPU.
-
-    For op matching: checks metadata.tritonbench_ops first, then falls back
-    to checking if the op exists as a top-level key in the JSON.
-
-    For GPU matching: if metadata.gpus is present, the file is only valid
-    for those GPUs. If absent, the file is valid for all GPUs.
-
-    Returns:
-        (matches, skip_reason): matches is True if the file should be used,
-        skip_reason is a message if skipped due to GPU filtering (None otherwise).
-    """
-    try:
-        with open(file_path, "r") as f:
-            data = json.load(f)
-    except (json.JSONDecodeError, OSError):
-        return False, None
-
-    metadata = data.get("metadata", {})
-
-    # Check op match
-    tritonbench_ops = metadata.get("tritonbench_ops")
-    if tritonbench_ops:
-        if op not in tritonbench_ops:
-            return False, None
-    elif op not in data:
-        return False, None
-
-    # Check GPU match
-    gpu_list = metadata.get("gpus")
-    if gpu_list and gpu.lower() not in [g.lower() for g in gpu_list]:
-        return False, f"GPU {gpu} not in metadata.gpus"
-
-    return True, None
-
-
-def get_input_loader(
-    gpu: str,
-    workloads: List[str],
-    op: str,
-    input_filter: Optional[str] = None,
-) -> List[tuple[str, str]]:
-    """
-    Get input loader paths for the given GPU type and workloads.
-
-    Supports two directory layouts:
-    1. Convention-based: {workload}/{gpu}/shapes_{op}.json
-    2. Flat (metadata-driven): {workload}/*.json with metadata.tritonbench_ops
-       or the op as a top-level key. Optional metadata.gpus for GPU filtering.
-
-    Args:
-        gpu: GPU type (e.g., "H100", "MI350") - will be lowercased
-        workloads: List of workload names (e.g., ["cmf", "omnifm_v4"]).
-        op: Operator name to find shape files for (e.g., "gemm", "addmm")
-        input_filter: Optional substring filter on input config filenames.
-
-    Returns:
-        List of (workload, input_loader_path) tuples
-        (e.g., [("cmf", "fb/cmf/h100/shapes_mm.json")])
-    """
-    gpu_lower = gpu.lower()
-    input_configs_dir = (
-        Path(REPO_PATH) / "tritonbench" / "data" / "input_configs" / "fb"
-    )
-
-    workloads = workloads if workloads else DEFAULT_WORKLOADS
-
-    input_loaders: List[tuple[str, str]] = []
-
-    for workload in workloads:
-        workload_dir = input_configs_dir / workload
-        gpu_subdir = workload_dir / gpu_lower
-
-        if gpu_subdir.exists() and gpu_subdir.is_dir():
-            # Convention-based: {workload}/{gpu}/shapes_{op}.json
-            op_pattern = f"shapes_{op}.json" if op != "gemm" else "shapes_mm.json"
-            shape_file = gpu_subdir / op_pattern
-            if shape_file.exists():
-                relative_path = f"fb/{workload}/{gpu_lower}/{op_pattern}"
-                input_loaders.append((workload, relative_path))
-                print(f"[Compare Benchmarks] Found input config: {relative_path}")
-            else:
-                print(
-                    f"[Compare Benchmarks] WARNING: No shape file {op_pattern} for op={op} in {workload}/{gpu_lower}"
-                )
-        elif workload_dir.exists():
-            # Flat (metadata-driven): scan .json files in the workload dir
-            found = False
-            for json_file in sorted(workload_dir.glob("*.json")):
-                if input_filter and input_filter not in json_file.name:
-                    print(
-                        f"[Compare Benchmarks] Skipping {json_file.name}: does not match --input-filter '{input_filter}'"
-                    )
-                    continue
-                matches, skip_reason = _check_input_config(json_file, op, gpu_lower)
-                if not matches:
-                    if skip_reason:
-                        print(
-                            f"[Compare Benchmarks] Skipping {json_file.name}: {skip_reason}"
-                        )
-                    continue
-                relative_path = f"fb/{workload}/{json_file.name}"
-                input_loaders.append((workload, relative_path))
-                print(f"[Compare Benchmarks] Found input config: {relative_path}")
-                found = True
-            if not found:
-                print(
-                    f"[Compare Benchmarks] WARNING: No matching input configs for op={op}, gpu={gpu_lower} in {workload}/"
-                )
-        else:
-            print(
-                f"[Compare Benchmarks] WARNING: No eval shapes for workload={workload}"
-            )
-
-    return input_loaders
 
 
 def run_benchmark_with_logs(
@@ -299,13 +210,85 @@ def log_scuba(df: pd.DataFrame, config: BenchmarkConfig) -> None:
         )
 
 
+def _resolve_input_loaders(
+    config: BenchmarkConfig,
+    op: str,
+    gpu: str,
+    output_dir: Path,
+) -> list[tuple[str, str]]:
+    """Resolve input loader paths for a given op.
+
+    Returns a list of (label, path) tuples. The label is used for the
+    workload column in Scuba logging and log file naming.
+
+    Priority:
+      1. --input-loader <file>  -> single file
+      2. --input-loader <dir>   -> scan directory, optionally filter by --input-filter
+      3. ai_infra.inductor_mm_shapes Hive table (fbcode only)
+    """
+    if config.input_loader:
+        loader_path = Path(config.input_loader)
+
+        if loader_path.is_file():
+            print(
+                f"[Compare Benchmarks] Shape source: file '{config.input_loader}'"
+            )
+            return [(loader_path.stem, config.input_loader)]
+
+        if loader_path.is_dir():
+            results = []
+            for json_file in sorted(loader_path.glob("*.json")):
+                if config.input_filter and config.input_filter not in json_file.name:
+                    continue
+                results.append((json_file.stem, str(json_file)))
+            if results:
+                print(
+                    f"[Compare Benchmarks] Shape source: directory '{config.input_loader}' "
+                    f"({len(results)} files"
+                    f"{', filter=' + repr(config.input_filter) if config.input_filter else ''})"
+                )
+            else:
+                print(
+                    f"[Compare Benchmarks] WARNING: No matching JSON files in '{config.input_loader}'"
+                    f"{' with filter=' + repr(config.input_filter) if config.input_filter else ''}"
+                )
+            return results
+
+        print(
+            f"[Compare Benchmarks] ERROR: --input-loader path '{config.input_loader}' "
+            "does not exist"
+        )
+        return []
+
+    if not is_fbcode():
+        print(
+            "[Compare Benchmarks] ERROR: No --input-loader provided, and Hive shape "
+            "source is only available in fbcode"
+        )
+        return []
+
+    print(
+        "[Compare Benchmarks] Shape source: ai_infra.inductor_mm_shapes (Hive)"
+    )
+    from pytorch.tritonbench.benchmarks.compare_benchmarks.fb.hive_shapes import (
+        get_shapes_from_hive,
+    )
+
+    hive_path = get_shapes_from_hive(
+        gpu, op, output_dir, config.hive_job_filter, config.hive_max_shapes
+    )
+    if not hive_path:
+        return []
+    label = config.hive_job_filter or "inductor_mm_shapes"
+    return [(label, hive_path)]
+
+
 def run_benchmarks(config: BenchmarkConfig) -> None:
     """Main benchmark runner."""
     gpu = config.gpu if config.gpu else detect_gpu()
 
     print(f"[Compare Benchmarks] GPU: {gpu}")
     print(f"[Compare Benchmarks] Ops: {config.ops}")
-    print(f"[Compare Benchmarks] Workloads: {config.workloads or 'all'}")
 
     all_dfs: List[pd.DataFrame] = []
 
@@ -318,40 +301,42 @@ def run_benchmarks(config: BenchmarkConfig) -> None:
                 continue
 
             lhs_benchmark, rhs_benchmark = config.benchmark_map[op]
-            input_loaders = get_input_loader(gpu, config.workloads, op, config.input_filter)
 
+            input_loaders = _resolve_input_loaders(config, op, gpu, output_dir)
             if not input_loaders:
                 print(
-                    f"[Compare Benchmarks] WARNING: No input configs found for op={op}, skipping"
+                    f"[Compare Benchmarks] WARNING: No shapes for op={op}, gpu={gpu}, skipping"
                 )
                 continue
 
-            for workload, input_loader in input_loaders:
+            for label, input_loader in input_loaders:
                 print(
-                    f"[Compare Benchmarks] Running {op} with workload={workload}, input_loader=tritonbench/data/input_configs/{input_loader}, LHS benchmark={lhs_benchmark}, RHS benchmark={rhs_benchmark}"
+                    f"[Compare Benchmarks] Running {op} ({label}): "
+                    f"LHS={lhs_benchmark}, RHS={rhs_benchmark}"
                 )
 
                 lhs_log = run_benchmark_with_logs(
-                    op, lhs_benchmark, config, output_dir, workload, input_loader
+                    op, lhs_benchmark, config, output_dir, label, input_loader
                 )
                 rhs_log = run_benchmark_with_logs(
-                    op, rhs_benchmark, config, output_dir, workload, input_loader
+                    op, rhs_benchmark, config, output_dir, label, input_loader
                 )
 
                 if not lhs_log or not rhs_log:
                     print(
-                        f"[Compare Benchmarks] WARNING: Either lhs_log (exists = {lhs_log is not None}) or rhs_log (exists = {rhs_log is not None}) does not exist"
+                        f"[Compare Benchmarks] WARNING: Either lhs_log (exists = {lhs_log is not None}) "
+                        f"or rhs_log (exists = {rhs_log is not None}) does not exist"
                     )
                     continue
 
                 if config.parse_autotune_logs:
                     print(
-                        f"[Compare Benchmarks] Parsing LHS and RHS logs with autotune parser"
+                        "[Compare Benchmarks] Parsing LHS and RHS logs with autotune parser"
                     )
                     comparison_df = compare_results(lhs_log, rhs_log)
 
                     if not comparison_df.empty:
-                        comparison_df["workload"] = workload
+                        comparison_df["workload"] = label
                         comparison_df["gpu"] = gpu
                         comparison_df["op"] = op
                         comparison_df["lhs_benchmark_name"] = lhs_benchmark
@@ -360,9 +345,7 @@ def run_benchmarks(config: BenchmarkConfig) -> None:
 
     combined_df = pd.concat(all_dfs, ignore_index=True) if all_dfs else pd.DataFrame()
 
-    if (
-        not combined_df.empty
-    ):  # reorder cols to have identifying information at the front
+    if not combined_df.empty:
         priority_cols = [
             "gpu",
             "workload",
@@ -408,16 +391,19 @@ def parse_args(args: List[str] = None) -> BenchmarkConfig:
         help=f"Comma-separated list of metrics. Default: {','.join(DEFAULT_METRICS)}",
     )
     parser.add_argument(
-        "--workloads",
+        "--input-loader",
         type=str,
         default=None,
-        help=f"Comma-separated list of workloads representing shapes to evaluate. Default: {','.join(DEFAULT_WORKLOADS)}",
+        help="Path to a JSON shape file or a directory of JSON shape files. "
+        "Overrides the default Hive shape source. Use --input-filter to "
+        "select specific files when pointing to a directory.",
     )
     parser.add_argument(
         "--input-filter",
         type=str,
         default=None,
-        help="Substring filter on input config filenames (if searching a workload directory without explicit GPU subdirectories). Only files whose name contains this string will be used.",
+        help="Substring filter on filenames when --input-loader is a directory. "
+        "Only JSON files whose name contains this string will be used.",
     )
     parser.add_argument(
         "--benchmarks-lhs",
@@ -450,40 +436,61 @@ def parse_args(args: List[str] = None) -> BenchmarkConfig:
         help=f"Custom experiment name to log to Scuba. Default: gpu_timestamp (printed at the end of the run)",
     )
 
-    # Diode-specific arguments
-    parser.add_argument(
-        "--diode-version",
-        type=str,
-        default="recommended",
-        help="Diode model version to use. Default: recommended",
-    )
-    parser.add_argument(
-        "--diode-model-config",
-        type=str,
-        default=None,
-        help="JSON-serialized Diode ModelConfig. Overrides --diode-version.",
-    )
-    parser.add_argument(
-        "--diode-topk",
-        type=int,
-        default=1,
-        help="Top K kernel configs to return from Diode. Default: 1",
-    )
+    if is_fbcode():
+        parser.add_argument(
+            "--hive-job-filter",
+            type=str,
+            default=None,
+            help="Optional mast_job_name substring filter for Hive shape query. "
+            "When set, only shapes from matching MAST jobs are used. "
+            "Ignored when --input-loader is provided.",
+        )
+        parser.add_argument(
+            "--hive-max-shapes",
+            type=int,
+            default=1500,
+            help="Maximum number of shapes to evaluate per op when using Hive. "
+            "Shapes are ranked by frequency (most common first). Default: 1500. "
+            "Ignored when --input-loader is provided.",
+        )
+        parser.add_argument(
+            "--diode-version",
+            type=str,
+            default="recommended",
+            help="Diode model version to use. Default: recommended",
+        )
+        parser.add_argument(
+            "--diode-model-config",
+            type=str,
+            default=None,
+            help="JSON-serialized Diode ModelConfig. Overrides --diode-version.",
+        )
+        parser.add_argument(
+            "--diode-topk",
+            type=int,
+            default=1,
+            help="Top K kernel configs to return from Diode. Default: 1",
+        )
 
     args = parser.parse_args(args)
-
-    workloads = args.workloads.split(",") if args.workloads else None
 
     base_configs = {
         "gpu": args.gpu,
         "ops": args.ops.split(","),
         "metrics": args.metrics.split(","),
-        "workloads": workloads,
+        "input_loader": args.input_loader,
         "input_filter": args.input_filter,
         "parse_autotune_logs": args.parse_autotune_logs,
         "log_scuba": args.log_scuba,
         "scuba_eval_id": args.scuba_eval_id,
     }
+
+    if is_fbcode():
+        base_configs = {
+            **base_configs,
+            "hive_job_filter": args.hive_job_filter,
+            "hive_max_shapes": args.hive_max_shapes,
+        }
 
     if args.custom_bench == "diode":
         if not is_fbcode():

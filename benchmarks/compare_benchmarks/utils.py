@@ -22,7 +22,6 @@ from dsi.logger.py3.whence_logged.types import WhenceScribeLogged
 
 DEFAULT_OPS = ["gemm", "addmm", "bmm", "scaled_mm"]
 DEFAULT_METRICS = ["latency", "tflops"]
-DEFAULT_WORKLOADS = ["cmf"]
 
 SUPPORTED_GPU_TYPES = ["A100", "H100", "B200", "GB200", "MI300", "MI350"]
 
@@ -35,9 +34,11 @@ class BenchmarkConfig:
     gpu: str = None
     ops: List[str] = field(default_factory=lambda: DEFAULT_OPS.copy())
     metrics: List[str] = field(default_factory=lambda: DEFAULT_METRICS.copy())
-    workloads: List[str] = field(default_factory=lambda: DEFAULT_WORKLOADS.copy())
     benchmark_map: dict[str, tuple[str, str]] = field(default_factory=dict)
-    input_filter: str = None
+    input_loader: Optional[str] = None
+    input_filter: Optional[str] = None
+    hive_job_filter: Optional[str] = None
+    hive_max_shapes: int = 1500
     parse_autotune_logs: bool = False
     log_scuba: bool = False
     scuba_eval_id: str = None
