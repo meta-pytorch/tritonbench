@@ -5,6 +5,7 @@ import sys
 from typing import Any, Callable, List, Optional
 
 import torch
+from torch.utils._pytree import tree_map
 
 from tritonbench.utils.env_utils import (
     IS_BLACKWELL,
@@ -129,6 +130,48 @@ class Operator(BenchmarkOperator):
 
     def get_available_num_inputs(self) -> int:
         return 1
+
+    def get_bwd_fn(self, fwd_fn: Callable) -> Callable:
+        # triton_blocked_gemm / pytorch_blocked_gemm return List[List[Tensor]]
+        # (C[i][j] = A[i] @ W[j]^T). The base class get_bwd_fn assumes a
+        # single Tensor (or a tuple whose first element is one) and crashes
+        # with 'randn_like(): argument input must be Tensor, not list'.
+        # Flatten the nested output, build a per-output dy, and dispatch via
+        # torch.autograd.backward so all output tensors contribute gradients.
+        grad_tensors: List[torch.Tensor] = []
+
+        def _collect(x: Any) -> Any:
+            if isinstance(x, torch.Tensor) and x.requires_grad:
+                grad_tensors.append(x)
+            return x
+
+        tree_map(_collect, self.example_inputs)
+
+        state: dict[str, Any] = {"y": None, "dy": None}
+
+        def _flatten(out: Any) -> List[torch.Tensor]:
+            if isinstance(out, torch.Tensor):
+                return [out]
+            flat: List[torch.Tensor] = []
+            for item in out:
+                flat.extend(_flatten(item))
+            return flat
+
+        def bwd_fn():
+            for t in grad_tensors:
+                if t.grad is not None:
+                    t.grad = None
+
+            if state["y"] is None:
+                ys = _flatten(fwd_fn())
+                state["y"] = ys
+                torch.manual_seed(0)
+                state["dy"] = [0.1 * torch.randn_like(t) for t in ys]
+
+            torch.autograd.backward(state["y"], state["dy"], retain_graph=True)
+            return grad_tensors
+
+        return bwd_fn
 
     def get_input_iter(self):
         device = torch.device(self.device)
