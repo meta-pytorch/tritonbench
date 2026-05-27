@@ -57,6 +57,15 @@ try:
 except (ImportError, IOError, AttributeError):
     HAS_TLX_MHA = False
 
+# [Optional] TLX Blackwell autograd wrapper (fwd via TLX, bwd via triton_mha_bwd).
+try:
+    # @manual=//hammer/v3/ops/triton:tlx_block_attention_bwd
+    from hammer.v3.ops.triton.tlx_block_attention_bwd import tlx_mha_with_grad
+
+    HAS_TLX_MHA_WITH_GRAD = True
+except (ImportError, IOError, AttributeError):
+    HAS_TLX_MHA_WITH_GRAD = False
+
 # [Optional] CuTeDSL Blackwell kernel
 try:
     # @manual=//hammer/v3/ops/cutedsl:cutedsl_attention
@@ -281,7 +290,6 @@ class Operator(BenchmarkOperator):
 
     @register_benchmark(
         enabled=HAS_TLX_MHA and is_cuda() and IS_BLACKWELL,
-        fwd_only=True,
     )
     def tlx_blackwell_ws_pipelined(
         self,
@@ -299,7 +307,17 @@ class Operator(BenchmarkOperator):
         # are not yet supported.
         if len(q_list) > 2:
             return None
-        return lambda: tlx_mha(
+        # For bwd / fwd_bwd modes, route through the autograd-aware wrapper
+        # (fwd via TLX, bwd via the standard triton_mha backward kernel).
+        # For fwd-only, use the forward-only entry point for the lowest
+        # autograd overhead.
+        if self.requires_grad:
+            if not HAS_TLX_MHA_WITH_GRAD:
+                return None
+            fn = tlx_mha_with_grad
+        else:
+            fn = tlx_mha
+        return lambda: fn(
             alpha=self.alpha,
             q_list=q_list,
             k_list=k_list,
