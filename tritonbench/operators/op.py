@@ -4,6 +4,7 @@ import pathlib
 from typing import Dict, List
 
 import yaml
+from tritonbench.utils.path_utils import add_path, SUBMODULE_PATH
 
 OPBENCH_DIR = "operators"
 INTERNAL_OPBENCH_DIR = "fb"
@@ -91,7 +92,8 @@ def load_opbench_by_name(op_name: str):
         if not _is_internal_operator(op_name)
         else f"{INTERNAL_OPBENCH_DIR}.{op_name}"
     )
-    module = importlib.import_module(f"..{op_pkg}", package=__name__)
+    with add_path(SUBMODULE_PATH):
+        module = importlib.import_module(f"..{op_pkg}", package=__name__)
 
     Operator = getattr(module, "Operator", None)
     if Operator is None:
