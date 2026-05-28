@@ -65,7 +65,7 @@ if SUPPORT_GLUON:
 
 import logging
 
-from tritonbench.utils.env_utils import IS_BLACKWELL, is_blackwell
+from tritonbench.utils.env_utils import IS_BLACKWELL, is_blackwell, is_triton_beta
 
 logger = logging.getLogger(__name__)
 
@@ -815,7 +815,10 @@ class Operator(BenchmarkOperator):
 
         return preproc_noop, fn
 
-    @register_benchmark(enabled=IS_BLACKWELL and HAS_TLX_HSTU, label="tlx-hstu")
+    @register_benchmark(
+        enabled=IS_BLACKWELL and HAS_TLX_HSTU and is_triton_beta(),
+        label="tlx-hstu",
+    )
     @multi_input_wrapper
     def tlx_hstu(self, *args) -> Tuple[Callable, Callable]:
         if self.varlen:
