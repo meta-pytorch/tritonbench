@@ -28,11 +28,34 @@ from .hstu import (
 
 HAS_CUDA = False
 try:
-    HAS_CUDA = is_fbcode() and is_cuda() and not IS_BLACKWELL
-except (FileNotFoundError, AttributeError):
+    if is_fbcode():
+        # fbcode: cuda_hstu_mha lives in the .fb sub-package and only ships
+        # the older Hopper kernel (the Blackwell path is exposed via
+        # hstu_cuda_blackwell below).
+        HAS_CUDA = is_cuda() and not IS_BLACKWELL
+    else:
+        # OSS: load cuda_hstu_mha from the vendored generative-recommenders
+        # submodule. Its internal dispatch routes Blackwell to the cutlass
+        # kernel registered as torch.ops.bw_hstu.bw_hstu_mha (loaded by side
+        # effect when we import the Blackwell .so package).
+        from tritonbench.utils.path_utils import add_path, SUBMODULE_PATH
+
+        with add_path(str(SUBMODULE_PATH.joinpath("generative-recommenders"))):
+            # Trigger the .so registration of torch.ops.bw_hstu.bw_hstu_mha
+            # on Blackwell. Wrapped in try so non-Blackwell hosts or
+            # not-yet-built extensions just skip this without failing.
+            try:
+                import bw_hstu._C  # noqa: F401 - import for side effects
+            except Exception:
+                pass
+            from generative_recommenders.ops.cpp.cuda_hstu_attention import (
+                cuda_hstu_mha,
+            )
+        HAS_CUDA = is_cuda()
+except (FileNotFoundError, AttributeError, ImportError):
     HAS_CUDA = False
 
-if HAS_CUDA:
+if HAS_CUDA and is_fbcode():
     from .fb.hstu import cuda_hstu_mha
 
 HAS_CUDA_BLACKWELL = False

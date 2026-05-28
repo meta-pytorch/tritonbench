@@ -82,6 +82,29 @@ def install_tritonparse():
     subprocess.check_call(cmd)
 
 
+def install_hstu_blackwell():
+    """Build the CUTLASS Blackwell HSTU jagged-attention extension.
+
+    Source is vendored under
+        submodules/generative-recommenders/generative_recommenders/fb/ultra/ops/blackwell/hstu_attention/
+    Produces a .so that registers torch.ops.bw_hstu.bw_hstu_mha on import,
+    consumed by ragged_attention's `hstu_cuda` backend on B200.
+    Slow first time (~5-30 min nvcc on cutlass templates); requires B200.
+    """
+    HSTU_BW_PATH = REPO_PATH.joinpath(
+        "submodules",
+        "generative-recommenders",
+        "generative_recommenders",
+        "fb",
+        "ultra",
+        "ops",
+        "blackwell",
+        "hstu_attention",
+    )
+    cmd = get_pip_cmd() + ["install", "-e", ".", "--no-build-isolation"]
+    subprocess.check_call(cmd, cwd=str(HSTU_BW_PATH.resolve()))
+
+
 def setup_hip(args: argparse.Namespace):
     # We have to disable all third-parties that donot support hip/rocm
     args.all = False
@@ -120,6 +143,14 @@ if __name__ == "__main__":
     parser.add_argument("--aiter", action="store_true", help="install AMD's aiter")
     parser.add_argument(
         "--tritonparse", action="store_true", help="Install tritonparse"
+    )
+    parser.add_argument(
+        "--hstu-blackwell",
+        action="store_true",
+        help=(
+            "Build the CUTLASS Blackwell HSTU jagged-attention extension "
+            "(B200 only; ~5-30min cold nvcc compile)."
+        ),
     )
     parser.add_argument(
         "--all", action="store_true", help="Install all custom kernel repos"
@@ -208,4 +239,10 @@ if __name__ == "__main__":
     if args.tritonparse:
         logger.info("[tritonbench] installing tritonparse...")
         install_tritonparse()
+    if args.hstu_blackwell:
+        logger.info(
+            "[tritonbench] building CUTLASS Blackwell HSTU extension "
+            "(this can take ~5-30 minutes)..."
+        )
+        install_hstu_blackwell()
     logger.info("[tritonbench] installation complete!")
