@@ -240,6 +240,7 @@ def make_tensordesc_inputs(m_block: int = 8, n_block: int = 32):
 
 
 # --- Autotuned kernel for benchmarking c_cache + autotune interaction ---
+# Uses num_ctas to exercise cluster dispatch path 1 (num_ctas > 1 → clusterDim.x = num_ctas).
 
 
 @triton.autotune(
@@ -251,7 +252,8 @@ def make_tensordesc_inputs(m_block: int = 8, n_block: int = 32):
                 "BLOCK_C3": 32,
                 "BLOCK_C4": 32,
                 "BLOCK_C5": 32,
-            }
+            },
+            num_ctas=2,
         ),
         triton.Config(
             {
@@ -260,7 +262,8 @@ def make_tensordesc_inputs(m_block: int = 8, n_block: int = 32):
                 "BLOCK_C3": 64,
                 "BLOCK_C4": 64,
                 "BLOCK_C5": 64,
-            }
+            },
+            num_ctas=1,
         ),
     ],
     key=[],
@@ -299,7 +302,8 @@ def nop_autotuned_kernel(
                 "BLOCK_C3": 32,
                 "BLOCK_C4": 32,
                 "BLOCK_C5": 32,
-            }
+            },
+            num_ctas=2,
         ),
         triton.Config(
             {
@@ -308,7 +312,8 @@ def nop_autotuned_kernel(
                 "BLOCK_C3": 64,
                 "BLOCK_C4": 64,
                 "BLOCK_C5": 64,
-            }
+            },
+            num_ctas=1,
         ),
     ],
     key=[],

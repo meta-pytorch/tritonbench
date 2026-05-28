@@ -440,22 +440,27 @@ class Operator(BenchmarkOperator):
             BLOCK_C5=kw_vals[4],
         )
 
-    @register_benchmark()
+    @register_benchmark(enabled=is_cuda())
     def nop_triton_kernel_autotuned(self, *args):
-        """Autotuned kernel — measures autotune + c_cache interaction."""
-        if len(args) != 19:
-            return lambda: nop_kernel[1,]()
-        # Warmup: trigger autotune config selection
-        nop_autotuned_kernel[(1,)](*args[:14])
-        return lambda: nop_autotuned_kernel[(1,)](*args[:14])
+        """Autotuned kernel with num_ctas — measures autotune + c_cache + cluster."""
+        from torch import zeros
 
-    @register_benchmark()
+        targs = [zeros(1, device="cuda") for _ in range(5)]
+        iargs = [1 for _ in range(9)]
+        kernel_args = tuple([*targs, *iargs])
+        nop_autotuned_kernel[(1,)](*kernel_args)
+        return lambda: nop_autotuned_kernel[(1,)](*kernel_args)
+
+    @register_benchmark(enabled=is_cuda())
     def nop_triton_kernel_autotuned_nocache(self, *args):
         """Autotuned kernel without c_cache — baseline for autotune overhead."""
-        if len(args) != 19:
-            return lambda: nop_kernel[1,]()
-        nop_autotuned_kernel_nocache[(1,)](*args[:14])
-        return lambda: nop_autotuned_kernel_nocache[(1,)](*args[:14])
+        from torch import zeros
+
+        targs = [zeros(1, device="cuda") for _ in range(5)]
+        iargs = [1 for _ in range(9)]
+        kernel_args = tuple([*targs, *iargs])
+        nop_autotuned_kernel_nocache[(1,)](*kernel_args)
+        return lambda: nop_autotuned_kernel_nocache[(1,)](*kernel_args)
 
     @register_benchmark()
     def nop_autotuned_with_none_proxy(self, *args):
