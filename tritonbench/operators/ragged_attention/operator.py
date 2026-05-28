@@ -40,12 +40,26 @@ try:
         # effect when we import the Blackwell .so package).
         from tritonbench.utils.path_utils import add_path, SUBMODULE_PATH
 
-        with add_path(str(SUBMODULE_PATH.joinpath("generative-recommenders"))):
-            # Trigger the .so registration of torch.ops.bw_hstu.bw_hstu_mha
-            # on Blackwell. Wrapped in try so non-Blackwell hosts or
-            # not-yet-built extensions just skip this without failing.
+        # Trigger the .so registration of torch.ops.bw_hstu.bw_hstu_mha on
+        # Blackwell. Two add_paths: one for the generative-recommenders package
+        # root (lets us import generative_recommenders.*), one for the
+        # extension package's parent dir (lets us import bw_hstu._C).
+        _HSTU_BW_PARENT = SUBMODULE_PATH.joinpath(
+            "generative-recommenders",
+            "generative_recommenders",
+            "fb",
+            "ultra",
+            "ops",
+            "blackwell",
+            "hstu_attention",
+        )
+        with add_path(str(SUBMODULE_PATH.joinpath("generative-recommenders"))), \
+                add_path(str(_HSTU_BW_PARENT)):
+            # Must import torch before bw_hstu._C so libc10.so is in dlopen
+            # path. import for side effects: registers torch.ops.bw_hstu.*.
+            import torch as _torch  # noqa: F401
             try:
-                import bw_hstu._C  # noqa: F401 - import for side effects
+                import bw_hstu._C  # noqa: F401
             except Exception:
                 pass
             from generative_recommenders.ops.cpp.cuda_hstu_attention import (
