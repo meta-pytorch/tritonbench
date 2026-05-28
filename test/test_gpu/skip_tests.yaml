@@ -10,10 +10,16 @@
 # aoti_kernel requires --artifact arg; tested separately
 aoti_kernel:
 
-# embedding will segfault on hip
+# embedding, flash_attention will segfault on hip
 embedding:
   devices:
     - cuda
+# flash_attention will segfault on hip+triton beta
+flash_attention:
+  disabled_devices:
+    - hip
+  disabled_channels:
+    - meta-triton
 # cpu-op for testing
 test_op:
 # fb-only ops
