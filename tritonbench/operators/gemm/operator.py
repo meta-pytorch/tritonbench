@@ -14,6 +14,7 @@ from tritonbench.operators.gemm.partition_k import (
 )
 from tritonbench.operators.gemm.stream_k import streamk_amd_matmul, streamk_cuda_matmul
 from tritonbench.operators.gemm.warp_spec_persistent_matmul import (
+    _use_meta_ws,
     blackwell_matmul_descriptor_persistent,
     blackwell_matmul_tma,
     blackwell_matmul_tma_persistent,
@@ -653,7 +654,7 @@ class Operator(BenchmarkOperator):
         else:
             return lambda: _tlx_matmul_2cta(a_contig, b_contig).to(target_dtype)
 
-    @register_benchmark(enabled=IS_BLACKWELL or IS_HOPPER)
+    @register_benchmark(enabled=IS_BLACKWELL or (IS_HOPPER and _use_meta_ws()))
     def triton_warpspec_tma_persistent_matmul(self, a, b, bias) -> Callable:
         if bias is not None:
             return (
@@ -663,7 +664,9 @@ class Operator(BenchmarkOperator):
         else:
             return lambda: blackwell_matmul_tma_persistent(a, b, warp_specialize=True)
 
-    @register_benchmark(enabled=IS_BLACKWELL or IS_HOPPER, fwd_only=True)
+    @register_benchmark(
+        enabled=IS_BLACKWELL or (IS_HOPPER and _use_meta_ws()), fwd_only=True
+    )
     def triton_warpspec_tma_persistent_splitk_matmul(self, a, b, bias) -> Callable:
         """Warp-specialized persistent split-K matmul for large-K undersaturated GEMMs.
 
@@ -687,7 +690,7 @@ class Operator(BenchmarkOperator):
         else:
             return lambda: blackwell_matmul_tma_persistent(a, b, warp_specialize=False)
 
-    @register_benchmark(enabled=IS_BLACKWELL or IS_HOPPER)
+    @register_benchmark(enabled=IS_BLACKWELL or (IS_HOPPER and _use_meta_ws()))
     def triton_warpspec_tma_matmul(self, a, b, bias) -> Callable:
         if bias is not None:
             return lambda: blackwell_matmul_tma(a, b, warp_specialize=True) + bias
@@ -701,7 +704,7 @@ class Operator(BenchmarkOperator):
         else:
             return lambda: blackwell_matmul_tma(a, b, warp_specialize=False)
 
-    @register_benchmark(enabled=IS_BLACKWELL or IS_HOPPER)
+    @register_benchmark(enabled=IS_BLACKWELL or (IS_HOPPER and _use_meta_ws()))
     def triton_warpspec_descriptor_persistent_matmul(self, a, b, bias) -> Callable:
         if bias is not None:
             return (
