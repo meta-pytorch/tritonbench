@@ -9,6 +9,11 @@
 # we rely on the code to determine specific backends to skip
 # aoti_kernel requires --artifact arg; tested separately
 aoti_kernel:
+
+# embedding will segfault on hip
+embedding:
+  devices:
+    - cuda
 # cpu-op for testing
 test_op:
 # fb-only ops
