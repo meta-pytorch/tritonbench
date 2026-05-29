@@ -8,6 +8,12 @@ import triton
 from torch._inductor.kernel.mm import scaling_pairs, ScalingType
 from tritonbench.data.llama import llama_shapes
 from tritonbench.operators.fp8_gemm.persistent import blackwell_persistent_tma
+from tritonbench.operators.fp8_gemm.scaled_mm_autows import (
+    BLOCKWISE_1x128 as AUTOWS_BLOCKWISE_1x128,
+    ROWWISE as AUTOWS_ROWWISE,
+    scaled_mm_autows,
+    TENSORWISE as AUTOWS_TENSORWISE,
+)
 from tritonbench.utils.env_utils import IS_BLACKWELL, is_fbcode
 from tritonbench.utils.triton_op import (
     BenchmarkOperator,
@@ -388,6 +394,29 @@ class Operator(BenchmarkOperator):
                 compiled(a, b)
 
             return lambda: compiled(a, b)
+
+    @register_benchmark()
+    def triton_autows_fp8_gemm(self, a, b, scale_a, scale_b):
+        _SCALING_MAP = {
+            ScalingType.TensorWise: AUTOWS_TENSORWISE,
+            ScalingType.RowWise: AUTOWS_ROWWISE,
+            ScalingType.BlockWise1x128: AUTOWS_BLOCKWISE_1x128,
+        }
+        if self.scaling_recipe_a != self.scaling_recipe_b:
+            raise ValueError(
+                f"autows requires symmetric scaling for A and B, got "
+                f"{self.scaling_recipe_a} vs {self.scaling_recipe_b}"
+            )
+        if self.scaling_recipe_a not in _SCALING_MAP:
+            raise ValueError(
+                f"Unsupported scaling type for autows: {self.scaling_recipe_a}"
+            )
+        scaling_mode = _SCALING_MAP[self.scaling_recipe_a]
+        sa = scale_a.squeeze()
+        sb = scale_b.squeeze()
+        return lambda: scaled_mm_autows(
+            a, b, sa, sb, scaling_mode, out_dtype=self._get_dtype()
+        )
 
     @register_benchmark()
     def triton_fp8_gemm(self, a, b, scale_a, scale_b):
