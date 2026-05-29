@@ -291,9 +291,9 @@ def main() -> int:
     rc2 = run_tritonbench(config_file, extra_args, output_dir_without, env_without)
     print()
 
-    if rc1 != 0:
+    if rc1:
         print(f"[ptxas-check] WARNING: Run with PTXAS_OPTIONS exited with code {rc1}")
-    if rc2 != 0:
+    if rc2:
         print(
             f"[ptxas-check] WARNING: Run without PTXAS_OPTIONS exited with code {rc2}"
         )
