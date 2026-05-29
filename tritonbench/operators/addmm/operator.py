@@ -9,6 +9,9 @@ import triton
 from tritonbench.utils.env_utils import get_logger, IS_BLACKWELL, is_fbcode
 from tritonbench.utils.python_utils import try_import
 
+with try_import("HAS_ADDMM_DEV"):
+    from .addmm_dev import addmm as addmm_dev
+
 with try_import("HAS_HSTU"):
     try:
         from hammer.ops.triton.triton_hstu_linear import (
@@ -140,6 +143,14 @@ class Operator(BenchmarkOperator):
     @register_benchmark(enabled=HAS_HSTU and IS_BLACKWELL)  # type: ignore # noqa: F821
     def triton_b200_ws(self, a, mat1, mat2) -> Callable:
         return lambda: triton_addmm_fwd_b200_direct(a, mat1, mat2)
+
+    @register_benchmark(enabled=HAS_ADDMM_DEV and IS_BLACKWELL)  # type: ignore # noqa: F821
+    def triton_b200_tma_ws(self, a, mat1, mat2) -> Callable:
+        from .addmm_dev import addmm as _addmm_dev
+
+        if a.dim() == 1:
+            return lambda: _addmm_dev(mat1, mat2, a)
+        return lambda: _addmm_dev(mat1, mat2) + a
 
     # FIXME: bwd has some problem, need to re-enable it
     @register_benchmark(enabled=False)
