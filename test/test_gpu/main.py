@@ -86,6 +86,13 @@ def _gen_test_operators(test_ops, skip_tests) -> set[str]:
             test_ops[skip_op]["disabled"] = test_ops[skip_op][
                 "disabled"
             ] or (disabled_device_match and disabled_channel_match)
+        if test_ops[skip_op]["disabled"] and skip_tests[skip_op].get(
+            "report", False
+        ):
+            logger.warning(
+                "%s test is temporarily disabled and needs work to re-enable it.",
+                skip_op,
+            )
     return {test_op for test_op in test_ops if not test_ops[test_op]["disabled"]}
 
 

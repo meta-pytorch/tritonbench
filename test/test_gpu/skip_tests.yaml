@@ -10,16 +10,6 @@
 # aoti_kernel requires --artifact arg; tested separately
 aoti_kernel:
 
-# embedding, flash_attention will segfault on hip
-embedding:
-  devices:
-    - cuda
-# flash_attention will segfault on hip+triton beta
-flash_attention:
-  disabled_devices:
-    - hip
-  disabled_channels:
-    - meta-triton
 # cpu-op for testing
 test_op:
 # fb-only ops
@@ -40,11 +30,24 @@ mx4_to_fp32:
   devices:
     - cuda
 # ============ TODO: errors in CI ============
-## TODO: CI Failure
 ## torch.AcceleratorError: CUDA error: unspecified launch failure
 decoding_attention:
+  report: true
 # TODO: MSLK does not work with meta-triton
 # TypeError: failed to specialize argument of type: KernelParamWrapper
 fp8_gemm_rowwise:
+  report: true
   channels:
     - triton-main
+# TODO: embedding, flash_attention will segfault on hip
+embedding:
+  report: true
+  devices:
+    - cuda
+# flash_attention will segfault on hip+triton beta
+flash_attention:
+  report: true
+  disabled_devices:
+    - hip
+  disabled_channels:
+    - meta-triton
