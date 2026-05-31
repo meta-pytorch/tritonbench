@@ -63,30 +63,30 @@ def _gen_test_operators(test_ops, skip_tests) -> set[str]:
         # ususally CI environment issue or broken operators need to be fixed
         if skip_tests[skip_op] == None:
             test_ops[skip_op]["disabled"] = True
-            continue
-        for field_name in ["devices", "channels"]:
-            test_ops[skip_op]["disabled"] = test_ops[skip_op][
-                "disabled"
-            ] or not _env_check(skip_tests[skip_op], field_name)
-        disabled_devices = skip_tests[skip_op].get("disabled_devices")
-        disabled_channels = skip_tests[skip_op].get("disabled_channels")
-        if disabled_devices is not None or disabled_channels is not None:
-            # disabled_* fields act as a deny-list over device/channel
-            # combinations. If only one side is specified, it matches any
-            # value for the other side.
-            disabled_device_match = (
-                True
-                if disabled_devices is None
-                else _env_check({"devices": disabled_devices}, "devices")
-            )
-            disabled_channel_match = (
-                True
-                if disabled_channels is None
-                else _env_check({"channels": disabled_channels}, "channels")
-            )
-            test_ops[skip_op]["disabled"] = test_ops[skip_op][
-                "disabled"
-            ] or (disabled_device_match and disabled_channel_match)
+        else:
+            for field_name in ["devices", "channels"]:
+                test_ops[skip_op]["disabled"] = test_ops[skip_op][
+                    "disabled"
+                ] or not _env_check(skip_tests[skip_op], field_name)
+            disabled_devices = skip_tests[skip_op].get("disabled_devices")
+            disabled_channels = skip_tests[skip_op].get("disabled_channels")
+            if disabled_devices is not None or disabled_channels is not None:
+                # disabled_* fields act as a deny-list over device/channel
+                # combinations. If only one side is specified, it matches any
+                # value for the other side.
+                disabled_device_match = (
+                    True
+                    if disabled_devices is None
+                    else _env_check({"devices": disabled_devices}, "devices")
+                )
+                disabled_channel_match = (
+                    True
+                    if disabled_channels is None
+                    else _env_check({"channels": disabled_channels}, "channels")
+                )
+                test_ops[skip_op]["disabled"] = test_ops[skip_op][
+                    "disabled"
+                ] or (disabled_device_match and disabled_channel_match)
         if test_ops[skip_op]["disabled"] and skip_tests[skip_op].get(
             "report", False
         ):
@@ -98,9 +98,6 @@ def _gen_test_operators(test_ops, skip_tests) -> set[str]:
 
 
 TEST_OPERATORS = _gen_test_operators(TEST_OPERATORS, skip_tests)
-
-print("Now logging!!!!!!")
-logger.warning("Now.... logger")
 
 def check_ci_output(op):
     from tritonbench.utils.triton_op import (
