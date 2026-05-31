@@ -87,7 +87,6 @@ def _gen_test_operators(test_ops, skip_tests) -> set[str]:
                 test_ops[skip_op]["disabled"] = test_ops[skip_op][
                     "disabled"
                 ] or (disabled_device_match and disabled_channel_match)
-        logger.warning(f"Testing skip op: {skip_op}, val: {skip_tests[skip_op]}")
         if test_ops[skip_op]["disabled"] and skip_tests[skip_op] and skip_tests[skip_op].get(
             "report", False
         ):
