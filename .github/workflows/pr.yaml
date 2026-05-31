@@ -4,6 +4,7 @@ on:
     paths:
       - .github/workflows/pr.yml
       - .github/workflows/_linux-test-*.yml
+      - test/test_gpu/**
       - tritonbench/**
   push:
     branches:
