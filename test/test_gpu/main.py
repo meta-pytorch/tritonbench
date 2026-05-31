@@ -35,6 +35,7 @@ with open(SKIP_FILE, "r") as f:
 
 logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger(__name__)
+logger.setLevel(logging.INFO)
 
 TEST_OPERATORS = (
     set(list_operators_by_collection(op_collection="buck"))
@@ -98,6 +99,8 @@ def _gen_test_operators(test_ops, skip_tests) -> set[str]:
 
 TEST_OPERATORS = _gen_test_operators(TEST_OPERATORS, skip_tests)
 
+print("Now logging!!!!!!")
+logger.warning("Now.... logger")
 
 def check_ci_output(op):
     from tritonbench.utils.triton_op import (
