@@ -843,7 +843,7 @@ def run_config(
     override_envs: bool = False,
     capture_output: Optional[str] = None,
     per_config_entry: Dict[str, Any] | None = None,
-):
+) -> int:
     assert Path(config_file).exists(), (
         f"Config file {config_file} must exist. Current working directory {os.getcwd()}"
     )  # Fbcode only: need to run from fbsource root directory
@@ -882,6 +882,7 @@ def run_config(
             capture_output=capture_output,
         )
         per_benchmark_callback(disabled)
+    return 0
 
 
 def load_operator_by_args(task_args: List[str]):
@@ -911,7 +912,7 @@ def run_in_task(
     override_envs: bool = False,
     capture_output: Optional[str] = None,
     timeout_s: int = 900,
-) -> None:
+) -> int:
     op_task_cmd = [] if is_fbcode() else [sys.executable]
     if not op_args:
         assert op, "If op_args is none, op must not be None."
