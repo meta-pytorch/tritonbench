@@ -793,6 +793,7 @@ def _run_config_entry(
     extra_envs: Optional[Dict[str, str]] = None,
     override_envs: bool = False,
     capture_output: Optional[str] = None,
+    benchmark_group_name: Optional[str] = None,
 ) -> bool:
     runner = benchmark_config.get("runner", None)
     op_args = benchmark_config["args"].split(" ") + args
@@ -832,6 +833,7 @@ def _run_config_entry(
         extra_envs=config_extra_envs,
         override_envs=override_envs,
         capture_output=capture_output,
+        benchmark_group_name=benchmark_group_name,
     )
     return False
 
@@ -843,6 +845,7 @@ def run_config(
     override_envs: bool = False,
     capture_output: Optional[str] = None,
     per_config_entry: Dict[str, Any] | None = None,
+    benchmark_group_name: Optional[str] = None,
 ):
     assert Path(config_file).exists(), (
         f"Config file {config_file} must exist. Current working directory {os.getcwd()}"
@@ -880,6 +883,7 @@ def run_config(
             extra_envs=extra_envs,
             override_envs=override_envs,
             capture_output=capture_output,
+            benchmark_group_name=benchmark_group_name,
         )
         per_benchmark_callback(disabled)
 
@@ -911,7 +915,9 @@ def run_in_task(
     override_envs: bool = False,
     capture_output: Optional[str] = None,
     timeout_s: int = 900,
+    benchmark_group_name: Optional[str] = None,
 ) -> None:
+    log_prefix = benchmark_group_name or "tritonbench"
     op_task_cmd = [] if is_fbcode() else [sys.executable]
     if not op_args:
         assert op, "If op_args is none, op must not be None."
@@ -946,7 +952,7 @@ def run_in_task(
             logger.setLevel(logging.ERROR)
         start_time = time.perf_counter()
         logger.info(
-            f"[tritonbench] Running benchmark {benchmark_name}: "
+            f"[{log_prefix}] Running benchmark {benchmark_name}: "
             + " ".join(op_task_cmd)
         )
         if override_envs:
@@ -973,19 +979,19 @@ def run_in_task(
         )
         benchmark_time = time.perf_counter() - start_time
         logger.info(
-            f"[tritonbench] Complete benchmark {benchmark_name} in {benchmark_time:.3f} seconds."
+            f"[{log_prefix}] Complete benchmark {benchmark_name} in {benchmark_time:.3f} seconds."
         )
         return 0
     except subprocess.TimeoutExpired:
         logger.warning(
-            f"[tritonbench] Benchmark {benchmark_name} timed out after {timeout_s} seconds."
+            f"[{log_prefix}] Benchmark {benchmark_name} timed out after {timeout_s} seconds."
         )
         return 0
     except subprocess.CalledProcessError as e:
         # By default, we will continue on the failed operators
         return e.returncode
     except KeyboardInterrupt:
-        logger.warning("[tritonbench] KeyboardInterrupt received, exiting...")
+        logger.warning(f"[{log_prefix}] KeyboardInterrupt received, exiting...")
         sys.exit(1)
     finally:
         if capture_output:

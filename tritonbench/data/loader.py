@@ -19,11 +19,7 @@ SUPPORTED_INPUT_OPS = [
 ]
 
 INPUT_CONFIG_DIR = Path(__file__).parent.joinpath("input_configs")
-INTERNAL_INPUT_CONFIG_DIR = (
-    importlib.resources.files("tritonbench.data.input_configs.fb")
-    if is_fbcode()
-    else None
-)
+INTERNAL_INPUT_CONFIG_DIR = INPUT_CONFIG_DIR.joinpath("fb") if is_fbcode() else None
 
 
 def get_input_config_path(input_config_short_path: str):
@@ -34,7 +30,9 @@ def get_input_config_path(input_config_short_path: str):
     elif INTERNAL_INPUT_CONFIG_DIR.joinpath(input_config_short_path).exists():
         input_file_path = INTERNAL_INPUT_CONFIG_DIR.joinpath(input_config_short_path)
     else:
-        raise RuntimeError(f"Input file {input_config_short_path} does not exist.")
+        raise RuntimeError(
+            f'Input file "{input_config_short_path}" does not exist in {INPUT_CONFIG_DIR} or {INTERNAL_INPUT_CONFIG_DIR}'
+        )
     return input_file_path
 
 

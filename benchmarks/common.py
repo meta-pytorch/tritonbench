@@ -109,6 +109,7 @@ def run_benchmark_config_ci(
         config_file=benchmark_config_file,
         args=["--worker-mode"] + maybe_scuba_args + maybe_logging_group,
         per_config_entry=per_benchmark_map,
+        benchmark_group_name=benchmark_group_name,
     )
     # Reduce all operator CSV outputs to a single output json
     benchmark_data = [transform_func(json.load(open(f, "r"))) for f in output_files]
