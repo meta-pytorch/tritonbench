@@ -332,13 +332,6 @@ fp8_gemm_rowwise:
     - _aoti_fp8_triton_mm
     tags:
     - triton
-  _cublas:
-    kernels:
-    - torch.ops.mslk.f8f8bf16_cublas
-    - torch.ops.mslk.f8f8bf16_cublas
-    tags:
-    - native_custom_ops
-    - mslk
   _cutlass_or_ck:
     kernels:
     - torch.ops.mslk.f8f8bf16_rowwise

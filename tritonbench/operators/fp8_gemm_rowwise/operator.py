@@ -81,7 +81,6 @@ def parse_args(args: List[str]) -> argparse.Namespace:
 
 HAS_TRITON = False
 HAS_CUTLASS_OR_CK = False
-HAS_CUBLAS = False
 
 with try_import("HAS_FP8_UTILS"):
     from mslk.utils.triton.fp8_utils import get_fp8_constants
@@ -105,17 +104,6 @@ try:
     HAS_CUTLASS_OR_CK = is_hip() or (is_cuda() and not IS_BLACKWELL)
 except (ImportError, AttributeError, FileNotFoundError, OSError):
     HAS_CUTLASS_OR_CK = False
-
-try:
-    import mslk.gemm  # noqa: F401
-
-    cublas_fp8_row = torch.ops.mslk.f8f8bf16_cublas
-    from mslk.quantize.triton.fp8_quantize import scale_fp8_row
-
-    # TODO: remove these b200 hacks.
-    HAS_CUBLAS = is_cuda() and not IS_BLACKWELL
-except (ImportError, IOError, AttributeError, FileNotFoundError, OSError):
-    HAS_CUBLAS = False
 
 
 BUILDIN_SHAPES = [
@@ -246,35 +234,6 @@ class Operator(BenchmarkOperator):
                 xq, wq, x_scale, w_scale, use_fast_accum=self.fp8_fast_accum
             )
 
-    @register_benchmark(enabled=HAS_CUBLAS, label=f"cublas_{torch.version.cuda}")
-    def _cublas(self, xq, wq, x_scale, w_scale, bias) -> Callable:
-        if bias is not None:
-            return (
-                lambda: scale_fp8_row(
-                    cublas_fp8_row(xq, wq, use_fast_accum=self.fp8_fast_accum),
-                    x_scale,
-                    w_scale,
-                )
-                + bias
-            )
-        else:
-            return lambda: scale_fp8_row(
-                cublas_fp8_row(xq, wq, use_fast_accum=self.fp8_fast_accum),
-                x_scale,
-                w_scale,
-            )
-
-    # TODO: add cublas rowwise FP8 kernel
-    # @register_benchmark(baseline=True)
-    # def _torch(self, xq, wq, x_scale, w_scale) -> Callable:
-    #     def _cublass(xq, wq, x_scale, w_scale):
-    #         output, _ = torch._scaled_mm(
-    #             xq, wq.T, use_fast_accum=True, out_dtype=torch.bfloat16
-    #         )
-    #         return output * x_scale[:, None] * w_scale[None, :]
-
-    #     return lambda: _cublass(xq, wq, x_scale, w_scale)
-
     @register_metric()
     def flops(
         self, fn_name: str, example_inputs: Any, metrics: BenchmarkOperatorMetrics
@@ -347,13 +306,11 @@ class Operator(BenchmarkOperator):
                     "_torch",
                     "_triton",
                     "_ck" if torch.version.hip else "_cutlass",
-                    "_cublas",
                 ],  # possible values for `line_arg``
                 line_names=[
                     "Torch",
                     "Triton",
                     "CK" if torch.version.hip else "Cutlass",
-                    "cuBLAS",
                 ],  # label name for the lines
                 styles=[("blue", "-"), ("green", "-"), ("yellow", "-")],  # line styles
                 ylabel="tflops",  # label name for the y-axis
