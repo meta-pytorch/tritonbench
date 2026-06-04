@@ -333,13 +333,9 @@ def matmul_tma_persistent_get_configs(pre_hook=None):
         return configs
     else:
         early_tma_store_lowering = [1] if _use_meta_ws() else [None]
-        if _use_meta_ws():
-            maxReg = [252] if IS_BLACKWELL else [208, 252]
-        else:
-            maxReg = [None]
 
         def _make_config(
-            BM, BN, BK, s, w, SUBTILE, FLATTEN, DP, pp, store_lowering, maxReg
+            BM, BN, BK, s, w, SUBTILE, FLATTEN, DP, pp, store_lowering, maxReg=None
         ):
             extras = {}
             if pp is not None:
@@ -365,7 +361,7 @@ def matmul_tma_persistent_get_configs(pre_hook=None):
             )
 
         return [
-            _make_config(BM, BN, BK, s, w, SUBTILE, FLATTEN, DP, pp, sl, mr)
+            _make_config(BM, BN, BK, s, w, SUBTILE, FLATTEN, DP, pp, sl)
             for BM in bm_range  #
             for BN in bn_range  #
             for BK in bk_range  #
@@ -376,7 +372,6 @@ def matmul_tma_persistent_get_configs(pre_hook=None):
             for DP in [1, 2]  #
             for pp in _pingpong_options()  #
             for sl in early_tma_store_lowering  #
-            for mr in maxReg  #
         ]
 
 
@@ -415,13 +410,6 @@ def _prune_tma_persistent_configs(configs, named_args, **kwargs):
             # registers: BLOCK_M=128 on Hopper, BLOCK_M=256 on Blackwell.
             required_block_m = 128 if IS_HOPPER else 256
             if block_m != required_block_m:
-                continue
-        # Select optimal register value for Hopper.
-        if IS_HOPPER and ws and _use_meta_ws():
-            maxReg = getattr(c, "maxRegAutoWS", 208)
-            if maxReg == 208 and data_partition_factor == 1:
-                continue
-            elif maxReg == 252 and data_partition_factor == 2:
                 continue
         kept.append(c)
     return _prune_warp_specialize_configs(kept, named_args, **kwargs)
@@ -902,8 +890,6 @@ def matmul_splitk_get_configs(pre_hook=None):
     base_extra = {}
     if _use_meta_ws():
         base_extra["early_tma_store_lowering"] = 1
-        if IS_BLACKWELL:
-            base_extra["maxRegAutoWS"] = 255
 
     splitk_bm_range = [64, 128] if IS_HOPPER else [128]
 
