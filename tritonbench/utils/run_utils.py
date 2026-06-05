@@ -35,6 +35,7 @@ from tritonbench.utils.env_utils import (
 from tritonbench.utils.git_utils import get_branch, get_commit_time, get_current_hash
 from tritonbench.utils.gpu_telemetry_observer import TelemetryContext
 from tritonbench.utils.gpu_utils import get_amd_device_name, gpu_lockdown
+from tritonbench.utils.helion_utils import apply_helion_backend_override
 from tritonbench.utils.list_operator_details import list_operator_details
 from tritonbench.utils.parser import get_parser
 from tritonbench.utils.path_utils import (
@@ -532,6 +533,8 @@ def tritonbench_run(args: Optional[List[str]] = None):
     parser = get_parser()
     args, extra_args = parser.parse_known_args(args)
 
+    apply_helion_backend_override(getattr(args, "helion_backend", None))
+
     tritonparse_init(args.tritonparse)
 
     # Strip `--ai-analysis` from sys.argv when in unsupported modes (multi-device,
@@ -645,6 +648,9 @@ def tritonbench_run(args: Optional[List[str]] = None):
 
 def _run(args: argparse.Namespace, extra_args: List[str]) -> BenchmarkOperatorResult:
     with set_torchrun_env():
+        # Apply before the operator module is imported so the helion.kernel wrap
+        # is in effect before any Helion kernel is constructed.
+        apply_helion_backend_override(getattr(args, "helion_backend", None))
         run_timestamp = datetime.fromtimestamp(time.time()).strftime("%Y%m%d%H%M%S")
         if is_loader_op(args.op):
             Opbench = get_op_loader_bench_cls_by_name(args.op)

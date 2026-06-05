@@ -449,6 +449,19 @@ def get_parser(args=None):
         type=str,
         help="Load plugin from a Python function. This is for loading backends at runtime.",
     )
+    parser.add_argument(
+        "--helion-backend",
+        type=str,
+        default=None,
+        help=(
+            "Override the Helion code-generation backend for every operator's "
+            "`helion` benchmark (e.g. 'cute' for the CuTe DSL backend, 'triton' "
+            "is the default). Sets HELION_BACKEND and ignores any hardcoded "
+            "config= the kernels pass, so it works for any op without editing "
+            "kernel files. Pair with HELION_AUTOTUNE_EFFORT=none to skip "
+            "autotuning."
+        ),
+    )
 
     if is_fbcode():
         parser.add_argument(
