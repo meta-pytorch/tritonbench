@@ -2530,17 +2530,19 @@ class BenchmarkOperator(metaclass=PostInitProcessor):
         att_trace_dir = launch_att(att_output_dir, op_task_args)
         return att_trace_dir
 
-    def kineto_trace(self, input_id: int, fn: Callable) -> str:
+    def kineto_trace(
+        self, input_id: int, fn: Callable, output_dir: Optional[str] = None
+    ) -> str:
         from tritonbench.components.kineto import do_bench_kineto
 
-        kineto_output_dir = self.get_temp_path(fn._name)
-        kineto_output_dir.mkdir(parents=True, exist_ok=True)
+        if output_dir is not None:
+            Path(output_dir).mkdir(parents=True, exist_ok=True)
         return do_bench_kineto(
             fn=fn,
             warmup=self.tb_args.warmup,
             rep=self.tb_args.rep,
             grad_to_none=self.get_grad_to_none(self.example_inputs),
-            output_dir=kineto_output_dir,
+            output_dir=output_dir,
             use_cuda_graphs=self.use_cuda_graphs,
             skip_cache_clearing=self.tb_args.skip_cache_clearing,
         )

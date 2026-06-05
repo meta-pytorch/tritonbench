@@ -1,0 +1,74 @@
+{
+    "traceEvents": [
+        {
+            "ph": "X",
+            "cat": "cpu_op",
+            "name": "aten::mm",
+            "pid": 1,
+            "tid": 1,
+            "ts": 1000000,
+            "dur": 500,
+            "args": {}
+        },
+        {
+            "ph": "X",
+            "cat": "kernel",
+            "name": "triton_gemm_kernel_0d1d2d",
+            "pid": 1,
+            "tid": 2,
+            "ts": 1000100,
+            "dur": 200,
+            "args": {}
+        },
+        {
+            "ph": "X",
+            "cat": "kernel",
+            "name": "triton_gemm_kernel_0d1d2d",
+            "pid": 1,
+            "tid": 2,
+            "ts": 1000400,
+            "dur": 200,
+            "args": {}
+        },
+        {
+            "ph": "X",
+            "cat": "kernel",
+            "name": "sm90_xmma_gemm_f16f16_f32",
+            "pid": 1,
+            "tid": 2,
+            "ts": 1001000,
+            "dur": 100,
+            "args": {}
+        },
+        {
+            "ph": "X",
+            "cat": "kernel",
+            "name": "void at::native::vectorized_elementwise_kernel<4, at::native::CUDAFunctorOnSelf_add<float>, at::detail::Array<char*, 3>>",
+            "pid": 1,
+            "tid": 2,
+            "ts": 1001200,
+            "dur": 50,
+            "args": {}
+        },
+        {
+            "ph": "X",
+            "cat": "gpu_memcpy",
+            "name": "Memcpy HtoD",
+            "pid": 1,
+            "tid": 2,
+            "ts": 1001300,
+            "dur": 30,
+            "args": {}
+        },
+        {
+            "ph": "X",
+            "cat": "kernel",
+            "name": "Memcpy DtoD",
+            "pid": 1,
+            "tid": 2,
+            "ts": 1001400,
+            "dur": 30,
+            "args": {}
+        }
+    ]
+}

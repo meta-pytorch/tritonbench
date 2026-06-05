@@ -5,8 +5,8 @@ import shutil
 import subprocess
 from pathlib import Path
 
-from .torch_utils import install_pytorch_nightly, install_pytorch_wheel
 from .python_utils import get_pip_cmd, USE_UV
+from .torch_utils import install_pytorch_nightly, install_pytorch_wheel
 
 # defines the default CUDA version to compile against
 DEFAULT_CUDA_VERSION = "13.0"

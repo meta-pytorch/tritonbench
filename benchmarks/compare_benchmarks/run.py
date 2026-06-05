@@ -63,9 +63,7 @@ from tritonbench.utils.env_utils import is_fbcode
 from tritonbench.utils.run_utils import run_in_task, run_one_operator
 
 if is_fbcode():
-    from pytorch.tritonbench.benchmarks.compare_benchmarks.utils import (
-        log_benchmark,
-    )
+    from pytorch.tritonbench.benchmarks.compare_benchmarks.utils import log_benchmark
     from pytorch.tritonbench.tools.fb.inductor_analyzer.autotune_parser import (
         compare_benchmark_results,
         parse_benchmark_results,
@@ -234,9 +232,7 @@ def _resolve_input_loaders(
         loader_path = Path(config.input_loader)
 
         if loader_path.is_file():
-            print(
-                f"[Compare Benchmarks] Shape source: file '{config.input_loader}'"
-            )
+            print(f"[Compare Benchmarks] Shape source: file '{config.input_loader}'")
             return [(loader_path.stem, config.input_loader)]
 
         if loader_path.is_dir():
@@ -271,9 +267,7 @@ def _resolve_input_loaders(
         )
         return []
 
-    print(
-        "[Compare Benchmarks] Shape source: ai_infra.inductor_mm_shapes (Hive)"
-    )
+    print("[Compare Benchmarks] Shape source: ai_infra.inductor_mm_shapes (Hive)")
     from pytorch.tritonbench.benchmarks.compare_benchmarks.fb.hive_shapes import (
         get_shapes_from_hive,
     )

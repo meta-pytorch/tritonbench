@@ -15,6 +15,9 @@ from tritonbench.components.do_bench.utils import (
 from tritonbench.utils.constants import DEFAULT_N_REP, DEFAULT_N_WARMUP
 from tritonbench.utils.env_utils import has_manifold
 
+if not hasattr(torch.version, "git_version"):
+    from .fb.run_utils import trace_handler
+
 DEFAULT_PROFILE_OPTS = {
     "record_shapes": True,
     "profile_memory": True,
@@ -22,9 +25,6 @@ DEFAULT_PROFILE_OPTS = {
     "with_flops": True,
     "with_modules": True,
 }
-
-if not hasattr(torch.version, "git_version"):
-    from .fb.run_utils import trace_handler
 
 
 def _find_the_latest_file(output_dir, recursive: bool = False, glob_pattern="*"):
@@ -52,22 +52,21 @@ def _find_the_latest_file(output_dir, recursive: bool = False, glob_pattern="*")
     return latest_path.name if latest_path else None
 
 
-def post_process(output_dir, name) -> str:
-    if not hasattr(torch.version, "git_version"):
+def post_process(output_dir, name, skip_manifold: bool = False) -> str:
+    if not output_dir:
         return f"https://www.internalfb.com/intern/perfdoctor/trace_view?filepath=tree/traces/tritonbench/{name}.gz&bucket=pyper_traces"
-    elif has_manifold():
-        lastest_json_file = _find_the_latest_file(output_dir, glob_pattern="*.json.gz")
-        assert lastest_json_file is not None, "No trace file found"
+    latest = _find_the_latest_file(output_dir, glob_pattern="*.json.gz")
+    trace_file = latest or name
+    if not skip_manifold and has_manifold():
         cmd = [
             "manifold",
             "put",
-            lastest_json_file,
-            f"pyper_traces/tree/traces/tritonbench/{lastest_json_file}",
+            trace_file,
+            f"pyper_traces/tree/traces/tritonbench/{trace_file}",
         ]
         subprocess.check_call(cmd, cwd=output_dir)
-        return f"https://www.internalfb.com/intern/perfdoctor/trace_view?filepath=tree/traces/tritonbench/{lastest_json_file}&bucket=pyper_traces"
-    else:
-        return f"{output_dir}/{name}"
+        return f"https://www.internalfb.com/intern/perfdoctor/trace_view?filepath=tree/traces/tritonbench/{trace_file}&bucket=pyper_traces"
+    return str(Path(output_dir) / trace_file)
 
 
 def do_bench_kineto_cudagraph(
@@ -78,6 +77,7 @@ def do_bench_kineto_cudagraph(
     grad_to_none,
     profile_opts,
     output_dir,
+    skip_manifold: bool = False,
 ) -> str:
     activity_groups = [
         profiler.ProfilerActivity.CUDA,
@@ -93,7 +93,8 @@ def do_bench_kineto_cudagraph(
             clear_cache()
             fn()
         torch.cuda.synchronize()
-        prefix = f"tritonbench_cudagraph_{fn._name}"
+        fn_name = getattr(fn, "_name", getattr(fn, "__name__", "unknown"))
+        prefix = f"tritonbench_cudagraph_{fn_name}"
         name = f"{prefix}_{datetime.now().strftime('%Y%m%d_%H%M%S')}_{''.join(random.choices(string.digits, k=10))}.json"
         # step 2 - profile cuda graph launch with kineto
         with profiler.profile(
@@ -106,11 +107,7 @@ def do_bench_kineto_cudagraph(
             with_stack=profile_opts["with_stack"],
             with_flops=profile_opts["with_flops"],
             with_modules=profile_opts["with_modules"],
-            on_trace_ready=(
-                partial(trace_handler, name)
-                if not hasattr(torch.version, "git_version")
-                else profiler.tensorboard_trace_handler(output_dir, use_gzip=True)
-            ),
+            on_trace_ready=_get_on_trace_ready(output_dir, name),
         ) as prof:
             for _i in range(n_warmup + n_repeat):
                 # we don't want `fn` to accumulate gradient values
@@ -121,7 +118,13 @@ def do_bench_kineto_cudagraph(
                         x.grad = None
                 g.replay()
                 prof.step()
-    return post_process(output_dir, name)
+    return post_process(output_dir, name, skip_manifold=skip_manifold)
+
+
+def _get_on_trace_ready(output_dir, name):
+    if not output_dir and not hasattr(torch.version, "git_version"):
+        return partial(trace_handler, name)
+    return profiler.tensorboard_trace_handler(output_dir, use_gzip=True)
 
 
 def do_bench_kineto(
@@ -149,12 +152,24 @@ def do_bench_kineto(
     :type fast_flush: bool
     :param profile_opts: Options to pass into profiler.profile
     :type profile_opts: dict, optional
-    :param output_dir: Output directory to store the trace
+    :param output_dir: Output directory to store the trace locally. When set,
+        the trace is saved as a gzipped JSON file in this directory and the
+        return value is the local file path. When ``None``, the trace is
+        uploaded to Manifold on internal builds.
     :type output_dir: str, optional
     """
     if profile_opts is None:
         profile_opts = DEFAULT_PROFILE_OPTS
+    import shutil
+    import tempfile
+
     import torch
+
+    user_output_dir = output_dir is not None
+    _temp_output_dir = None
+    if output_dir is None and hasattr(torch.version, "git_version"):
+        _temp_output_dir = tempfile.mkdtemp(prefix="tritonbench_kineto_")
+        output_dir = _temp_output_dir
 
     fn()
     torch.cuda.synchronize()
@@ -183,14 +198,22 @@ def do_bench_kineto(
 
     if use_cuda_graphs:
         return do_bench_kineto_cudagraph(
-            fn, clear_cache, n_warmup, n_repeat, grad_to_none, profile_opts, output_dir
+            fn,
+            clear_cache,
+            n_warmup,
+            n_repeat,
+            grad_to_none,
+            profile_opts,
+            output_dir,
+            skip_manifold=user_output_dir,
         )
 
     activity_groups = [
         profiler.ProfilerActivity.CUDA,
         profiler.ProfilerActivity.CPU,
     ]
-    prefix = f"tritonbench_{fn._name}"
+    fn_name = getattr(fn, "_name", getattr(fn, "__name__", "unknown"))
+    prefix = f"tritonbench_{fn_name}"
     name = f"{prefix}_{datetime.now().strftime('%Y%m%d_%H%M%S')}_{''.join(random.choices(string.digits, k=10))}.json"
     with profiler.profile(
         schedule=profiler.schedule(
@@ -202,11 +225,7 @@ def do_bench_kineto(
         with_stack=profile_opts["with_stack"],
         with_flops=profile_opts["with_flops"],
         with_modules=profile_opts["with_modules"],
-        on_trace_ready=(
-            partial(trace_handler, name)
-            if not hasattr(torch.version, "git_version")
-            else profiler.tensorboard_trace_handler(output_dir, use_gzip=True)
-        ),
+        on_trace_ready=_get_on_trace_ready(output_dir, name),
     ) as prof:
         for i in range(n_warmup + n_repeat):
             # we don't want `fn` to accumulate gradient values
@@ -219,7 +238,11 @@ def do_bench_kineto(
             clear_cache()
             fn()
             prof.step()
-    return post_process(output_dir, name)
+    try:
+        return post_process(output_dir, name, skip_manifold=user_output_dir)
+    finally:
+        if _temp_output_dir:
+            shutil.rmtree(_temp_output_dir, ignore_errors=True)
 
 
 def do_bench_kineto_walltime(fn, repcnt=5, profile_opts=None, output_dir=None):
@@ -234,7 +257,8 @@ def do_bench_kineto_walltime(fn, repcnt=5, profile_opts=None, output_dir=None):
         profiler.ProfilerActivity.CUDA,
         profiler.ProfilerActivity.CPU,
     ]
-    prefix = f"tritonbench_{fn._name}"
+    fn_name = getattr(fn, "_name", getattr(fn, "__name__", "unknown"))
+    prefix = f"tritonbench_{fn_name}"
     name = f"{prefix}_{datetime.now().strftime('%Y%m%d_%H%M%S')}_{''.join(random.choices(string.digits, k=10))}.json"
     with profiler.profile(
         schedule=profiler.schedule(wait=0, warmup=repcnt - 1, active=1, repeat=1),
@@ -244,11 +268,7 @@ def do_bench_kineto_walltime(fn, repcnt=5, profile_opts=None, output_dir=None):
         with_stack=profile_opts["with_stack"],
         with_flops=profile_opts["with_flops"],
         with_modules=profile_opts["with_modules"],
-        on_trace_ready=(
-            partial(trace_handler, name)
-            if not hasattr(torch.version, "git_version")
-            else profiler.tensorboard_trace_handler(output_dir, use_gzip=True)
-        ),
+        on_trace_ready=_get_on_trace_ready(output_dir, name),
     ) as prof:
         for i in range(repcnt):
             fn()

@@ -1,12 +1,11 @@
 import unittest
 
 import torch
-
 from tritonbench.utils.env_utils import (
     IS_BLACKWELL,
+    is_blackwell,
     IS_BLACKWELL_ANY,
     IS_BLACKWELL_CONSUMER,
-    is_blackwell,
     is_blackwell_consumer,
 )
 

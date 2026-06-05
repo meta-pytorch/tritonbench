@@ -9,6 +9,7 @@ CURRENT_DIR = os.path.dirname(os.path.abspath(__file__))
 
 from ..common import run_benchmark_config_ci
 
+
 def main() -> None:
     parser = argparse.ArgumentParser()
     parser.add_argument("--name", default="compile_time", help="Benchmark name.")
@@ -30,6 +31,7 @@ def main() -> None:
         ci=args.ci,
         log_scuba=args.log_scuba,
     )
+
 
 if __name__ == "__main__":
     # Do not add code here, it won't be run. Add them to the function called below.

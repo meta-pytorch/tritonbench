@@ -20,15 +20,15 @@ class FlashAttention:
     @staticmethod
     def create_inputs(Z, H, N_CTX, HEAD_DIM, dtype=torch.bfloat16):
         torch.manual_seed(20)
-        q = torch.empty(
-            (Z, H, N_CTX, HEAD_DIM), device="cuda", dtype=dtype
-        ).normal_(mean=0.0, std=0.5)
-        k = torch.empty(
-            (Z, H, N_CTX, HEAD_DIM), device="cuda", dtype=dtype
-        ).normal_(mean=0.0, std=0.5)
-        v = torch.empty(
-            (Z, H, N_CTX, HEAD_DIM), device="cuda", dtype=dtype
-        ).normal_(mean=0.0, std=0.5)
+        q = torch.empty((Z, H, N_CTX, HEAD_DIM), device="cuda", dtype=dtype).normal_(
+            mean=0.0, std=0.5
+        )
+        k = torch.empty((Z, H, N_CTX, HEAD_DIM), device="cuda", dtype=dtype).normal_(
+            mean=0.0, std=0.5
+        )
+        v = torch.empty((Z, H, N_CTX, HEAD_DIM), device="cuda", dtype=dtype).normal_(
+            mean=0.0, std=0.5
+        )
         return q, k, v
 
     @staticmethod
@@ -81,15 +81,14 @@ class FlashAttention:
 # Blackwell FA2 autoWS (fwd + bwd)
 # =============================================================================
 
+
 @unittest.skip("TODO: RuntimeError on autoWS")
 class TestBlackwellTritonFusedAttention(unittest.TestCase):
     """Tests for blackwell_triton_fused_attention.py (autoWS variant)."""
 
     @classmethod
     def setUpClass(cls):
-        from tritonbench.kernels.blackwell_triton_fused_attention import (
-            attention_opt,
-        )
+        from tritonbench.kernels.blackwell_triton_fused_attention import attention_opt
 
         cls.attention_opt = staticmethod(attention_opt)
 

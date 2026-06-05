@@ -78,7 +78,9 @@ def validate_requested_values(
         )
 
     unknown_channels = [
-        channel for channel in triton_channels if channel not in SUPPORTED_TRITON_CHANNELS
+        channel
+        for channel in triton_channels
+        if channel not in SUPPORTED_TRITON_CHANNELS
     ]
     if unknown_channels:
         raise ValueError(
@@ -205,9 +207,7 @@ def main() -> int:
         requested_benchmarks, requested_triton_channels, requested_runners
     )
 
-    benchmarks = select_benchmarks(
-        requested_benchmarks, args.event_name, changed_files
-    )
+    benchmarks = select_benchmarks(requested_benchmarks, args.event_name, changed_files)
 
     full_matrix_entries: list[dict[str, str]] = []
     for benchmark in benchmarks:
