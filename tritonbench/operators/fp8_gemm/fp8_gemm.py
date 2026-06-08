@@ -14,7 +14,7 @@ from tritonbench.operators.fp8_gemm.scaled_mm_autows import (
     scaled_mm_autows,
     TENSORWISE as AUTOWS_TENSORWISE,
 )
-from tritonbench.utils.env_utils import IS_BLACKWELL, is_fbcode
+from tritonbench.utils.env_utils import IS_BLACKWELL, is_cuda, is_fbcode
 from tritonbench.utils.triton_op import (
     BenchmarkOperator,
     BenchmarkOperatorMetrics,
@@ -282,7 +282,9 @@ class Operator(BenchmarkOperator):
             out_dtype=self._get_dtype(),
         )
 
-    @register_benchmark()
+    # On AMD it says:
+    # AttributeError("module 'triton.language' has no attribute 'float8_e4m3fn'")
+    @register_benchmark(enabled=is_cuda())
     def pt2_fp8_gemm(self, a, b, scale_a, scale_b) -> Callable:
         torch._dynamo.reset()
         with inductor_config.patch(
@@ -395,7 +397,9 @@ class Operator(BenchmarkOperator):
 
             return lambda: compiled(a, b)
 
-    @register_benchmark()
+    # This impl is CUDA-specific
+    # AMD error: TypeError: range.__init__() got an unexpected keyword argument 'separate_epilogue_store'
+    @register_benchmark(enabled=is_cuda())
     def triton_autows_fp8_gemm(self, a, b, scale_a, scale_b):
         _SCALING_MAP = {
             ScalingType.TensorWise: AUTOWS_TENSORWISE,

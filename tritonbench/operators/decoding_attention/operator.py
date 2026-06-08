@@ -9,6 +9,7 @@ from typing import Callable, Optional, Tuple
 
 import torch
 from tritonbench.utils.env_utils import IS_BLACKWELL, is_cuda
+from tritonbench.utils.python_utils import try_import
 from tritonbench.utils.path_utils import add_ld_library_path
 
 # [Optional] flash_attn v2
@@ -49,13 +50,9 @@ try:
 except (ImportError, IOError, AttributeError):
     HAS_XFORMERS = False
 
-try:
+with try_import("HAS_FB_IMPORT"):
     import mslk.attention.gqa_attn_splitk  # noqa: F401
     from gen_ai.llm_inference.fb.llm.quantization.kv_quantize import quantize_kv_fp8
-
-    HAS_FB_IMPORT = True
-except ImportError:
-    HAS_FB_IMPORT = False
 
 
 from tritonbench.utils.env_utils import is_b200
