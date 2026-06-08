@@ -1,8 +1,17 @@
+import logging
 import os
+import shlex
 import shutil
+import subprocess
 import sys
 from collections import defaultdict
-from typing import List
+from pathlib import Path
+from typing import List, Optional, TYPE_CHECKING
+
+if TYPE_CHECKING:
+    from tritonbench.utils.triton_op import BenchmarkOperatorMetrics
+
+logger: logging.Logger = logging.getLogger(__name__)
 
 """
 A dictionary mapping short metric names to their corresponding NVIDIA Nsight Compute
@@ -172,22 +181,22 @@ def get_arithmetic_intensity(kernel):
 
 
 def read_ncu_report(report_path: str, required_metrics: List[str]):
-    assert os.path.exists(report_path), (
-        f"The NCU report at {report_path} does not exist."
-    )
+    assert os.path.exists(
+        report_path
+    ), f"The NCU report at {report_path} does not exist."
     _import_ncu_python_path()
     import ncu_report
 
     # save all kernels' metrics. {metric_name: [kernel1_metric_value, kernel2_metric_value, ...]}
     results = defaultdict(list)
     test_report = ncu_report.load_report(report_path)
-    assert test_report.num_ranges() > 0, (
-        f"No profile data found in the NCU report at {report_path}"
-    )
+    assert (
+        test_report.num_ranges() > 0
+    ), f"No profile data found in the NCU report at {report_path}"
     default_range = test_report.range_by_idx(0)
-    assert default_range.num_actions() > 0, (
-        f"No profile data found in the default range of the NCU report at {report_path}"
-    )
+    assert (
+        default_range.num_actions() > 0
+    ), f"No profile data found in the default range of the NCU report at {report_path}"
     total_duration = 0
     total_dram_bytes = 0
     weighted_fp32_ai_sum = 0
@@ -255,3 +264,160 @@ def read_ncu_report(report_path: str, required_metrics: List[str]):
             weighted_fp64_tflops_sum / total_duration,
         )
     return results
+
+
+def ncu_trace(
+    op_task_args: List[str],
+    output_dir: Path,
+    range_name: str,
+    replay: bool = False,
+    profile_ir: bool = False,
+    extend_ncu_args: Optional[List[str]] = None,
+) -> str:
+    """
+    Run NCU on a single operator backend/input subprocess and return the path to
+    the generated report.
+
+    Args:
+        op_task_args: The command line that runs a single operator backend/input
+            in a subprocess.
+        output_dir: The directory the report is written to.
+        range_name: The NVTX range to profile (``range_start``/``range_end``).
+        replay: Whether to generate a ``.ncu-rep`` report (vs. a ``.csv`` log).
+        profile_ir: Whether to profile with TTGIR source locations.
+        extend_ncu_args: Extra ``--metrics`` to collect; defaults to ``--set full``.
+    """
+    extend_ncu_args = (
+        ["--metrics", ",".join(extend_ncu_args)]
+        if extend_ncu_args
+        else [
+            "--set",
+            "full",
+        ]
+    )
+    # Disable DCGM
+    disable_dyno_dcgm = [
+        "sudo",
+        "dyno",
+        "dcgm_profiling",
+        "--mute=true",
+        "--duration=100000_s",
+    ]
+    disable_dcgm_service = [
+        "sudo",
+        "systemctl",
+        "stop",
+        "nvidia-dcgm",
+    ]
+
+    def service_exists(service_name):
+        try:
+            result = subprocess.run(
+                ["systemctl", "status", service_name],
+                stdout=subprocess.PIPE,
+                stderr=subprocess.PIPE,
+                check=True,
+            )
+            return result.returncode == 0
+        except subprocess.CalledProcessError:
+            return False
+
+    if shutil.which("dyno") or service_exists("nvidia-dcgm"):
+        dyno_result = subprocess.run(disable_dyno_dcgm).returncode
+        systemctl_result = subprocess.run(disable_dcgm_service).returncode
+        if dyno_result != 0 and systemctl_result != 0:
+            logger.warning(
+                "DCGM may not have been successfully disabled. Proceeding to collect NCU trace anyway..."
+            )
+    output_dir.mkdir(parents=True, exist_ok=True)
+    ext = ".csv" if not replay else ".ncu-rep"
+    ncu_output_file = output_dir.joinpath(
+        f"ncu_rep{'_ir' if profile_ir else ''}{ext}"
+    ).resolve()
+    ncu_args = [
+        "ncu",
+        "--nvtx",
+        "--nvtx-include",
+        # it is for range_start and range_end. no ending /.
+        f"{range_name}",
+        "--pm-sampling-max-passes",
+        "4",
+        "--warp-sampling-max-passes",
+        "4",
+        "--target-processes",
+        "all",
+        "--import-source",
+        "yes",
+    ]
+    ncu_args.extend(extend_ncu_args)
+    if replay:
+        ncu_args.extend(
+            [
+                "-f",
+                "-o",
+                str(ncu_output_file.resolve()),
+            ]
+        )
+    else:
+        ncu_args.extend(
+            [
+                "--csv",
+                "-f",
+                "--log-file",
+                str(ncu_output_file.resolve()),
+            ]
+        )
+    ncu_args.extend(op_task_args)
+    logger.info("Running NCU: %s", shlex.join(ncu_args))
+    # Sometimes, `ncu --target-processes all` will fail with the message "Failed to connect to process". Setting
+    # CUDA_INJECTION64_PATH=none seems to fix this issue.
+    env = {**os.environ, "CUDA_INJECTION64_PATH": "none"}
+    if profile_ir:
+        env["USE_TTGIR_LOC"] = "1"
+    subprocess.check_call(ncu_args, env=env)
+    return str(ncu_output_file.resolve())
+
+
+def analyze_ncu_metrics(
+    required_metrics: List[str],
+    op_task_args: List[str],
+    output_dir: Path,
+    range_name: str,
+    metrics: "BenchmarkOperatorMetrics",
+) -> None:
+    """
+    Collect NCU metrics (ncu_rep, ncu_rep_ir, or ncu_analyzer metrics) and
+    populate `metrics` in place.
+
+    Args:
+        required_metrics: The metrics requested for this benchmark run.
+        op_task_args: The command line that runs a single operator backend/input
+            in a subprocess, forwarded to ``ncu_trace``.
+        output_dir: The directory the NCU report is written to.
+        range_name: The NVTX range to profile, forwarded to ``ncu_trace``.
+        metrics: The ``BenchmarkOperatorMetrics`` instance to populate.
+    """
+    # ncu metrics (ncu_rep, ncu_rep_ir, or ncu_analyzer metrics)
+    ncu_metrics = get_ncu_metrics(required_metrics)
+    out = None
+    if ncu_metrics or "ncu_rep" in required_metrics or "ncu_rep_ir" in required_metrics:
+        profile_ir = "ncu_rep_ir" in required_metrics
+        out = ncu_trace(
+            op_task_args,
+            output_dir,
+            range_name,
+            replay=True,
+            extend_ncu_args=ncu_metrics,
+            profile_ir=profile_ir,
+        )
+    # Read and update NCU metrics if any required metrics match the NCU metrics
+    if ncu_metrics:
+        ncu_analyzer_results = read_ncu_report(out, required_metrics)
+        for metric_name, metric_value in ncu_analyzer_results.items():
+            metrics.extra_metrics[metric_name] = metric_value
+        if "arithmetic_intensity" in required_metrics:
+            logger.warning("Arithmetic intensity only supports FP32 and FP64 for now.")
+    if "ncu_rep" in required_metrics:
+        metrics.ncu_rep = out
+    if "ncu_rep_ir" in required_metrics:
+        metrics.ncu_rep_ir = out

@@ -7,10 +7,7 @@ import json
 import logging
 import os
 import random
-import shlex
-import shutil
 import statistics
-import subprocess
 import sys
 import tempfile
 import time
@@ -220,9 +217,9 @@ def _find_op_name_from_module_path(module_path: str) -> str:
     PATH_PREFIX = "tritonbench.operators."
     # We have a separate operator loader for aten operator benchmark.
     PATH_PREFIX_LOADER = "tritonbench.operator_loader."
-    assert PATH_PREFIX in module_path or PATH_PREFIX_LOADER in module_path, (
-        f"We rely on module path prefix to identify operator name. Expected {PATH_PREFIX}<operator_name>, get {module_path}."
-    )
+    assert (
+        PATH_PREFIX in module_path or PATH_PREFIX_LOADER in module_path
+    ), f"We rely on module path prefix to identify operator name. Expected {PATH_PREFIX}<operator_name>, get {module_path}."
     if PATH_PREFIX_LOADER in module_path:
         suffix = module_path.partition(PATH_PREFIX_LOADER)[2]
         suffix = suffix.partition(".")[2]
@@ -569,9 +566,9 @@ class BenchmarkOperatorResult:
             metrics_dict = asdict(y_vals)
         if metric_name in metrics_dict:
             return metrics_dict[metric_name]
-        assert metric_name in metrics_dict["extra_metrics"], (
-            f"Metric {metric_name} could not be found."
-        )
+        assert (
+            metric_name in metrics_dict["extra_metrics"]
+        ), f"Metric {metric_name} could not be found."
         return metrics_dict["extra_metrics"][metric_name]
 
     def _get_result_dict(self):
@@ -795,9 +792,9 @@ class BenchmarkOperator(metaclass=PostInitProcessor):
         elif self.tb_args.mode == "fwd_no_grad":
             self.mode = Mode.FWD_NO_GRAD
         else:
-            assert self.tb_args.mode == "bwd", (
-                "We only accept test modes: fwd, bwd, fwd_bwd, or fwd_no_grad."
-            )
+            assert (
+                self.tb_args.mode == "bwd"
+            ), "We only accept test modes: fwd, bwd, fwd_bwd, or fwd_no_grad."
             self.mode = Mode.BWD
         self.requires_grad = not (self.mode == Mode.FWD_NO_GRAD)
         self.device = tb_args.device
@@ -986,16 +983,16 @@ class BenchmarkOperator(metaclass=PostInitProcessor):
             setattr(fwd_fn, "_name", bm_func_name)
             return fwd_fn
         elif self.mode == Mode.BWD:
-            assert not backend.fwd_only, (
-                f"Backend {bm_func_name} does not support backward pass."
-            )
+            assert (
+                not backend.fwd_only
+            ), f"Backend {bm_func_name} does not support backward pass."
             bwd_fn = self.get_bwd_fn(fwd_fn)
             setattr(bwd_fn, "_name", bm_func_name)
             return bwd_fn
         elif self.mode == Mode.FWD_BWD:
-            assert not backend.fwd_only, (
-                f"Backend {bm_func_name} does not support backward pass."
-            )
+            assert (
+                not backend.fwd_only
+            ), f"Backend {bm_func_name} does not support backward pass."
             bwd_fn = self.get_bwd_fn(fwd_fn)
 
             # FWD_BWD returns (forward_output, grad_tensors_after_backward)
@@ -1949,9 +1946,9 @@ class BenchmarkOperator(metaclass=PostInitProcessor):
                 self.required_metrics
             )
             for metric_name in required_custom_metrics:
-                assert metric_name not in BUILTIN_METRICS, (
-                    "Metric name {metric_name} is built-in and should be OVERRIDDEN_METRICS. Please report a bug."
-                )
+                assert (
+                    metric_name not in BUILTIN_METRICS
+                ), "Metric name {metric_name} is built-in and should be OVERRIDDEN_METRICS. Please report a bug."
                 extra_metrics[metric_name] = None
             return extra_metrics
 
@@ -2075,65 +2072,24 @@ class BenchmarkOperator(metaclass=PostInitProcessor):
                     input_id, fn_name, metrics, kineto_trace=True
                 )
             if not is_hip():
-                # ncu metrics (ncu_rep, ncu_rep_ir, or ncu_analyzer metrics)
-                ncu_metrics: List[str] = ncu_analyzer.get_ncu_metrics(
-                    self.required_metrics
+                op_task_args = self._get_op_task_args(
+                    input_id, fn_name, "single_run_in_task"
                 )
-                if (
-                    ncu_metrics
-                    or "ncu_rep" in self.required_metrics
-                    or "ncu_rep_ir" in self.required_metrics
-                ):
-                    profile_ir = "ncu_rep_ir" in self.required_metrics
-                    out = self.ncu_trace(
-                        input_id,
-                        fn_name,
-                        replay=True,
-                        extend_ncu_args=ncu_metrics,
-                        profile_ir=profile_ir,
-                    )
-                # Read and update NCU metrics if any required metrics match the NCU metrics
-                if ncu_metrics:
-                    ncu_analyzer_results = ncu_analyzer.read_ncu_report(
-                        out, self.required_metrics
-                    )
-                    for metric_name, metric_value in ncu_analyzer_results.items():
-                        metrics.extra_metrics[metric_name] = metric_value
-                    if "arithmetic_intensity" in self.required_metrics:
-                        logger.warning(
-                            "Arithmetic intensity only supports FP32 and FP64 for now."
-                        )
-                if "ncu_rep" in self.required_metrics:
-                    metrics.ncu_rep = out
-                if "ncu_rep_ir" in self.required_metrics:
-                    metrics.ncu_rep_ir = out
-                # nsys metrics
-                nsys_metrics = nsys_analyzer.get_nsys_metrics(self.required_metrics)
-                if "nsys_rep" in self.required_metrics or nsys_metrics:
-                    nsys_rep_path = self.nsys_rep(input_id, fn_name)
-                    metrics.nsys_rep = nsys_rep_path
-                    if nsys_metrics:
-                        nsys_analyzer_results = nsys_analyzer.read_nsys_report(
-                            nsys_rep_path, nsys_metrics
-                        )
-                        for metric_name, metric_value in nsys_analyzer_results.items():
-                            metrics.extra_metrics[metric_name] = metric_value
-                if "nsys_gpu_speedup" in self.required_metrics:
-                    baseline_nsys_gpu_kernel_sum = (
-                        self.baseline_metrics.extra_metrics.get(
-                            "nsys_gpu_kernel_sum", None
-                        )
-                        if self.baseline_metrics
-                        else None
-                    )
-                    current_nsys_gpu_kernel_sum = metrics.extra_metrics.get(
-                        "nsys_gpu_kernel_sum", None
-                    )
-                    metrics.nsys_gpu_speedup = (
-                        baseline_nsys_gpu_kernel_sum / current_nsys_gpu_kernel_sum
-                        if baseline_nsys_gpu_kernel_sum and current_nsys_gpu_kernel_sum
-                        else None
-                    )
+                output_dir = self.get_temp_path(fn_name)
+                ncu_analyzer.analyze_ncu_metrics(
+                    self.required_metrics,
+                    op_task_args,
+                    output_dir,
+                    _RANGE_NAME,
+                    metrics,
+                )
+                nsys_analyzer.analyze_nsys_metrics(
+                    self.required_metrics,
+                    op_task_args,
+                    output_dir,
+                    metrics,
+                    self.baseline_metrics,
+                )
             else:
                 if "att_trace" in self.required_metrics:
                     metrics.att_trace = self.att_trace(input_id, fn_name)
@@ -2397,133 +2353,6 @@ class BenchmarkOperator(metaclass=PostInitProcessor):
         )
         return op_task_args
 
-    def nsys_rep(self, input_id: int, fn_name: str) -> str:
-        op_task_args = self._get_op_task_args(input_id, fn_name, "single_run_in_task")
-        nsys_output_dir = self.get_temp_path(fn_name)
-        nsys_output_dir.mkdir(parents=True, exist_ok=True)
-        ext = ".nsys-rep"
-        nsys_bin = os.environ.get("NSYS_BIN", "nsys")
-        nsys_output_file = nsys_output_dir.joinpath(f"nsys_rep{ext}").resolve()
-        nsys_trace_cmd = [
-            nsys_bin,
-            "profile",
-            "-t",
-            "nvtx,osrt,cuda,cudnn,cublas",
-            "-w",
-            "true",
-            "-f",
-            "true",
-            "-o",
-            str(nsys_output_file),
-        ]
-        nsys_trace_cmd.extend(op_task_args)
-        try:
-            subprocess.check_call(nsys_trace_cmd)
-        except subprocess.CalledProcessError:
-            # FIXME: calling nsys on Tritonbench will throw SIGTERM with error code 143
-            pass
-        return str(nsys_output_file.resolve())
-
-    def ncu_trace(
-        self,
-        input_id: int,
-        fn_name: str,
-        replay: bool = False,
-        profile_ir=False,
-        extend_ncu_args: List[str] = None,
-    ) -> str:
-        extend_ncu_args = (
-            ["--metrics", ",".join(extend_ncu_args)]
-            if extend_ncu_args
-            else [
-                "--set",
-                "full",
-            ]
-        )
-        op_task_args = self._get_op_task_args(input_id, fn_name, "single_run_in_task")
-        # Disable DCGM
-        disable_dyno_dcgm = [
-            "sudo",
-            "dyno",
-            "dcgm_profiling",
-            "--mute=true",
-            "--duration=100000_s",
-        ]
-        disable_dcgm_service = [
-            "sudo",
-            "systemctl",
-            "stop",
-            "nvidia-dcgm",
-        ]
-
-        def service_exists(service_name):
-            try:
-                result = subprocess.run(
-                    ["systemctl", "status", service_name],
-                    stdout=subprocess.PIPE,
-                    stderr=subprocess.PIPE,
-                    check=True,
-                )
-                return result.returncode == 0
-            except subprocess.CalledProcessError:
-                return False
-
-        if shutil.which("dyno") or service_exists("nvidia-dcgm"):
-            dyno_result = subprocess.run(disable_dyno_dcgm).returncode
-            systemctl_result = subprocess.run(disable_dcgm_service).returncode
-            if dyno_result != 0 and systemctl_result != 0:
-                logger.warn(
-                    "DCGM may not have been successfully disabled. Proceeding to collect NCU trace anyway..."
-                )
-        ncu_output_dir = self.get_temp_path(fn_name)
-        ncu_output_dir.mkdir(parents=True, exist_ok=True)
-        ext = ".csv" if not replay else ".ncu-rep"
-        ncu_output_file = ncu_output_dir.joinpath(
-            f"ncu_rep{'_ir' if profile_ir else ''}{ext}"
-        ).resolve()
-        ncu_args = [
-            "ncu",
-            "--nvtx",
-            "--nvtx-include",
-            # it is for range_start and range_end. no ending /.
-            f"{_RANGE_NAME}",
-            "--pm-sampling-max-passes",
-            "4",
-            "--warp-sampling-max-passes",
-            "4",
-            "--target-processes",
-            "all",
-            "--import-source",
-            "yes",
-        ]
-        ncu_args.extend(extend_ncu_args)
-        if replay:
-            ncu_args.extend(
-                [
-                    "-f",
-                    "-o",
-                    str(ncu_output_file.resolve()),
-                ]
-            )
-        else:
-            ncu_args.extend(
-                [
-                    "--csv",
-                    "-f",
-                    "--log-file",
-                    str(ncu_output_file.resolve()),
-                ]
-            )
-        ncu_args.extend(op_task_args)
-        logger.info("Running NCU: %s", shlex.join(ncu_args))
-        # Sometimes, `ncu --target-processes all` will fail with the message "Failed to connect to process". Setting
-        # CUDA_INJECTION64_PATH=none seems to fix this issue.
-        env = {**os.environ, "CUDA_INJECTION64_PATH": "none"}
-        if profile_ir:
-            env["USE_TTGIR_LOC"] = "1"
-        subprocess.check_call(ncu_args, env=env)
-        return str(ncu_output_file.resolve())
-
     def att_trace(self, input_id: int, fn_name: str) -> str:
         op_task_args = self._get_op_task_args(input_id, fn_name, "single_run_in_task")
         att_output_dir = self.get_temp_path(fn_name)
@@ -2644,18 +2473,16 @@ class BenchmarkOperator(metaclass=PostInitProcessor):
         device_name = (
             "AMD MI300X"
             if torch.version.hip
-            else _get_mtia_device_name()
-            if is_mtia()
-            else torch.cuda.get_device_name()
+            else _get_mtia_device_name() if is_mtia() else torch.cuda.get_device_name()
         )
-        assert device_name in rooflines, (
-            f"{device_name} is not supported in HW roofline specs."
-        )
+        assert (
+            device_name in rooflines
+        ), f"{device_name} is not supported in HW roofline specs."
         rooflines = rooflines[device_name]
         if self.is_compute_bound:
-            assert self.tb_args.precision in rooflines, (
-                f"{self.tb_args.precision} is not supported by {device_name}."
-            )
+            assert (
+                self.tb_args.precision in rooflines
+            ), f"{self.tb_args.precision} is not supported by {device_name}."
             return rooflines[self.tb_args.precision]
         return rooflines
 
