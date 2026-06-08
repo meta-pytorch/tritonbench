@@ -15,6 +15,8 @@ from tritonbench.operators.fp8_gemm.scaled_mm_autows import (
     TENSORWISE as AUTOWS_TENSORWISE,
 )
 from tritonbench.utils.env_utils import IS_BLACKWELL, is_cuda, is_fbcode
+from tritonbench.utils.env_utils import IS_BLACKWELL, is_fbcode
+from tritonbench.utils.python_utils import try_import
 from tritonbench.utils.triton_op import (
     BenchmarkOperator,
     BenchmarkOperatorMetrics,
@@ -24,6 +26,9 @@ from tritonbench.utils.triton_op import (
 from tritonbench.utils.triton_utils import has_experimental_descriptor, has_tlx
 
 from .tutorial import matmul as tutorial_matmul
+
+with try_import("HAS_VLLM_CUTLASS"):
+    from vllm import _custom_ops as vllm_ops
 
 
 torch._dynamo.config.recompile_limit = 10000
@@ -420,6 +425,44 @@ class Operator(BenchmarkOperator):
         sb = scale_b.squeeze()
         return lambda: scaled_mm_autows(
             a, b, sa, sb, scaling_mode, out_dtype=self._get_dtype()
+        )
+
+    @register_benchmark(enabled=HAS_VLLM_CUTLASS)
+    def vllm_cutlass_fp8_gemm(self, a, b, scale_a, scale_b):
+        # vLLM cutlass_scaled_mm computes (scale_a * a) @ (scale_b * b) with
+        # a=[M,K], b=[K,N]. The operator provides b as [N,K], so pass b.t().
+        #
+        # Scale layouts map directly to what get_scale() already produces:
+        #   TensorWise: scalar scale_a / scale_b
+        #   RowWise:    scale_a=[M,1] over [M,K], scale_b=[1,N] over [K,N]
+        #   BlockWise (DeepSeek-style 1x128 activations + 128x128 weights):
+        #     scale_a=[M, K/128] (M-contiguous), scale_b=[N/128, K/128]. vLLM
+        #     wants scale_b as [K/128, N/128], so pass scale_b.T. vLLM relies on
+        #     these exact (non-contiguous) strides -- do NOT make them contiguous.
+        ra, rb = self.scaling_recipe_a, self.scaling_recipe_b
+        row_tensor = {ScalingType.TensorWise, ScalingType.RowWise}
+
+        if ra in row_tensor and rb in row_tensor:
+            return lambda: vllm_ops.cutlass_scaled_mm(
+                a, b.t(), scale_a, scale_b, out_dtype=self._get_dtype()
+            )
+
+        if (
+            ra == ScalingType.BlockWise1x128
+            and rb == ScalingType.BlockWise128x128
+        ):
+            major, minor = torch.cuda.get_device_capability(a.device)
+            if not vllm_ops.cutlass_scaled_mm_supports_block_fp8(major * 10 + minor):
+                raise NotImplementedError(
+                    "vLLM cutlass blockwise fp8 is not supported on this device"
+                )
+            return lambda: vllm_ops.cutlass_scaled_mm(
+                a, b.t(), scale_a, scale_b.t(), out_dtype=self._get_dtype()
+            )
+
+        raise NotImplementedError(
+            "vllm_cutlass_fp8_gemm supports TensorWise, RowWise, and BlockWise "
+            "(1x128 activations + 128x128 weights) scaling only"
         )
 
     @register_benchmark()
