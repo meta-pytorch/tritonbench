@@ -9,8 +9,8 @@ from typing import Callable, Optional, Tuple
 
 import torch
 from tritonbench.utils.env_utils import IS_BLACKWELL, is_cuda
-from tritonbench.utils.python_utils import try_import
 from tritonbench.utils.path_utils import add_ld_library_path
+from tritonbench.utils.python_utils import try_import
 
 # [Optional] flash_attn v2
 HAS_FLASH_V2 = True
