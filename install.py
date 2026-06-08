@@ -87,7 +87,8 @@ def setup_hip(args: argparse.Namespace):
     args.all = False
     args.liger = True
     args.aiter = True
-    args.mslk = True
+    # disable mslk because mslk has linking issue on AMD
+    # args.mslk = True
 
 
 if __name__ == "__main__":
