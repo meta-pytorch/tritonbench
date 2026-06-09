@@ -42,8 +42,17 @@ fp8_gemm_rowwise:
 # TODO: embedding, flash_attention will segfault on hip
 embedding:
   report: true
-  devices:
-    - cuda
+  disabled_devices:
+    - hip
+# TODO: welford, jsd will segfault on hip
+welford:
+  report: true
+  disabled_devices:
+    - hip
+jsd:
+  report: true
+  disabled_devices:
+    - hip
 # flash_attention will segfault on hip+triton beta
 flash_attention:
   report: true
