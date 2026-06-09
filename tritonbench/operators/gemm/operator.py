@@ -13,12 +13,14 @@ from tritonbench.operators.gemm.partition_k import (
     matmul_partition_k as matmul_partition_k_kernel,
 )
 from tritonbench.operators.gemm.stream_k import streamk_amd_matmul, streamk_cuda_matmul
-from tritonbench.operators.gemm.warp_spec_persistent_matmul import (
-    blackwell_matmul_descriptor_persistent,
-    blackwell_matmul_tma,
-    blackwell_matmul_tma_persistent,
-    blackwell_matmul_tma_persistent_splitk,
-)
+
+if False:
+    from tritonbench.operators.gemm.warp_spec_persistent_matmul import (
+        blackwell_matmul_descriptor_persistent,
+        blackwell_matmul_tma,
+        blackwell_matmul_tma_persistent,
+        blackwell_matmul_tma_persistent_splitk,
+    )
 from tritonbench.utils.triton_utils import has_tlx
 
 if has_tlx():
@@ -481,6 +483,51 @@ class Operator(BenchmarkOperator):
                 compiled(a, b)
         finally:
             mm_heuristic.mm_configs = original_mm_configs
+
+        return lambda: compiled(a, b)
+
+    @register_benchmark(enabled=IS_BLACKWELL)
+    def pt2_matmul_maxautotune_host_side_tma_only(self, a, b, bias) -> Callable:
+        torch._dynamo.reset()
+        with inductor_config.patch(
+            {
+                "max_autotune": True,
+                "max_autotune_gemm_backends": "TRITON",
+                "autotune_fallback_to_aten": False,
+                "autotune_num_choices_displayed": self.inductor_autotune_num_choices_displayed,
+                "triton.enable_persistent_tma_matmul": True,
+                "triton.enable_host_side_tma": True,
+                "test_configs.autotune_choice_name_regex": "blackwell_ws_persistent_tma",
+            }
+        ):
+            if bias is not None:
+                f = lambda a, b: a.matmul(b) + bias
+            else:
+                f = lambda a, b: a.matmul(b)
+            compiled = torch.compile(f, dynamic=False)
+            compiled(a, b)
+
+        return lambda: compiled(a, b)
+
+    @register_benchmark(enabled=IS_BLACKWELL)
+    def pt2_matmul_maxautotune_device_side_tma_only(self, a, b, bias) -> Callable:
+        torch._dynamo.reset()
+        with inductor_config.patch(
+            {
+                "max_autotune": True,
+                "max_autotune_gemm_backends": "TRITON",
+                "autotune_fallback_to_aten": False,
+                "autotune_num_choices_displayed": self.inductor_autotune_num_choices_displayed,
+                "triton.enable_persistent_tma_matmul": True,
+                "test_configs.autotune_choice_name_regex": "blackwell_ws_persistent_tma",
+            }
+        ):
+            if bias is not None:
+                f = lambda a, b: a.matmul(b) + bias
+            else:
+                f = lambda a, b: a.matmul(b)
+            compiled = torch.compile(f, dynamic=False)
+            compiled(a, b)
 
         return lambda: compiled(a, b)
 

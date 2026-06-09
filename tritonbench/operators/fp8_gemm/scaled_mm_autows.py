@@ -27,7 +27,7 @@ TMA feasibility by scaling mode:
 Reference implementations:
   - tritonbench/operators/fp8_gemm/persistent.py (blackwell_persistent_tma_kernel)
   - tritonbench/operators/gemm/warp_spec_persistent_matmul.py (Meta WS / upstream WS paths)
-  - torch/_inductor/kernel/templates/triton_blackwell_ws_persistent_device_tma_mm.py.jinja
+  - torch/_inductor/kernel/templates/triton_blackwell_ws_persistent_tma_mm.py.jinja
   - tritonbench/operators/fb/fp8_grouped_gemm/kernels.py (block-scale TMA pattern)
   - triton_mtia/third_party/triton/python/tutorials/10-block-scaled-matmul.py (block scaling)
 """
