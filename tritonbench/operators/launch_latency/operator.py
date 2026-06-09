@@ -7,6 +7,7 @@ from triton.compiler import CompiledKernel
 from tritonbench.utils.env_utils import is_cuda
 from tritonbench.utils.python_utils import try_import
 from tritonbench.utils.triton_op import BenchmarkOperator, register_benchmark
+from tritonbench.utils.triton_utils import has_tlx
 
 with try_import("HAS_TILELANG"):
     import tilelang
@@ -440,7 +441,7 @@ class Operator(BenchmarkOperator):
             BLOCK_C5=kw_vals[4],
         )
 
-    @register_benchmark(enabled=is_cuda())
+    @register_benchmark(enabled=is_cuda() and has_tlx())
     def nop_triton_kernel_autotuned(self, *args):
         """Autotuned kernel with num_ctas — measures autotune + c_cache + cluster."""
         from torch import zeros
@@ -451,7 +452,7 @@ class Operator(BenchmarkOperator):
         nop_autotuned_kernel[(1,)](*kernel_args)
         return lambda: nop_autotuned_kernel[(1,)](*kernel_args)
 
-    @register_benchmark(enabled=is_cuda())
+    @register_benchmark(enabled=is_cuda() and has_tlx())
     def nop_triton_kernel_autotuned_nocache(self, *args):
         """Autotuned kernel without c_cache — baseline for autotune overhead."""
         from torch import zeros

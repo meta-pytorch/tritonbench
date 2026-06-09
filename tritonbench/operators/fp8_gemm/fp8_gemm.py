@@ -21,7 +21,7 @@ from tritonbench.utils.triton_op import (
     register_benchmark,
     register_metric,
 )
-from tritonbench.utils.triton_utils import has_experimental_descriptor
+from tritonbench.utils.triton_utils import has_experimental_descriptor, has_tlx
 
 from .tutorial import matmul as tutorial_matmul
 
@@ -269,9 +269,9 @@ class Operator(BenchmarkOperator):
 
     @register_benchmark(baseline=True)
     def torch_fp8_gemm(self, a, b, scale_a, scale_b):
-        assert not self.contains_blockwise_scaling or HAS_CUDA_129, (
-            "BlockWise scaling variants for scaled_gemm require CUDA 12.9+"
-        )
+        assert (
+            not self.contains_blockwise_scaling or HAS_CUDA_129
+        ), "BlockWise scaling variants for scaled_gemm require CUDA 12.9+"
 
         return lambda: torch._scaled_mm(
             a,
@@ -399,7 +399,7 @@ class Operator(BenchmarkOperator):
 
     # This impl is CUDA-specific
     # AMD error: TypeError: range.__init__() got an unexpected keyword argument 'separate_epilogue_store'
-    @register_benchmark(enabled=is_cuda())
+    @register_benchmark(enabled=is_cuda() and has_tlx())
     def triton_autows_fp8_gemm(self, a, b, scale_a, scale_b):
         _SCALING_MAP = {
             ScalingType.TensorWise: AUTOWS_TENSORWISE,
