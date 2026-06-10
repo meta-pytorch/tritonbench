@@ -106,13 +106,19 @@ def _gen_test_operators(test_ops, skip_tests) -> tuple[set[str], dict[str, str]]
                     else:
                         test_ops[skip_op]["disabled"] = True
         if (
-            test_ops[skip_op]["disabled"]
+            (test_ops[skip_op]["disabled"] or skip_op in skip_backends)
             and skip_tests[skip_op]
             and skip_tests[skip_op].get("report", False)
         ):
+            scope = (
+                f"backends ({skip_backends[skip_op]})"
+                if skip_op in skip_backends
+                else "test"
+            )
             logger.warning(
-                "%s test is temporarily disabled and needs work to re-enable it.",
+                "%s %s is temporarily disabled and needs work to re-enable it.",
                 skip_op,
+                scope,
             )
     enabled_ops = {test_op for test_op in test_ops if not test_ops[test_op]["disabled"]}
     skip_backends = {op: skip_backends[op] for op in skip_backends if op in enabled_ops}
