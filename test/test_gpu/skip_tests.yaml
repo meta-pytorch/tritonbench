@@ -7,6 +7,14 @@
 #    channels: <list of triton channels> (options: "triton-main", "meta-triton", default: ["triton-main", "meta-triton"])
 # to override the default, specify devices and channels to limit combinations
 # we rely on the code to determine specific backends to skip
+#    disabled_devices: <list of devices to disable on>
+#    disabled_channels: <list of triton channels to disable on>
+#    backends: <comma-separated backends to skip via --skip> (requires disabled_devices
+#              or disabled_channels; only the listed backends are skipped instead of
+#              disabling the entire operator when the disabled_* condition matches)
+#
+# Override the skip list entirely by setting the env var TRITONBENCH_TEST_SKIP_FILE
+# to a custom yaml file path (a RuntimeError is raised if the file does not exist).
 # aoti_kernel requires --artifact arg; tested separately
 aoti_kernel:
 
