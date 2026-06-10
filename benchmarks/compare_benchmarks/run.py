@@ -62,6 +62,10 @@ from pytorch.tritonbench.benchmarks.compare_benchmarks.utils import (
 from tritonbench.utils.env_utils import is_fbcode
 from tritonbench.utils.run_utils import run_in_task, run_one_operator
 
+OP_TO_TRITONBENCH_OP: dict[str, str] = {
+    "scaled_mm": "fp8_gemm",
+}
+
 if is_fbcode():
     from pytorch.tritonbench.benchmarks.compare_benchmarks.utils import log_benchmark
     from pytorch.tritonbench.tools.fb.inductor_analyzer.autotune_parser import (
@@ -77,9 +81,10 @@ def build_op_args(
     input_loader: Optional[str] = None,
 ) -> List[str]:
     """Build command-line arguments for a single operator benchmark."""
+    tritonbench_op = OP_TO_TRITONBENCH_OP.get(op, op)
     args = [
         "--op",
-        op,
+        tritonbench_op,
         "--metrics",
         ",".join(config.metrics),
         "--only",
