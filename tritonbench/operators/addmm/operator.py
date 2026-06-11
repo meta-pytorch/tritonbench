@@ -132,6 +132,7 @@ class Operator(BenchmarkOperator):
         if addmm_args.bias_1D_y:
             self.shapes = [(m, k, n, True) for m, k, n, _ in self.shapes]
         self.col_major = addmm_args.col_major
+        self.add_in_bias_dtype = addmm_args.add_in_bias_dtype
 
     @register_benchmark(enabled=HAS_HSTU)  # type: ignore # noqa: F821
     def triton_addmm(self, a, mat1, mat2) -> Callable:
@@ -139,7 +140,12 @@ class Operator(BenchmarkOperator):
 
     @register_benchmark(enabled=HAS_HSTU and IS_BLACKWELL)  # type: ignore # noqa: F821
     def triton_b200_ws(self, a, mat1, mat2) -> Callable:
-        return lambda: triton_addmm_fwd_b200_direct(a, mat1, mat2)
+        return lambda: triton_addmm_fwd_b200_direct(
+            a,
+            mat1,
+            mat2,
+            add_in_bias_dtype=self.add_in_bias_dtype,
+        )
 
     # FIXME: bwd has some problem, need to re-enable it
     @register_benchmark(enabled=False)

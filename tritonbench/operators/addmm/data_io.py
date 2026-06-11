@@ -15,6 +15,7 @@ def parse_args(args: List[str]) -> argparse.Namespace:
     parser.add_argument("--col-major", action="store_true", default=False)
     parser.add_argument("--large-k-shapes", action="store_true", default=False)
     parser.add_argument("--bias-1D-y", action="store_true", default=False)
+    parser.add_argument("--add-in-bias-dtype", action="store_true", default=False)
     parser.add_argument("--batch-scaling-shapes", action="store_true", default=False)
     parser.add_argument(
         "--config",
