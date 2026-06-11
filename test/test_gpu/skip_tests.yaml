@@ -38,15 +38,6 @@ mx4_to_fp32:
   devices:
     - cuda
 # ============ TODO: errors in CI ============
-## torch.AcceleratorError: CUDA error: unspecified launch failure
-decoding_attention:
-  report: true
-# TODO: MSLK does not work with meta-triton
-# TypeError: failed to specialize argument of type: KernelParamWrapper
-fp8_gemm_rowwise:
-  report: true
-  channels:
-    - triton-main
 # TODO: embedding, flash_attention will segfault on hip
 embedding:
   report: true
