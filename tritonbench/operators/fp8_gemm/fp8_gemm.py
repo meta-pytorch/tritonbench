@@ -15,7 +15,6 @@ from tritonbench.operators.fp8_gemm.scaled_mm_autows import (
     TENSORWISE as AUTOWS_TENSORWISE,
 )
 from tritonbench.utils.env_utils import IS_BLACKWELL, is_cuda, is_fbcode
-from tritonbench.utils.env_utils import IS_BLACKWELL, is_fbcode
 from tritonbench.utils.python_utils import try_import
 from tritonbench.utils.triton_op import (
     BenchmarkOperator,
@@ -447,10 +446,7 @@ class Operator(BenchmarkOperator):
                 a, b.t(), scale_a, scale_b, out_dtype=self._get_dtype()
             )
 
-        if (
-            ra == ScalingType.BlockWise1x128
-            and rb == ScalingType.BlockWise128x128
-        ):
+        if ra == ScalingType.BlockWise1x128 and rb == ScalingType.BlockWise128x128:
             major, minor = torch.cuda.get_device_capability(a.device)
             if not vllm_ops.cutlass_scaled_mm_supports_block_fp8(major * 10 + minor):
                 raise NotImplementedError(
