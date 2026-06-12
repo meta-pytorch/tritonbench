@@ -128,7 +128,7 @@ class Operator(BenchmarkOperator):
         self.sampling_alpha = args.sampling_alpha
         self.requires_grad = not (self.mode == Mode.FWD_NO_GRAD)
 
-    @register_benchmark(baseline=True)
+    @register_benchmark(enabled=is_cuda(), baseline=True)
     def hstu(self, q, k, v, seq_offsets, num_targets, max_seq_len, sparsity):
         # TMA is NVIDIA Hopper+ only; on AMD the backward kernel crashes when
         # tensor-descriptor rewrite and tl.assume (buffer-ops) coexist.
