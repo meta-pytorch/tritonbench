@@ -132,8 +132,8 @@ PREFLIGHT_RC=$?
 set -e
 # if no regression, exit early and report error: this shouldn't happen
 if [ ${PREFLIGHT_RC} -eq 0 ]; then
-    echo "ERROR: No regression detected on bad commit (${BAD_COMMIT}) relative to good commit (${GOOD_COMMIT})."
-    echo "The regression detector exited with 0, meaning the bad commit behaves the same as the good commit."
+    echo "ERROR: No regression detected on bad commit (${BAD_COMMIT}) relative to good commit (${GOOD_COMMIT}), or baseline fails to run."
+    echo "The regression detector exited with 0, meaning the bad commit behaves the same as the good commit, or baseline fails to run."
     echo "Please verify that your good_commit and bad_commit are correct, or adjust the REGRESSION_THRESHOLD (currently ${REGRESSION_THRESHOLD}%)."
     exit 1
 elif [ ${PREFLIGHT_RC} -ne 1 ] && [ ${FUNCTIONAL} -ne 1 ]; then
