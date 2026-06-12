@@ -70,7 +70,7 @@ if __name__ == "__main__":
     try:
         baseline_signal = get_baseline(BASELINE_LOG)
     except Exception as e:
-        print(f"baseline run failed: {e}")
+        print(f"baseline run failed in {BASELINE_LOG}: {e}")
         exit(0)
     p = subprocess.Popen(cmdline, cwd=REPO_DIR, stdout=subprocess.PIPE, stderr=None)
     assert p.stdout is not None
