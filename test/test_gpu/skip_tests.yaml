@@ -47,3 +47,7 @@ gdn_fwd_h:
   report: true
   disabled_devices:
     - hip
+int4_gemm:
+  report: true
+  disabled_devices:
+    - hip
