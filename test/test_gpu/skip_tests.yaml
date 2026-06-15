@@ -43,3 +43,7 @@ embedding:
   report: true
   disabled_devices:
     - hip
+gdn_fwd_h:
+  report: true
+  disabled_devices:
+    - hip
