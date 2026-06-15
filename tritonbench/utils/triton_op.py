@@ -25,9 +25,20 @@ from typing import Any, Callable, Dict, Generator, List, Optional, Tuple, Type, 
 import psutil
 import tabulate
 import torch
-import triton
 from torch.utils._pytree import tree_map
-from triton.runtime.errors import OutOfResources as TritonOutOfResources
+
+# Triton is optional so non-Triton devices (cpu, tpu) can run without it.
+# triton is only used inside Triton/CUDA-specific code paths below.
+try:
+    import triton
+    from triton.runtime.errors import OutOfResources as TritonOutOfResources
+except ImportError:
+    triton = None
+
+    class TritonOutOfResources(Exception):
+        """Placeholder when triton is absent; never raised without triton."""
+
+
 from tritonbench.components.do_bench import do_bench_wrapper, Latency
 from tritonbench.components.do_bench.utils import (
     estimate_cuda_runtime_ms,

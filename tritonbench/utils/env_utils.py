@@ -14,8 +14,14 @@ from functools import lru_cache
 from typing import Optional
 
 import torch
-import triton
 from tritonbench.utils.path_utils import REPO_PATH
+
+# Triton is optional so non-Triton devices (cpu, tpu) can run without it.
+# Helpers that touch triton (e.g. is_mtia) already guard for its absence.
+try:
+    import triton
+except ImportError:
+    triton = None
 
 log = logging.getLogger(__name__)
 log.setLevel(logging.INFO)

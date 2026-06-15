@@ -7,12 +7,42 @@ import triton.language as tl
 from tritonbench.utils.constants import DEFAULT_N_REP, DEFAULT_N_WARMUP
 from tritonbench.utils.cudagraph_utils import CudaGraphConfig, CudaGraphError
 from tritonbench.utils.env_utils import is_hip
-from tritonbench.utils.gpu_utils import sleep_amd
 
 from .common import summarize_statistics
 from .utils import resolve_warmup_and_rep
 
+AMD_SLEEP_NS_PER_ITERATION = 3870
+
 _kernel_unblock_stream = None
+
+
+@triton.jit
+def sleep_amd(sleep_ns: tl.constexpr = 1000000):
+    """
+    AMD GPU sleep using s_sleep instruction.
+
+    Each iteration of s_sleep 127 sleeps for ~127*64 = 8,128 clock cycles.
+    On MI300X @ 2.1 GHz, this is approximately 3.87 μs per iteration.
+    On MI350X @ 2.2 GHz, this is approximately 3.69 μs per iteration.
+
+    Args:
+        sleep_ns: Target sleep duration in nanoseconds.
+                 Default 1000000 (1ms).
+
+    Note:
+        Timing is approximate and varies with GPU clock frequency.
+    """
+    # Calculate iterations: sleep_ns / 3870 ns per iteration
+    num_iterations: tl.constexpr = max(1, sleep_ns // AMD_SLEEP_NS_PER_ITERATION)
+    for _ in range(num_iterations):
+        tl.inline_asm_elementwise(
+            "s_sleep 127",
+            "=r",
+            args=[],
+            dtype=tl.int32,
+            is_pure=False,
+            pack=1,
+        )
 
 
 def _get_unblocking_stream(device: torch.device):

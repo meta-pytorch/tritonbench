@@ -5,16 +5,21 @@ from functools import partial
 from typing import List, Optional
 
 import torch
-import triton
 from torch._inductor.runtime.benchmarking import benchmarker
 from tritonbench.components.do_bench.entropy.entropy_criterion import EntropyCriterion
 from tritonbench.utils.constants import DEFAULT_N_REP, DEFAULT_N_WARMUP
 from tritonbench.utils.cudagraph_utils import CudaGraphConfig
 
 from .common import summarize_statistics
-from .gpu_events import do_bench_events
-from .power import do_bench_power
 from .utils import estimate_cuda_runtime_ms, resolve_warmup_and_rep
+
+# Triton is optional: non-Triton devices (cpu, tpu) can run without it. The
+# Triton-backed timing paths (events, power, cudagraph, the driver benchmarker)
+# import it lazily where used.
+try:
+    import triton
+except ImportError:
+    triton = None
 
 NS_TO_MS = 1e-6
 logger = logging.getLogger(__name__)
@@ -721,6 +726,8 @@ def do_bench_wrapper(
                 )
         elif repcnt:
             # benchmark using repcnt
+            from .power import do_bench_power
+
             return Latency(
                 times=do_bench_power(
                     fn,
@@ -732,6 +739,8 @@ def do_bench_wrapper(
                 remove_outliers=False,
             )
         elif latency_measure_mode == "gpu_events":
+            from .gpu_events import do_bench_events
+
             return Latency(
                 times=do_bench_events(
                     fn,
