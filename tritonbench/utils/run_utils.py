@@ -555,6 +555,14 @@ def tritonbench_run(args: Optional[List[str]] = None):
         torch.mtia.init()
         mtia_triton_launcher.init()
 
+    if args.device == "tpu":
+        # torch_tpu registers the "tpu" PrivateUse1 backend; it usually
+        # autoloads on `import torch`, but import explicitly so failures are
+        # loud and hardware init happens here rather than mid-benchmark.
+        import torch_tpu  # noqa: F401
+
+        assert torch.tpu.is_available(), "No TPU device available for --device tpu"
+
     if args.op:
         ops = args.op.split(",")
     else:
