@@ -72,17 +72,18 @@ def _gen_test_operators(test_ops, skip_tests) -> tuple[set[str], dict[str, str]]
     for skip_op in skip_tests:
         if not skip_op in test_ops:
             continue
-        # remove operators that are unconditionally bypassed on CI
-        # ususally CI environment issue or broken operators need to be fixed
-        if skip_tests[skip_op] == None:
+        skip_config = skip_tests[skip_op]
+        # Remove operators that are unconditionally bypassed on CI. A report-only
+        # config is equivalent to an empty config, but also emits the warning below.
+        if skip_config is None or set(skip_config) == {"report"}:
             test_ops[skip_op]["disabled"] = True
         else:
             for field_name in ["devices", "channels"]:
                 test_ops[skip_op]["disabled"] = test_ops[skip_op][
                     "disabled"
-                ] or not _env_check(skip_tests[skip_op], field_name)
-            disabled_devices = skip_tests[skip_op].get("disabled_devices")
-            disabled_channels = skip_tests[skip_op].get("disabled_channels")
+                ] or not _env_check(skip_config, field_name)
+            disabled_devices = skip_config.get("disabled_devices")
+            disabled_channels = skip_config.get("disabled_channels")
             if disabled_devices is not None or disabled_channels is not None:
                 # disabled_* fields act as a deny-list over device/channel
                 # combinations. If only one side is specified, it matches any
@@ -98,7 +99,7 @@ def _gen_test_operators(test_ops, skip_tests) -> tuple[set[str], dict[str, str]]
                     else _env_check({"channels": disabled_channels}, "channels")
                 )
                 if disabled_device_match and disabled_channel_match:
-                    backends = skip_tests[skip_op].get("backends")
+                    backends = skip_config.get("backends")
                     if backends:
                         # Only skip the specified backends (via `--skip`) instead
                         # of disabling the entire operator.
@@ -107,8 +108,8 @@ def _gen_test_operators(test_ops, skip_tests) -> tuple[set[str], dict[str, str]]
                         test_ops[skip_op]["disabled"] = True
         if (
             (test_ops[skip_op]["disabled"] or skip_op in skip_backends)
-            and skip_tests[skip_op]
-            and skip_tests[skip_op].get("report", False)
+            and skip_config
+            and skip_config.get("report", False)
         ):
             scope = (
                 f"backends ({skip_backends[skip_op]})"
