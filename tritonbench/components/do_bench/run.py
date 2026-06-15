@@ -476,6 +476,60 @@ def _do_bench_cpu(
     return summarize_statistics(times, quantiles, return_mode)
 
 
+def _do_bench_tpu(
+    fn, warmup, rep, grad_to_none=None, quantiles=None, return_mode="mean"
+):
+    """Measure latency of a function on TPU (torch_tpu).
+
+    Same wall-clock approach as ``_do_bench_cpu`` but with an explicit
+    ``torch.accelerator.synchronize()`` around each timed region, since
+    torch_tpu executes asynchronously. CUDA event timing, CUDA graphs, and
+    Triton's driver benchmarker do not work on TPU, so this is the timing path
+    for ``--device tpu``. Requires torch_tpu >= 2026-06-05, where
+    ``torch.accelerator.synchronize()`` waits for all in-flight tensors.
+    """
+    assert return_mode in ["min", "max", "mean", "median", "all"]
+    # Warm up once, then estimate the runtime of the function.
+    fn()
+    torch.accelerator.synchronize()
+    t0 = time.time_ns()
+    for _ in range(5):
+        fn()
+    torch.accelerator.synchronize()
+    t1 = time.time_ns()
+    estimate_ms = (t1 - t0) * NS_TO_MS / 5
+    warmup, rep = resolve_warmup_and_rep(warmup, rep, estimate_ms)
+
+    # compute number of warmup and repeat
+    if estimate_ms == 0:
+        n_repeat = DEFAULT_N_REP
+        n_warmup = DEFAULT_N_WARMUP
+    else:
+        n_warmup = max(1, int(warmup / estimate_ms))
+        n_repeat = max(1, int(rep / estimate_ms))
+    # Warm-up
+    for _ in range(n_warmup):
+        fn()
+    torch.accelerator.synchronize()
+    times_ms = []
+    # Benchmark
+    for _i in range(n_repeat):
+        # we don't want `fn` to accumulate gradient values
+        # if it contains a backward pass. So we clear the
+        # provided gradients
+        if grad_to_none is not None:
+            for x in grad_to_none:
+                x.grad = None
+        # record time of `fn`, synchronizing to capture async device work
+        t0 = time.time_ns()
+        fn()
+        torch.accelerator.synchronize()
+        t1 = time.time_ns()
+        times_ms.append((t1 - t0) * NS_TO_MS)
+    times = torch.tensor(times_ms, dtype=torch.float)
+    return summarize_statistics(times, quantiles, return_mode)
+
+
 def _do_bench_entropy(
     fn,
     warmup,
@@ -671,7 +725,7 @@ def do_bench_wrapper(
     if (
         (warmup is None or rep is None)
         and not repcnt
-        and not device == "cpu"
+        and device not in ("cpu", "tpu")
         and latency_measure_mode == "triton_do_bench"
     ):
         estimate_runtime = estimate_cuda_runtime_ms(fn, grad_to_none=grad_to_none)
@@ -685,6 +739,16 @@ def do_bench_wrapper(
         if device == "cpu":
             return Latency(
                 times=_do_bench_cpu(
+                    fn,
+                    warmup=warmup,
+                    rep=rep,
+                    return_mode="all",
+                    grad_to_none=grad_to_none,
+                )
+            )
+        elif device == "tpu":
+            return Latency(
+                times=_do_bench_tpu(
                     fn,
                     warmup=warmup,
                     rep=rep,
