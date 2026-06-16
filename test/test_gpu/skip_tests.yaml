@@ -38,16 +38,8 @@ mx4_to_fp32:
   devices:
     - cuda
 # ============ TODO: errors in CI ============
-# TODO: embedding will segfault on hip
-embedding:
-  report: true
-  disabled_devices:
-    - hip
-gdn_fwd_h:
-  report: true
-  disabled_devices:
-    - hip
-int4_gemm:
+# TODO: flash_attention will segfault on hip
+flash_attention:
   report: true
   disabled_devices:
     - hip
