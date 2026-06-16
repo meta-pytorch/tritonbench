@@ -133,19 +133,22 @@ def _host_descriptor_pre_hook(nargs):
 
     sa = nargs.get("scale_a_ptr")
     sb = nargs.get("scale_b_ptr")
-    scaling_mode = nargs.get("SCALING_MODE", TENSORWISE)
-    if scaling_mode == ROWWISE:
+    a_mode = nargs.get("SCALE_A_MODE", TENSORWISE)
+    b_mode = nargs.get("SCALE_B_MODE", TENSORWISE)
+    if a_mode == ROWWISE and b_mode == ROWWISE:
         if isinstance(sa, TensorDescriptor):
             sa.block_shape = [block_m]
         if isinstance(sb, TensorDescriptor):
             sb.block_shape = [block_n // epilogue_subtile]
-    elif scaling_mode == BLOCKWISE_1x128:
+    elif a_mode == BLOCKWISE_1x128 and b_mode == BLOCKWISE_1x128:
         vec_size = nargs["VEC_SIZE"]
         rep_k = triton.cdiv(block_k // vec_size, 4)
         if isinstance(sa, TensorDescriptor):
             sa.block_shape = [1, block_m // 128, rep_k, 2, 256]
         if isinstance(sb, TensorDescriptor):
             sb.block_shape = [1, block_n // 128, rep_k, 2, 256]
+    # DeepSeek (BLOCKWISE_1x128 / BLOCKWISE_128x128) uses plain tensors, not
+    # TensorDescriptors, so there is nothing to resize here.
 
 
 def _get_autotune_configs():
@@ -185,9 +188,12 @@ def _get_autotune_configs():
 def _prune_configs(configs, named_args, **kwargs):
     """Prune invalid configs based on WS mode, backend, and problem size."""
     pruned = []
-    scaling_mode = named_args.get("SCALING_MODE", TENSORWISE)
+    a_mode = named_args.get("SCALE_A_MODE", TENSORWISE)
+    b_mode = named_args.get("SCALE_B_MODE", TENSORWISE)
     vec_size = named_args.get("VEC_SIZE", 0)
     is_blackwell = _is_blackwell()
+    is_mxfp8 = a_mode == BLOCKWISE_1x128 and b_mode == BLOCKWISE_1x128
+    is_deepseek = a_mode == BLOCKWISE_1x128 and b_mode == BLOCKWISE_128x128
     for config in configs:
         num_warps = config.num_warps
         if num_warps < 4:
@@ -198,9 +204,16 @@ def _prune_configs(configs, named_args, **kwargs):
             continue
         if N and config.kwargs["BLOCK_SIZE_N"] > N * 2:
             continue
-        # Block scaling requires BLOCK_K >= VEC_SIZE * 4
-        if scaling_mode == BLOCKWISE_1x128 and vec_size > 0:
+        # MXFP8 block scaling requires BLOCK_K >= VEC_SIZE * 4
+        if is_mxfp8 and vec_size > 0:
             if config.kwargs["BLOCK_SIZE_K"] < vec_size * 4:
+                continue
+        # DeepSeek blockwise (1x128/128x128): one 128-wide scale group per K
+        # tile and one B N-block per tile -> pin BLOCK_K and BLOCK_N to 128.
+        if is_deepseek:
+            if config.kwargs["BLOCK_SIZE_K"] != 128:
+                continue
+            if config.kwargs["BLOCK_SIZE_N"] != 128:
                 continue
         # Hopper: epilogue subtiling forced off (subtile=1). The reshape/permute/
         # split pattern is a Blackwell register-pressure relief that doesn't carry
@@ -279,9 +292,16 @@ def scaled_mm_autows_kernel(
     N,
     K,
     NUM_SMS: tl.constexpr,
-    SCALING_MODE: tl.constexpr,
+    # Per-operand scaling recipes (real ScalingType values). The kernel selects
+    # its algorithm from the (SCALE_A_MODE, SCALE_B_MODE) pair:
+    #   (TENSORWISE, TENSORWISE)             -> scalar epilogue scale
+    #   (ROWWISE, ROWWISE)                   -> per-row/col epilogue scale
+    #   (BLOCKWISE_1x128, BLOCKWISE_1x128)   -> MXFP8 via tl.dot_scaled (Blackwell)
+    #   (BLOCKWISE_1x128, BLOCKWISE_128x128) -> DeepSeek in-loop fp32 rescale
+    SCALE_A_MODE: tl.constexpr,
+    SCALE_B_MODE: tl.constexpr,
     # Use host-side TMA for RowWise scale loads (TensorWise = scalar load,
-    # BlockWise uses host-side 5D TMA via the (1, ..., 2, 256) repack)
+    # MXFP8 uses host-side 5D TMA via the (1, ..., 2, 256) repack)
     USE_SCALE_TMA: tl.constexpr,
     # Block scaling vector size (e.g. 32 for MXFP8, 0 when unused)
     VEC_SIZE: tl.constexpr,
@@ -301,20 +321,32 @@ def scaled_mm_autows_kernel(
     Persistent TMA matmul kernel for FP8 scaled_mm with warp specialization.
     Computes: C = (A @ B^T) * scale_a * scale_b
     """
+    # Compile-time algorithm selection from the per-operand recipe pair.
+    IS_TENSORWISE: tl.constexpr = (SCALE_A_MODE == TENSORWISE) and (
+        SCALE_B_MODE == TENSORWISE
+    )
+    IS_ROWWISE: tl.constexpr = (SCALE_A_MODE == ROWWISE) and (SCALE_B_MODE == ROWWISE)
+    IS_MXFP8: tl.constexpr = (SCALE_A_MODE == BLOCKWISE_1x128) and (
+        SCALE_B_MODE == BLOCKWISE_1x128
+    )
+    IS_DEEPSEEK: tl.constexpr = (SCALE_A_MODE == BLOCKWISE_1x128) and (
+        SCALE_B_MODE == BLOCKWISE_128x128
+    )
+
     start_pid = tl.program_id(axis=0)
     num_pid_m = tl.cdiv(M, BLOCK_SIZE_M)
     num_pid_n = tl.cdiv(N, BLOCK_SIZE_N)
     k_tiles = tl.cdiv(K, BLOCK_SIZE_K)
     num_tiles = num_pid_m * num_pid_n
 
-    if SCALING_MODE == TENSORWISE:
+    if IS_TENSORWISE:
         scale_a_scalar = tl.load(scale_a_ptr)
         scale_b_scalar = tl.load(scale_b_ptr)
 
     # ROWWISE host-side TMA: scale_a_ptr / scale_b_ptr are passed in as
-    # TensorDescriptors when USE_SCALE_TMA — no in-kernel descriptor build.
+    # TensorDescriptors when USE_SCALE_TMA -- no in-kernel descriptor build.
 
-    if SCALING_MODE == BLOCKWISE_1x128:
+    if IS_MXFP8:
         # Host-side 5D TMA on the (1, M//128, K//VEC_SIZE//4, 2, 256) repack
         # of the cuBLAS block-scale layout (32*4*4 == 2*256). Same trick used
         # by tritonbench/operators/fb/fp8_grouped_gemm/kernels.py.
@@ -339,7 +371,7 @@ def scaled_mm_autows_kernel(
 
         accumulator = tl.zeros((BLOCK_SIZE_M, BLOCK_SIZE_N), dtype=tl.float32)
 
-        if SCALING_MODE == BLOCKWISE_1x128:
+        if IS_MXFP8:
             # Block scaled K-loop: 5D TMA load of scales, fused into dot_scaled.
             scale_m_tile = pid_m * REP_M
             scale_n_tile = pid_n * REP_N
@@ -367,6 +399,35 @@ def scaled_mm_autows_kernel(
                 accumulator = tl.dot_scaled(
                     a_tile, sa, "e4m3", b_tile.T, sb, "e4m3", accumulator
                 )
+        elif IS_DEEPSEEK:
+            # DeepSeek-style blockwise: 1x128 scales for A, 128x128 for B.
+            # Plain fp32 scales (NOT MX); they vary along K so they cannot factor
+            # out to the epilogue -- each 128-wide K group's partial dot is
+            # rescaled by sa[m,kb]*sb[n//128,kb] before accumulation.
+            # _prune_configs pins BLOCK_SIZE_K=128 (one group per K tile) and
+            # BLOCK_SIZE_N=128 (one B N-block per tile), so kb==ki and the B
+            # N-block index == pid_n. scale_a is row-major [M, K//128];
+            # scale_b is row-major [N//128, K//128].
+            num_k_groups = K // 128
+            offs_m_scale = offs_am + tl.arange(0, BLOCK_SIZE_M)
+            mask_m_scale = offs_m_scale < M
+            for ki in range(k_tiles):
+                offs_k = ki * BLOCK_SIZE_K
+                a_tile = a_desc.load([offs_am, offs_k])
+                b_tile = b_desc.load([offs_bn, offs_k])
+                partial = tl.dot(
+                    a_tile,
+                    b_tile.T,
+                    out_dtype=tl.float32,
+                    allow_tf32=True,
+                )
+                sa = tl.load(
+                    scale_a_ptr + offs_m_scale * num_k_groups + ki,
+                    mask=mask_m_scale,
+                    other=0.0,
+                )
+                sb = tl.load(scale_b_ptr + pid_n * num_k_groups + ki)
+                accumulator += partial * sa[:, None] * sb
         else:
             for ki in range(k_tiles):
                 offs_k = ki * BLOCK_SIZE_K
@@ -381,7 +442,7 @@ def scaled_mm_autows_kernel(
                     allow_tf32=True,
                 )
 
-            if SCALING_MODE == ROWWISE:
+            if IS_ROWWISE:
                 if USE_SCALE_TMA:
                     sa = scale_a_ptr.load([offs_am])
                 else:
@@ -403,9 +464,9 @@ def scaled_mm_autows_kernel(
         sub_n: tl.constexpr = BLOCK_SIZE_N // EPILOGUE_SUBTILE
         for i in tl.static_range(EPILOGUE_SUBTILE):
             subtile = subtiles[i]
-            if SCALING_MODE == TENSORWISE:
+            if IS_TENSORWISE:
                 subtile *= scale_a_scalar * scale_b_scalar
-            elif SCALING_MODE == ROWWISE:
+            elif IS_ROWWISE:
                 if USE_SCALE_TMA:
                     sb = scale_b_ptr.load([offs_bn + i * sub_n])
                 else:
@@ -425,7 +486,8 @@ def scaled_mm_autows(
     b: torch.Tensor,
     scale_a: torch.Tensor,
     scale_b: torch.Tensor,
-    scaling_mode: int = TENSORWISE,
+    scale_a_mode: int = TENSORWISE,
+    scale_b_mode: Optional[int] = None,
     out_dtype: torch.dtype = torch.bfloat16,
 ) -> torch.Tensor:
     """
@@ -434,16 +496,26 @@ def scaled_mm_autows(
     Args:
         a: [M, K] FP8 tensor (e.g., float8_e4m3fn)
         b: [N, K] FP8 tensor (row-major; computes A @ B^T)
-        scale_a: Scale for A — scalar (TensorWise), [M] (RowWise),
-                 or 5D (M//128, K//VEC_SIZE//4, 32, 4, 4) (BlockWise)
-        scale_b: Scale for B — scalar (TensorWise), [N] (RowWise),
-                 or 5D (N//128, K//VEC_SIZE//4, 32, 4, 4) (BlockWise)
-        scaling_mode: TENSORWISE (0), ROWWISE (1), or BLOCKWISE_1x128 (4)
+        scale_a: Scale for A -- scalar (TensorWise), [M] (RowWise),
+                 5D MX repack (BLOCKWISE_1x128 / MXFP8), or [M, K//128]
+                 (BLOCKWISE_1x128 DeepSeek).
+        scale_b: Scale for B -- scalar (TensorWise), [N] (RowWise),
+                 5D MX repack (BLOCKWISE_1x128 / MXFP8), or [N//128, K//128]
+                 (BLOCKWISE_128x128 DeepSeek).
+        scale_a_mode: per-operand recipe for A (TENSORWISE / ROWWISE /
+                 BLOCKWISE_1x128).
+        scale_b_mode: per-operand recipe for B; defaults to scale_a_mode
+                 (symmetric). Supported pairs: (TENSORWISE, TENSORWISE),
+                 (ROWWISE, ROWWISE), (BLOCKWISE_1x128, BLOCKWISE_1x128) MXFP8,
+                 and (BLOCKWISE_1x128, BLOCKWISE_128x128) DeepSeek.
         out_dtype: Output dtype (default bfloat16)
 
     Returns:
         C: [M, N] tensor in out_dtype
     """
+    if scale_b_mode is None:
+        scale_b_mode = scale_a_mode
+
     assert a.ndim == 2 and b.ndim == 2, "Inputs must be 2D"
     M, K = a.shape
     N, K_b = b.shape
@@ -462,13 +534,17 @@ def scaled_mm_autows(
     num_sms = device_props.multi_processor_count
     is_blackwell = device_props.major >= 10
 
-    assert scaling_mode != BLOCKWISE_1x128 or is_blackwell, (
-        "BLOCKWISE_1x128 requires Blackwell (sm_100+); tl.dot_scaled MMA is "
+    is_rowwise = scale_a_mode == ROWWISE and scale_b_mode == ROWWISE
+    is_mxfp8 = scale_a_mode == BLOCKWISE_1x128 and scale_b_mode == BLOCKWISE_1x128
+    is_deepseek = scale_a_mode == BLOCKWISE_1x128 and scale_b_mode == BLOCKWISE_128x128
+
+    assert not is_mxfp8 or is_blackwell, (
+        "MXFP8 blockwise requires Blackwell (sm_100+); tl.dot_scaled MMA is "
         "Blackwell-only."
     )
 
-    use_scale_tma = scaling_mode == ROWWISE
-    vec_size = MXFP8_VEC_SIZE if scaling_mode == BLOCKWISE_1x128 else 0
+    use_scale_tma = is_rowwise
+    vec_size = MXFP8_VEC_SIZE if is_mxfp8 else 0
 
     dummy_block_2d = [1, 1]
     a_arg = TensorDescriptor(a, a.shape, a.stride(), dummy_block_2d)
@@ -481,7 +557,7 @@ def scaled_mm_autows(
     if use_scale_tma:
         scale_a_arg = TensorDescriptor.from_tensor(scale_a, [128])
         scale_b_arg = TensorDescriptor.from_tensor(scale_b, [128])
-    elif scaling_mode == BLOCKWISE_1x128:
+    elif is_mxfp8:
         scale_a_arg = TensorDescriptor.from_tensor(
             scale_a.reshape(1, M // 128, K // vec_size // 4, 2, 256),
             [1, 1, 1, 2, 256],
@@ -490,6 +566,12 @@ def scaled_mm_autows(
             scale_b.reshape(1, N // 128, K // vec_size // 4, 2, 256),
             [1, 1, 1, 2, 256],
         )
+    elif is_deepseek:
+        # DeepSeek 1x128 (A) + 128x128 (B): plain fp32 2D scales, pointer-loaded
+        # (no TMA, no MX repack). scale_a: [M, K//128]; scale_b: [N//128, K//128].
+        # Force row-major so in-kernel pointer arithmetic (row*K//128 + kb) holds.
+        scale_a_arg = scale_a.contiguous()
+        scale_b_arg = scale_b.contiguous()
     else:
         scale_a_arg = scale_a
         scale_b_arg = scale_b
@@ -502,6 +584,13 @@ def scaled_mm_autows(
 
     _ensure_triton_allocator(a.device)
 
+    # DeepSeek rescales inside the K-loop (dot -> *sa*sb -> accumulate). That
+    # in-loop compute chain is not partitionable by the warp-specialization pass
+    # (it trips "multiple cross-partition producers"), so run it through the plain
+    # persistent loop (no WS) like the Hopper path.
+    warp_specialize = is_blackwell and not is_deepseek
+    separate_epilogue_store = is_blackwell and not is_deepseek
+
     scaled_mm_autows_kernel[grid](
         a_arg,
         b_arg,
@@ -512,13 +601,14 @@ def scaled_mm_autows(
         N,
         K,
         NUM_SMS=num_sms,
-        SCALING_MODE=scaling_mode,
+        SCALE_A_MODE=scale_a_mode,
+        SCALE_B_MODE=scale_b_mode,
         USE_SCALE_TMA=use_scale_tma,
         VEC_SIZE=vec_size,
         OUT_DTYPE=tl_out_dtype,
         FLATTEN=False,
-        WARP_SPECIALIZE=is_blackwell,
-        SEPARATE_EPILOGUE_STORE=is_blackwell,
+        WARP_SPECIALIZE=warp_specialize,
+        SEPARATE_EPILOGUE_STORE=separate_epilogue_store,
     )
 
     return c
@@ -544,6 +634,7 @@ def scaled_mm_v2(
       - TensorWise + TensorWise
       - RowWise + RowWise
       - BlockWise 1x128 (MXFP8) + BlockWise 1x128
+      - BlockWise 1x128 (DeepSeek) + BlockWise 128x128
 
     Args follow the _scaled_mm_v2 convention:
       scale_a/scale_b: list of scale tensors
@@ -557,17 +648,17 @@ def scaled_mm_v2(
     )
     r_a, r_b = recipe_a[0], recipe_b[0]
 
-    supported = {TENSORWISE, ROWWISE, BLOCKWISE_1x128}
+    supported = {TENSORWISE, ROWWISE, BLOCKWISE_1x128, BLOCKWISE_128x128}
     assert r_a in supported, f"Unsupported recipe_a: {r_a}"
     assert r_b in supported, f"Unsupported recipe_b: {r_b}"
-    assert r_a == r_b, f"Mixed scaling not yet supported: {r_a} vs {r_b}"
 
     return scaled_mm_autows(
         mat_a,
         mat_b,
         scale_a[0],
         scale_b[0],
-        scaling_mode=r_a,
+        scale_a_mode=r_a,
+        scale_b_mode=r_b,
         out_dtype=out_dtype,
     )
 

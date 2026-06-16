@@ -9,6 +9,7 @@ from torch._inductor.kernel.mm import scaling_pairs, ScalingType
 from tritonbench.data.llama import llama_shapes
 from tritonbench.operators.fp8_gemm.persistent import blackwell_persistent_tma
 from tritonbench.operators.fp8_gemm.scaled_mm_autows import (
+    BLOCKWISE_128x128 as AUTOWS_BLOCKWISE_128x128,
     BLOCKWISE_1x128 as AUTOWS_BLOCKWISE_1x128,
     ROWWISE as AUTOWS_ROWWISE,
     scaled_mm_autows,
@@ -406,25 +407,38 @@ class Operator(BenchmarkOperator):
     # AMD error: TypeError: range.__init__() got an unexpected keyword argument 'separate_epilogue_store'
     @register_benchmark(enabled=is_cuda() and has_tlx())
     def triton_autows_fp8_gemm(self, a, b, scale_a, scale_b):
-        _SCALING_MAP = {
+        # Per-operand recipe -> autows kernel mode. The kernel dispatches on the
+        # (scale_a_mode, scale_b_mode) pair, so A and B are passed independently.
+        _RECIPE_TO_MODE = {
             ScalingType.TensorWise: AUTOWS_TENSORWISE,
             ScalingType.RowWise: AUTOWS_ROWWISE,
             ScalingType.BlockWise1x128: AUTOWS_BLOCKWISE_1x128,
+            ScalingType.BlockWise128x128: AUTOWS_BLOCKWISE_128x128,
         }
-        if self.scaling_recipe_a != self.scaling_recipe_b:
-            raise ValueError(
-                f"autows requires symmetric scaling for A and B, got "
-                f"{self.scaling_recipe_a} vs {self.scaling_recipe_b}"
+        ra, rb = self.scaling_recipe_a, self.scaling_recipe_b
+        if ra not in _RECIPE_TO_MODE or rb not in _RECIPE_TO_MODE:
+            raise ValueError(f"Unsupported scaling type for autows: {ra} / {rb}")
+        a_mode = _RECIPE_TO_MODE[ra]
+        b_mode = _RECIPE_TO_MODE[rb]
+
+        # DeepSeek-style asymmetric blockwise (A=1x128, B=128x128): scales are 2D
+        # fp32 grids ([M, K/128] and [N/128, K/128]); pass them through unsqueezed
+        # so the kernel's row-major pointer arithmetic stays correct.
+        if ra == ScalingType.BlockWise1x128 and rb == ScalingType.BlockWise128x128:
+            return lambda: scaled_mm_autows(
+                a, b, scale_a, scale_b, a_mode, b_mode, out_dtype=self._get_dtype()
             )
-        if self.scaling_recipe_a not in _SCALING_MAP:
+
+        # Other supported combinations are symmetric (TensorWise/RowWise/MXFP8).
+        if ra != rb:
             raise ValueError(
-                f"Unsupported scaling type for autows: {self.scaling_recipe_a}"
+                f"autows supports asymmetric scaling only for "
+                f"BlockWise1x128/BlockWise128x128; got {ra} vs {rb}"
             )
-        scaling_mode = _SCALING_MAP[self.scaling_recipe_a]
         sa = scale_a.squeeze()
         sb = scale_b.squeeze()
         return lambda: scaled_mm_autows(
-            a, b, sa, sb, scaling_mode, out_dtype=self._get_dtype()
+            a, b, sa, sb, a_mode, b_mode, out_dtype=self._get_dtype()
         )
 
     @register_benchmark(enabled=HAS_VLLM_CUTLASS)
