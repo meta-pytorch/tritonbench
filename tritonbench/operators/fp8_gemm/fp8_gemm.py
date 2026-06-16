@@ -268,7 +268,8 @@ class Operator(BenchmarkOperator):
     def get_x_val(self, example_inputs) -> float:
         a, b, _, _ = example_inputs
         m, k = a.size()
-        _, n = b.size()
+        # b is built as randn(n, k), so n is dim 0 (dim 1 is the shared k).
+        n, _ = b.size()
         return (m, n, k)
 
     @register_benchmark(baseline=True)
