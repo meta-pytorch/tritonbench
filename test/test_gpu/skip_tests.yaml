@@ -43,3 +43,7 @@ flash_attention:
   report: true
   disabled_devices:
     - hip
+embedding:
+  report: true
+  disabled_devices:
+    - hip
