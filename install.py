@@ -123,6 +123,11 @@ if __name__ == "__main__":
         "--tritonparse", action="store_true", help="Install tritonparse"
     )
     parser.add_argument(
+        "--int21",
+        action="store_true",
+        help="Build the INT21 RMSNorm CUDA (sm_100a) kernel and export it as a PyTorch custom op",
+    )
+    parser.add_argument(
         "--all", action="store_true", help="Install all custom kernel repos"
     )
     args = parser.parse_args()
@@ -209,4 +214,9 @@ if __name__ == "__main__":
     if args.tritonparse:
         logger.info("[tritonbench] installing tritonparse...")
         install_tritonparse()
+    if args.int21:
+        logger.info("[tritonbench] building int21 rmsnorm kernel...")
+        from tools.int21.install import install_int21
+
+        install_int21()
     logger.info("[tritonbench] installation complete!")
