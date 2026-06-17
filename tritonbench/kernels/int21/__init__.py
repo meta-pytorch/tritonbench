@@ -1,13 +1,5 @@
-from .rmsnorm_b200 import (
-    load_ext,
-    rmsnorm,
-    rmsnorm_bwd_out,
-    rmsnorm_fwd_out,
-)
+from .rmsnorm_b200 import rms_norm
 
 __all__ = [
-    "load_ext",
-    "rmsnorm",
-    "rmsnorm_bwd_out",
-    "rmsnorm_fwd_out",
+    "rms_norm",
 ]

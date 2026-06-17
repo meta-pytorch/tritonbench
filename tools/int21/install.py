@@ -1,7 +1,10 @@
 import logging
 import os
+import subprocess
 import sys
 from pathlib import Path
+
+from tools.python_utils import get_pip_cmd
 
 
 logger = logging.getLogger(__name__)
@@ -20,13 +23,11 @@ def install_int21():
     artifact is ready before benchmarking.
     """
     # ``pybind11`` and ``ninja`` are required by the JIT extension build.
-    cmd = ["uv", "pip", "install", "pybind11", "ninja"]
-    import subprocess
-
+    cmd = get_pip_cmd() + ["install", "pybind11", "ninja"]
     subprocess.check_call(cmd)
 
     sys.path.insert(0, str(REPO_PATH))
-    from tritonbench.kernels.int21 import load_ext
+    from tritonbench.kernels.int21.rmsnorm_b200 import load_ext
 
     logger.info("[tritonbench] building int21 rmsnorm_b200.cu (sm_100a)...")
     load_ext()
