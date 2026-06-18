@@ -164,20 +164,17 @@ def _get_autotune_configs():
     configs = []
     block_configs = [
         # (BLOCK_M, BLOCK_N, BLOCK_K)
-        # (128, 128, 64),
-        # (128, 256, 64),
-        # (256, 128, 64),
-        # (128, 128, 128),
-        # (128, 256, 128),
+        (128, 128, 64),
+        (128, 256, 64),
+        (256, 128, 64),
+        (128, 128, 128),
+        (128, 256, 128),
         (256, 128, 128),
     ]
 
-    # num_stages=3 is needed by the symmetric fp32 1x128 path (the extra sb
-    # broadcast over M overflows SMEM at num_stages=4); other modes keep 4.
-    for num_stages in [3, 4]:
+    for num_stages in [3, 4, 5]:
         for BLOCK_M, BLOCK_N, BLOCK_K in block_configs:
-            for EPILOGUE_SUBTILE in [1]:
-                # for EPILOGUE_SUBTILE in [1, 2, 4]:
+            for EPILOGUE_SUBTILE in [1, 2, 4]:
                 configs.append(
                     triton.Config(
                         {
@@ -230,17 +227,27 @@ def _prune_configs(configs, named_args, **kwargs):
                 continue
             if config.kwargs["BLOCK_SIZE_N"] != 128:
                 continue
+            # BLOCK_M=128 crashes the Canonicalizer for the DeepSeek path
+            # (symmetric 1x128 compiles fine at 128). The autotuner cannot skip a
+            # config that fails to *compile* (only OOM), so exclude it here.
+            if config.kwargs["BLOCK_SIZE_M"] == 128:
+                continue
         # Symmetric fp32 blockwise (1x128/1x128): one 128-wide K group per tile
         # so kb == ki for the in-loop rescale (BLOCK_N is free, sb is a vector).
-        # The extra sb broadcast over M overflows SMEM at num_stages=4 (DeepSeek's
-        # scalar sb does not), so cap it at 3. MXFP8 keeps all num_stages and lets
-        # the autotuner drop any that overflow; the other modes keep num_stages=4.
         if is_blockwise_1x128:
             if config.kwargs["BLOCK_SIZE_K"] != 128:
                 continue
+        # num_stages gating (the autotuner only skips OOM configs, not ones that
+        # fail to compile, so gate per mode here):
+        #   DeepSeek / symmetric 1x128 -- the WS-off in-loop fp32 rescale does not
+        #     hold up at num_stages>=4 (symmetric OOMs SMEM from the sb-over-M
+        #     broadcast; DeepSeek crashes the Canonicalizer), so cap at 3.
+        #   MXFP8 -- try every num_stages; the autotuner drops any that overflow.
+        #   TensorWise / RowWise -- the [4, 5] tuning set.
+        if is_deepseek or is_blockwise_1x128:
             if config.num_stages > 3:
                 continue
-        elif not is_mxfp8 and config.num_stages != 4:
+        elif not is_mxfp8 and config.num_stages < 4:
             continue
         # Hopper: epilogue subtiling forced off (subtile=1). The reshape/permute/
         # split pattern is a Blackwell register-pressure relief that doesn't carry
