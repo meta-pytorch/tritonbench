@@ -11,6 +11,7 @@ from tritonbench.operators.fp8_gemm.persistent import blackwell_persistent_tma
 from tritonbench.operators.fp8_gemm.scaled_mm_autows import (
     BLOCKWISE_128x128 as AUTOWS_BLOCKWISE_128x128,
     BLOCKWISE_1x128 as AUTOWS_BLOCKWISE_1x128,
+    MXFP8 as AUTOWS_MXFP8,
     ROWWISE as AUTOWS_ROWWISE,
     scaled_mm_autows,
     TENSORWISE as AUTOWS_TENSORWISE,
@@ -29,6 +30,11 @@ from .tutorial import matmul as tutorial_matmul
 
 with try_import("HAS_VLLM_CUTLASS"):
     from vllm import _custom_ops as vllm_ops
+
+with try_import("HAS_VLLM_TRITON_BLOCK_FP8"):
+    from vllm.model_executor.layers.quantization.utils.fp8_utils import (
+        w8a8_triton_block_scaled_mm,
+    )
 
 
 torch._dynamo.config.recompile_limit = 10000
@@ -414,6 +420,7 @@ class Operator(BenchmarkOperator):
             ScalingType.RowWise: AUTOWS_ROWWISE,
             ScalingType.BlockWise1x128: AUTOWS_BLOCKWISE_1x128,
             ScalingType.BlockWise128x128: AUTOWS_BLOCKWISE_128x128,
+            "MXFP8": AUTOWS_MXFP8,
         }
         ra, rb = self.scaling_recipe_a, self.scaling_recipe_b
         if ra not in _RECIPE_TO_MODE or rb not in _RECIPE_TO_MODE:
@@ -429,12 +436,21 @@ class Operator(BenchmarkOperator):
                 a, b, scale_a, scale_b, a_mode, b_mode, out_dtype=self._get_dtype()
             )
 
-        # Other supported combinations are symmetric (TensorWise/RowWise/MXFP8).
         if ra != rb:
             raise ValueError(
                 f"autows supports asymmetric scaling only for "
                 f"BlockWise1x128/BlockWise128x128; got {ra} vs {rb}"
             )
+
+        # Symmetric blockwise passes scales through as-is (no squeeze):
+        #   MXFP8:          1x32 e8m0 scales in the flat blocked layout [M*K/32].
+        #   BlockWise1x128: fp32 2D grids [M, K/128] and [N, K/128].
+        if ra == "MXFP8" or ra == ScalingType.BlockWise1x128:
+            return lambda: scaled_mm_autows(
+                a, b, scale_a, scale_b, a_mode, b_mode, out_dtype=self._get_dtype()
+            )
+
+        # TensorWise (scalar) / RowWise ([M], [N]): squeeze to the kernel's shapes.
         sa = scale_a.squeeze()
         sb = scale_b.squeeze()
         return lambda: scaled_mm_autows(
@@ -474,6 +490,35 @@ class Operator(BenchmarkOperator):
         raise NotImplementedError(
             "vllm_cutlass_fp8_gemm supports TensorWise, RowWise, and BlockWise "
             "(1x128 activations + 128x128 weights) scaling only"
+        )
+
+    @register_benchmark(enabled=HAS_VLLM_TRITON_BLOCK_FP8)
+    def vllm_triton_block_scaled_fp8_gemm(self, a, b, scale_a, scale_b):
+        # vLLM's Triton block-scaled matmul: C = A @ B^T with A=[M,K], B=[N,K],
+        # As=[M, K/block_k], Bs=[N/block_n, K/block_k] (all fp32 scales). Unlike
+        # the cuBLAS/CUTLASS path it is block-shape-generic, so it serves BOTH:
+        #   symmetric BlockWise1x128/1x128 -> block_size=[1, 128]
+        #   DeepSeek    1x128 / 128x128    -> block_size=[128, 128]
+        # This is the only correct accuracy reference for the symmetric 1x128
+        # recipe (cuBLAS _scaled_mm returns CUBLAS_STATUS_NOT_SUPPORTED for it).
+        # Use with `--baseline vllm_triton_block_scaled_fp8_gemm` since the
+        # default baseline (torch_fp8_gemm) cannot run this recipe.
+        ra, rb = self.scaling_recipe_a, self.scaling_recipe_b
+        if ra == ScalingType.BlockWise1x128 and rb == ScalingType.BlockWise1x128:
+            block_size = [1, 128]
+        elif ra == ScalingType.BlockWise1x128 and rb == ScalingType.BlockWise128x128:
+            block_size = [128, 128]
+        else:
+            raise NotImplementedError(
+                "vllm_triton_block_scaled_fp8_gemm supports BlockWise1x128/1x128 "
+                "and BlockWise1x128/128x128 (DeepSeek) only"
+            )
+        # vLLM asserts A.is_contiguous(); the harness tensors usually already are,
+        # but normalize to be safe. Bs/As are read by stride, so any layout works.
+        a_c = a.contiguous()
+        b_c = b.contiguous()
+        return lambda: w8a8_triton_block_scaled_mm(
+            a_c, b_c, scale_a, scale_b, block_size, self._get_dtype()
         )
 
     @register_benchmark()

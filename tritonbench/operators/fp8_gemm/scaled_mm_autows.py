@@ -2,15 +2,19 @@
 Triton kernel for scaled_mm (FP8 GEMM) with AutoWS (Automatic Warp Specialization).
 
 Based on _scaled_mm_v2 semantics from PyTorch. Supports TensorWise, RowWise,
-and BlockWise (MXFP8) scaling recipes with Blackwell warp-specialized persistent
-TMA matmul.
+MXFP8 (1x32 e8m0 microscaling), and fp32 blockwise (symmetric 1x128/1x128 and
+DeepSeek 1x128/128x128) scaling recipes with a Blackwell warp-specialized
+persistent TMA matmul.
 
 Backend support:
-  - Blackwell (sm_100+): AutoWS persistent loop, all scaling modes
-    (TensorWise, RowWise, BlockWise MXFP8 via tl.dot_scaled).
+  - Blackwell (sm_100+): AutoWS persistent loop. MXFP8 (1x32 e8m0) lowers via
+    tl.dot_scaled -> ttng.tc_gen5_mma_scaled (warp-specialized). The fp32
+    blockwise modes (symmetric 1x128/1x128 and DeepSeek 1x128/128x128) use
+    tl.dot + an in-loop fp32 rescale (no WS). TensorWise/RowWise scale in the
+    epilogue.
   - Hopper (sm_90): plain persistent loop (no warp_specialize),
-    EPILOGUE_SUBTILE forced to 1, TensorWise + RowWise only. BLOCKWISE_1x128
-    is rejected because tl.dot_scaled MMA is Blackwell-only.
+    EPILOGUE_SUBTILE forced to 1. MXFP8 is rejected (tl.dot_scaled MMA is
+    Blackwell-only); the fp32 paths work but are unoptimized.
 
 The tl.range(..., flatten=...) loop-flattening pragma is intentionally left
 off on both backends (FLATTEN=False); enabling it regressed perf in this
@@ -47,6 +51,9 @@ from triton.tools.tensor_descriptor import TensorDescriptor
 # ---------------------------------------------------------------------------
 TENSORWISE = tl.constexpr(0)
 ROWWISE = tl.constexpr(1)
+# MXFP8 == at::blas::ScalingType.BlockWise1x32: 1x32 e8m0 microscaling, lowered
+# via tl.dot_scaled -> ttng.tc_gen5_mma_scaled on Blackwell.
+MXFP8 = tl.constexpr(3)
 BLOCKWISE_1x128 = tl.constexpr(4)
 BLOCKWISE_128x128 = tl.constexpr(5)
 
@@ -140,15 +147,16 @@ def _host_descriptor_pre_hook(nargs):
             sa.block_shape = [block_m]
         if isinstance(sb, TensorDescriptor):
             sb.block_shape = [block_n // epilogue_subtile]
-    elif a_mode == BLOCKWISE_1x128 and b_mode == BLOCKWISE_1x128:
+    elif a_mode == MXFP8 and b_mode == MXFP8:
         vec_size = nargs["VEC_SIZE"]
         rep_k = triton.cdiv(block_k // vec_size, 4)
         if isinstance(sa, TensorDescriptor):
             sa.block_shape = [1, block_m // 128, rep_k, 2, 256]
         if isinstance(sb, TensorDescriptor):
             sb.block_shape = [1, block_n // 128, rep_k, 2, 256]
-    # DeepSeek (BLOCKWISE_1x128 / BLOCKWISE_128x128) uses plain tensors, not
-    # TensorDescriptors, so there is nothing to resize here.
+    # The fp32 blockwise modes -- symmetric 1x128/1x128 and DeepSeek
+    # (1x128 / 128x128) -- use plain tensors, not TensorDescriptors, so there is
+    # nothing to resize here.
 
 
 def _get_autotune_configs():
@@ -156,17 +164,20 @@ def _get_autotune_configs():
     configs = []
     block_configs = [
         # (BLOCK_M, BLOCK_N, BLOCK_K)
-        (128, 128, 64),
-        (128, 256, 64),
-        (256, 128, 64),
-        (128, 128, 128),
-        (128, 256, 128),
+        # (128, 128, 64),
+        # (128, 256, 64),
+        # (256, 128, 64),
+        # (128, 128, 128),
+        # (128, 256, 128),
         (256, 128, 128),
     ]
 
-    for num_stages in [4, 5]:
+    # num_stages=3 is needed by the symmetric fp32 1x128 path (the extra sb
+    # broadcast over M overflows SMEM at num_stages=4); other modes keep 4.
+    for num_stages in [3, 4]:
         for BLOCK_M, BLOCK_N, BLOCK_K in block_configs:
-            for EPILOGUE_SUBTILE in [1, 2, 4]:
+            for EPILOGUE_SUBTILE in [1]:
+                # for EPILOGUE_SUBTILE in [1, 2, 4]:
                 configs.append(
                     triton.Config(
                         {
@@ -188,11 +199,15 @@ def _get_autotune_configs():
 def _prune_configs(configs, named_args, **kwargs):
     """Prune invalid configs based on WS mode, backend, and problem size."""
     pruned = []
-    a_mode = named_args.get("SCALE_A_MODE", TENSORWISE)
-    b_mode = named_args.get("SCALE_B_MODE", TENSORWISE)
-    vec_size = named_args.get("VEC_SIZE", 0)
+    # Constexpr meta-params (SCALE_A_MODE, ...) are passed as keyword args, so
+    # they arrive here in **kwargs, NOT in named_args (which holds only the
+    # positional kernel args -- a_desc..K). Fall back to named_args/default.
+    a_mode = kwargs.get("SCALE_A_MODE", named_args.get("SCALE_A_MODE", TENSORWISE))
+    b_mode = kwargs.get("SCALE_B_MODE", named_args.get("SCALE_B_MODE", TENSORWISE))
+    vec_size = kwargs.get("VEC_SIZE", named_args.get("VEC_SIZE", 0))
     is_blackwell = _is_blackwell()
-    is_mxfp8 = a_mode == BLOCKWISE_1x128 and b_mode == BLOCKWISE_1x128
+    is_mxfp8 = a_mode == MXFP8 and b_mode == MXFP8
+    is_blockwise_1x128 = a_mode == BLOCKWISE_1x128 and b_mode == BLOCKWISE_1x128
     is_deepseek = a_mode == BLOCKWISE_1x128 and b_mode == BLOCKWISE_128x128
     for config in configs:
         num_warps = config.num_warps
@@ -215,6 +230,18 @@ def _prune_configs(configs, named_args, **kwargs):
                 continue
             if config.kwargs["BLOCK_SIZE_N"] != 128:
                 continue
+        # Symmetric fp32 blockwise (1x128/1x128): one 128-wide K group per tile
+        # so kb == ki for the in-loop rescale (BLOCK_N is free, sb is a vector).
+        # The extra sb broadcast over M overflows SMEM at num_stages=4 (DeepSeek's
+        # scalar sb does not), so cap it at 3. MXFP8 keeps all num_stages and lets
+        # the autotuner drop any that overflow; the other modes keep num_stages=4.
+        if is_blockwise_1x128:
+            if config.kwargs["BLOCK_SIZE_K"] != 128:
+                continue
+            if config.num_stages > 3:
+                continue
+        elif not is_mxfp8 and config.num_stages != 4:
+            continue
         # Hopper: epilogue subtiling forced off (subtile=1). The reshape/permute/
         # split pattern is a Blackwell register-pressure relief that doesn't carry
         # over cleanly without WS scheduling.
@@ -296,7 +323,8 @@ def scaled_mm_autows_kernel(
     # its algorithm from the (SCALE_A_MODE, SCALE_B_MODE) pair:
     #   (TENSORWISE, TENSORWISE)             -> scalar epilogue scale
     #   (ROWWISE, ROWWISE)                   -> per-row/col epilogue scale
-    #   (BLOCKWISE_1x128, BLOCKWISE_1x128)   -> MXFP8 via tl.dot_scaled (Blackwell)
+    #   (MXFP8, MXFP8)                       -> 1x32 e8m0 via tl.dot_scaled (Blackwell)
+    #   (BLOCKWISE_1x128, BLOCKWISE_1x128)   -> symmetric fp32 1x128 in-loop rescale
     #   (BLOCKWISE_1x128, BLOCKWISE_128x128) -> DeepSeek in-loop fp32 rescale
     SCALE_A_MODE: tl.constexpr,
     SCALE_B_MODE: tl.constexpr,
@@ -326,7 +354,8 @@ def scaled_mm_autows_kernel(
         SCALE_B_MODE == TENSORWISE
     )
     IS_ROWWISE: tl.constexpr = (SCALE_A_MODE == ROWWISE) and (SCALE_B_MODE == ROWWISE)
-    IS_MXFP8: tl.constexpr = (SCALE_A_MODE == BLOCKWISE_1x128) and (
+    IS_MXFP8: tl.constexpr = (SCALE_A_MODE == MXFP8) and (SCALE_B_MODE == MXFP8)
+    IS_BLOCKWISE_1x128: tl.constexpr = (SCALE_A_MODE == BLOCKWISE_1x128) and (
         SCALE_B_MODE == BLOCKWISE_1x128
     )
     IS_DEEPSEEK: tl.constexpr = (SCALE_A_MODE == BLOCKWISE_1x128) and (
@@ -428,6 +457,40 @@ def scaled_mm_autows_kernel(
                 )
                 sb = tl.load(scale_b_ptr + pid_n * num_k_groups + ki)
                 accumulator += partial * sa[:, None] * sb
+        elif IS_BLOCKWISE_1x128:
+            # Symmetric fp32 blockwise: 1x128 scales for BOTH A and B (arbitrary
+            # fp32, one per row per 128-wide K group). Like DeepSeek but B's scale
+            # is a per-N-row vector instead of a per-128xN-block scalar, so each
+            # K group's partial dot is rescaled by sa[m,kb]*sb[n,kb]. NOT MX --
+            # these fp32 scales cannot use tl.dot_scaled. _prune_configs pins
+            # BLOCK_SIZE_K=128 (one group per K tile) so kb==ki. scale_a is
+            # row-major [M, K//128]; scale_b is row-major [N, K//128].
+            num_k_groups = K // 128
+            offs_m_scale = offs_am + tl.arange(0, BLOCK_SIZE_M)
+            offs_n_scale = offs_bn + tl.arange(0, BLOCK_SIZE_N)
+            mask_m_scale = offs_m_scale < M
+            mask_n_scale = offs_n_scale < N
+            for ki in range(k_tiles):
+                offs_k = ki * BLOCK_SIZE_K
+                a_tile = a_desc.load([offs_am, offs_k])
+                b_tile = b_desc.load([offs_bn, offs_k])
+                partial = tl.dot(
+                    a_tile,
+                    b_tile.T,
+                    out_dtype=tl.float32,
+                    allow_tf32=True,
+                )
+                sa = tl.load(
+                    scale_a_ptr + offs_m_scale * num_k_groups + ki,
+                    mask=mask_m_scale,
+                    other=0.0,
+                )
+                sb = tl.load(
+                    scale_b_ptr + offs_n_scale * num_k_groups + ki,
+                    mask=mask_n_scale,
+                    other=0.0,
+                )
+                accumulator += partial * sa[:, None] * sb[None, :]
         else:
             for ki in range(k_tiles):
                 offs_k = ki * BLOCK_SIZE_K
@@ -497,17 +560,19 @@ def scaled_mm_autows(
         a: [M, K] FP8 tensor (e.g., float8_e4m3fn)
         b: [N, K] FP8 tensor (row-major; computes A @ B^T)
         scale_a: Scale for A -- scalar (TensorWise), [M] (RowWise),
-                 5D MX repack (BLOCKWISE_1x128 / MXFP8), or [M, K//128]
-                 (BLOCKWISE_1x128 DeepSeek).
+                 flat blocked e8m0 [M*K//32] (MXFP8), or [M, K//128] fp32
+                 (BLOCKWISE_1x128 symmetric / DeepSeek).
         scale_b: Scale for B -- scalar (TensorWise), [N] (RowWise),
-                 5D MX repack (BLOCKWISE_1x128 / MXFP8), or [N//128, K//128]
+                 flat blocked e8m0 [N*K//32] (MXFP8), [N, K//128] fp32
+                 (BLOCKWISE_1x128 symmetric), or [N//128, K//128] fp32
                  (BLOCKWISE_128x128 DeepSeek).
-        scale_a_mode: per-operand recipe for A (TENSORWISE / ROWWISE /
+        scale_a_mode: per-operand recipe for A (TENSORWISE / ROWWISE / MXFP8 /
                  BLOCKWISE_1x128).
         scale_b_mode: per-operand recipe for B; defaults to scale_a_mode
                  (symmetric). Supported pairs: (TENSORWISE, TENSORWISE),
-                 (ROWWISE, ROWWISE), (BLOCKWISE_1x128, BLOCKWISE_1x128) MXFP8,
-                 and (BLOCKWISE_1x128, BLOCKWISE_128x128) DeepSeek.
+                 (ROWWISE, ROWWISE), (MXFP8, MXFP8) 1x32 e8m0,
+                 (BLOCKWISE_1x128, BLOCKWISE_1x128) symmetric fp32, and
+                 (BLOCKWISE_1x128, BLOCKWISE_128x128) DeepSeek.
         out_dtype: Output dtype (default bfloat16)
 
     Returns:
@@ -535,7 +600,10 @@ def scaled_mm_autows(
     is_blackwell = device_props.major >= 10
 
     is_rowwise = scale_a_mode == ROWWISE and scale_b_mode == ROWWISE
-    is_mxfp8 = scale_a_mode == BLOCKWISE_1x128 and scale_b_mode == BLOCKWISE_1x128
+    is_mxfp8 = scale_a_mode == MXFP8 and scale_b_mode == MXFP8
+    is_blockwise_1x128 = (
+        scale_a_mode == BLOCKWISE_1x128 and scale_b_mode == BLOCKWISE_1x128
+    )
     is_deepseek = scale_a_mode == BLOCKWISE_1x128 and scale_b_mode == BLOCKWISE_128x128
 
     assert not is_mxfp8 or is_blackwell, (
@@ -566,10 +634,11 @@ def scaled_mm_autows(
             scale_b.reshape(1, N // 128, K // vec_size // 4, 2, 256),
             [1, 1, 1, 2, 256],
         )
-    elif is_deepseek:
-        # DeepSeek 1x128 (A) + 128x128 (B): plain fp32 2D scales, pointer-loaded
-        # (no TMA, no MX repack). scale_a: [M, K//128]; scale_b: [N//128, K//128].
-        # Force row-major so in-kernel pointer arithmetic (row*K//128 + kb) holds.
+    elif is_deepseek or is_blockwise_1x128:
+        # Plain fp32 2D scales, pointer-loaded (no TMA, no MX repack). Force
+        # row-major so in-kernel pointer arithmetic (row * K//128 + kb) holds.
+        #   DeepSeek 1x128(A)+128x128(B): scale_a [M, K//128], scale_b [N//128, K//128]
+        #   symmetric 1x128/1x128:        scale_a [M, K//128], scale_b [N, K//128]
         scale_a_arg = scale_a.contiguous()
         scale_b_arg = scale_b.contiguous()
     else:
@@ -584,12 +653,20 @@ def scaled_mm_autows(
 
     _ensure_triton_allocator(a.device)
 
-    # DeepSeek rescales inside the K-loop (dot -> *sa*sb -> accumulate). That
-    # in-loop compute chain is not partitionable by the warp-specialization pass
-    # (it trips "multiple cross-partition producers"), so run it through the plain
-    # persistent loop (no WS) like the Hopper path.
-    warp_specialize = is_blackwell and not is_deepseek
-    separate_epilogue_store = is_blackwell and not is_deepseek
+    # DeepSeek and symmetric fp32 1x128 rescale inside the K-loop (dot -> *sa*sb
+    # -> accumulate). That in-loop compute chain is not partitionable by the
+    # warp-specialization pass (it trips "multiple cross-partition producers"),
+    # so run them through the plain persistent loop (no WS) like the Hopper path.
+    #
+    # MXFP8 uses tl.dot_scaled -> ttng.tc_gen5_mma_scaled. The scaled-dot lowering
+    # works, but the AutoWS partition scheduler (NVGPUWarpSpecialization /
+    # tritongpu-automatic-warp-specialization) does not yet partition a
+    # tc_gen5_mma_scaled loop, so WS is disabled for MXFP8 for now (it still emits
+    # tc_gen5_mma_scaled via the plain persistent loop). Enabling WS on the
+    # scaled MMA is the AutoWS-compiler follow-up.
+    ws_ok = not is_deepseek and not is_blockwise_1x128 and not is_mxfp8
+    warp_specialize = is_blackwell and ws_ok
+    separate_epilogue_store = is_blackwell and ws_ok
 
     scaled_mm_autows_kernel[grid](
         a_arg,
@@ -648,7 +725,7 @@ def scaled_mm_v2(
     )
     r_a, r_b = recipe_a[0], recipe_b[0]
 
-    supported = {TENSORWISE, ROWWISE, BLOCKWISE_1x128, BLOCKWISE_128x128}
+    supported = {TENSORWISE, ROWWISE, MXFP8, BLOCKWISE_1x128, BLOCKWISE_128x128}
     assert r_a in supported, f"Unsupported recipe_a: {r_a}"
     assert r_b in supported, f"Unsupported recipe_b: {r_b}"
 
@@ -736,35 +813,56 @@ if __name__ == "__main__":
     )
     all_passed &= _check_close("RowWise", c_triton_row, c_ref_row)
 
-    # --- Test 3: BlockWise MXFP8 scaling ---
-    print("\n--- BlockWise MXFP8 scaling ---")
+    # --- Test 3: MXFP8 (1x32 e8m0 microscaling) via tl.dot_scaled ---
+    print("\n--- MXFP8 (1x32 e8m0) scaling ---")
     try:
-        from triton.tools.mxfp import MXScaleTensor
+        from torch.testing._internal.common_quantized import to_blocked, to_mxfp
 
-        VEC_SIZE = MXFP8_VEC_SIZE
-        scale_a_raw = torch.ones(
-            (M // 128, K // VEC_SIZE // 4, 32, 4, 4),
-            dtype=torch.float32,
-            device=device,
-        )
-        scale_b_raw = torch.ones(
-            (N // 128, K // VEC_SIZE // 4, 32, 4, 4),
-            dtype=torch.float32,
-            device=device,
-        )
-        scale_a_block = MXScaleTensor(scale_a_raw).data
-        scale_b_block = MXScaleTensor(scale_b_raw).data
+        def _deq_mx(xq, s2d, vec=32):
+            # fp32 emulation of dot_scaled: dequant = quant * 2^scale per vec-block.
+            R, Kk = xq.shape
+            xf = xq.float().reshape(R, Kk // vec, vec)
+            sf = s2d.float().reshape(R, Kk // vec, 1)
+            return (xf * sf).reshape(R, Kk)
 
-        c_triton_block = scaled_mm_autows(
-            a_fp8, b_fp8, scale_a_block, scale_b_block, BLOCKWISE_1x128
+        sa2d, a_mx = to_mxfp(a_fp32.to(torch.bfloat16), block_size=32, format="mxfp8")
+        sb2d, b_mx = to_mxfp(b_fp32.to(torch.bfloat16), block_size=32, format="mxfp8")
+        c_triton_mx = scaled_mm_autows(
+            a_mx, b_mx, to_blocked(sa2d), to_blocked(sb2d), MXFP8, MXFP8
         )
-        # All scales are 1.0, so block-scaled result should match unscaled fp8 mm.
-        c_ref_block = (a_fp32 @ b_fp32.T).to(torch.bfloat16)
-        all_passed &= _check_close(
-            "BlockWise (all-ones scales)", c_triton_block, c_ref_block
-        )
+        # Reference = exact fp32 emulation of what dot_scaled computes (so this
+        # also validates the to_blocked <-> in-kernel de-swizzle round-trip).
+        c_ref_mx = (_deq_mx(a_mx, sa2d) @ _deq_mx(b_mx, sb2d).T).to(torch.bfloat16)
+        all_passed &= _check_close("MXFP8 (1x32 e8m0)", c_triton_mx, c_ref_mx)
     except ImportError:
-        print("  MXScaleTensor not available, skipping block scaling test")
+        print("  to_mxfp/to_blocked not available, skipping MXFP8 test")
+
+    # --- Test 3b: symmetric fp32 BlockWise 1x128 (both operands) ---
+    print("\n--- BlockWise 1x128/1x128 (symmetric fp32) scaling ---")
+
+    def _quant_1x128(x):
+        # x [R, K] fp32 -> (x_q e4m3, scale [R, K//128] fp32), matching the
+        # tritonbench harness convention (scale = amax/448, x_q = x * scale).
+        R, Kk = x.shape
+        xb = x.reshape(R, Kk // 128, 128)
+        amax = xb.abs().amax(dim=2, keepdim=True).float()
+        scale = (torch.finfo(torch.float8_e4m3fn).max / amax).reciprocal()
+        xq = (xb * scale).reshape(R, Kk).to(torch.float8_e4m3fn)
+        return xq, scale.reshape(R, Kk // 128).to(torch.float32)
+
+    def _deq_1x128(xq, s):
+        R, Kk = xq.shape
+        return (
+            xq.float().reshape(R, Kk // 128, 128) * s.float().reshape(R, Kk // 128, 1)
+        ).reshape(R, Kk)
+
+    a_q, sa_bw = _quant_1x128(a_fp32)
+    b_q, sb_bw = _quant_1x128(b_fp32)
+    c_triton_bw = scaled_mm_autows(
+        a_q, b_q, sa_bw, sb_bw, BLOCKWISE_1x128, BLOCKWISE_1x128
+    )
+    c_ref_bw = (_deq_1x128(a_q, sa_bw) @ _deq_1x128(b_q, sb_bw).T).to(torch.bfloat16)
+    all_passed &= _check_close("BlockWise1x128 symmetric (fp32)", c_triton_bw, c_ref_bw)
 
     # --- Test 4: v2 API ---
     print("\n--- _scaled_mm_v2 API ---")
