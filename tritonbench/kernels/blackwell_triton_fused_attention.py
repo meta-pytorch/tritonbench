@@ -278,14 +278,14 @@ else:
 
     configs = [
         make_standard_config(BM, BN, s, w, subtile, vectmul, add2reduce, maxreg)
-        for BM in [128, 256]
-        for BN in [64, 128]
-        for s in NUM_STAGES_OPTIONS
+        for BM in [256]  # 128, 256]
+        for BN in [128]  # 64, 128]
+        for s in [3]  # NUM_STAGES_OPTIONS
         for w in [4]
         for subtile in [True]
-        for vectmul in [0, 1]
+        for vectmul in [1]  # 0, 1]
         for add2reduce in [False]
-        for maxreg in [152, 192]
+        for maxreg in [152]  # , 192]
     ]
 
 
