@@ -26,6 +26,7 @@ try:
 except ImportError:
     pass
 
+from tritonbench.operators.flex_attention.triton_autows import autows_flex_attention
 from tritonbench.utils.env_utils import is_hip
 from tritonbench.utils.input import input_filter
 from tritonbench.utils.triton_op import (
@@ -323,6 +324,24 @@ class Operator(BenchmarkOperator):
             block_mask=block_mask,
             kernel_options=kernel_options,
         )
+
+    # Disabled by default because TritonBench does not yet have proper checks
+    # for Meta Triton + Blackwell + AutoWS being enabled. Test with `--force`.
+    # TODO: Enable once those runtime gates are validated.
+    @register_benchmark(enabled=False, fwd_only=True)
+    def triton_autows_flex_attention(
+        self,
+        q: torch.Tensor,
+        k: torch.Tensor,
+        v: torch.Tensor,
+        score_mod: Optional[_score_mod_signature],
+        block_mask: Optional[BlockMask],
+        mod_type: str,
+        kernel_options: dict[str, Any],
+    ) -> Optional[Callable]:
+        if mod_type not in ("noop", "causal"):
+            return unsupported_fn
+        return lambda: autows_flex_attention(q, k, v, causal=mod_type == "causal")
 
     @register_benchmark(enabled=HAS_FLASH_V3)
     def flash_v3(
