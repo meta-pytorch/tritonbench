@@ -16,6 +16,9 @@ import torch
 from torch.nn.attention import sdpa_kernel, SDPBackend
 from torch.nn.functional import scaled_dot_product_attention as sdpa
 from tritonbench.kernels.attention_utils import SUPPORT_GLUON
+from tritonbench.operators.blackwell_attentions.triton_autows import (
+    autows_hstu_attention,
+)
 from tritonbench.utils.python_utils import try_import
 
 try:
@@ -840,6 +843,33 @@ class Operator(BenchmarkOperator):
                 seq_offsets=seq_offsets,
                 attn_scale=torch.tensor(1.0 / max_seq_len, device=q.device),
                 sort_by_length=False,
+            )
+
+        return preproc_hstu, fn
+
+    # This backend currently does not work: the Meta AutoWS compiler path
+    # crashes in NVGPUWarpSpecialization for the HSTU loop. Test with `--force`
+    # after the compiler task is fixed.
+    # TODO: Enable once the compiler issue is fixed and Meta Triton + Blackwell
+    # + AutoWS runtime gates are validated.
+    @register_benchmark(enabled=False, fwd_only=True, label="triton-autows-hstu")
+    @multi_input_wrapper
+    def triton_autows_hstu(self, *args) -> Tuple[Callable, Callable]:
+        if self.varlen:
+            raise NotImplementedError("AutoWS HSTU does not support varlen interface")
+        if self.local:
+            raise NotImplementedError("AutoWS HSTU does not support local attention")
+
+        alpha = 1.0 / self.D_HEAD
+
+        def fn(q, k, v, seq_offsets, max_seq_len):
+            return autows_hstu_attention(
+                q,
+                k,
+                v,
+                seq_offsets,
+                max_seq_len,
+                alpha=alpha,
             )
 
         return preproc_hstu, fn
