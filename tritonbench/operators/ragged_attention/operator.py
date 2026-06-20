@@ -18,6 +18,7 @@ from tritonbench.utils.triton_op import (
 )
 
 from .hstu import get_test_inputs, HAS_HAMMER, triton_hstu_mha, triton_ragged_hstu_mha
+from .triton_autows import triton_autows_ragged_hstu
 
 HAS_CUDA = False
 try:
@@ -165,6 +166,24 @@ class Operator(BenchmarkOperator):
             contextual_seq_len=self.contextual_seq_len,
             sort_by_length=False,
             full_attn_size=0,
+        )
+
+    # Test with --force. This backend currently does not compile: Meta AutoWS
+    # crashes in NVGPUWarpSpecialization for the HSTU SiLU product consumed by
+    # the PV MMA across partition boundaries.
+    # TODO: Enable once the compiler issue is fixed and runtime gates for Meta
+    # Triton + Blackwell + AutoWS are validated.
+    @register_benchmark(enabled=False, fwd_only=True)
+    def triton_autows_ragged_hstu(
+        self, q, k, v, seq_offsets, num_targets, max_seq_len, sparsity
+    ):
+        return lambda: triton_autows_ragged_hstu(
+            max_seq_len,
+            alpha=self.alpha,
+            q=q,
+            k=k,
+            v=v,
+            seq_offsets=seq_offsets,
         )
 
     # TODO: remove B200 hacks like these.
