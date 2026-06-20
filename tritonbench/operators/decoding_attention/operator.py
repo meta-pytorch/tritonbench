@@ -8,6 +8,9 @@ import os
 from typing import Callable, Optional, Tuple
 
 import torch
+from tritonbench.operators.decoding_attention.triton_autows import (
+    autows_decoding_attention,
+)
 from tritonbench.utils.env_utils import IS_BLACKWELL, is_cuda
 from tritonbench.utils.path_utils import add_ld_library_path
 from tritonbench.utils.python_utils import try_import
@@ -481,6 +484,19 @@ class Operator(BenchmarkOperator):
             attn_bias,
             op=fmha.triton_splitk.FwOp,
         ).view(q.shape)
+
+    # Disabled by default because TritonBench does not yet have proper checks
+    # for Meta Triton + Blackwell + AutoWS being enabled. Test with `--force`.
+    # TODO: Enable once those runtime gates are validated.
+    @register_benchmark(enabled=False, fwd_only=True)
+    def triton_autows_decoding_attention(
+        self,
+        q: torch.Tensor,
+        k_cache: torch.Tensor,
+        v_cache: torch.Tensor,
+        cache_seqlens: torch.Tensor,
+    ) -> Callable:
+        return lambda: autows_decoding_attention(q, k_cache, v_cache, cache_seqlens)
 
     @register_benchmark(enabled=HAS_XFORMERS)
     def triton_splitk_fp8kv(
