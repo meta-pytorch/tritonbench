@@ -44,6 +44,8 @@ from tritonbench.utils.triton_utils import has_tlx
 if has_tlx():
     from tritonbench.operators.gdpa.gdpa_blackwell_tlx import gdpa_forward_tlx
 
+from tritonbench.operators.gdpa.triton_autows import triton_autows_gdpa
+
 from .gdpa import gdpa as gdpa_kernel
 from .gdpa_utils import generate_jagged_data
 
@@ -207,6 +209,33 @@ class Operator(BenchmarkOperator):
                 bwd_opt_tech="tlx",
             )
             return real_output
+
+        return _inner
+
+    @register_benchmark(enabled=is_blackwell(), fwd_only=True)
+    def triton_autows_gdpa(
+        self,
+        _config_name,
+        jagged_q,
+        jagged_k,
+        jagged_v,
+        jagged_data,
+        padded_data,
+        activation,
+    ):
+        def _inner():
+            return triton_autows_gdpa(
+                query=jagged_q,
+                key=jagged_k,
+                value=jagged_v,
+                query_offset=jagged_data["q_offsets"],
+                key_offset=jagged_data["k_offsets"],
+                max_seq_len_q=jagged_data["max_seq_len_q"],
+                max_seq_len_kv=jagged_data["max_seq_len_k"],
+                activation=activation,
+                broadcast_q=jagged_data["broadcast_q"],
+                window_size=jagged_data["window_size"],
+            )
 
         return _inner
 
