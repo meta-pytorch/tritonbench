@@ -4,6 +4,8 @@ from typing import Callable, Generator, List, Optional, Tuple
 import torch
 from transformers.models.llama.configuration_llama import LlamaConfig
 from transformers.models.llama.modeling_llama import LlamaMLP
+from tritonbench.operators.swiglu.triton_autows import triton_autows_swiglu
+from tritonbench.utils.env_utils import is_blackwell
 from tritonbench.utils.triton_op import (
     BenchmarkOperator,
     Mode,
@@ -68,6 +70,15 @@ class Operator(BenchmarkOperator):
     @register_benchmark(enabled=LigerSwiGLUMLP is not None)
     def liger_swiglu(self, input) -> Callable:
         return lambda: self.liger_op(input)
+
+    @register_benchmark(enabled=is_blackwell(), fwd_only=True)
+    def triton_autows_swiglu(self, input) -> Callable:
+        def fn():
+            gate = self.baseline_op.gate_proj(input)
+            up = self.baseline_op.up_proj(input)
+            return self.baseline_op.down_proj(triton_autows_swiglu(gate, up))
+
+        return fn
 
     @register_benchmark()
     def torch_compile_swiglu(self, input) -> Callable:
