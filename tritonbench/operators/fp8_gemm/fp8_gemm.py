@@ -115,25 +115,32 @@ def get_scale(
         # For tensor-wise scaling, kernel requires a float32 scale tensor
         if custom_scale:
             return torch.tensor(custom_scale, dtype=torch.float32, device=x.device)
-        scale = (torch.finfo(torch.float8_e4m3fn).max / x.abs().max()).reciprocal()
-        x *= scale
-        return x, scale.to(torch.float32)
+        # Scale x UP into the fp8 dynamic range so the stored fp8 values use the
+        # full range (absmax ~= fp8 max), then return the reciprocal (dequant)
+        # scale that _scaled_mm multiplies the accumulator by to recover real units.
+        quant_scale = torch.finfo(torch.float8_e4m3fn).max / x.abs().max()
+        x = x.mul(quant_scale)
+        dequant_scale = quant_scale.reciprocal()
+        return x, dequant_scale.to(torch.float32)
 
     def _get_scale_per_row(
         x: torch.Tensor, transpose: bool = False
     ) -> (torch.Tensor, torch.Tensor):
         if transpose:  # scale_b.shape should be [1, N]
-            scale = (
+            quant_scale = (
                 torch.finfo(torch.float8_e4m3fn).max
                 / x.abs().max(dim=0, keepdim=True).values
-            ).reciprocal()
+            )
         else:  # scale_a.shape should be [M, 1]
-            scale = (
+            quant_scale = (
                 torch.finfo(torch.float8_e4m3fn).max
                 / x.abs().max(dim=1, keepdim=True).values
-            ).reciprocal()
-        x = x.mul(scale)
-        return x, scale.to(
+            )
+        # Scale x UP into the fp8 dynamic range, then return the reciprocal
+        # (dequant) scale for _scaled_mm to recover real units.
+        x = x.mul(quant_scale)
+        dequant_scale = quant_scale.reciprocal()
+        return x, dequant_scale.to(
             torch.float32
         )  # For row-wise scaling, kernel requires a float32 scale tensor
 
@@ -142,13 +149,12 @@ def get_scale(
     ) -> (torch.Tensor, torch.Tensor):
         x = x.unflatten(1, (-1, block_inner)).unflatten(0, (-1, block_outer))
         amax = x.abs().amax(dim=[1, 3], keepdim=True).float()
-        scale = (
-            torch.finfo(torch.float8_e4m3fn).max / amax
-        ).reciprocal()  # keeps scale small enough such that scaling doesn't cause inf values
+        quant_scale = torch.finfo(torch.float8_e4m3fn).max / amax
         x = (
-            x.mul(scale).flatten(2, 3).flatten(0, 1)
-        )  # scale input up to dynamic range of float8_e4m3fn
-        scale = scale.flatten(2, 3).flatten(0, 1)
+            x.mul(quant_scale).flatten(2, 3).flatten(0, 1)
+        )  # scale input UP to the dynamic range of float8_e4m3fn
+        # Return the reciprocal (dequant) scale for _scaled_mm to recover real units.
+        scale = quant_scale.reciprocal().flatten(2, 3).flatten(0, 1)
 
         if block_outer == 1 and block_inner == 128:
             scale = (
