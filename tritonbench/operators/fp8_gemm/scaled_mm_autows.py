@@ -233,9 +233,7 @@ def _prune_configs(configs, named_args, **kwargs):
             continue
         # 2-CTA (cta_group::2): a tuning option for the epilogue-scaled modes
         # (TensorWise, RowWise) -- like CUTLASS, which uses the same 2-SM cluster
-        # for per-tensor and per-token/-channel (the per-row/col scale is applied
-        # in the epilogue by global coordinate, so the cluster split is
-        # transparent). MXFP8 / in-loop fp32 modes don't support 2-CTA.
+        # for per-tensor and per-token/-channel.
         # Requires Blackwell + Meta-WS + BLOCK_M >= 128.
         if config.kwargs.get("TWO_CTAS", False):
             if not (is_tensorwise or is_rowwise):
