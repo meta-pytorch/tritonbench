@@ -176,10 +176,15 @@ def _get_autotune_configs():
     # the plain-tl.dot path. _prune_configs offers it as a tuning option for
     # TensorWise/RowWise on Blackwell + Meta-WS, BM>=128 (see the RowWise caveat
     # there: the autotuner can mis-pick the 2-CTA RowWise config).
+    #
+    # ctas_per_cga is an FBTriton/Meta-WS-only triton.Config arg, so only emit the
+    # 2-CTA configs when Meta-WS is available -- on OSS Triton _use_meta_ws() is
+    # False and no ctas_per_cga config is ever constructed.
+    two_cta_options = [False, True] if _use_meta_ws() else [False]
     for num_stages in [3, 4, 5]:
         for BLOCK_M, BLOCK_N, BLOCK_K in block_configs:
             for EPILOGUE_SUBTILE in [1, 2, 4]:
-                for TWO_CTAS in [False, True]:
+                for TWO_CTAS in two_cta_options:
                     extras = {"ctas_per_cga": (2, 1, 1)} if TWO_CTAS else {}
                     configs.append(
                         triton.Config(
@@ -536,14 +541,26 @@ def scaled_mm_autows_kernel(
                 a_tile = a_desc.load([offs_am, offs_k])
                 b_tile = b_desc.load([offs_bn, offs_k])
                 # Triton TR011: keep Tensor Core TF32 behavior explicit.
-                accumulator = tl.dot(
-                    a_tile,
-                    b_tile.T,
-                    accumulator,
-                    out_dtype=tl.float32,
-                    allow_tf32=True,
-                    two_ctas=TWO_CTAS,
-                )
+                # two_ctas is an FBTriton-only tl.dot kwarg -- only pass it on the
+                # 2-CTA path (TWO_CTAS is set only under Meta-WS) so OSS Triton,
+                # which has no such kwarg, never receives it.
+                if TWO_CTAS:
+                    accumulator = tl.dot(
+                        a_tile,
+                        b_tile.T,
+                        accumulator,
+                        out_dtype=tl.float32,
+                        allow_tf32=True,
+                        two_ctas=True,
+                    )
+                else:
+                    accumulator = tl.dot(
+                        a_tile,
+                        b_tile.T,
+                        accumulator,
+                        out_dtype=tl.float32,
+                        allow_tf32=True,
+                    )
 
             if IS_ROWWISE:
                 if USE_SCALE_TMA:
