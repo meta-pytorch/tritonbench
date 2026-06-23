@@ -20,6 +20,7 @@ from tritonbench.operator_loader import get_op_loader_bench_cls_by_name, is_load
 from tritonbench.operators import load_opbench_by_name
 from tritonbench.operators_collection import list_operators_by_collection
 from tritonbench.utils.ab_test import compare_ab_results, run_ab_test
+from tritonbench.utils.compile_utils import set_compile_backend_for_device
 from tritonbench.utils.env_utils import (
     is_blackwell,
     is_cuda,
@@ -535,6 +536,12 @@ def tritonbench_run(args: Optional[List[str]] = None):
 
     apply_helion_backend_override(getattr(args, "helion_backend", None))
 
+    # Install before any operator import (some operators call torch.compile at
+    # module load, e.g. gemm/partition_k) and before the multi-device probe in
+    # run_multi_device, which imports operators prior to _run. _run installs it
+    # again for the config / per-op subprocess paths (idempotent).
+    set_compile_backend_for_device(args.device)
+
     tritonparse_init(args.tritonparse)
 
     # Strip `--ai-analysis` from sys.argv when in unsupported modes (multi-device,
@@ -659,6 +666,14 @@ def _run(args: argparse.Namespace, extra_args: List[str]) -> BenchmarkOperatorRe
         # Apply before the operator module is imported so the helion.kernel wrap
         # is in effect before any Helion kernel is constructed.
         apply_helion_backend_override(getattr(args, "helion_backend", None))
+        # Pin a device-appropriate default backend for torch.compile before any
+        # operator runs. Done here (the single point every run path funnels
+        # through: normal, A/B, config, and multi-device subprocesses) rather
+        # than in tritonbench_run, whose early returns (e.g. TRITONBENCH_RUN_CONFIG)
+        # would otherwise skip it. torch_tpu globally monkeypatches
+        # torch.compile to default to backend="tpu" whenever installed, which
+        # otherwise breaks cpu/cuda torch.compile baselines.
+        set_compile_backend_for_device(args.device)
         run_timestamp = datetime.fromtimestamp(time.time()).strftime("%Y%m%d%H%M%S")
         if is_loader_op(args.op):
             Opbench = get_op_loader_bench_cls_by_name(args.op)
