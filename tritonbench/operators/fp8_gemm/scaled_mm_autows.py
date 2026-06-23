@@ -172,23 +172,31 @@ def _get_autotune_configs():
         (256, 128, 128),
     ]
 
+    # TWO_CTAS=True enables 2-CTA (cta_group::2) MMA via ctas_per_cga=(2,1,1) on
+    # the plain-tl.dot path. _prune_configs offers it as a tuning option for
+    # TensorWise/RowWise on Blackwell + Meta-WS, BM>=128 (see the RowWise caveat
+    # there: the autotuner can mis-pick the 2-CTA RowWise config).
     for num_stages in [3, 4, 5]:
         for BLOCK_M, BLOCK_N, BLOCK_K in block_configs:
             for EPILOGUE_SUBTILE in [1, 2, 4]:
-                configs.append(
-                    triton.Config(
-                        {
-                            "BLOCK_SIZE_M": BLOCK_M,
-                            "BLOCK_SIZE_N": BLOCK_N,
-                            "BLOCK_SIZE_K": BLOCK_K,
-                            "GROUP_SIZE_M": 8,
-                            "EPILOGUE_SUBTILE": EPILOGUE_SUBTILE,
-                        },
-                        num_stages=num_stages,
-                        num_warps=4,
-                        pre_hook=_host_descriptor_pre_hook,
+                for TWO_CTAS in [False, True]:
+                    extras = {"ctas_per_cga": (2, 1, 1)} if TWO_CTAS else {}
+                    configs.append(
+                        triton.Config(
+                            {
+                                "BLOCK_SIZE_M": BLOCK_M,
+                                "BLOCK_SIZE_N": BLOCK_N,
+                                "BLOCK_SIZE_K": BLOCK_K,
+                                "GROUP_SIZE_M": 8,
+                                "EPILOGUE_SUBTILE": EPILOGUE_SUBTILE,
+                                "TWO_CTAS": TWO_CTAS,
+                            },
+                            num_stages=num_stages,
+                            num_warps=4,
+                            pre_hook=_host_descriptor_pre_hook,
+                            **extras,
+                        )
                     )
-                )
 
     return configs
 
@@ -203,6 +211,8 @@ def _prune_configs(configs, named_args, **kwargs):
     b_mode = kwargs.get("SCALE_B_MODE", named_args.get("SCALE_B_MODE", TENSORWISE))
     vec_size = kwargs.get("VEC_SIZE", named_args.get("VEC_SIZE", 0))
     is_blackwell = _is_blackwell()
+    is_tensorwise = a_mode == TENSORWISE and b_mode == TENSORWISE
+    is_rowwise = a_mode == ROWWISE and b_mode == ROWWISE
     is_mxfp8 = a_mode == MXFP8 and b_mode == MXFP8
     is_blockwise_1x128 = a_mode == BLOCKWISE_1x128 and b_mode == BLOCKWISE_1x128
     is_deepseek = a_mode == BLOCKWISE_1x128 and b_mode == BLOCKWISE_128x128
@@ -216,6 +226,19 @@ def _prune_configs(configs, named_args, **kwargs):
             continue
         if N and config.kwargs["BLOCK_SIZE_N"] > N * 2:
             continue
+        # 2-CTA (cta_group::2): a tuning option for the epilogue-scaled modes
+        # (TensorWise, RowWise) -- like CUTLASS, which uses the same 2-SM cluster
+        # for per-tensor and per-token/-channel (the per-row/col scale is applied
+        # in the epilogue by global coordinate, so the cluster split is
+        # transparent). MXFP8 / in-loop fp32 modes don't support 2-CTA.
+        # Requires Blackwell + Meta-WS + BLOCK_M >= 128.
+        if config.kwargs.get("TWO_CTAS", False):
+            if not (is_tensorwise or is_rowwise):
+                continue
+            if not (is_blackwell and _use_meta_ws()):
+                continue
+            if config.kwargs["BLOCK_SIZE_M"] < 128:
+                continue
         # MXFP8 block scaling requires BLOCK_K >= VEC_SIZE * 4
         if is_mxfp8 and vec_size > 0:
             if config.kwargs["BLOCK_SIZE_K"] < vec_size * 4:
@@ -351,6 +374,12 @@ def scaled_mm_autows_kernel(
     FLATTEN: tl.constexpr = True,
     WARP_SPECIALIZE: tl.constexpr = True,
     SEPARATE_EPILOGUE_STORE: tl.constexpr = True,
+    # 2-CTA (cta_group::2) tcgen05 MMA across a contiguous CTA pair. Set by
+    # autotune configs that also carry ctas_per_cga=(2,1,1); only the plain
+    # tl.dot path uses it (compiler splits B per CTA + inserts cross-CTA sync).
+    # _prune_configs offers it as a tuning option for TensorWise/RowWise on
+    # Blackwell + Meta-WS, BM>=128.
+    TWO_CTAS: tl.constexpr = False,
 ):
     """
     Persistent TMA matmul kernel for FP8 scaled_mm with warp specialization.
@@ -371,6 +400,9 @@ def scaled_mm_autows_kernel(
 
     start_pid = tl.program_id(axis=0)
     num_pid_m = tl.cdiv(M, BLOCK_SIZE_M)
+    # 2-CTA pairs tile the M axis, so round the M tile count up to even.
+    if TWO_CTAS:
+        num_pid_m = (num_pid_m + 1) // 2 * 2
     num_pid_n = tl.cdiv(N, BLOCK_SIZE_N)
     k_tiles = tl.cdiv(K, BLOCK_SIZE_K)
     num_tiles = num_pid_m * num_pid_n
@@ -510,6 +542,7 @@ def scaled_mm_autows_kernel(
                     accumulator,
                     out_dtype=tl.float32,
                     allow_tf32=True,
+                    two_ctas=TWO_CTAS,
                 )
 
             if IS_ROWWISE:
@@ -653,9 +686,10 @@ def scaled_mm_autows(
         scale_b_arg = scale_b
 
     def grid(META):
-        num_tiles = triton.cdiv(M, META["BLOCK_SIZE_M"]) * triton.cdiv(
-            N, META["BLOCK_SIZE_N"]
-        )
+        num_pid_m = triton.cdiv(M, META["BLOCK_SIZE_M"])
+        if META.get("TWO_CTAS", False):
+            num_pid_m = triton.cdiv(num_pid_m, 2) * 2
+        num_tiles = num_pid_m * triton.cdiv(N, META["BLOCK_SIZE_N"])
         return (min(num_sms, num_tiles),)
 
     _ensure_triton_allocator(a.device)
