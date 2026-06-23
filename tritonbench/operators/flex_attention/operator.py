@@ -26,7 +26,10 @@ try:
 except ImportError:
     pass
 
-from tritonbench.operators.flex_attention.triton_autows import autows_flex_attention
+from tritonbench.operators.flex_attention.triton_autows import (
+    autows_flex_attention,
+    autows_flex_attention_persistent,
+)
 from tritonbench.utils.env_utils import is_hip
 from tritonbench.utils.input import input_filter
 from tritonbench.utils.triton_op import (
@@ -342,6 +345,25 @@ class Operator(BenchmarkOperator):
         if mod_type not in ("noop", "causal"):
             return unsupported_fn
         return lambda: autows_flex_attention(q, k, v, causal=mod_type == "causal")
+
+    # Persistent AutoWS variant (K-3, D109219053): warp-specializes an outer
+    # persistent tile loop instead of the inner KV loop. Validated for the noop
+    # (full SDPA) path only. Disabled by default for the same runtime-gate
+    # reason; test with `--force` under TRITON_USE_META_WS=1.
+    @register_benchmark(enabled=False, fwd_only=True)
+    def triton_autows_flex_attention_persistent(
+        self,
+        q: torch.Tensor,
+        k: torch.Tensor,
+        v: torch.Tensor,
+        score_mod: Optional[_score_mod_signature],
+        block_mask: Optional[BlockMask],
+        mod_type: str,
+        kernel_options: dict[str, Any],
+    ) -> Optional[Callable]:
+        if mod_type != "noop":
+            return unsupported_fn
+        return lambda: autows_flex_attention_persistent(q, k, v)
 
     @register_benchmark(enabled=HAS_FLASH_V3)
     def flash_v3(
