@@ -10,7 +10,7 @@ from tritonbench.utils.env_utils import is_fbcode
 if is_fbcode():  # Diode not available in OSS
     import diode.torch_diode.config as diode_config
     from diode.torch_diode.choices import DiodeInductorChoices
-    from diode.torch_diode.models.triton_gemm.encode_features import FeatureVersion
+    from diode.torch_diode.features import FeatureVersion
     from diode.torch_diode.models.triton_gemm.model import (
         GEMMModel,
         MODEL_CONFIGS,
@@ -34,9 +34,11 @@ def deserialize_model_config(json_str: str) -> "ModelConfig":
             - template_op_pairs (list[list[str, str]]): Template/op pairs
               (JSON arrays, converted to tuples)
             - supported_devices (list[str] | null): Supported GPU devices
-            - feature_version (str): Feature version string (e.g. "v4")
+            - feature_version (str): Feature version string (e.g. "v7")
             - is_production (bool, optional): Production bucket flag. Default: True
             - description (str, optional): Human-readable description. Default: ""
+            - allow_legacy_checkpoint_without_metadata (bool, optional): Whether
+              missing checkpoint metadata is accepted. Default: True.
 
     Returns:
         A ModelConfig instance.
@@ -47,6 +49,13 @@ def deserialize_model_config(json_str: str) -> "ModelConfig":
         ValueError: If feature_version is not a valid FeatureVersion enum value.
     """
     data = json.loads(json_str)
+    allow_legacy_checkpoint = data.get("allow_legacy_checkpoint_without_metadata", True)
+    if not isinstance(allow_legacy_checkpoint, bool):
+        raise ValueError(
+            "allow_legacy_checkpoint_without_metadata must be a bool, got "
+            f"{allow_legacy_checkpoint!r}"
+        )
+
     return ModelConfig(
         model_name=data["model_name"],
         n_hidden_layers=data["n_hidden_layers"],
@@ -56,6 +65,7 @@ def deserialize_model_config(json_str: str) -> "ModelConfig":
         feature_version=FeatureVersion(data["feature_version"]),
         is_production=data.get("is_production", True),
         description=data.get("description", ""),
+        allow_legacy_checkpoint_without_metadata=allow_legacy_checkpoint,
     )
 
 
