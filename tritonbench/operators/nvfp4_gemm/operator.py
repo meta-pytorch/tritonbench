@@ -3,7 +3,10 @@ from typing import Any, Callable, Generator, List, Optional, Tuple
 
 import torch
 import torch._inductor.config as inductor_config
-from tritonbench.operators.nvfp4_gemm.triton_autows import triton_autows_nvfp4_gemm
+from tritonbench.operators.nvfp4_gemm.triton_autows import (
+    triton_autows_nvfp4_gemm,
+    triton_autows_nvfp4_gemm_persistent,
+)
 from tritonbench.utils.triton_op import (
     BenchmarkOperator,
     BenchmarkOperatorMetrics,
@@ -139,6 +142,31 @@ class Operator(BenchmarkOperator):
 
         def fn():
             return triton_autows_nvfp4_gemm(
+                a,
+                b,
+                scale_a,
+                scale_b,
+                m,
+                n,
+                k,
+                out_dtype=out_dtype,
+            )
+
+        return fn
+
+    # Persistent AutoWS variant (K-5, D109223075): warp-specializes an outer
+    # persistent tile loop instead of the inner K loop. Disabled by default: it
+    # currently does NOT compile through Meta AutoWS (NVGPUWarpSpecialization
+    # crashes staging the block-scaled dot_scaled scale operand into TMEM).
+    # Carried for coverage; test with `--force` once the compiler issue is fixed.
+    @register_benchmark(enabled=False, fwd_only=True)
+    def triton_autows_nvfp4_gemm_persistent(
+        self, a, b, scale_a, scale_b, m, n, k
+    ) -> Callable:
+        out_dtype = self.out_dtype
+
+        def fn():
+            return triton_autows_nvfp4_gemm_persistent(
                 a,
                 b,
                 scale_a,
