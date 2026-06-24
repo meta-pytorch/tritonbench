@@ -44,7 +44,10 @@ from tritonbench.utils.triton_utils import has_tlx
 if has_tlx():
     from tritonbench.operators.gdpa.gdpa_blackwell_tlx import gdpa_forward_tlx
 
-from tritonbench.operators.gdpa.triton_autows import triton_autows_gdpa
+from tritonbench.operators.gdpa.triton_autows import (
+    triton_autows_gdpa,
+    triton_autows_gdpa_persistent,
+)
 
 from .gdpa import gdpa as gdpa_kernel
 from .gdpa_utils import generate_jagged_data
@@ -225,6 +228,38 @@ class Operator(BenchmarkOperator):
     ):
         def _inner():
             return triton_autows_gdpa(
+                query=jagged_q,
+                key=jagged_k,
+                value=jagged_v,
+                query_offset=jagged_data["q_offsets"],
+                key_offset=jagged_data["k_offsets"],
+                max_seq_len_q=jagged_data["max_seq_len_q"],
+                max_seq_len_kv=jagged_data["max_seq_len_k"],
+                activation=activation,
+                broadcast_q=jagged_data["broadcast_q"],
+                window_size=jagged_data["window_size"],
+            )
+
+        return _inner
+
+    # Persistent AutoWS variant (K-4, D109222272): a jagged-native persistent
+    # kernel that warp-specializes an outer tile loop. Disabled by default: it
+    # currently does NOT compile through Meta AutoWS (NVGPUWarpSpecialization
+    # cross-partition TMEM MMA-operand crash on the QK -> activation -> PV loop).
+    # Carried for coverage; test with `--force` once the compiler issue is fixed.
+    @register_benchmark(enabled=False, fwd_only=True)
+    def triton_autows_gdpa_persistent(
+        self,
+        _config_name,
+        jagged_q,
+        jagged_k,
+        jagged_v,
+        jagged_data,
+        padded_data,
+        activation,
+    ):
+        def _inner():
+            return triton_autows_gdpa_persistent(
                 query=jagged_q,
                 key=jagged_k,
                 value=jagged_v,
