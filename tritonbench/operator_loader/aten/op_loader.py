@@ -17,7 +17,7 @@ class AtenOperator(BenchmarkOperator):
         self, tb_args: argparse.Namespace, extra_args: Optional[List[str]] = None
     ):
         super().__init__(tb_args, extra_args)
-        self.aten_op = eval(self.aten_op_name)
+        self.aten_op = getattr(torch.ops.aten, self.aten_op_name)
         if not self.tb_args.input_loader:
             self.tb_args.input_loader = self.aten_op_input
 
