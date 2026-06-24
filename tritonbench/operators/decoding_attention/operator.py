@@ -10,6 +10,7 @@ from typing import Callable, Optional, Tuple
 import torch
 from tritonbench.operators.decoding_attention.triton_autows import (
     autows_decoding_attention,
+    autows_decoding_attention_persistent,
 )
 from tritonbench.utils.env_utils import IS_BLACKWELL, is_cuda
 from tritonbench.utils.path_utils import add_ld_library_path
@@ -497,6 +498,21 @@ class Operator(BenchmarkOperator):
         cache_seqlens: torch.Tensor,
     ) -> Callable:
         return lambda: autows_decoding_attention(q, k_cache, v_cache, cache_seqlens)
+
+    # Persistent AutoWS variant (K-2, D109218631): warp-specializes an outer
+    # persistent tile loop instead of the inner KV loop. Disabled by default for
+    # the same reason; test with `--force`.
+    @register_benchmark(enabled=False, fwd_only=True)
+    def triton_autows_decoding_attention_persistent(
+        self,
+        q: torch.Tensor,
+        k_cache: torch.Tensor,
+        v_cache: torch.Tensor,
+        cache_seqlens: torch.Tensor,
+    ) -> Callable:
+        return lambda: autows_decoding_attention_persistent(
+            q, k_cache, v_cache, cache_seqlens
+        )
 
     @register_benchmark(enabled=HAS_XFORMERS)
     def triton_splitk_fp8kv(

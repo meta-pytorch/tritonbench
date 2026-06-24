@@ -1,5 +1,19 @@
 # (c) Meta Platforms, Inc. and affiliates. Confidential and proprietary.
 
+# AutoWS candidates for the TritonBench ``decoding_attention`` ``triton_splitk``
+# backend (GQA decode attention with a KV cache), targeting Blackwell b200a
+# (sm_100). Two Meta-AutoWS (automatic warp specialization) variants are
+# provided so both warp-specialization structures are exercisable:
+#   * ``autows_decoding_attention`` - NON-persistent: one program per batch,
+#     warp-specializes the inner KV loop (``tl.range(..., warp_specialize=True)``).
+#   * ``autows_decoding_attention_persistent`` - PERSISTENT (from K-2,
+#     D109218631): ``grid = #SMs`` with an outer persistent tile loop over the
+#     ``B * head_kv`` decode work-items warp-specialized so AutoWS has a loop to
+#     specialize across the load -> MMA -> softmax -> store pipeline.
+# Both compute the same math the ``triton_splitk`` backend (xformers
+# ``fmha.triton_splitk.FwOp``) produces for the decode case, with TMA
+# ``TensorDescriptor`` loads and fp32 online (flash) softmax.
+
 import math
 
 import torch
@@ -119,11 +133,11 @@ def autows_decoding_attention(
     num_warps: int = 4,
     num_stages: int = 2,
 ) -> torch.Tensor:
-    """AutoWS forward for TritonBench decoding_attention triton_splitk semantics.
+    """NON-persistent AutoWS forward for decoding_attention triton_splitk.
 
     This re-expresses the split-K decode attention forward as a single-pass
     flash-decoding forward so Meta's AutoWS path can see an explicit
-    ``tl.range(..., warp_specialize=True)``.
+    ``tl.range(..., warp_specialize=True)`` on the inner KV loop.
     """
     if not hasattr(triton, "knobs"):
         raise NotImplementedError("autows_decoding_attention requires Meta Triton")
@@ -223,3 +237,210 @@ def autows_decoding_attention(
     )
 
     return o_pad[:, :folded_m, :].reshape(batch, seq_len_q, head_q, head_dim)
+
+
+# Triton TR001: this coverage backend intentionally keeps a fixed config while
+# it is disabled by default pending proper runtime gates.
+@triton.jit
+def _decode_attn_fwd_persistent_ws(  # noqa: TR001
+    desc_q,  # [B*KVH, BLOCK_M(padded head group), DIM] row-major
+    desc_k,  # [B*KVH*MAX_LEN, DIM]
+    desc_v,  # [B*KVH*MAX_LEN, DIM]
+    desc_o,  # [B*KVH, BLOCK_M, DIM]
+    cache_seqlens_ptr,  # [B] int32
+    scale,
+    B,
+    KVH,
+    MAX_LEN,
+    NUM_SMS: tl.constexpr,
+    DIM: tl.constexpr,
+    BLOCK_M: tl.constexpr,  # padded query-row block (>= GROUP, multiple of 16)
+    BLOCK_N: tl.constexpr,  # KV tile
+):
+    start_pid = tl.program_id(0)
+    num_tiles = B * KVH  # one decode work-item per (batch, kv_head)
+
+    # Persistent tile loop: this is the loop Meta AutoWS specializes.
+    for tile_id in tl.range(start_pid, num_tiles, NUM_SMS, warp_specialize=True):
+        b = tile_id // KVH
+        kvh = tile_id % KVH
+
+        seqlen = tl.load(cache_seqlens_ptr + b)  # S_b valid KV positions
+
+        # Q for this (batch, kv_head): GROUP query heads stacked as rows.
+        q = desc_q.load([tile_id * BLOCK_M, 0])  # [BLOCK_M, DIM]
+        q = (q.to(tl.float32) * scale).to(q.dtype)
+
+        # KV base row for this (batch, kv_head) in the flattened [.., MAX_LEN, DIM].
+        kv_row_base = (b * KVH + kvh) * MAX_LEN
+
+        # Online softmax (flash) accumulators.
+        m_i = tl.full([BLOCK_M], -float("inf"), dtype=tl.float32)
+        l_i = tl.zeros([BLOCK_M], dtype=tl.float32)
+        acc = tl.zeros([BLOCK_M, DIM], dtype=tl.float32)
+
+        # Iterate KV blocks up to the valid length (rounded up).
+        hi = tl.cdiv(seqlen, BLOCK_N) * BLOCK_N
+        for start_n in range(0, hi, BLOCK_N):
+            offs_n = start_n + tl.arange(0, BLOCK_N)
+            k = desc_k.load([kv_row_base + start_n, 0])  # [BLOCK_N, DIM]
+            # Triton TR011: explicit TF32 policy keeps tensor-core behavior stable.
+            qk = tl.dot(q, k.T, allow_tf32=True)  # [BLOCK_M, BLOCK_N] (q pre-scaled)
+
+            # Mask padded / out-of-range KV positions.
+            valid = offs_n[None, :] < seqlen
+            qk = tl.where(valid, qk, -float("inf"))
+
+            m_ij = tl.maximum(m_i, tl.max(qk, axis=1))
+            p = tl.exp(qk - m_ij[:, None])
+            alpha = tl.exp(m_i - m_ij)
+
+            l_i = l_i * alpha + tl.sum(p, axis=1)
+            acc = acc * alpha[:, None]
+
+            v = desc_v.load([kv_row_base + start_n, 0])  # [BLOCK_N, DIM]
+            # Triton TR011: explicit TF32 policy keeps tensor-core behavior stable.
+            acc += tl.dot(p.to(v.dtype), v, allow_tf32=True)
+            m_i = m_ij
+
+        # Normalize. (l_i > 0 for every real query row since seqlen >= 1.)
+        l_safe = tl.where(l_i > 0.0, l_i, 1.0)
+        acc = acc / l_safe[:, None]
+
+        desc_o.store([tile_id * BLOCK_M, 0], acc.to(desc_o.dtype))
+
+
+def _next_mult_16(x: int) -> int:
+    return ((x + 15) // 16) * 16
+
+
+def autows_decoding_attention_persistent(
+    q: torch.Tensor,  # [B, 1, head_q, head_d]
+    k_cache: torch.Tensor,  # [B, max_len_kv, head_kv, head_d]
+    v_cache: torch.Tensor,  # [B, max_len_kv, head_kv, head_d]
+    cache_seqlens: torch.Tensor,  # [B] int32
+    *,
+    block_n: int = 64,
+    num_warps: int = 4,
+    num_stages: int = 2,
+) -> torch.Tensor:
+    """PERSISTENT AutoWS GQA decode-attention forward for ``triton_splitk`` (K-2).
+
+    The persistent kernel strides over the ``B * head_kv`` decode work-items with
+    an explicit ``tl.range(..., warp_specialize=True)`` so Meta's AutoWS path can
+    partition the K/V loads into a producer warp group.
+    """
+    if not hasattr(triton, "knobs"):
+        raise NotImplementedError(
+            "autows_decoding_attention_persistent requires Meta Triton"
+        )
+
+    batch, seq_len_q, head_q, head_dim = q.shape
+    if seq_len_q != 1:
+        raise NotImplementedError(
+            "autows_decoding_attention_persistent supports seq_len_q == 1"
+        )
+    _, max_len_kv, head_kv, _ = k_cache.shape
+    if k_cache.shape != v_cache.shape:
+        raise NotImplementedError(
+            "autows_decoding_attention_persistent requires matching K/V"
+        )
+    if head_q % head_kv != 0:
+        raise NotImplementedError(
+            "autows_decoding_attention_persistent requires head_q % head_kv == 0"
+        )
+    if head_dim != 128:
+        raise NotImplementedError(
+            "autows_decoding_attention_persistent currently supports D=128"
+        )
+
+    group = head_q // head_kv  # query rows per kv head
+    block_m = max(16, _next_mult_16(group))
+
+    device = q.device
+    dtype = q.dtype
+
+    # Pack Q as [B*KVH, BLOCK_M, DIM]: for work-item (b, kvh) the rows are the
+    # GROUP query heads [kvh*GROUP : (kvh+1)*GROUP], padded up to BLOCK_M.
+    q3 = q.reshape(batch, head_q, head_dim).reshape(batch, head_kv, group, head_dim)
+    q_pack = torch.zeros(
+        (batch * head_kv, block_m, head_dim), dtype=dtype, device=device
+    )
+    q_pack[:, :group, :] = q3.reshape(batch * head_kv, group, head_dim)
+    q2 = q_pack.reshape(batch * head_kv * block_m, head_dim)
+
+    # Pack K/V as [B*KVH*MAX_LEN, DIM] contiguous (head dim next to batch).
+    k4 = k_cache.permute(0, 2, 1, 3).contiguous()  # [B, KVH, MAX_LEN, DIM]
+    v4 = v_cache.permute(0, 2, 1, 3).contiguous()
+    k2 = k4.reshape(batch * head_kv * max_len_kv, head_dim)
+    v2 = v4.reshape(batch * head_kv * max_len_kv, head_dim)
+
+    o_pack = torch.empty(
+        (batch * head_kv * block_m, head_dim), dtype=dtype, device=device
+    )
+
+    def alloc_fn(size: int, _alignment: int, _stream) -> torch.Tensor:
+        return torch.empty(size, device=device, dtype=torch.int8)
+
+    triton.set_allocator(alloc_fn)
+
+    desc_q = TensorDescriptor(
+        q2,
+        shape=[batch * head_kv * block_m, head_dim],
+        strides=[head_dim, 1],
+        block_shape=[block_m, head_dim],
+    )
+    desc_k = TensorDescriptor(
+        k2,
+        shape=[batch * head_kv * max_len_kv, head_dim],
+        strides=[head_dim, 1],
+        block_shape=[block_n, head_dim],
+    )
+    desc_v = TensorDescriptor(
+        v2,
+        shape=[batch * head_kv * max_len_kv, head_dim],
+        strides=[head_dim, 1],
+        block_shape=[block_n, head_dim],
+    )
+    desc_o = TensorDescriptor(
+        o_pack,
+        shape=[batch * head_kv * block_m, head_dim],
+        strides=[head_dim, 1],
+        block_shape=[block_m, head_dim],
+    )
+
+    cache_seqlens = cache_seqlens.to(torch.int32).contiguous()
+    scale = head_dim**-0.5
+
+    num_sms = torch.cuda.get_device_properties(device).multi_processor_count
+    grid = (num_sms,)
+
+    assert triton.knobs.nvidia.use_meta_ws, (
+        "autows_decoding_attention_persistent requires TRITON_USE_META_WS=1"
+    )
+    # TODO: Tune max registers across partitions.
+    _decode_attn_fwd_persistent_ws[grid](
+        desc_q,
+        desc_k,
+        desc_v,
+        desc_o,
+        cache_seqlens,
+        scale,
+        batch,
+        head_kv,
+        max_len_kv,
+        NUM_SMS=num_sms,
+        DIM=head_dim,
+        BLOCK_M=block_m,
+        BLOCK_N=block_n,
+        num_warps=num_warps,
+        num_stages=num_stages,
+    )
+
+    # Unpack [B*KVH, BLOCK_M, DIM] -> [B, 1, head_q, head_d].
+    o3 = o_pack.reshape(batch * head_kv, block_m, head_dim)[:, :group, :]
+    return (
+        o3.reshape(batch, head_kv, group, head_dim)
+        .reshape(batch, head_q, head_dim)
+        .reshape(batch, seq_len_q, head_q, head_dim)
+    )
