@@ -181,27 +181,31 @@ def _get_autotune_configs():
     # 2-CTA configs when Meta-WS is available -- on OSS Triton _use_meta_ws() is
     # False and no ctas_per_cga config is ever constructed.
     two_cta_options = [False, True] if _use_meta_ws() else [False]
-    for num_stages in [3, 4, 5]:
-        for BLOCK_M, BLOCK_N, BLOCK_K in block_configs:
-            for EPILOGUE_SUBTILE in [1, 2, 4]:
-                for TWO_CTAS in two_cta_options:
-                    extras = {"ctas_per_cga": (2, 1, 1)} if TWO_CTAS else {}
-                    configs.append(
-                        triton.Config(
-                            {
-                                "BLOCK_SIZE_M": BLOCK_M,
-                                "BLOCK_SIZE_N": BLOCK_N,
-                                "BLOCK_SIZE_K": BLOCK_K,
-                                "GROUP_SIZE_M": 8,
-                                "EPILOGUE_SUBTILE": EPILOGUE_SUBTILE,
-                                "TWO_CTAS": TWO_CTAS,
-                            },
-                            num_stages=num_stages,
-                            num_warps=4,
-                            pre_hook=_host_descriptor_pre_hook,
-                            **extras,
+    # num_warps: Blackwell WS runs at 4 (the pass adds producer/epilogue warps on
+    # top); the Hopper plain-wgmma path needs 8 (two warpgroups) for a big-N fp8 tile.
+    # _prune_configs gates which survives per backend/tile.
+    for num_warps in [4, 8]:
+        for num_stages in [3, 4, 5]:
+            for BLOCK_M, BLOCK_N, BLOCK_K in block_configs:
+                for EPILOGUE_SUBTILE in [1, 2, 4]:
+                    for TWO_CTAS in two_cta_options:
+                        extras = {"ctas_per_cga": (2, 1, 1)} if TWO_CTAS else {}
+                        configs.append(
+                            triton.Config(
+                                {
+                                    "BLOCK_SIZE_M": BLOCK_M,
+                                    "BLOCK_SIZE_N": BLOCK_N,
+                                    "BLOCK_SIZE_K": BLOCK_K,
+                                    "GROUP_SIZE_M": 8,
+                                    "EPILOGUE_SUBTILE": EPILOGUE_SUBTILE,
+                                    "TWO_CTAS": TWO_CTAS,
+                                },
+                                num_stages=num_stages,
+                                num_warps=num_warps,
+                                pre_hook=_host_descriptor_pre_hook,
+                                **extras,
+                            )
                         )
-                    )
 
     return configs
 
@@ -230,6 +234,18 @@ def _prune_configs(configs, named_args, **kwargs):
         if M and config.kwargs["BLOCK_SIZE_M"] > M * 2:
             continue
         if N and config.kwargs["BLOCK_SIZE_N"] > N * 2:
+            continue
+        # num_warps: Blackwell always 4 (WS adds producer/epilogue warps on top). On
+        # Hopper only the plain-wgmma TensorWise/RowWise path goes to 8, and only for
+        # big-N tiles (BLOCK_M*BLOCK_N >= 128*256) -- the main sm_90 gap-closer; the
+        # in-loop-rescale modes (DeepSeek / 1x128) stay at the tested 4.
+        bm_w = config.kwargs["BLOCK_SIZE_M"]
+        bn_w = config.kwargs["BLOCK_SIZE_N"]
+        if not is_blackwell and (is_tensorwise or is_rowwise):
+            want_warps = 8 if bm_w * bn_w >= 128 * 256 else 4
+            if config.num_warps != want_warps:
+                continue
+        elif config.num_warps != 4:
             continue
         # 2-CTA (cta_group::2): a tuning option for the epilogue-scaled modes
         # (TensorWise, RowWise) -- like CUTLASS, which uses the same 2-SM cluster
@@ -269,15 +285,20 @@ def _prune_configs(configs, named_args, **kwargs):
         #     hold up at num_stages>=4 (symmetric OOMs SMEM from the sb-over-M
         #     broadcast; DeepSeek crashes the Canonicalizer), so cap at 3.
         #   MXFP8 -- try every num_stages; the autotuner drops any that overflow.
-        #   TensorWise / RowWise -- the [4, 5] tuning set.
+        #   Blackwell TensorWise/RowWise -- [4, 5] (WS tuning set).
+        #   Hopper TensorWise/RowWise -- [3, 4, 5]. The big-N BLOCK_K=128 winner OOMs
+        #     SMEM past s3 (48KB/stage) and s3 is optimal anyway (MMA-bound; a 4th
+        #     stage adds nothing) -- so it fits without epilogue subtiling.
         if is_deepseek or is_blockwise_1x128:
             if config.num_stages > 3:
                 continue
-        elif not is_mxfp8 and config.num_stages < 4:
+        elif is_mxfp8:
+            pass
+        elif is_blackwell and config.num_stages < 4:
             continue
-        # Hopper: epilogue subtiling forced off (subtile=1). The reshape/permute/
-        # split pattern is a Blackwell register-pressure relief that doesn't carry
-        # over cleanly without WS scheduling.
+        # Hopper: subtiling off (subtile=1) -- within noise on the plain path (the
+        # big-N tile fits SMEM at s3 without it). Blackwell keeps [1, 2, 4], where it
+        # is a genuine register-pressure relief.
         if not is_blackwell and config.kwargs["EPILOGUE_SUBTILE"] != 1:
             continue
         pruned.append(config)
@@ -721,6 +742,11 @@ def scaled_mm_autows(
     # tc_gen5_mma_scaled via the plain persistent loop). Enabling WS on the
     # scaled MMA is the AutoWS-compiler follow-up.
     ws_ok = not is_deepseek and not is_blockwise_1x128 and not is_mxfp8
+    # WS is a Blackwell-only win. On Hopper, Meta-WS (TRITON_USE_META_WS=1) does
+    # partition this loop but runs ~10% slower than the plain wgmma pipeline (worse at
+    # smaller tiles): the async SW pipeliner already overlaps TMA with wgmma, and the
+    # scheduler leaves the epilogue scale/cast on the MMA partition while adding
+    # sync/SMEM that outweighs the split. So Hopper stays plain; speed is from config.
     warp_specialize = is_blackwell and ws_ok
     separate_epilogue_store = is_blackwell and ws_ok
 
