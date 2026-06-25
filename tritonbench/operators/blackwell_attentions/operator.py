@@ -18,6 +18,7 @@ from torch.nn.functional import scaled_dot_product_attention as sdpa
 from tritonbench.kernels.attention_utils import SUPPORT_GLUON
 from tritonbench.operators.blackwell_attentions.triton_autows import (
     autows_hstu_attention,
+    autows_hstu_attention_persistent,
 )
 from tritonbench.utils.python_utils import try_import
 
@@ -864,6 +865,38 @@ class Operator(BenchmarkOperator):
 
         def fn(q, k, v, seq_offsets, max_seq_len):
             return autows_hstu_attention(
+                q,
+                k,
+                v,
+                seq_offsets,
+                max_seq_len,
+                alpha=alpha,
+            )
+
+        return preproc_hstu, fn
+
+    # Persistent AutoWS variant (K-1, D109218027): warp-specializes an outer
+    # persistent tile loop instead of the inner KV loop, which validated
+    # ws=pass. Disabled by default for the same runtime-gate reason; test with
+    # `--force` under TRITON_USE_META_WS=1.
+    @register_benchmark(
+        enabled=False, fwd_only=True, label="triton-autows-hstu-persistent"
+    )
+    @multi_input_wrapper
+    def triton_autows_hstu_persistent(self, *args) -> Tuple[Callable, Callable]:
+        if self.varlen:
+            raise NotImplementedError("AutoWS HSTU does not support varlen interface")
+        if self.local:
+            raise NotImplementedError("AutoWS HSTU does not support local attention")
+
+        alpha = 1.0 / self.D_HEAD
+
+        def fn(q, k, v, seq_offsets, max_seq_len):
+            if q.shape != k.shape or q.shape != v.shape:
+                raise NotImplementedError(
+                    "AutoWS HSTU only supports non-GQA MHA inputs"
+                )
+            return autows_hstu_attention_persistent(
                 q,
                 k,
                 v,
