@@ -138,7 +138,7 @@ class Latency:
         elif mode == "max":
             return str(self.max)
         elif mode == "min":
-            return str(self.max)
+            return str(self.min)
         elif mode == "mean":
             return str(statistics.mean(self.times))
         else:
