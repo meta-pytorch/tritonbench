@@ -829,7 +829,18 @@ class BenchmarkOperator(metaclass=PostInitProcessor):
             REGISTERED_X_VALS[self.name] = "x_val"
         # We rely on each operator to correctly respect the input data dtype
         if self.tb_args.precision == "bypass":
-            self.tb_args.precision = self.DEFAULT_PRECISION
+            # On TPU, fp16 fails to compile (Mosaic: "Invalid vector type for
+            # load") and bf16 is the native default; prefer bf16 over an
+            # operator's fp16 default when the user didn't request a precision.
+            if self.device == "tpu" and self.DEFAULT_PRECISION == "fp16":
+                self.tb_args.precision = "bf16"
+                logger.warning(
+                    "Defaulting precision to bf16 on TPU instead of this "
+                    "operator's fp16 default (TPU cannot compile fp16). Pass "
+                    "--precision explicitly to override."
+                )
+            else:
+                self.tb_args.precision = self.DEFAULT_PRECISION
         self.dtype = PRECISION_DTYPE_MAPPING.get(self.tb_args.precision, None)
         if self.tb_args.baseline:
             BASELINE_BENCHMARKS[self.name] = _split_params_by_comma(
