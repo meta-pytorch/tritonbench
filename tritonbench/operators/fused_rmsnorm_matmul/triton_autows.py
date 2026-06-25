@@ -123,7 +123,7 @@ def _subtile_accumulator(
 
 @triton.autotune(
     configs=_get_autotune_configs(),
-    key=["M", "N", "K"],
+    key=["M", "N", "K", "USE_SHARED_A_RRMS"],
     prune_configs_by={"early_config_prune": _prune_configs},
 )
 @triton.jit
@@ -146,6 +146,7 @@ def _gemm_rmsnorm_kernel(
     DATA_PARTITION_FACTOR: tl.constexpr,
     GROUP_SIZE: tl.constexpr,
     GROUP_BY_N: tl.constexpr,
+    USE_SHARED_A_RRMS: tl.constexpr,
     NUM_SMS: tl.constexpr,
 ):
     start_pid = tl.program_id(0)
@@ -187,12 +188,15 @@ def _gemm_rmsnorm_kernel(
             rows = offs_am + tl.arange(0, BLOCK_M)
             cols_k = offs_k + tl.arange(0, BLOCK_K)
             a = a_desc.load([offs_am, offs_k])
-            a_rms = tl.load(
-                a_ptr + rows[:, None] * stride_am + cols_k[None, :] * stride_ak,
-                mask=(rows[:, None] < M) & (cols_k[None, :] < K),
-                other=0.0,
-            )
             b = b_desc.load([offs_bn, offs_k])
+            if USE_SHARED_A_RRMS:
+                a_rms = a
+            else:
+                a_rms = tl.load(
+                    a_ptr + rows[:, None] * stride_am + cols_k[None, :] * stride_ak,
+                    mask=(rows[:, None] < M) & (cols_k[None, :] < K),
+                    other=0.0,
+                )
             a_f32 = a_rms.to(tl.float32)
             row_sumsq += tl.sum(a_f32 * a_f32, axis=1)
             accumulator += tl.dot(
@@ -221,6 +225,7 @@ def triton_autows_fused_rmsnorm_gemm(
     b_weighted_t: torch.Tensor,
     eps: float,
     *,
+    use_shared_a_rrms: bool = False,
     num_sms: int = 148,
 ) -> torch.Tensor:
     m, k = x.shape
@@ -250,6 +255,7 @@ def triton_autows_fused_rmsnorm_gemm(
         x.stride(0),
         x.stride(1),
         eps,
+        USE_SHARED_A_RRMS=use_shared_a_rrms,
         NUM_SMS=num_sms,
     )
     return out

@@ -19,6 +19,11 @@ def parse_op_args(args: List[str]) -> argparse.Namespace:
     parser.add_argument("--n", type=int, default=12800)
     parser.add_argument("--k", type=int, default=1024)
     parser.add_argument("--eps", type=float, default=1.0e-6)
+    parser.add_argument(
+        "--a-rrms-source",
+        choices=("scalar", "tma"),
+        default="tma",
+    )
     return parser.parse_args(args)
 
 
@@ -46,6 +51,7 @@ class Operator(BenchmarkOperator):
         self.N = args.n
         self.K = args.k
         self.eps = args.eps
+        self.use_shared_a_rrms = args.a_rrms_source == "tma"
 
     @register_x_val(label="(M, N, K)")
     def get_x_val(self, example_inputs) -> Tuple[int, int, int]:
@@ -70,6 +76,7 @@ class Operator(BenchmarkOperator):
                 x,
                 b_weighted_t,
                 self.eps,
+                use_shared_a_rrms=self.use_shared_a_rrms,
             )
 
         return inner
