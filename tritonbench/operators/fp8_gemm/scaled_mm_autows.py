@@ -743,10 +743,7 @@ def scaled_mm_autows(
     # scaled MMA is the AutoWS-compiler follow-up.
     ws_ok = not is_deepseek and not is_blockwise_1x128 and not is_mxfp8
     # WS is a Blackwell-only win. On Hopper, Meta-WS (TRITON_USE_META_WS=1) does
-    # partition this loop but runs ~10% slower than the plain wgmma pipeline (worse at
-    # smaller tiles): the async SW pipeliner already overlaps TMA with wgmma, and the
-    # scheduler leaves the epilogue scale/cast on the MMA partition while adding
-    # sync/SMEM that outweighs the split. So Hopper stays plain; speed is from config.
+    # partition this loop but runs ~10% slower than the plain wgmma pipeline.
     warp_specialize = is_blackwell and ws_ok
     separate_epilogue_store = is_blackwell and ws_ok
 
