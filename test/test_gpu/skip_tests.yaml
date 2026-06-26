@@ -38,12 +38,3 @@ mx4_to_fp32:
   devices:
     - cuda
 # ============ TODO: errors in CI ============
-# TODO: flash_attention will segfault on hip
-flash_attention:
-  report: true
-  disabled_devices:
-    - hip
-embedding:
-  report: true
-  disabled_devices:
-    - hip
