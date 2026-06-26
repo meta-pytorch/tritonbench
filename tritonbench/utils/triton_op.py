@@ -1944,6 +1944,33 @@ class BenchmarkOperator(metaclass=PostInitProcessor):
                     self.baseline_fn = self.baseline_fns[bl]
                     break
 
+    def _measure_latency(self, fn, warmup, rep, repcnt):
+        """Allow operators to add custom measurement logic.
+
+        Some operators need special handling to properly measure performance. For
+        example, heavy compute operators may throttle at a hardware level, and it
+        it more representative to alternate with low compute ops to better represent
+        model steady state.
+        """
+        return do_bench_wrapper(
+            fn,
+            warmup,
+            rep,
+            repcnt,
+            grad_to_none=self.get_grad_to_none(self.example_inputs),
+            device=self.device,
+            use_cuda_graphs=self.use_cuda_graphs,
+            bypass_fail=self.tb_args.bypass_fail,
+            latency_measure_mode=self.tb_args.latency_measure_mode,
+            skip_cache_clearing=self.tb_args.skip_cache_clearing,
+            entropy_criterion=getattr(self.tb_args, "entropy_criterion", False),
+            entropy_max_angle=getattr(self.tb_args, "entropy_max_angle", 0.048),
+            entropy_min_r2=getattr(self.tb_args, "entropy_min_r2", 0.36),
+            entropy_window_size=getattr(self.tb_args, "entropy_window_size", 299),
+            entropy_max_samples=getattr(self.tb_args, "entropy_max_samples", 10000),
+            cudagraph_config=self.cudagraph_config,
+        )
+
     def _do_bench(
         self,
         input_id: int,
@@ -1985,28 +2012,7 @@ class BenchmarkOperator(metaclass=PostInitProcessor):
                     self.cudagraph_config.num_inputs_per_iter = (
                         self.get_num_inputs_per_iter(self.example_inputs)
                     )
-                metrics.latency = do_bench_wrapper(
-                    fn,
-                    warmup,
-                    rep,
-                    repcnt,
-                    grad_to_none=self.get_grad_to_none(self.example_inputs),
-                    device=self.device,
-                    use_cuda_graphs=self.use_cuda_graphs,
-                    bypass_fail=self.tb_args.bypass_fail,
-                    latency_measure_mode=self.tb_args.latency_measure_mode,
-                    skip_cache_clearing=self.tb_args.skip_cache_clearing,
-                    entropy_criterion=getattr(self.tb_args, "entropy_criterion", False),
-                    entropy_max_angle=getattr(self.tb_args, "entropy_max_angle", 0.048),
-                    entropy_min_r2=getattr(self.tb_args, "entropy_min_r2", 0.36),
-                    entropy_window_size=getattr(
-                        self.tb_args, "entropy_window_size", 299
-                    ),
-                    entropy_max_samples=getattr(
-                        self.tb_args, "entropy_max_samples", 10000
-                    ),
-                    cudagraph_config=self.cudagraph_config,
-                )
+                metrics.latency = self._measure_latency(fn, warmup, rep, repcnt)
                 if metrics.latency is not None:
                     metrics.latency.scale(self.get_latency_scale(self.example_inputs))
             if {

@@ -1,4 +1,5 @@
 import logging
+import time
 from importlib.metadata import PackageNotFoundError, version
 from itertools import accumulate
 from typing import Any, Generator, List, Tuple
@@ -8,6 +9,7 @@ import torch
 logger = logging.getLogger(__name__)
 from torch._inductor import config as inductor_config
 from torch._inductor.utils import ensure_cute_available
+from tritonbench.components.do_bench.run import Latency
 from tritonbench.utils.env_utils import IS_BLACKWELL, is_cuda, is_fbcode
 from tritonbench.utils.path_utils import add_path, REPO_PATH
 from tritonbench.utils.triton_op import (
@@ -92,6 +94,13 @@ class Operator(BenchmarkOperator):
     DEFAULT_METRICS = ["latency", "speedup", "accuracy", "tflops"]
     FWD_ONLY = True
 
+    # Latency knobs for _measure_latency (see its docstring for the rationale).
+    # _LATENCY_COOLDOWN_S tuned on aten_grouped_mm: clock recovery saturates by
+    # ~0.5-1s, so 1.0s keeps full fidelity at a third of the 3.0s downtime.
+    _LATENCY_REPLICAS = 5
+    _LATENCY_COOLDOWN_S = 1.0
+    _LATENCY_REPCNT = 10
+
     def __init__(self, tb_args, extra_args: List[str] | None = None):
         super().__init__(tb_args, extra_args)
         self.only_fb_shapes = False
@@ -100,6 +109,23 @@ class Operator(BenchmarkOperator):
         # Only use FB shapes when --only-fb-shapes is passed
         if self.only_fb_shapes and not is_fbcode():
             raise ValueError("--only-fb-shapes requires running in fbcode")
+
+    def _measure_latency(self, fn, warmup, rep, repcnt):
+        """Pool several short, cooled-down measurements for a robust, un-throttled p50.
+
+        Prolonged run throttle performance by ~15-20% on compute-bound GEMMs,
+        while a single short measurement is noisy. Instead, alternate short bursts
+        of GEMMs with long sleeps to allow clocks to recover.
+        """
+        per_replica = repcnt if repcnt is not None else self._LATENCY_REPCNT
+        pooled: List[float] = []
+        _ = super()._measure_latency(fn, warmup, rep, per_replica)  # Warmup
+        for i in range(self._LATENCY_REPLICAS):
+            time.sleep(self._LATENCY_COOLDOWN_S)
+            lat = super()._measure_latency(fn, warmup, rep, per_replica)
+            if lat is not None:
+                pooled.extend(lat.times)
+        return Latency(times=pooled) if pooled else None
 
     @staticmethod
     def parse_op_args(extra_args: List[str]):
