@@ -24,7 +24,7 @@ if is_fbcode():
         try:
             from ops.interfaces.gemm.grouped_gemm import (
                 Backend as SplitSizeBackend,
-                get_avaiable_backends as split_size_get_available_backends,
+                get_available_backends as split_size_get_available_backends,
                 grouped_gemm_dgrad as split_size_grouped_gemm_dgrad,
                 grouped_gemm_fprop as split_size_grouped_gemm_fprop,
                 grouped_gemm_wgrad as split_size_grouped_gemm_wgrad,
@@ -282,12 +282,12 @@ class Operator(BenchmarkOperator):
         ) = compile_cutedsl_grouped_gemm(
             group_A,
             group_B,
-            ab_dtype=cutlass.Float16
-            if self.dtype == torch.float16
-            else cutlass.BFloat16,
-            c_dtype=cutlass.Float16
-            if self.dtype == torch.float16
-            else cutlass.BFloat16,
+            ab_dtype=(
+                cutlass.Float16 if self.dtype == torch.float16 else cutlass.BFloat16
+            ),
+            c_dtype=(
+                cutlass.Float16 if self.dtype == torch.float16 else cutlass.BFloat16
+            ),
             acc_dtype=cutlass.Float32,
             a_major="m",
             b_major="n",
@@ -334,12 +334,12 @@ class Operator(BenchmarkOperator):
             ) = compile_cutedsl_grouped_gemm(
                 group_A,
                 group_B,
-                ab_dtype=cutlass.Float16
-                if self.dtype == torch.float16
-                else cutlass.BFloat16,
-                c_dtype=cutlass.Float16
-                if self.dtype == torch.float16
-                else cutlass.BFloat16,
+                ab_dtype=(
+                    cutlass.Float16 if self.dtype == torch.float16 else cutlass.BFloat16
+                ),
+                c_dtype=(
+                    cutlass.Float16 if self.dtype == torch.float16 else cutlass.BFloat16
+                ),
                 acc_dtype=cutlass.Float32,
                 a_major="m",
                 b_major="n",
@@ -384,12 +384,12 @@ class Operator(BenchmarkOperator):
         grouped_gemm_sm100_tuned(
             group_A,
             group_B,
-            ab_dtype=cutlass.Float16
-            if self.dtype == torch.float16
-            else cutlass.BFloat16,
-            c_dtype=cutlass.Float16
-            if self.dtype == torch.float16
-            else cutlass.BFloat16,
+            ab_dtype=(
+                cutlass.Float16 if self.dtype == torch.float16 else cutlass.BFloat16
+            ),
+            c_dtype=(
+                cutlass.Float16 if self.dtype == torch.float16 else cutlass.BFloat16
+            ),
             acc_dtype=cutlass.Float32,
             a_major="m",
             b_major="n",
@@ -404,12 +404,12 @@ class Operator(BenchmarkOperator):
             outs = grouped_gemm_sm100_tuned(
                 group_A,
                 group_B,
-                ab_dtype=cutlass.Float16
-                if self.dtype == torch.float16
-                else cutlass.BFloat16,
-                c_dtype=cutlass.Float16
-                if self.dtype == torch.float16
-                else cutlass.BFloat16,
+                ab_dtype=(
+                    cutlass.Float16 if self.dtype == torch.float16 else cutlass.BFloat16
+                ),
+                c_dtype=(
+                    cutlass.Float16 if self.dtype == torch.float16 else cutlass.BFloat16
+                ),
                 acc_dtype=cutlass.Float32,
                 skip_ref_check=True,
                 shape_sig=shape_sig,
