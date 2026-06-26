@@ -1,0 +1,36 @@
+name: linux-test-tpu
+on:
+  workflow_call:
+
+permissions:
+  contents: read
+
+jobs:
+  linux-test-tpu:
+    if: github.repository_owner == 'meta-pytorch'
+    # NOTE: requires a Google TPU runner to be provisioned for this repo. The
+    # label below matches the PyTorch org's TPU v7 runner; adjust to whatever
+    # tritonbench is granted. Until then this workflow only runs on demand
+    # (see tpu.yaml -> workflow_dispatch) and is not a PR gate.
+    runs-on: linux.google.tpuv7x.1
+    timeout-minutes: 120
+    steps:
+      - name: Checkout Tritonbench
+        uses: actions/checkout@v3
+        with:
+          submodules: recursive
+      - name: Set up venv
+        run: |
+          uv venv --python 3.12 .venv
+          echo "VIRTUAL_ENV=$(pwd)/.venv" >> "${GITHUB_ENV}"
+          echo "$(pwd)/.venv/bin" >> "${GITHUB_PATH}"
+      - name: Install Tritonbench (TPU)
+        run: |
+          uv pip install --group dev-tpu
+          uv pip install -e . --no-deps
+      - name: Install torch_tpu stack
+        run: |
+          bash ./.ci/tritonbench/install-tpu.sh
+      - name: Test Tritonbench on TPU
+        run: |
+          bash ./.ci/tritonbench/test-tpu.sh

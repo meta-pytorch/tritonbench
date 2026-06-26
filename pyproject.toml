@@ -41,6 +41,17 @@ dev-cpu = [
     "pyyaml",
     "transformers==5.0.0rc3",
 ]
+dev-tpu = [
+    "packaging",
+    "psutil",
+    "tabulate",
+    "matplotlib",
+    "pyyaml",
+    "transformers==5.0.0rc3",
+    # triton is not used on TPU (no Triton kernels run there), but many
+    # operators `import triton` at module load; install it so they import.
+    "triton",
+]
 dev-numpy = [
     "numpy==2.0.2; python_version < '3.10'",
     "numpy==2.1.0; python_version >= '3.10' and python_version < '3.14'",

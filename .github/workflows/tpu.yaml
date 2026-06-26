@@ -1,0 +1,18 @@
+name: TritonBench TPU Test
+# Manual-only for now: TPU CI requires a provisioned Google TPU runner and a
+# torch_tpu deploy-key secret (see _linux-test-tpu.yml / .ci/tritonbench/
+# install-tpu.sh). Once those land, this can be added to pr.yaml alongside the
+# h100/mi350 jobs to gate PRs.
+on:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  tpu-test:
+    uses: ./.github/workflows/_linux-test-tpu.yml
+
+concurrency:
+  group: ${{ github.workflow }}-${{ github.event.pull_request.number || github.sha }}-${{ github.event_name == 'workflow_dispatch' }}
+  cancel-in-progress: true
