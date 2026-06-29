@@ -2036,6 +2036,7 @@ class BenchmarkOperator(metaclass=PostInitProcessor):
                     grad_to_none=self.get_grad_to_none(self.example_inputs),
                     required_metrics=self.required_metrics,
                     use_cuda_graphs=self.use_cuda_graphs,
+                    device_type=self.device,
                 )
             if (
                 "mem_footprint_compression_ratio" in self.required_metrics
@@ -2337,17 +2338,24 @@ class BenchmarkOperator(metaclass=PostInitProcessor):
             torch.cuda.synchronize()
 
     def do_bench_mem(self, fn, n_repeat=2, grad_to_none=None, device_type="cuda"):
-        di = torch._dynamo.device_interface.get_interface_for_device(device_type)
+        if device_type == "tpu":
+            # torch's TpuInterface.synchronize() is an unimplemented stub, so the
+            # generic get_interface_for_device path fails on TPU; sync via the
+            # accelerator API instead. See google-pytorch/torch_tpu#2130.
+            sync = torch.accelerator.synchronize
+        else:
+            di = torch._dynamo.device_interface.get_interface_for_device(device_type)
+            sync = di.synchronize
         # warmup
         fn()
-        di.synchronize()
+        sync()
         # benchmark
         for _ in range(n_repeat):
             if grad_to_none is not None:
                 for x in grad_to_none:
                     x.grad = None
             fn()
-        di.synchronize()
+        sync()
 
     def get_peak_mem(
         self,
@@ -2660,8 +2668,12 @@ class BenchmarkOperator(metaclass=PostInitProcessor):
         latency_without_compile = metrics.walltime
         return latency_with_compile - latency_without_compile, None
 
-    def hw_roofline(self) -> float:
+    def hw_roofline(self) -> Optional[float]:
         """Hardware roofline in tflops."""
+        if self.device == "tpu":
+            # No TPU entries in HW_ROOFLINE_SPECS yet (and torch.cuda device
+            # lookup would fail); report no roofline rather than crash.
+            return None
         from tritonbench.utils.gpu_utils import HW_ROOFLINE_SPECS
 
         rooflines = HW_ROOFLINE_SPECS[self.is_compute_bound]
