@@ -252,6 +252,8 @@ def _prune_configs(configs, named_args, **kwargs):
         # for per-tensor and per-token/-channel.
         # Requires Blackwell + Meta-WS + BLOCK_M >= 128.
         if config.kwargs.get("TWO_CTAS", False):
+            # DeepSeek is rescale-bound, not MMA-bound -> 2-CTA gives no speedup
+            # (verified), so keep it off there; only TensorWise/RowWise benefit.
             if not (is_tensorwise or is_rowwise):
                 continue
             if not (is_blackwell and _use_meta_ws()):
@@ -280,10 +282,13 @@ def _prune_configs(configs, named_args, **kwargs):
             if config.kwargs["BLOCK_SIZE_K"] != 128:
                 continue
         # num_stages gating (the autotuner only skips OOM configs, not ones that
-        # fail to compile, so gate per mode here):
-        #   DeepSeek / symmetric 1x128 -- the WS-off in-loop fp32 rescale does not
-        #     hold up at num_stages>=4 (symmetric OOMs SMEM from the sb-over-M
-        #     broadcast; DeepSeek crashes the Canonicalizer), so cap at 3.
+        # fail to compile or MISCOMPILE, so gate per mode here):
+        #   DeepSeek / symmetric 1x128 -- the WS-off in-loop fp32 rescale OOMs SMEM
+        #     at num_stages>=4 (the sa/sb broadcast over the tile), so cap at 3.
+        #     NOTE: DeepSeek formerly RACED at num_stages>=3 via an in-loop SCALAR
+        #     sb load (non-deterministic, wrong on ~0.1% of large-magnitude
+        #     elements); fixed by loading sb as a [BLOCK_N] vector in the
+        #     IS_DEEPSEEK branch (verified correct + deterministic at <=3).
         #   MXFP8 -- try every num_stages; the autotuner drops any that overflow.
         #   Blackwell TensorWise/RowWise -- [4, 5] (WS tuning set).
         #   Hopper TensorWise/RowWise -- [3, 4, 5]. The big-N BLOCK_K=128 winner OOMs
@@ -456,6 +461,12 @@ def scaled_mm_autows_kernel(
         flatten=FLATTEN,
         warp_specialize=WARP_SPECIALIZE,
         separate_epilogue_store=SEPARATE_EPILOGUE_STORE,
+        # DeepSeek's in-loop fp32 rescale keeps the running accumulator in
+        # registers in the computation partition. Merge the epilogue into that
+        # partition so the [BLOCK_M, BLOCK_N] f32 accumulator is consumed in-place
+        # (truncf+store) instead of being spilled to a full-tile SMEM channel for
+        # a separate epilogue warp group -- that 128KB channel overflows SMEM.
+        merge_epilogue_to_computation=IS_DEEPSEEK,
     ):
         pid_m, pid_n = _compute_pid(tile_id, num_pid_in_group, num_pid_m, GROUP_SIZE_M)
         offs_am = pid_m * BLOCK_SIZE_M
@@ -503,10 +514,20 @@ def scaled_mm_autows_kernel(
             num_k_groups = K // 128
             offs_m_scale = offs_am + tl.arange(0, BLOCK_SIZE_M)
             mask_m_scale = offs_m_scale < M
+            # B's scale is one fp32 per (N-block, K-group). BLOCK_SIZE_N is pinned
+            # to 128 == one N-block, so every column of this tile maps to N-block
+            # pid_n. Load sb as a [BLOCK_SIZE_N] VECTOR (all == scale_b[pid_n, ki])
+            # rather than a scalar: a scalar (uniform) in-loop load RACES under the
+            # software pipeliner at num_stages>=3, whereas the vector load -- the
+            # same shape the symmetric path below uses -- is race-safe.
+            offs_n_block = (offs_bn + tl.arange(0, BLOCK_SIZE_N)) // 128
             for ki in range(k_tiles):
                 offs_k = ki * BLOCK_SIZE_K
                 a_tile = a_desc.load([offs_am, offs_k])
                 b_tile = b_desc.load([offs_bn, offs_k])
+                # NOTE: 2-CTA (two_ctas) is NOT used here -- DeepSeek is
+                # rescale-bound, not MMA-bound, so cta_group::2 gives no speedup
+                # (verified). The win is num_warps=8 (2 consumer warpgroups).
                 partial = tl.dot(
                     a_tile,
                     b_tile.T,
@@ -518,8 +539,8 @@ def scaled_mm_autows_kernel(
                     mask=mask_m_scale,
                     other=0.0,
                 )
-                sb = tl.load(scale_b_ptr + pid_n * num_k_groups + ki)
-                accumulator += partial * sa[:, None] * sb
+                sb = tl.load(scale_b_ptr + offs_n_block * num_k_groups + ki)
+                accumulator += partial * sa[:, None] * sb[None, :]
         elif IS_BLOCKWISE_1x128:
             # Symmetric fp32 blockwise: 1x128 scales for BOTH A and B (arbitrary
             # fp32, one per row per 128-wide K group). Like DeepSeek but B's scale
@@ -741,9 +762,11 @@ def scaled_mm_autows(
     # tc_gen5_mma_scaled loop, so WS is disabled for MXFP8 for now (it still emits
     # tc_gen5_mma_scaled via the plain persistent loop). Enabling WS on the
     # scaled MMA is the AutoWS-compiler follow-up.
-    ws_ok = not is_deepseek and not is_blockwise_1x128 and not is_mxfp8
-    # WS is a Blackwell-only win. On Hopper, Meta-WS (TRITON_USE_META_WS=1) does
-    # partition this loop but runs ~10% slower than the plain wgmma pipeline.
+    # DeepSeek now warp-specializes: the in-loop fp32 rescale's register
+    # accumulator is handed to the epilogue via a cross-partition channel whose
+    # producer task-id is resolved correctly after the WSCodePartition fix
+    # (traceLoopCarriedProducer). Symmetric 1x128 and MXFP8 stay WS-off.
+    ws_ok = not is_blockwise_1x128 and not is_mxfp8
     warp_specialize = is_blackwell and ws_ok
     separate_epilogue_store = is_blackwell and ws_ok
 
