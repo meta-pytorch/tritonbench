@@ -413,8 +413,7 @@ def scaled_mm_autows_kernel(
 
     if IS_MXFP8:
         # Host-side 5D TMA on the (1, M//128, K//VEC_SIZE//4, 2, 256) repack
-        # of the cuBLAS block-scale layout (32*4*4 == 2*256). Same trick used
-        # by tritonbench/operators/fb/fp8_grouped_gemm/kernels.py.
+        # of the cuBLAS block-scale layout (32*4*4 == 2*256).
         REP_M: tl.constexpr = BLOCK_SIZE_M // 128
         REP_N: tl.constexpr = BLOCK_SIZE_N // 128
         REP_K: tl.constexpr = triton.cdiv(BLOCK_SIZE_K // VEC_SIZE, 4)
@@ -429,11 +428,8 @@ def scaled_mm_autows_kernel(
         flatten=FLATTEN,
         warp_specialize=WARP_SPECIALIZE,
         separate_epilogue_store=SEPARATE_EPILOGUE_STORE,
-        # DeepSeek's in-loop fp32 rescale keeps the running accumulator in
-        # registers in the computation partition. Merge the epilogue into that
-        # partition so the [BLOCK_M, BLOCK_N] f32 accumulator is consumed in-place
-        # (truncf+store) instead of being spilled to a full-tile SMEM channel for
-        # a separate epilogue warp group -- that 128KB channel overflows SMEM.
+        # DeepSeek: merge the epilogue into the computation partition so the
+        # register accumulator isn't spilled to a full-tile SMEM channel (OOMs).
         merge_epilogue_to_computation=IS_DEEPSEEK,
     ):
         pid_m, pid_n = _compute_pid(tile_id, num_pid_in_group, num_pid_m, GROUP_SIZE_M)
@@ -471,31 +467,21 @@ def scaled_mm_autows_kernel(
                     a_tile, sa, "e4m3", b_tile.T, sb, "e4m3", accumulator
                 )
         elif IS_DEEPSEEK:
-            # DeepSeek-style blockwise: 1x128 scales for A, 128x128 for B.
-            # Plain fp32 scales (NOT MX); they vary along K so they cannot factor
-            # out to the epilogue -- each 128-wide K group's partial dot is
-            # rescaled by sa[m,kb]*sb[n//128,kb] before accumulation.
-            # _prune_configs pins BLOCK_SIZE_K=128 (one group per K tile) and
-            # BLOCK_SIZE_N=128 (one B N-block per tile), so kb==ki and the B
-            # N-block index == pid_n. scale_a is row-major [M, K//128];
-            # scale_b is row-major [N//128, K//128].
+            # DeepSeek-style blockwise: scale_a is row-major [M, K//128];
+            # scale_b is row-major [N//128, K//128]. Both are fp32.
+            # Each 128-wide K group's partial dot is rescaled by
+            # sa[m,kb]*sb[n//128,kb] before accumulation.
             num_k_groups = K // 128
             offs_m_scale = offs_am + tl.arange(0, BLOCK_SIZE_M)
             mask_m_scale = offs_m_scale < M
-            # B's scale is one fp32 per (N-block, K-group). BLOCK_SIZE_N is pinned
-            # to 128 == one N-block, so every column of this tile maps to N-block
-            # pid_n. Load sb as a [BLOCK_SIZE_N] VECTOR (all == scale_b[pid_n, ki])
-            # rather than a scalar: a scalar (uniform) in-loop load RACES under the
-            # software pipeliner at num_stages>=3, whereas the vector load -- the
-            # same shape the symmetric path below uses -- is race-safe.
+            # B's scale is one fp32 per N-block. Load it as a [BLOCK_N] vector
+            # (all == scale_b[pid_n, ki]), not a scalar:
+            # a scalar in-loop load races the pipeliner at num_stages>=3.
             offs_n_block = (offs_bn + tl.arange(0, BLOCK_SIZE_N)) // 128
             for ki in range(k_tiles):
                 offs_k = ki * BLOCK_SIZE_K
                 a_tile = a_desc.load([offs_am, offs_k])
                 b_tile = b_desc.load([offs_bn, offs_k])
-                # NOTE: 2-CTA (two_ctas) is NOT used here -- DeepSeek is
-                # rescale-bound, not MMA-bound, so cta_group::2 gives no speedup
-                # (verified). The win is num_warps=8 (2 consumer warpgroups).
                 partial = tl.dot(
                     a_tile,
                     b_tile.T,
@@ -510,13 +496,9 @@ def scaled_mm_autows_kernel(
                 sb = tl.load(scale_b_ptr + offs_n_block * num_k_groups + ki)
                 accumulator += partial * sa[:, None] * sb[None, :]
         elif IS_BLOCKWISE_1x128:
-            # Symmetric fp32 blockwise: 1x128 scales for BOTH A and B (arbitrary
-            # fp32, one per row per 128-wide K group). Like DeepSeek but B's scale
-            # is a per-N-row vector instead of a per-128xN-block scalar, so each
-            # K group's partial dot is rescaled by sa[m,kb]*sb[n,kb]. NOT MX --
-            # these fp32 scales cannot use tl.dot_scaled. _prune_configs pins
-            # BLOCK_SIZE_K=128 (one group per K tile) so kb==ki. scale_a is
-            # row-major [M, K//128]; scale_b is row-major [N, K//128].
+            # Symmetric fp32 blockwise: scale_a is row-major [M, K//128];
+            # scale_b is row-major [N, K//128]. Both are fp32.
+            # Each K group's partial dot is rescaled by sa[m,kb]*sb[n,kb].
             num_k_groups = K // 128
             offs_m_scale = offs_am + tl.arange(0, BLOCK_SIZE_M)
             offs_n_scale = offs_bn + tl.arange(0, BLOCK_SIZE_N)
@@ -548,10 +530,7 @@ def scaled_mm_autows_kernel(
                 offs_k = ki * BLOCK_SIZE_K
                 a_tile = a_desc.load([offs_am, offs_k])
                 b_tile = b_desc.load([offs_bn, offs_k])
-                # Triton TR011: keep Tensor Core TF32 behavior explicit.
-                # two_ctas is an FBTriton-only tl.dot kwarg -- only pass it on the
-                # 2-CTA path (TWO_CTAS is set only under Meta-WS) so OSS Triton,
-                # which has no such kwarg, never receives it.
+                # TWO_CTAS is set only under Meta-WS
                 if TWO_CTAS:
                     accumulator = tl.dot(
                         a_tile,
@@ -719,21 +698,7 @@ def scaled_mm_autows(
 
     _ensure_triton_allocator(a.device)
 
-    # DeepSeek and symmetric fp32 1x128 rescale inside the K-loop (dot -> *sa*sb
-    # -> accumulate). That in-loop compute chain is not partitionable by the
-    # warp-specialization pass (it trips "multiple cross-partition producers"),
-    # so run them through the plain persistent loop (no WS) like the Hopper path.
-    #
-    # MXFP8 uses tl.dot_scaled -> ttng.tc_gen5_mma_scaled. The scaled-dot lowering
-    # works, but the AutoWS partition scheduler (NVGPUWarpSpecialization /
-    # tritongpu-automatic-warp-specialization) does not yet partition a
-    # tc_gen5_mma_scaled loop, so WS is disabled for MXFP8 for now (it still emits
-    # tc_gen5_mma_scaled via the plain persistent loop). Enabling WS on the
-    # scaled MMA is the AutoWS-compiler follow-up.
-    # DeepSeek now warp-specializes: the in-loop fp32 rescale's register
-    # accumulator is handed to the epilogue via a cross-partition channel whose
-    # producer task-id is resolved correctly after the WSCodePartition fix
-    # (traceLoopCarriedProducer). Symmetric 1x128 and MXFP8 stay WS-off.
+    # WS not supported for Symmetric 1x128 and MXFP8 yet.
     ws_ok = not is_blockwise_1x128 and not is_mxfp8
     warp_specialize = is_blackwell and ws_ok
     separate_epilogue_store = is_blackwell and ws_ok
