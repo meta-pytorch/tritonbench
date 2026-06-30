@@ -211,101 +211,69 @@ def _get_autotune_configs():
 
 
 def _prune_configs(configs, named_args, **kwargs):
-    """Prune invalid configs based on WS mode, backend, and problem size."""
-    pruned = []
-    # Constexpr meta-params (SCALE_A_MODE, ...) are passed as keyword args, so
-    # they arrive here in **kwargs, NOT in named_args (which holds only the
-    # positional kernel args -- a_desc..K). Fall back to named_args/default.
+    """Prune autotune configs by scaling mode, backend (Hopper/Blackwell), and shape."""
+    # Constexpr meta-params arrive in **kwargs, not named_args.
     a_mode = kwargs.get("SCALE_A_MODE", named_args.get("SCALE_A_MODE", TENSORWISE))
     b_mode = kwargs.get("SCALE_B_MODE", named_args.get("SCALE_B_MODE", TENSORWISE))
     vec_size = kwargs.get("VEC_SIZE", named_args.get("VEC_SIZE", 0))
+    M, N = named_args.get("M", 0), named_args.get("N", 0)
     is_blackwell = _is_blackwell()
     is_tensorwise = a_mode == TENSORWISE and b_mode == TENSORWISE
     is_rowwise = a_mode == ROWWISE and b_mode == ROWWISE
     is_mxfp8 = a_mode == MXFP8 and b_mode == MXFP8
     is_blockwise_1x128 = a_mode == BLOCKWISE_1x128 and b_mode == BLOCKWISE_1x128
     is_deepseek = a_mode == BLOCKWISE_1x128 and b_mode == BLOCKWISE_128x128
+
+    pruned = []
     for config in configs:
-        num_warps = config.num_warps
-        if num_warps < 4:
+        c = config.kwargs
+        bm, bn, bk = c["BLOCK_SIZE_M"], c["BLOCK_SIZE_N"], c["BLOCK_SIZE_K"]
+        nw, ns = config.num_warps, config.num_stages
+
+        if nw < 4 or (M and bm > M * 2) or (N and bn > N * 2):
             continue
-        M = named_args.get("M", 0)
-        N = named_args.get("N", 0)
-        if M and config.kwargs["BLOCK_SIZE_M"] > M * 2:
-            continue
-        if N and config.kwargs["BLOCK_SIZE_N"] > N * 2:
-            continue
-        # num_warps: Blackwell always 4 (WS adds producer/epilogue warps on top). On
-        # Hopper only the plain-wgmma TensorWise/RowWise path goes to 8, and only for
-        # big-N tiles (BLOCK_M*BLOCK_N >= 128*256) -- the main sm_90 gap-closer; the
-        # in-loop-rescale modes (DeepSeek / 1x128) stay at the tested 4.
-        bm_w = config.kwargs["BLOCK_SIZE_M"]
-        bn_w = config.kwargs["BLOCK_SIZE_N"]
+
+        # num_warps: Hopper TensorWise/RowWise -> 8 for big-N tiles else 4;
+        # Blackwell DeepSeek (rescale-bound) -> 8; everything else -> 4.
         if not is_blackwell and (is_tensorwise or is_rowwise):
-            want_warps = 8 if bm_w * bn_w >= 128 * 256 else 4
-            if config.num_warps != want_warps:
+            if nw != (8 if bm * bn >= 128 * 256 else 4):
                 continue
-        elif config.num_warps != 4:
+        elif is_blackwell and is_deepseek:
+            if nw != 8:
+                continue
+        elif nw != 4:
             continue
-        # 2-CTA (cta_group::2): a tuning option for the epilogue-scaled modes
-        # (TensorWise, RowWise) -- like CUTLASS, which uses the same 2-SM cluster
-        # for per-tensor and per-token/-channel.
-        # Requires Blackwell + Meta-WS + BLOCK_M >= 128.
-        if config.kwargs.get("TWO_CTAS", False):
-            # DeepSeek is rescale-bound, not MMA-bound -> 2-CTA gives no speedup
-            # (verified), so keep it off there; only TensorWise/RowWise benefit.
+
+        # 2-CTA: TensorWise/RowWise only, Blackwell + Meta-WS, BM >= 128.
+        if c.get("TWO_CTAS", False):
             if not (is_tensorwise or is_rowwise):
                 continue
-            if not (is_blackwell and _use_meta_ws()):
+            if not (is_blackwell and _use_meta_ws()) or bm < 128:
                 continue
-            if config.kwargs["BLOCK_SIZE_M"] < 128:
-                continue
-        # MXFP8 block scaling requires BLOCK_K >= VEC_SIZE * 4
-        if is_mxfp8 and vec_size > 0:
-            if config.kwargs["BLOCK_SIZE_K"] < vec_size * 4:
-                continue
-        # DeepSeek blockwise (1x128/128x128): one 128-wide scale group per K
-        # tile and one B N-block per tile -> pin BLOCK_K and BLOCK_N to 128.
-        if is_deepseek:
-            if config.kwargs["BLOCK_SIZE_K"] != 128:
-                continue
-            if config.kwargs["BLOCK_SIZE_N"] != 128:
-                continue
-            # BLOCK_M=128 crashes the Canonicalizer for the DeepSeek path
-            # (symmetric 1x128 compiles fine at 128). The autotuner cannot skip a
-            # config that fails to *compile* (only OOM), so exclude it here.
-            if config.kwargs["BLOCK_SIZE_M"] == 128:
-                continue
-        # Symmetric fp32 blockwise (1x128/1x128): one 128-wide K group per tile
-        # so kb == ki for the in-loop rescale (BLOCK_N is free, sb is a vector).
-        if is_blockwise_1x128:
-            if config.kwargs["BLOCK_SIZE_K"] != 128:
-                continue
-        # num_stages gating (the autotuner only skips OOM configs, not ones that
-        # fail to compile or MISCOMPILE, so gate per mode here):
-        #   DeepSeek / symmetric 1x128 -- the WS-off in-loop fp32 rescale OOMs SMEM
-        #     at num_stages>=4 (the sa/sb broadcast over the tile), so cap at 3.
-        #     NOTE: DeepSeek formerly RACED at num_stages>=3 via an in-loop SCALAR
-        #     sb load (non-deterministic, wrong on ~0.1% of large-magnitude
-        #     elements); fixed by loading sb as a [BLOCK_N] vector in the
-        #     IS_DEEPSEEK branch (verified correct + deterministic at <=3).
-        #   MXFP8 -- try every num_stages; the autotuner drops any that overflow.
-        #   Blackwell TensorWise/RowWise -- [4, 5] (WS tuning set).
-        #   Hopper TensorWise/RowWise -- [3, 4, 5]. The big-N BLOCK_K=128 winner OOMs
-        #     SMEM past s3 (48KB/stage) and s3 is optimal anyway (MMA-bound; a 4th
-        #     stage adds nothing) -- so it fits without epilogue subtiling.
+
+        # MXFP8: BLOCK_K must cover >= 4 scale vectors.
+        if is_mxfp8 and vec_size > 0 and bk < vec_size * 4:
+            continue
+        # DeepSeek: pin BK=BN=128 (one K-group + one B N-block per tile);
+        # BLOCK_M=128 crashes the Canonicalizer, so require BM>=256.
+        if is_deepseek and (bk != 128 or bn != 128 or bm == 128):
+            continue
+        # Symmetric 1x128: pin BK=128 (one K-group per tile).
+        if is_blockwise_1x128 and bk != 128:
+            continue
+
+        # num_stages: in-loop-rescale modes cap at 3 (OOM SMEM beyond); MXFP8 tries
+        # all (autotuner drops overflow); Blackwell TensorWise/RowWise need >= 4.
         if is_deepseek or is_blockwise_1x128:
-            if config.num_stages > 3:
+            if ns > 3:
                 continue
-        elif is_mxfp8:
-            pass
-        elif is_blackwell and config.num_stages < 4:
+        elif not is_mxfp8 and is_blackwell and ns < 4:
             continue
-        # Hopper: subtiling off (subtile=1) -- within noise on the plain path (the
-        # big-N tile fits SMEM at s3 without it). Blackwell keeps [1, 2, 4], where it
-        # is a genuine register-pressure relief.
-        if not is_blackwell and config.kwargs["EPILOGUE_SUBTILE"] != 1:
+
+        # Hopper: epilogue subtiling off (Blackwell keeps it for register relief).
+        if not is_blackwell and c["EPILOGUE_SUBTILE"] != 1:
             continue
+
         pruned.append(config)
     return pruned
 
