@@ -211,96 +211,69 @@ def _get_autotune_configs():
 
 
 def _prune_configs(configs, named_args, **kwargs):
-    """Prune invalid configs based on WS mode, backend, and problem size."""
-    pruned = []
-    # Constexpr meta-params (SCALE_A_MODE, ...) are passed as keyword args, so
-    # they arrive here in **kwargs, NOT in named_args (which holds only the
-    # positional kernel args -- a_desc..K). Fall back to named_args/default.
+    """Prune autotune configs by scaling mode, backend (Hopper/Blackwell), and shape."""
+    # Constexpr meta-params arrive in **kwargs, not named_args.
     a_mode = kwargs.get("SCALE_A_MODE", named_args.get("SCALE_A_MODE", TENSORWISE))
     b_mode = kwargs.get("SCALE_B_MODE", named_args.get("SCALE_B_MODE", TENSORWISE))
     vec_size = kwargs.get("VEC_SIZE", named_args.get("VEC_SIZE", 0))
+    M, N = named_args.get("M", 0), named_args.get("N", 0)
     is_blackwell = _is_blackwell()
     is_tensorwise = a_mode == TENSORWISE and b_mode == TENSORWISE
     is_rowwise = a_mode == ROWWISE and b_mode == ROWWISE
     is_mxfp8 = a_mode == MXFP8 and b_mode == MXFP8
     is_blockwise_1x128 = a_mode == BLOCKWISE_1x128 and b_mode == BLOCKWISE_1x128
     is_deepseek = a_mode == BLOCKWISE_1x128 and b_mode == BLOCKWISE_128x128
+
+    pruned = []
     for config in configs:
-        num_warps = config.num_warps
-        if num_warps < 4:
+        c = config.kwargs
+        bm, bn, bk = c["BLOCK_SIZE_M"], c["BLOCK_SIZE_N"], c["BLOCK_SIZE_K"]
+        nw, ns = config.num_warps, config.num_stages
+
+        if nw < 4 or (M and bm > M * 2) or (N and bn > N * 2):
             continue
-        M = named_args.get("M", 0)
-        N = named_args.get("N", 0)
-        if M and config.kwargs["BLOCK_SIZE_M"] > M * 2:
-            continue
-        if N and config.kwargs["BLOCK_SIZE_N"] > N * 2:
-            continue
-        # num_warps: Blackwell always 4 (WS adds producer/epilogue warps on top). On
-        # Hopper only the plain-wgmma TensorWise/RowWise path goes to 8, and only for
-        # big-N tiles (BLOCK_M*BLOCK_N >= 128*256) -- the main sm_90 gap-closer; the
-        # in-loop-rescale modes (DeepSeek / 1x128) stay at the tested 4.
-        bm_w = config.kwargs["BLOCK_SIZE_M"]
-        bn_w = config.kwargs["BLOCK_SIZE_N"]
+
+        # num_warps: Hopper TensorWise/RowWise -> 8 for big-N tiles else 4;
+        # Blackwell DeepSeek (rescale-bound) -> 8; everything else -> 4.
         if not is_blackwell and (is_tensorwise or is_rowwise):
-            want_warps = 8 if bm_w * bn_w >= 128 * 256 else 4
-            if config.num_warps != want_warps:
+            if nw != (8 if bm * bn >= 128 * 256 else 4):
                 continue
-        elif config.num_warps != 4:
+        elif is_blackwell and is_deepseek:
+            if nw != 8:
+                continue
+        elif nw != 4:
             continue
-        # 2-CTA (cta_group::2): a tuning option for the epilogue-scaled modes
-        # (TensorWise, RowWise) -- like CUTLASS, which uses the same 2-SM cluster
-        # for per-tensor and per-token/-channel.
-        # Requires Blackwell + Meta-WS + BLOCK_M >= 128.
-        if config.kwargs.get("TWO_CTAS", False):
+
+        # 2-CTA: TensorWise/RowWise only, Blackwell + Meta-WS, BM >= 128.
+        if c.get("TWO_CTAS", False):
             if not (is_tensorwise or is_rowwise):
                 continue
-            if not (is_blackwell and _use_meta_ws()):
+            if not (is_blackwell and _use_meta_ws()) or bm < 128:
                 continue
-            if config.kwargs["BLOCK_SIZE_M"] < 128:
-                continue
-        # MXFP8 block scaling requires BLOCK_K >= VEC_SIZE * 4
-        if is_mxfp8 and vec_size > 0:
-            if config.kwargs["BLOCK_SIZE_K"] < vec_size * 4:
-                continue
-        # DeepSeek blockwise (1x128/128x128): one 128-wide scale group per K
-        # tile and one B N-block per tile -> pin BLOCK_K and BLOCK_N to 128.
-        if is_deepseek:
-            if config.kwargs["BLOCK_SIZE_K"] != 128:
-                continue
-            if config.kwargs["BLOCK_SIZE_N"] != 128:
-                continue
-            # BLOCK_M=128 crashes the Canonicalizer for the DeepSeek path
-            # (symmetric 1x128 compiles fine at 128). The autotuner cannot skip a
-            # config that fails to *compile* (only OOM), so exclude it here.
-            if config.kwargs["BLOCK_SIZE_M"] == 128:
-                continue
-        # Symmetric fp32 blockwise (1x128/1x128): one 128-wide K group per tile
-        # so kb == ki for the in-loop rescale (BLOCK_N is free, sb is a vector).
-        if is_blockwise_1x128:
-            if config.kwargs["BLOCK_SIZE_K"] != 128:
-                continue
-        # num_stages gating (the autotuner only skips OOM configs, not ones that
-        # fail to compile, so gate per mode here):
-        #   DeepSeek / symmetric 1x128 -- the WS-off in-loop fp32 rescale does not
-        #     hold up at num_stages>=4 (symmetric OOMs SMEM from the sb-over-M
-        #     broadcast; DeepSeek crashes the Canonicalizer), so cap at 3.
-        #   MXFP8 -- try every num_stages; the autotuner drops any that overflow.
-        #   Blackwell TensorWise/RowWise -- [4, 5] (WS tuning set).
-        #   Hopper TensorWise/RowWise -- [3, 4, 5]. The big-N BLOCK_K=128 winner OOMs
-        #     SMEM past s3 (48KB/stage) and s3 is optimal anyway (MMA-bound; a 4th
-        #     stage adds nothing) -- so it fits without epilogue subtiling.
+
+        # MXFP8: BLOCK_K must cover >= 4 scale vectors.
+        if is_mxfp8 and vec_size > 0 and bk < vec_size * 4:
+            continue
+        # DeepSeek: pin BK=BN=128 (one K-group + one B N-block per tile);
+        # BLOCK_M=128 crashes the Canonicalizer, so require BM>=256.
+        if is_deepseek and (bk != 128 or bn != 128 or bm == 128):
+            continue
+        # Symmetric 1x128: pin BK=128 (one K-group per tile).
+        if is_blockwise_1x128 and bk != 128:
+            continue
+
+        # num_stages: in-loop-rescale modes cap at 3 (OOM SMEM beyond); MXFP8 tries
+        # all (autotuner drops overflow); Blackwell TensorWise/RowWise need >= 4.
         if is_deepseek or is_blockwise_1x128:
-            if config.num_stages > 3:
+            if ns > 3:
                 continue
-        elif is_mxfp8:
-            pass
-        elif is_blackwell and config.num_stages < 4:
+        elif not is_mxfp8 and is_blackwell and ns < 4:
             continue
-        # Hopper: subtiling off (subtile=1) -- within noise on the plain path (the
-        # big-N tile fits SMEM at s3 without it). Blackwell keeps [1, 2, 4], where it
-        # is a genuine register-pressure relief.
-        if not is_blackwell and config.kwargs["EPILOGUE_SUBTILE"] != 1:
+
+        # Hopper: epilogue subtiling off (Blackwell keeps it for register relief).
+        if not is_blackwell and c["EPILOGUE_SUBTILE"] != 1:
             continue
+
         pruned.append(config)
     return pruned
 
@@ -440,8 +413,7 @@ def scaled_mm_autows_kernel(
 
     if IS_MXFP8:
         # Host-side 5D TMA on the (1, M//128, K//VEC_SIZE//4, 2, 256) repack
-        # of the cuBLAS block-scale layout (32*4*4 == 2*256). Same trick used
-        # by tritonbench/operators/fb/fp8_grouped_gemm/kernels.py.
+        # of the cuBLAS block-scale layout (32*4*4 == 2*256).
         REP_M: tl.constexpr = BLOCK_SIZE_M // 128
         REP_N: tl.constexpr = BLOCK_SIZE_N // 128
         REP_K: tl.constexpr = triton.cdiv(BLOCK_SIZE_K // VEC_SIZE, 4)
@@ -456,6 +428,9 @@ def scaled_mm_autows_kernel(
         flatten=FLATTEN,
         warp_specialize=WARP_SPECIALIZE,
         separate_epilogue_store=SEPARATE_EPILOGUE_STORE,
+        # DeepSeek: merge the epilogue into the computation partition so the
+        # register accumulator isn't spilled to a full-tile SMEM channel (OOMs).
+        merge_epilogue_to_computation=IS_DEEPSEEK,
     ):
         pid_m, pid_n = _compute_pid(tile_id, num_pid_in_group, num_pid_m, GROUP_SIZE_M)
         offs_am = pid_m * BLOCK_SIZE_M
@@ -492,17 +467,17 @@ def scaled_mm_autows_kernel(
                     a_tile, sa, "e4m3", b_tile.T, sb, "e4m3", accumulator
                 )
         elif IS_DEEPSEEK:
-            # DeepSeek-style blockwise: 1x128 scales for A, 128x128 for B.
-            # Plain fp32 scales (NOT MX); they vary along K so they cannot factor
-            # out to the epilogue -- each 128-wide K group's partial dot is
-            # rescaled by sa[m,kb]*sb[n//128,kb] before accumulation.
-            # _prune_configs pins BLOCK_SIZE_K=128 (one group per K tile) and
-            # BLOCK_SIZE_N=128 (one B N-block per tile), so kb==ki and the B
-            # N-block index == pid_n. scale_a is row-major [M, K//128];
-            # scale_b is row-major [N//128, K//128].
+            # DeepSeek-style blockwise: scale_a is row-major [M, K//128];
+            # scale_b is row-major [N//128, K//128]. Both are fp32.
+            # Each 128-wide K group's partial dot is rescaled by
+            # sa[m,kb]*sb[n//128,kb] before accumulation.
             num_k_groups = K // 128
             offs_m_scale = offs_am + tl.arange(0, BLOCK_SIZE_M)
             mask_m_scale = offs_m_scale < M
+            # B's scale is one fp32 per N-block. Load it as a [BLOCK_N] vector
+            # (all == scale_b[pid_n, ki]), not a scalar:
+            # a scalar in-loop load races the pipeliner at num_stages>=3.
+            offs_n_block = (offs_bn + tl.arange(0, BLOCK_SIZE_N)) // 128
             for ki in range(k_tiles):
                 offs_k = ki * BLOCK_SIZE_K
                 a_tile = a_desc.load([offs_am, offs_k])
@@ -518,16 +493,12 @@ def scaled_mm_autows_kernel(
                     mask=mask_m_scale,
                     other=0.0,
                 )
-                sb = tl.load(scale_b_ptr + pid_n * num_k_groups + ki)
-                accumulator += partial * sa[:, None] * sb
+                sb = tl.load(scale_b_ptr + offs_n_block * num_k_groups + ki)
+                accumulator += partial * sa[:, None] * sb[None, :]
         elif IS_BLOCKWISE_1x128:
-            # Symmetric fp32 blockwise: 1x128 scales for BOTH A and B (arbitrary
-            # fp32, one per row per 128-wide K group). Like DeepSeek but B's scale
-            # is a per-N-row vector instead of a per-128xN-block scalar, so each
-            # K group's partial dot is rescaled by sa[m,kb]*sb[n,kb]. NOT MX --
-            # these fp32 scales cannot use tl.dot_scaled. _prune_configs pins
-            # BLOCK_SIZE_K=128 (one group per K tile) so kb==ki. scale_a is
-            # row-major [M, K//128]; scale_b is row-major [N, K//128].
+            # Symmetric fp32 blockwise: scale_a is row-major [M, K//128];
+            # scale_b is row-major [N, K//128]. Both are fp32.
+            # Each K group's partial dot is rescaled by sa[m,kb]*sb[n,kb].
             num_k_groups = K // 128
             offs_m_scale = offs_am + tl.arange(0, BLOCK_SIZE_M)
             offs_n_scale = offs_bn + tl.arange(0, BLOCK_SIZE_N)
@@ -559,10 +530,7 @@ def scaled_mm_autows_kernel(
                 offs_k = ki * BLOCK_SIZE_K
                 a_tile = a_desc.load([offs_am, offs_k])
                 b_tile = b_desc.load([offs_bn, offs_k])
-                # Triton TR011: keep Tensor Core TF32 behavior explicit.
-                # two_ctas is an FBTriton-only tl.dot kwarg -- only pass it on the
-                # 2-CTA path (TWO_CTAS is set only under Meta-WS) so OSS Triton,
-                # which has no such kwarg, never receives it.
+                # TWO_CTAS is set only under Meta-WS
                 if TWO_CTAS:
                     accumulator = tl.dot(
                         a_tile,
@@ -730,20 +698,8 @@ def scaled_mm_autows(
 
     _ensure_triton_allocator(a.device)
 
-    # DeepSeek and symmetric fp32 1x128 rescale inside the K-loop (dot -> *sa*sb
-    # -> accumulate). That in-loop compute chain is not partitionable by the
-    # warp-specialization pass (it trips "multiple cross-partition producers"),
-    # so run them through the plain persistent loop (no WS) like the Hopper path.
-    #
-    # MXFP8 uses tl.dot_scaled -> ttng.tc_gen5_mma_scaled. The scaled-dot lowering
-    # works, but the AutoWS partition scheduler (NVGPUWarpSpecialization /
-    # tritongpu-automatic-warp-specialization) does not yet partition a
-    # tc_gen5_mma_scaled loop, so WS is disabled for MXFP8 for now (it still emits
-    # tc_gen5_mma_scaled via the plain persistent loop). Enabling WS on the
-    # scaled MMA is the AutoWS-compiler follow-up.
-    ws_ok = not is_deepseek and not is_blockwise_1x128 and not is_mxfp8
-    # WS is a Blackwell-only win. On Hopper, Meta-WS (TRITON_USE_META_WS=1) does
-    # partition this loop but runs ~10% slower than the plain wgmma pipeline.
+    # WS not supported for Symmetric 1x128 and MXFP8 yet.
+    ws_ok = not is_blockwise_1x128 and not is_mxfp8
     warp_specialize = is_blackwell and ws_ok
     separate_epilogue_store = is_blackwell and ws_ok
 
