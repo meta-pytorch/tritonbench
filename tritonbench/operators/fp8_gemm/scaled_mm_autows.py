@@ -254,9 +254,10 @@ def _prune_configs(configs, named_args, **kwargs):
         # MXFP8: BLOCK_K must cover >= 4 scale vectors.
         if is_mxfp8 and vec_size > 0 and bk < vec_size * 4:
             continue
-        # DeepSeek: pin BK=BN=128 (one K-group + one B N-block per tile);
-        # BLOCK_M=128 crashes the Canonicalizer, so require BM>=256.
-        if is_deepseek and (bk != 128 or bn != 128 or bm == 128):
+        # DeepSeek: pin BK=BN=128 (one K-group + one B N-block per tile) and
+        # BM=128. BM=128 halves the per-CTA TMEM/reg/SMEM footprint -> fits the
+        # ns=3 operand pipeline, avoids register spills, and doubles CTA count.
+        if is_deepseek and (bk != 128 or bn != 128 or bm != 128):
             continue
         # Symmetric 1x128: pin BK=128 (one K-group per tile).
         if is_blockwise_1x128 and bk != 128:
