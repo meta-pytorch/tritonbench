@@ -6,12 +6,25 @@ Generated from Inductor for forward layernorm with and without welford
 import torch
 import triton
 import triton.language as tl
-from torch._C import _cuda_getCurrentRawStream as get_raw_stream
+
+try:
+    from torch._C import _cuda_getCurrentRawStream as get_raw_stream
+except ImportError:
+    # CUDA-only symbol, absent on cpu/TPU torch builds. Only used by the Triton
+    # kernel-launch path below, which never runs on TPU.
+    get_raw_stream = None
 from torch._inductor.runtime import triton_helpers, triton_heuristics
 from torch._inductor.runtime.triton_helpers import libdevice
 
-empty_strided_cuda = torch._C._dynamo.guards._empty_strided_cuda
+try:
+    empty_strided_cuda = torch._C._dynamo.guards._empty_strided_cuda
+except AttributeError:
+    empty_strided_cuda = None
 reinterpret_tensor = torch.ops.inductor._reinterpret_tensor
+
+# These Triton kernel-launch paths require the CUDA-only helpers above; when
+# they're absent (cpu/TPU torch builds) the triton_welford backends can't run.
+HAS_CUDA_LAUNCH_HELPERS = get_raw_stream is not None and empty_strided_cuda is not None
 
 
 @triton.autotune(
