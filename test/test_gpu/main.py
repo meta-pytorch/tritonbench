@@ -34,7 +34,17 @@ elif is_fbcode():
     import importlib
 
     fbcode_skip_file_path = "fb/skip_tests.yaml"
-    SKIP_FILE = importlib.resources.files(__package__).joinpath(fbcode_skip_file_path)
+    # The reactor-ci runner imports this file standalone via
+    # spec_from_file_location(), which leaves __package__ == "" and makes
+    # importlib.resources.files("") raise "Empty module name". Fall back to a
+    # __file__-relative path in that case (the file is on disk in the staged
+    # test rootdir alongside main.py).
+    if __package__:
+        SKIP_FILE = importlib.resources.files(__package__).joinpath(
+            fbcode_skip_file_path
+        )
+    else:
+        SKIP_FILE = os.path.join(os.path.dirname(__file__), fbcode_skip_file_path)
 else:
     SKIP_FILE = os.path.abspath(
         os.path.join(os.path.dirname(__file__), "skip_tests.yaml")
