@@ -18,7 +18,10 @@ from tritonbench.utils.triton_op import (
 )
 
 from .hstu import get_test_inputs, HAS_HAMMER, triton_hstu_mha, triton_ragged_hstu_mha
-from .triton_autows import triton_autows_ragged_hstu
+from .triton_autows import (
+    triton_autows_ragged_hstu,
+    triton_autows_ragged_hstu_persistent,
+)
 
 HAS_CUDA = False
 try:
@@ -184,6 +187,25 @@ class Operator(BenchmarkOperator):
             k=k,
             v=v,
             seq_offsets=seq_offsets,
+        )
+
+    # Persistent AutoWS variant (K-6, D109223946): warp-specializes an outer
+    # persistent tile loop (bounded by each jagged sequence's valid M-tile count)
+    # and handles num_targets clamping; validated ws=pass. Disabled by default
+    # for the same runtime-gate reason; test with `--force` under
+    # TRITON_USE_META_WS=1.
+    @register_benchmark(enabled=False, fwd_only=True)
+    def triton_autows_ragged_hstu_persistent(
+        self, q, k, v, seq_offsets, num_targets, max_seq_len, sparsity
+    ):
+        return lambda: triton_autows_ragged_hstu_persistent(
+            max_seq_len,
+            alpha=self.alpha,
+            q=q,
+            k=k,
+            v=v,
+            seq_offsets=seq_offsets,
+            num_targets=num_targets,
         )
 
     # TODO: remove B200 hacks like these.
