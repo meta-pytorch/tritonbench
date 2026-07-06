@@ -88,6 +88,30 @@ def get_default_shapes():
     return shapes
 
 
+def parse_cli_shapes(specs):
+    """Build operator shape tuples from --shapes specs of the form 'G,M,N,K'.
+
+    Per group the GEMM is x[M, K] @ w[K, N]; G experts with M tokens each
+    (uniform split). Produces the split-size interface inputs
+    (W=[G, N, K], split=[M]*G) so the split_size_* benchmarks run, plus the
+    2D shared B=[K, N] for the torch._grouped_mm / triton paths.
+    """
+    shapes = []
+    for spec in specs:
+        parts = [int(x) for x in spec.split(",")]
+        if len(parts) != 4:
+            raise ValueError(
+                f"--shapes entry must be 'G,M,N,K' (4 ints), got: {spec!r}"
+            )
+        G, M, N, K = parts
+        A_shapes = [(M, K)] * G
+        B_shape = (K, N)
+        W_shape = (G, N, K)
+        split_size = [M] * G
+        shapes.append((A_shapes, B_shape, W_shape, split_size))
+    return shapes
+
+
 # TODO(nikhilap): Add a separate 3D grouped_gemm operator to alleviate the restriction that all B tensors must be the same.
 class Operator(BenchmarkOperator):
     DEFAULT_PRECISION = "bf16"
@@ -106,6 +130,7 @@ class Operator(BenchmarkOperator):
         self.only_fb_shapes = False
         args, _ = self.parse_op_args(extra_args or [])
         self.only_fb_shapes = args.only_fb_shapes
+        self.cli_shapes = args.shapes
         # Only use FB shapes when --only-fb-shapes is passed
         if self.only_fb_shapes and not is_fbcode():
             raise ValueError("--only-fb-shapes requires running in fbcode")
@@ -137,6 +162,17 @@ class Operator(BenchmarkOperator):
             action="store_true",
             default=False,
             help="Only run benchmarks with FB-specific shapes (requires fbcode)",
+        )
+        parser.add_argument(
+            "--shapes",
+            type=str,
+            nargs="+",
+            default=None,
+            metavar="G,M,N,K",
+            help="Explicit grouped-GEMM shapes as space-separated 'G,M,N,K' "
+            "tuples (per group x[M,K] @ w[K,N], G experts, M tokens/expert), "
+            "e.g. --shapes 64,2048,3584,1792 64,2048,1792,1792. "
+            "Overrides the default/fb shape sweep.",
         )
         return parser.parse_known_args(extra_args)
 
@@ -612,7 +648,9 @@ class Operator(BenchmarkOperator):
         If you need truly different B_i per group, you cannot use the 2D+offs API —
         instead, you must switch to the 3D variant (both A and B 3D) where offs is not required.
         """
-        if hasattr(self, "external_shapes") and self.external_shapes:
+        if self.cli_shapes:
+            self.shapes = parse_cli_shapes(self.cli_shapes)
+        elif hasattr(self, "external_shapes") and self.external_shapes:
             self.shapes = self.external_shapes
         elif self.only_fb_shapes:
             # Validation already done in __init__
