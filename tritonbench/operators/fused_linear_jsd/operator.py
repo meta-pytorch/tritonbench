@@ -125,13 +125,21 @@ class LigerLMHeadJSD(torch.nn.Module):
         )
 
 
+def parse_op_args(args: List[str]):
+    parser = argparse.ArgumentParser()
+    parser.add_argument("--H", type=int, default=4096, help="Hidden size")
+    parser.add_argument("--V", type=int, default=128256, help="Vocabulary size")
+    return parser.parse_args(args)
+
+
 class Operator(BenchmarkOperator):
     def __init__(
         self, tb_args: argparse.Namespace, extra_args: Optional[List[str]] = None
     ):
         super().__init__(tb_args, extra_args)
-        self.H = 4096
-        self.V = 128256
+        args = parse_op_args(self.extra_args)
+        self.H = args.H
+        self.V = args.V
         self.baseline_op = TorchLMHeadJSD(
             H=self.H, V=self.V, dtype=self.dtype, device=self.device
         )

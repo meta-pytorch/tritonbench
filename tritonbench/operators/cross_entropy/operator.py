@@ -53,14 +53,17 @@ class Operator(BenchmarkOperator):
                 requires_grad=True,
                 device=self.device,
             )
-            target = torch.randint(V, (self.B * self.T, 1), device=self.device).squeeze(
-                1
-            )
+            # Pallas/TPU does not support int64 tensors; use int32 indices there.
+            target_dtype = torch.int32 if self.device == "tpu" else torch.int64
+            target = torch.randint(
+                V, (self.B * self.T, 1), device=self.device, dtype=target_dtype
+            ).squeeze(1)
             yield _input, target
 
     @register_benchmark(baseline=True)
     def cross_entropy_loss(self, input, target) -> Callable:
-        return lambda: self.baseline_model(input, target)
+        # nn.CrossEntropyLoss requires Long targets; inputs may be int32 on TPU.
+        return lambda: self.baseline_model(input, target.long())
 
     @register_benchmark(enabled=LigerCrossEntropyLoss is not None)
     def liger_cross_entropy_loss(self, input, target) -> Callable:
@@ -71,7 +74,7 @@ class Operator(BenchmarkOperator):
         compiled = torch.compile(
             self.baseline_model, dynamic=False, mode="max-autotune-no-cudagraphs"
         )
-        return lambda: compiled(input, target)
+        return lambda: compiled(input, target.long())
 
     @register_x_val(label="(B, T, V)")
     def get_x_val(self, example_inputs) -> Tuple[int, int, int]:
