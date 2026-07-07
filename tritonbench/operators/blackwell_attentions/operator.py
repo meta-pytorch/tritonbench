@@ -750,7 +750,6 @@ class Operator(BenchmarkOperator):
                 True,  # SUBTILING for fwd, EPILOGUE_SUBTILE for bwd is tunable
                 1,  # VECT_MUL for fwd [0, 1]
                 False,  # FADD2_REDUCE for fwd
-                False,  # early_tma_store_lowering for bwd
             )
 
         return preproc_noop, fn
