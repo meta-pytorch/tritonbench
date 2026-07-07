@@ -591,9 +591,15 @@ class Operator(BenchmarkOperator):
         fwd_fn_lambda = getattr(self, fn._name)
         fwd_fn = fwd_fn_lambda(*example_inputs)
         # Calculate memory size
-        config_name, jagged_q, jagged_k, jagged_v, jagged_data, padded_data = (
-            example_inputs
-        )
+        (
+            config_name,
+            jagged_q,
+            jagged_k,
+            jagged_v,
+            jagged_data,
+            padded_data,
+            activation,
+        ) = example_inputs
         fwd_output = fwd_fn()
         run_fwd = self.mode in [Mode.FWD, Mode.FWD_BWD, Mode.FWD_NO_GRAD]
         run_bwd = self.mode in [Mode.BWD, Mode.FWD_BWD]
