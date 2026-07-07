@@ -31,6 +31,14 @@ class Operator(BenchmarkOperator):
         for sz in [24048, 1024 * 1024, 64 * 1024 * 1024, 64 * 1024 * 1024 + 16]:
             _input = torch.randn((sz,), device=self.device, dtype=torch.float32)
             yield _input, 32, 2, 1, RoundingMode.even, False
+        # A few large MX4 comm (quantize_comm / All2All_Pooled) production cases that run >10ms
+        for numel, group_size in [
+            (1_409_400_832, 16),  # backward encode, trace 12.09ms
+            (1_409_286_144, 8),  # forward encode, trace 24.16ms
+            (2_421_580_288, 8),  # forward encode, trace 45.80ms
+        ]:
+            _input = torch.randn((numel,), device=self.device, dtype=torch.float32)
+            yield _input, group_size, 2, 1, RoundingMode.even, False
 
     @register_benchmark(baseline=True, fwd_only=True, enabled=HAS_FBGEMM)
     def fbgemm_fp32_to_mx4(self, *args) -> Callable:
