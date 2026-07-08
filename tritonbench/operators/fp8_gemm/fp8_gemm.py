@@ -498,13 +498,23 @@ class Operator(BenchmarkOperator):
         # in one accumulator, single scaled epilogue). Kernel reshapes scales to [M]/[N].
         if ra == ScalingType.RowWise and rb == ScalingType.RowWise:
             return lambda: tlx_scaled_mm(
-                a, b, scale_a, scale_b, out_dtype=self._get_dtype(), scale_mode="rowwise"
+                a,
+                b,
+                scale_a,
+                scale_b,
+                out_dtype=self._get_dtype(),
+                scale_mode="rowwise",
             )
         # TensorWise: scalar scales -> tensorwise mode (same K-independent mainloop, single
         # scalar-scaled epilogue). Kernel reshapes scale_a/scale_b to 1-element tensors.
         if ra == ScalingType.TensorWise and rb == ScalingType.TensorWise:
             return lambda: tlx_scaled_mm(
-                a, b, scale_a, scale_b, out_dtype=self._get_dtype(), scale_mode="tensorwise"
+                a,
+                b,
+                scale_a,
+                scale_b,
+                out_dtype=self._get_dtype(),
+                scale_mode="tensorwise",
             )
         raise NotImplementedError(
             "tlx_scaled_mm supports --scaling-pair BlockWise1x128,BlockWise128x128, "
