@@ -59,6 +59,13 @@ def is_meta_triton() -> bool:
     return spec is not None
 
 
+def has_meta_ws():
+    """
+    Returns whether Meta WS is enabled.
+    """
+    return os.environ.get("TRITON_USE_META_WS", "0") == "1"
+
+
 def is_triton_main():
     return not is_fbcode() and not is_meta_triton()
 

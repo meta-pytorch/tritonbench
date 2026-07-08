@@ -16,7 +16,7 @@ from tritonbench.operators.fp8_gemm.scaled_mm_autows import (
     scaled_mm_autows,
     TENSORWISE as AUTOWS_TENSORWISE,
 )
-from tritonbench.utils.env_utils import IS_BLACKWELL, is_cuda, is_fbcode
+from tritonbench.utils.env_utils import has_meta_ws, IS_BLACKWELL, is_cuda, is_fbcode
 from tritonbench.utils.python_utils import try_import
 from tritonbench.utils.triton_op import (
     BenchmarkOperator,
@@ -416,8 +416,7 @@ class Operator(BenchmarkOperator):
             return lambda: compiled(a, b)
 
     # This impl is CUDA-specific
-    # AMD error: TypeError: range.__init__() got an unexpected keyword argument 'separate_epilogue_store'
-    @register_benchmark(enabled=is_cuda() and has_tlx())
+    @register_benchmark(enabled=is_cuda() and has_tlx() and has_meta_ws())
     def triton_autows_fp8_gemm(self, a, b, scale_a, scale_b):
         # Per-operand recipe -> autows kernel mode. The kernel dispatches on the
         # (scale_a_mode, scale_b_mode) pair, so A and B are passed independently.
