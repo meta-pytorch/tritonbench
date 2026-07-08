@@ -18,6 +18,23 @@ except ModuleNotFoundError:
 # blob/main/benchmark/scripts/benchmark_embedding.py
 
 
+def parse_op_args(args: List[str]):
+    parser = argparse.ArgumentParser()
+    # When any of --B/--T/--D is given, a single (B, T, D) shape is used instead
+    # of the default two; --v-range overrides the vocab sweep. Defaults preserve
+    # the original behavior.
+    parser.add_argument("--B", type=int, default=None, help="Batch size")
+    parser.add_argument("--T", type=int, default=None, help="Sequence length")
+    parser.add_argument("--D", type=int, default=None, help="Embedding dim")
+    parser.add_argument(
+        "--v-range",
+        type=str,
+        default="10,18",
+        help="Vocab size range 'start,end' -> V=2^start..2^(end-1)",
+    )
+    return parser.parse_args(args)
+
+
 class Operator(BenchmarkOperator):
     def __init__(
         self, tb_args: argparse.Namespace, extra_args: Optional[List[str]] = None
@@ -27,11 +44,29 @@ class Operator(BenchmarkOperator):
         self.baseline_op = None
         self.liger_op = None
         self.reset_dynamo = True
+        args = parse_op_args(self.extra_args)
+        start, end = map(int, args.v_range.split(","))
+        self._v_range = range(start, end)
+        # Override the default (B, T, D) sweep only when explicitly requested.
+        if args.B is not None or args.T is not None or args.D is not None:
+            self._btd_shapes = [
+                (
+                    args.B if args.B is not None else 32,
+                    args.T if args.T is not None else 512,
+                    args.D if args.D is not None else 768,
+                )
+            ]
+        else:
+            self._btd_shapes = [(32, 512, 768), (8, 2048, 4096)]
 
     def get_input_iter(self) -> Generator:
-        for B, T, D in [(32, 512, 768), (8, 2048, 4096)]:
-            for V in [2**i for i in range(10, 18)]:
-                _input = torch.randint(0, V, (B, T), device=self.device)
+        for B, T, D in self._btd_shapes:
+            for V in [2**i for i in self._v_range]:
+                # Pallas/TPU does not support int64 tensors; use int32 indices there.
+                idx_dtype = torch.int32 if self.device == "tpu" else torch.int64
+                _input = torch.randint(
+                    0, V, (B, T), device=self.device, dtype=idx_dtype
+                )
                 tmp_embed = Embedding(V, D).to(self.device).to(self.dtype)
                 shared_weight = tmp_embed.weight.data
                 yield V, D, _input, shared_weight
