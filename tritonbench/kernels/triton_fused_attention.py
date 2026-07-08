@@ -38,7 +38,12 @@ except ImportError:
 
 
 def is_cuda():
-    return triton.runtime.driver.active.get_current_target().backend == "cuda"
+    try:
+        return triton.runtime.driver.active.get_current_target().backend == "cuda"
+    except (RuntimeError, AttributeError):
+        # No active Triton driver (e.g. on TPU, where these kernels never run) ->
+        # not CUDA. Avoids a hard crash at import time.
+        return False
 
 
 def is_hip_async_copy_enabled():

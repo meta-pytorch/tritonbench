@@ -90,4 +90,4 @@ class Operator(BenchmarkOperator):
     def get_input_iter(self) -> Generator:
         p = 0.25
         for size in self.get_x_vals():
-            yield p, torch.randn(size=(size,)).cuda()
+            yield p, torch.randn(size=(size,), device=self.device)

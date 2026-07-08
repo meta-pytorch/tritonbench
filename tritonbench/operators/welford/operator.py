@@ -12,6 +12,7 @@ from tritonbench.utils.triton_op import (
 from .triton_welford import (
     fused_native_layer_norm as triton_welford_kernel,
     fused_native_layer_norm_no_welford as triton_no_welford_kernel,
+    HAS_CUDA_LAUNCH_HELPERS,
 )
 
 
@@ -39,11 +40,11 @@ class Operator(BenchmarkOperator):
         super().__init__(tb_args, extra_args)
         self.shapes = BUILDIN_SHAPES
 
-    @register_benchmark()
+    @register_benchmark(enabled=HAS_CUDA_LAUNCH_HELPERS)
     def triton_welford(self, p1, p2, p3) -> Callable:
         return lambda: triton_welford_kernel(p1, p2, p3)
 
-    @register_benchmark()
+    @register_benchmark(enabled=HAS_CUDA_LAUNCH_HELPERS)
     def test_no_welford(self, p1, p2, p3) -> Callable:
         return lambda: triton_no_welford_kernel(p1, p2, p3)
 
@@ -124,9 +125,9 @@ class Operator(BenchmarkOperator):
     def get_input_iter(self) -> Generator:
         for shape in self.shapes:
             s, d = shape
-            p1 = rand_strided((d,), (1,), device="cuda:0", dtype=torch.bfloat16)
-            p2 = rand_strided((d,), (1,), device="cuda:0", dtype=torch.bfloat16)
-            p3 = rand_strided((s, d), (d, 1), device="cuda:0", dtype=torch.bfloat16)
+            p1 = rand_strided((d,), (1,), device=self.device, dtype=torch.bfloat16)
+            p2 = rand_strided((d,), (1,), device=self.device, dtype=torch.bfloat16)
+            p3 = rand_strided((s, d), (d, 1), device=self.device, dtype=torch.bfloat16)
             yield p1, p2, p3
 
     def accuracy(self, fn: Callable, baseline_fn: Callable) -> bool:
