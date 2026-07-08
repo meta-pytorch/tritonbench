@@ -28,6 +28,25 @@ from tritonbench.utils.triton_utils import has_experimental_descriptor, has_tlx
 
 from .tutorial import matmul as tutorial_matmul
 
+# Warp-specialized FP8 scaled_mm TLX kernel (BlockWise + RowWise), imported straight
+# from the triton source tree (the source of truth) rather than a fork in this operator.
+# The HAS_TLX_SCALED_MM guard is still required: has_tlx() only says TLX exists, not that
+# this specific kernel imports cleanly (missing file / syntax error / dep) -- without it a
+# broken kernel would crash benchmark registration instead of just disabling the backend.
+if has_tlx():
+    try:
+        from triton.language.extra.tlx.tutorials.blackwell_scaled_mm_ws import (
+            blackwell_scaled_mm_ws as tlx_scaled_mm,
+        )
+
+        HAS_TLX_SCALED_MM = True
+    except Exception:
+        tlx_scaled_mm = None
+        HAS_TLX_SCALED_MM = False
+else:
+    tlx_scaled_mm = None
+    HAS_TLX_SCALED_MM = False
+
 with try_import("HAS_VLLM_CUTLASS"):
     from vllm import _custom_ops as vllm_ops
 
@@ -461,6 +480,35 @@ class Operator(BenchmarkOperator):
         sb = scale_b.squeeze()
         return lambda: scaled_mm_autows(
             a, b, sa, sb, a_mode, b_mode, out_dtype=self._get_dtype()
+        )
+
+    # Hand-written warp-specialized TLX scaled_mm (CUTLASS SM100 mirror). Supports the
+    # asymmetric BlockWise (BlockWise1x128 activations + BlockWise128x128 weights,
+    # DeepSeek) recipe and RowWise. Inputs pass straight through -- scale layouts are
+    # exactly what get_scale() produces (blockwise: scale_a M-major, scale_b
+    # [N/128,K/128] row-major; rowwise: scale_a [M,1], scale_b [1,N]).
+    @register_benchmark(enabled=is_cuda() and has_tlx() and HAS_TLX_SCALED_MM)
+    def tlx_scaled_mm_fp8_gemm(self, a, b, scale_a, scale_b):
+        ra, rb = self.scaling_recipe_a, self.scaling_recipe_b
+        if ra == ScalingType.BlockWise1x128 and rb == ScalingType.BlockWise128x128:
+            return lambda: tlx_scaled_mm(
+                a, b, scale_a, scale_b, out_dtype=self._get_dtype()
+            )
+        # RowWise: K-independent per-row/per-col scales -> rowwise mode (accumulate all K
+        # in one accumulator, single scaled epilogue). Kernel reshapes scales to [M]/[N].
+        if ra == ScalingType.RowWise and rb == ScalingType.RowWise:
+            return lambda: tlx_scaled_mm(
+                a, b, scale_a, scale_b, out_dtype=self._get_dtype(), scale_mode="rowwise"
+            )
+        # TensorWise: scalar scales -> tensorwise mode (same K-independent mainloop, single
+        # scalar-scaled epilogue). Kernel reshapes scale_a/scale_b to 1-element tensors.
+        if ra == ScalingType.TensorWise and rb == ScalingType.TensorWise:
+            return lambda: tlx_scaled_mm(
+                a, b, scale_a, scale_b, out_dtype=self._get_dtype(), scale_mode="tensorwise"
+            )
+        raise NotImplementedError(
+            "tlx_scaled_mm supports --scaling-pair BlockWise1x128,BlockWise128x128, "
+            f"RowWise,RowWise, or TensorWise,TensorWise; got {ra},{rb}"
         )
 
     @register_benchmark(enabled=HAS_VLLM_CUTLASS)
