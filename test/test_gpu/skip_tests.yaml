@@ -28,6 +28,9 @@ flash_attention:
 blackwell_attentions:
   devices:
     - b200
+blackwell_attentions_mxfp8:
+  devices:
+    - b200
 nvfp4_gemm:
   devices:
     - b200
