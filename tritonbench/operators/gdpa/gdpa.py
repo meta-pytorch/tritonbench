@@ -1047,7 +1047,6 @@ bwd_configs_ws = [
             num_warps=w,
         )
     )
-    for buf in [2]
     for BM1 in [64]
     for BN1 in [128]
     for s in ([1, 2] if is_hip() else [0])
