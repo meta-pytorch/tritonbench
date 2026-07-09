@@ -166,6 +166,12 @@ def get_scale(
     def _get_scale_per_block(
         x: torch.Tensor, block_outer: int, block_inner: int
     ) -> (torch.Tensor, torch.Tensor):
+        M, K = x.shape
+        pad_outer = (-M) % block_outer
+        pad_inner = (-K) % block_inner
+        if pad_outer or pad_inner:
+            x = torch.nn.functional.pad(x, (0, pad_inner, 0, pad_outer))
+
         x = x.unflatten(1, (-1, block_inner)).unflatten(0, (-1, block_outer))
         amax = x.abs().amax(dim=[1, 3], keepdim=True).float()
         quant_scale = torch.finfo(torch.float8_e4m3fn).max / amax
@@ -174,6 +180,7 @@ def get_scale(
         )  # scale input UP to the dynamic range of float8_e4m3fn
         # Return the reciprocal (dequant) scale for _scaled_mm to recover real units.
         scale = quant_scale.reciprocal().flatten(2, 3).flatten(0, 1)
+        x = x[:M, :K]  # drop padding from the fp8 data; scale stays ceil_div-sized
 
         if block_outer == 1 and block_inner == 128:
             scale = (

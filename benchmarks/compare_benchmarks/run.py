@@ -79,8 +79,14 @@ def build_op_args(
     config: BenchmarkConfig,
     benchmark_name: str,
     input_loader: Optional[str] = None,
+    scaling_pair: Optional[str] = None,
 ) -> List[str]:
-    """Build command-line arguments for a single operator benchmark."""
+    """Build command-line arguments for a single operator benchmark.
+
+    ``scaling_pair`` is the per-shape-set recipe derived from the shape source
+    (e.g. ``RowWise,RowWise``). An explicit ``--scaling-pair`` flag
+    (``config.scaling_pair``) overrides it.
+    """
     tritonbench_op = OP_TO_TRITONBENCH_OP.get(op, op)
     args = [
         "--op",
@@ -95,6 +101,10 @@ def build_op_args(
         "--input-loader",
         input_loader,
     ]
+
+    effective_scaling_pair = getattr(config, "scaling_pair", None) or scaling_pair
+    if op == "scaled_mm" and effective_scaling_pair:
+        args.extend(["--scaling-pair", effective_scaling_pair])
 
     if config.custom_bench == "diode" and "diode" in benchmark_name:
         if config.diode_model_config is not None:
@@ -113,13 +123,14 @@ def run_benchmark_with_logs(
     output_dir: Path,
     workload: str,
     input_loader: str,
+    scaling_pair: Optional[str] = None,
 ) -> Optional[Path]:
     """
     Run a benchmark in a subprocess and capture autotune logs for parsing.
     Uses run_in_task to isolate each operator in its own subprocess.
     """
     log_file = output_dir / f"{op}_{benchmark_name}_{workload}.log"
-    op_args = build_op_args(op, config, benchmark_name, input_loader)
+    op_args = build_op_args(op, config, benchmark_name, input_loader, scaling_pair)
 
     print(f"[Compare Benchmarks] Running {benchmark_name} on {op}")
     print(f"[Compare Benchmarks] Args: {' '.join(str(arg) for arg in op_args)}")
@@ -222,11 +233,13 @@ def _resolve_input_loaders(
     op: str,
     gpu: str,
     output_dir: Path,
-) -> list[tuple[str, str]]:
+) -> list[tuple[str, str, Optional[str]]]:
     """Resolve input loader paths for a given op.
 
-    Returns a list of (label, path) tuples. The label is used for the
-    workload column in Scuba logging and log file naming.
+    Returns a list of (label, path, scaling_pair) tuples. The label is used for
+    the workload column in Scuba logging and log file naming. scaling_pair is
+    the fp8 recipe to evaluate the shapes under (scaled_mm Hive shapes only;
+    None otherwise).
 
     Priority:
       1. --input-loader <file>  -> single file
@@ -238,14 +251,14 @@ def _resolve_input_loaders(
 
         if loader_path.is_file():
             print(f"[Compare Benchmarks] Shape source: file '{config.input_loader}'")
-            return [(loader_path.stem, config.input_loader)]
+            return [(loader_path.stem, config.input_loader, None)]
 
         if loader_path.is_dir():
             results = []
             for json_file in sorted(loader_path.glob("*.json")):
                 if config.input_filter and config.input_filter not in json_file.name:
                     continue
-                results.append((json_file.stem, str(json_file)))
+                results.append((json_file.stem, str(json_file), None))
             if results:
                 print(
                     f"[Compare Benchmarks] Shape source: directory '{config.input_loader}' "
@@ -277,13 +290,21 @@ def _resolve_input_loaders(
         get_shapes_from_hive,
     )
 
-    hive_path = get_shapes_from_hive(
+    hive_results = get_shapes_from_hive(
         gpu, op, output_dir, config.hive_job_filter, config.hive_max_shapes
     )
-    if not hive_path:
+    if not hive_results:
         return []
-    label = config.hive_job_filter or "inductor_mm_shapes"
-    return [(label, hive_path)]
+    base_label = config.hive_job_filter or "inductor_mm_shapes"
+    loaders: list[tuple[str, str, Optional[str]]] = []
+    for scaling_pair, path in hive_results:
+        label = (
+            f"{base_label}_{scaling_pair.replace(',', '_')}"
+            if scaling_pair
+            else base_label
+        )
+        loaders.append((label, path, scaling_pair))
+    return loaders
 
 
 def run_benchmarks(config: BenchmarkConfig) -> None:
@@ -294,6 +315,7 @@ def run_benchmarks(config: BenchmarkConfig) -> None:
     print(f"[Compare Benchmarks] Ops: {config.ops}")
 
     all_dfs: List[pd.DataFrame] = []
+    op_row_counts: dict[str, int] = {op: 0 for op in config.ops}
 
     with tempfile.TemporaryDirectory() as tmpdir:
         output_dir = Path(tmpdir)
@@ -312,17 +334,18 @@ def run_benchmarks(config: BenchmarkConfig) -> None:
                 )
                 continue
 
-            for label, input_loader in input_loaders:
+            for label, input_loader, scaling_pair in input_loaders:
                 print(
                     f"[Compare Benchmarks] Running {op} ({label}): "
                     f"LHS={lhs_benchmark}, RHS={rhs_benchmark}"
+                    + (f", scaling_pair={scaling_pair}" if scaling_pair else "")
                 )
 
                 lhs_log = run_benchmark_with_logs(
-                    op, lhs_benchmark, config, output_dir, label, input_loader
+                    op, lhs_benchmark, config, output_dir, label, input_loader, scaling_pair
                 )
                 rhs_log = run_benchmark_with_logs(
-                    op, rhs_benchmark, config, output_dir, label, input_loader
+                    op, rhs_benchmark, config, output_dir, label, input_loader, scaling_pair
                 )
 
                 if not lhs_log or not rhs_log:
@@ -345,6 +368,15 @@ def run_benchmarks(config: BenchmarkConfig) -> None:
                         comparison_df["lhs_benchmark_name"] = lhs_benchmark
                         comparison_df["rhs_benchmark_name"] = rhs_benchmark
                         all_dfs.append(comparison_df)
+                        op_row_counts[op] += len(comparison_df)
+                    else:
+                        print(
+                            f"[Compare Benchmarks] WARNING: op={op} ({label}) "
+                            f"produced 0 comparison rows "
+                            f"(LHS={lhs_benchmark}, RHS={rhs_benchmark}). "
+                            "Benchmarks ran but the autotune parser found no "
+                            "matching results to compare."
+                        )
 
     combined_df = pd.concat(all_dfs, ignore_index=True) if all_dfs else pd.DataFrame()
 
@@ -361,6 +393,18 @@ def run_benchmarks(config: BenchmarkConfig) -> None:
 
         if config.parse_autotune_logs and config.log_scuba and is_fbcode():
             log_scuba(combined_df, config)
+
+    print(f"[Compare Benchmarks] Per-op comparison row counts for gpu={gpu}:")
+    for op in config.ops:
+        print(f"[Compare Benchmarks]   {op}: {op_row_counts.get(op, 0)} rows")
+    zero_ops = [op for op in config.ops if op_row_counts.get(op, 0) == 0]
+    if zero_ops:
+        print(
+            "[Compare Benchmarks] WARNING: the following ops produced 0 rows "
+            f"on gpu={gpu} (nothing logged): {', '.join(zero_ops)}. This "
+            "usually means a missing/disabled baseline, an unsupported op/GPU "
+            "combination, or an autotune-parser mismatch."
+        )
 
 
 def parse_args(args: List[str] = None) -> BenchmarkConfig:
@@ -438,6 +482,14 @@ def parse_args(args: List[str] = None) -> BenchmarkConfig:
         default=None,
         help=f"Custom experiment name to log to Scuba. Default: gpu_timestamp (printed at the end of the run)",
     )
+    parser.add_argument(
+        "--scaling-pair",
+        type=str,
+        default=None,
+        help="fp8/scaled_mm scaling recipe pair forwarded to the fp8_gemm "
+        "operator, e.g. 'RowWise,RowWise'. Only applies to --ops scaled_mm. "
+        "Default: None (operator default TensorWise,TensorWise).",
+    )
 
     if is_fbcode():
         parser.add_argument(
@@ -486,6 +538,7 @@ def parse_args(args: List[str] = None) -> BenchmarkConfig:
         "parse_autotune_logs": args.parse_autotune_logs,
         "log_scuba": args.log_scuba,
         "scuba_eval_id": args.scuba_eval_id,
+        "scaling_pair": args.scaling_pair,
     }
 
     if is_fbcode():

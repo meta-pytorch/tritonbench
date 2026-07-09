@@ -45,6 +45,7 @@ class BenchmarkConfig:
     parse_autotune_logs: bool = False
     log_scuba: bool = False
     scuba_eval_id: str = None
+    scaling_pair: Optional[str] = None
 
 
 @dataclass
@@ -197,19 +198,13 @@ def log_benchmark(
             batch = safe_int(row.get("B"), default=None)
             op = safe_str(row.get("Operation"))
 
-            scale_a_row = safe_int(row.get("scale_a_row_dim"), default=None)
-            scale_a_col = safe_int(row.get("scale_a_col_dim"), default=None)
-            scale_b_row = safe_int(row.get("scale_b_row_dim"), default=None)
-            scale_b_col = safe_int(row.get("scale_b_col_dim"), default=None)
+            scale_a_row = safe_int(row.get("scale_a_row_dim"), default=1)
+            scale_a_col = safe_int(row.get("scale_a_col_dim"), default=1)
+            scale_b_row = safe_int(row.get("scale_b_row_dim"), default=1)
+            scale_b_col = safe_int(row.get("scale_b_col_dim"), default=1)
             scale_a_recipe = None
             scale_b_recipe = None
-            if (
-                op == "scaled_mm"
-                and scale_a_row is not None
-                and scale_a_col is not None
-                and scale_b_row is not None
-                and scale_b_col is not None
-            ):
+            if op == "scaled_mm":
                 from torch._inductor.fb.shape_logging import _scale_recipe
 
                 dtype_str = safe_str(row.get("Dtype"))
@@ -221,19 +216,13 @@ def log_benchmark(
                 scale_dtype = torch.float32
                 scale_a_recipe = (
                     _scale_recipe(
-                        (m_dim, k_dim),
-                        mat_dtype,
-                        (scale_a_row, scale_a_col),
-                        scale_dtype,
+                        (m_dim, k_dim), mat_dtype, (scale_a_row, scale_a_col), scale_dtype
                     )
                     or None
                 )
                 scale_b_recipe = (
                     _scale_recipe(
-                        (k_dim, n_dim),
-                        mat_dtype,
-                        (scale_b_row, scale_b_col),
-                        scale_dtype,
+                        (k_dim, n_dim), mat_dtype, (scale_b_row, scale_b_col), scale_dtype
                     )
                     or None
                 )
