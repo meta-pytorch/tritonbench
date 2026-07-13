@@ -28,6 +28,10 @@ flash_attention:
 blackwell_attentions:
   devices:
     - b200
+  # Default input-0 is N_CTX=128, which triggers an AutoWS compiler crash and a
+  # cross-tile race on the persistent Blackwell FA path (single-trip inner
+  # loop). Run seq>=256 in CI until that is fixed. See T279315890.
+  extra_args: --seq-len 256
 blackwell_attentions_mxfp8:
   devices:
     - b200
