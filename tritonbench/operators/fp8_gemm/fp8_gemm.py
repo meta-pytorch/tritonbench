@@ -16,7 +16,13 @@ from tritonbench.operators.fp8_gemm.scaled_mm_autows import (
     scaled_mm_autows,
     TENSORWISE as AUTOWS_TENSORWISE,
 )
-from tritonbench.utils.env_utils import has_meta_ws, IS_BLACKWELL, is_cuda, is_fbcode
+from tritonbench.utils.env_utils import (
+    has_meta_ws,
+    IS_BLACKWELL,
+    is_cuda,
+    is_fbcode,
+    is_hip,
+)
 from tritonbench.utils.python_utils import try_import
 from tritonbench.utils.triton_op import (
     BenchmarkOperator,
@@ -326,9 +332,7 @@ class Operator(BenchmarkOperator):
             out_dtype=self._get_dtype(),
         )
 
-    # On AMD it says:
-    # AttributeError("module 'triton.language' has no attribute 'float8_e4m3fn'")
-    @register_benchmark(enabled=is_cuda())
+    @register_benchmark(enabled=is_cuda() or is_hip())
     def pt2_fp8_gemm(self, a, b, scale_a, scale_b) -> Callable:
         torch._dynamo.reset()
         with inductor_config.patch(
