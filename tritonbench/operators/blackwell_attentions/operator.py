@@ -59,6 +59,13 @@ try:
 except Exception:
     HAS_TRITON_TUTORIAL_FA2 = False
 
+# Upstream 06-fused-attention with warp_specialize currently crashes in
+# TritonGPUAutomaticWarpSpecialization on Blackwell ("ttng.tmem_alloc op
+# operation destroyed but still has uses"). Disable this benchmark until the
+# upstream-WS regression is fixed so blackwell_attentions CI is green. See
+# T279315890.
+HAS_TRITON_TUTORIAL_FA2 = False
+
 if SUPPORT_GLUON:
     from tritonbench.kernels.gluon_attention_forward import (
         attention_forward as gluon_blackwell_fwd,
