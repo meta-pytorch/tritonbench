@@ -94,6 +94,17 @@ class CallGraph(ast.NodeVisitor):
         self.bindings_stack: List[Dict[str, str]] = [dict()]
         self.local_functions: Set[str] = set()
 
+        # (scope, var name) -> set of every symbol the var was ever assigned.
+        # Used to resolve `capture_triton(kernel_fn)` indirection where a local
+        # variable is (conditionally) bound to one of several triton kernels.
+        self.name_targets: Dict[Tuple[str, str], Set[str]] = {}
+
+        # simple name -> every target it was ever bound to (imports, defs,
+        # assigns). Used to recover alternatives when a name is shadowed, e.g.
+        # `from X import k as f` inside `if has_tlx():` followed by a fallback
+        # `def f(...): raise` — last-write-wins would only keep the stub.
+        self.all_targets: Dict[str, List[str]] = {}
+
         # lambda node -> synthetic id (stable within this pass)
         self._lambda_ids: Dict[ast.Lambda, str] = {}
 
@@ -111,6 +122,9 @@ class CallGraph(ast.NodeVisitor):
 
     def _bind(self, name: str, target: str):
         self.bindings_stack[-1][name] = target
+        targets = self.all_targets.setdefault(name, [])
+        if target not in targets:
+            targets.append(target)
 
     def _bind_func_descriptor(self, node, decorators: List[str]):
         name = node.name
@@ -337,11 +351,52 @@ class CallGraph(ast.NodeVisitor):
             for t in node.targets:
                 if isinstance(t, ast.Name):
                     self._bind(t.id, sym)
+                    # Track *every* symbol bound to this name in this scope, so
+                    # `capture_triton(var)` can be resolved to all candidate
+                    # kernels even when `var` is conditionally reassigned.
+                    self.name_targets.setdefault((self._cur_scope(), t.id), set()).add(
+                        sym
+                    )
                     if any([t.id == backend for backend in self.backends.keys()]):
                         print(
                             f"recording assignment for backend: {self.backends}, tid: {t.id}"
                         )
                         self._record_assignment(t.id, sym, node)
+        elif isinstance(node.value, ast.Call):
+            # `var = wrapper(kernel, ...)` (e.g. an autotune helper that takes
+            # the kernel as an argument and returns a launchable). Treat the
+            # call's name arguments as candidate kernels for `var`, so a later
+            # `var[grid](...)` / `capture_triton(var)` resolves to them.
+            arg_targets = set()
+            for a in node.value.args:
+                if isinstance(a, ast.Name):
+                    arg_targets.add(self._resolve_name(a.id))
+                elif isinstance(a, ast.Attribute):
+                    arg_targets.add(self._resolve_attr(a))
+            if arg_targets:
+                for t in node.targets:
+                    if isinstance(t, ast.Name):
+                        self.name_targets.setdefault(
+                            (self._cur_scope(), t.id), set()
+                        ).update(arg_targets)
+        elif isinstance(node.value, ast.IfExp):
+            # `var = A if cond else B` where A/B are triton kernels selected at
+            # runtime (e.g. a warp-specialized vs. plain kernel). Record both
+            # branches as candidate kernels for `var` so a later
+            # `var[grid](...)` / `capture_triton(var)` resolves to the real
+            # kernel name(s) instead of the launcher-variable placeholder.
+            branch_targets = set()
+            for branch in (node.value.body, node.value.orelse):
+                if isinstance(branch, ast.Name):
+                    branch_targets.add(self._resolve_name(branch.id))
+                elif isinstance(branch, ast.Attribute):
+                    branch_targets.add(self._resolve_attr(branch))
+            if branch_targets:
+                for t in node.targets:
+                    if isinstance(t, ast.Name):
+                        self.name_targets.setdefault(
+                            (self._cur_scope(), t.id), set()
+                        ).update(branch_targets)
         self.generic_visit(node)
 
     def visit_AnnAssign(self, node: ast.AnnAssign):
@@ -360,6 +415,12 @@ class CallGraph(ast.NodeVisitor):
     def visit_Call(self, node: ast.Call):
         fn = node.func
         maybe_triton = False
+        # Additional callees to record alongside the primary one, used to
+        # resolve `capture_triton(var)` indirection into the real kernel(s).
+        extra_callees: List[str] = []
+        # When True, the primary callee is a launcher variable (not a kernel
+        # itself) whose real kernels are in extra_callees -- skip recording it.
+        skip_primary = False
         if isinstance(fn, ast.Name):
             callee = self._resolve_name(fn.id)
         elif isinstance(fn, ast.Attribute):
@@ -371,10 +432,24 @@ class CallGraph(ast.NodeVisitor):
         ):  # highly likely to be triton - met a function call with subscript
             if isinstance(fn.value, ast.Name):
                 callee = fn.value.id
+                # `kernel_fn[grid](...)` where kernel_fn is a local variable
+                # (conditionally) bound to one or more triton kernels: record
+                # the resolved kernel name(s) so the real kernel is captured,
+                # and drop the launcher variable name itself.
+                resolved_targets = self.name_targets.get(
+                    (self._cur_scope(), fn.value.id), set()
+                )
+                if resolved_targets:
+                    extra_callees.extend(t.split(".")[-1] for t in resolved_targets)
+                    skip_primary = True
             elif isinstance(fn.value, ast.Attribute):
                 callee = fn.value.value.id
                 if hasattr(fn.value, "attr"):
-                    callee = callee + "." + fn.value.attr
+                    # `kernel.fn[grid](...)` launches the underlying triton
+                    # kernel; treat it as `kernel[grid](...)` so we record the
+                    # real kernel name rather than a `<name>.fn` duplicate.
+                    if fn.value.attr != "fn":
+                        callee = callee + "." + fn.value.attr
             elif isinstance(fn.value, ast.Call):
                 # add hack to handle torch._library.capture_triton
                 if (
@@ -395,6 +470,20 @@ class CallGraph(ast.NodeVisitor):
                     else:
                         callee_func = "unknown"
                     callee = f"<torch._library.capture_triton({callee_func})>"
+                    # Resolve the wrapped argument to the real kernel(s) so the
+                    # actual triton.jit name is recorded (not just the wrapper
+                    # placeholder). `capture_triton(kernel_fn)` where kernel_fn
+                    # is (conditionally) bound to one or more triton kernels.
+                    # Emit the unqualified name(s): when the kernel is defined
+                    # in this module, _record_call resolves its triton.jit
+                    # descriptor and validate_edges records it directly.
+                    targets = self.name_targets.get((self._cur_scope(), callee_func))
+                    if targets:
+                        extra_callees.extend(t.split(".")[-1] for t in targets)
+                    else:
+                        resolved = self._resolve_name(callee_func)
+                        if resolved != callee_func:
+                            extra_callees.append(resolved.split(".")[-1])
                 else:
                     if isinstance(fn.value.func, ast.Name):
                         callee = self._resolve_name(fn.value.func.id)
@@ -408,7 +497,10 @@ class CallGraph(ast.NodeVisitor):
         else:
             callee = "<dynamic_call>"
 
-        self._record_call(callee, node, maybe_triton=maybe_triton)
+        if not skip_primary:
+            self._record_call(callee, node, maybe_triton=maybe_triton)
+        for extra in extra_callees:
+            self._record_call(extra, node, maybe_triton=True)
         self.generic_visit(node)
 
 
@@ -418,6 +510,58 @@ def _strip_link_tree_prefix(path: str) -> str:
     if idx != -1:
         return path[idx + len(marker) :]
     return path
+
+
+def _augment_with_alternatives(
+    callees: List[str], all_targets: Dict[str, List[str]]
+) -> List[str]:
+    """Add alternative module-level bindings for each callee's simple name.
+
+    Handles names shadowed by a fallback stub: a callee resolved to the stub
+    also gets its import target enqueued so the real kernel is still found.
+    """
+    result = list(callees)
+    seen = set(callees)
+    for callee in callees:
+        simple = callee.rsplit(".", 1)[-1]
+        for alt in all_targets.get(simple, []):
+            if alt not in seen:
+                result.append(alt)
+                seen.add(alt)
+    return result
+
+
+def _resolve_triton_op_kernels(callee: str) -> List[str]:
+    """Resolve a `torch.ops.<ns>.<op>` callee to the triton kernels it wraps.
+
+    Ops registered via `torch._library.triton_op` (e.g. ads_mkl custom ops) are
+    not statically traceable -- the kernel launch happens inside the registered
+    implementation. torch records the wrapped triton kernels at registration
+    time, so query that registry at runtime to recover the real kernel names.
+    Returns an empty list for non-triton_op custom ops (e.g. fbgemm C++ ops).
+    """
+    if not callee.startswith("torch.ops."):
+        return []
+    rest = callee[len("torch.ops.") :]
+    parts = rest.split(".", 1)
+    if len(parts) != 2:
+        return []
+    op_name = f"{parts[0]}::{parts[1]}"
+    try:
+        from torch._library.triton import get_triton_kernels_for_op
+
+        kernels = get_triton_kernels_for_op(op_name)
+    except Exception:
+        return []
+    names: List[str] = []
+    for k in kernels or []:
+        name = getattr(k, "__name__", None)
+        if name is None:
+            inner = getattr(k, "fn", None)
+            name = getattr(inner, "__name__", None)
+        if name:
+            names.append(name)
+    return names
 
 
 def validate_edges(edges, source_file: str = "") -> Dict[str, str]:
@@ -432,6 +576,18 @@ def validate_edges(edges, source_file: str = "") -> Dict[str, str]:
             result_tags["kernels"].append(edge.caller)
             if source_file:
                 result_tags["files"].append(source_file)
+        # Helion kernels are built via `helion.kernel(...)` (a call) or the
+        # `@helion.kernel` decorator. They generate their GPU kernels at
+        # runtime, so reaching this marker is as deep as static analysis can
+        # go: tag the backend "helion" and stop.
+        if edge.callee == "helion.kernel" or (
+            edge.callee_descriptor
+            and "helion.kernel" in edge.callee_descriptor.decorators
+        ):
+            result_tags["tags"].append("helion")
+            result_tags["kernels"].append(edge.caller)
+            if source_file:
+                result_tags["files"].append(source_file)
         if edge.callee_descriptor and (
             "triton.jit" in edge.callee_descriptor.decorators
             or "<dynamic_decorator_triton.jit>" in edge.callee_descriptor.decorators
@@ -441,16 +597,27 @@ def validate_edges(edges, source_file: str = "") -> Dict[str, str]:
             if source_file:
                 result_tags["files"].append(source_file)
         if edge.callee.startswith("<torch._library.capture_triton"):
+            # Tag triton, but do not record the wrapper placeholder as a
+            # kernel: the real kernel name is resolved from the wrapped
+            # argument (see capture_triton handling in visit_Call) and recorded
+            # via the triton.jit branch above.
             result_tags["tags"].append("triton")
-            result_tags["kernels"].append(edge.callee)
             if source_file:
                 result_tags["files"].append(source_file)
         if (
             edge.callee.startswith("torch.ops.")
             and not "cutedsl" in result_tags["tags"]
         ):
-            result_tags["tags"].append("native_custom_ops")
-            result_tags["kernels"].append(edge.callee)
+            # If this custom op was registered via torch._library.triton_op,
+            # recover the real triton kernel names it wraps; otherwise fall
+            # back to recording it as an opaque native custom op.
+            triton_op_kernels = _resolve_triton_op_kernels(edge.callee)
+            if triton_op_kernels:
+                result_tags["tags"].append("triton")
+                result_tags["kernels"].extend(triton_op_kernels)
+            else:
+                result_tags["tags"].append("native_custom_ops")
+                result_tags["kernels"].append(edge.callee)
             if source_file:
                 result_tags["files"].append(source_file)
         if edge.callee.startswith("triton.experimental.gluon"):
@@ -477,10 +644,10 @@ def validate_edges(edges, source_file: str = "") -> Dict[str, str]:
             result_tags["kernels"].append(edge.callee)
             if source_file:
                 result_tags["files"].append(source_file)
-    # remove duplicates
-    result_tags["tags"] = list(set(result_tags["tags"]))
-    result_tags["kernels"] = list(set(result_tags["kernels"]))
-    result_tags["files"] = list(set(result_tags["files"]))
+    # remove duplicates; sort for deterministic output
+    result_tags["tags"] = sorted(set(result_tags["tags"]))
+    result_tags["kernels"] = sorted(set(result_tags["kernels"]))
+    result_tags["files"] = sorted(set(result_tags["files"]))
     if not result_tags["kernels"] and not result_tags["tags"]:
         return None
     if not result_tags["files"]:
@@ -496,12 +663,27 @@ def gen_static_extension_tags(callee: str) -> Dict[str, str]:
 
 
 def trace_callees(callees_with_module: List[Tuple[str, str]], depth=8):
-    """Bread-first search, maximum depth 10"""
+    """Breadth-first search over the call graph, maximum depth `depth`.
+
+    Records the *union* of kernels reachable through all branches rather than
+    returning on the first match. A dispatcher (e.g. an autograd ``forward()``
+    that selects among several kernel variants at runtime based on the GPU
+    arch or input shape) can reach multiple kernels; the static analysis must
+    report all of them so it can match whichever one the runtime actually
+    launches. When a branch yields a kernel we stop descending that branch but
+    keep draining the queue so sibling branches are still explored.
+    """
     queue = [
         {"callee": callee[0], "module": callee[1], "depth": 1}
         for callee in callees_with_module
     ]
     seen = set()
+    merged: Dict[str, List[str]] = {"tags": [], "kernels": [], "files": []}
+
+    def _merge_tags(into: Dict[str, List[str]], tags: Dict[str, Any]) -> None:
+        for key in ("tags", "kernels", "files"):
+            into[key].extend(tags.get(key, []))
+
     while len(queue):
         cur = queue.pop(0)
         if cur["depth"] > depth:
@@ -581,7 +763,8 @@ def trace_callees(callees_with_module: List[Tuple[str, str]], depth=8):
             f"Found entity {callee} at module {module.__name__}. Searching callee {callee_name}"
         )
         if source_file == "static-extension":
-            return gen_static_extension_tags(callee)
+            _merge_tags(merged, gen_static_extension_tags(callee))
+            continue
         if source_file.endswith(".so"):
             continue
         real_module_name = module.__name__
@@ -598,11 +781,16 @@ def trace_callees(callees_with_module: List[Tuple[str, str]], depth=8):
         cg.visit(tree)
         # get next level callees
         print(cg.edges)
-        # validate the edges: if any of them uses triton, apply triton tag and stop searching
+        # validate the edges: if any of them uses triton/native kernels,
+        # record them and stop descending this branch (the kernel is the
+        # leaf), but keep exploring sibling branches still in the queue.
         tags = validate_edges(cg.edges, source_file=source_file)
         if tags:
-            return tags
-        next_level_callees = [edge.callee for edge in cg.edges]
+            _merge_tags(merged, tags)
+            continue
+        next_level_callees = _augment_with_alternatives(
+            [edge.callee for edge in cg.edges], cg.all_targets
+        )
         for next_level_callee in next_level_callees:
             queue.append(
                 {
@@ -611,8 +799,16 @@ def trace_callees(callees_with_module: List[Tuple[str, str]], depth=8):
                     "depth": cur["depth"] + 1,
                 }
             )
-    # No valid tags are found, return None
-    return None
+    # Return the union of kernels/tags found across all reachable branches;
+    # sort for deterministic output.
+    merged["tags"] = sorted(set(merged["tags"]))
+    merged["kernels"] = sorted(set(merged["kernels"]))
+    merged["files"] = sorted(set(merged["files"]))
+    if not merged["kernels"] and not merged["tags"]:
+        return None
+    if not merged["files"]:
+        del merged["files"]
+    return merged
 
 
 def build_backend_callees(
@@ -629,5 +825,11 @@ def build_backend_callees(
         backends=backends,
     )
     cg.visit(tree)
+    # Augment each backend's callees with alternative module-level bindings so
+    # a callee shadowed by a fallback stub still reaches the real import.
+    for backend in cg.backends:
+        cg.backends[backend] = _augment_with_alternatives(
+            cg.backends[backend], cg.all_targets
+        )
     print(cg.backends)
     return cg.backends

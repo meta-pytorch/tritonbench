@@ -34,9 +34,17 @@ from tritonbench.utils.run_utils import load_operator_by_args, run_in_task
 from tritonbench.utils.triton_op import REGISTERED_BENCHMARKS
 
 try:
-    from ast_analyzer import build_backend_callees, trace_callees
+    from ast_analyzer import (
+        _resolve_triton_op_kernels,
+        build_backend_callees,
+        trace_callees,
+    )
 except ImportError:
-    from .ast_analyzer import build_backend_callees, trace_callees
+    from .ast_analyzer import (
+        _resolve_triton_op_kernels,
+        build_backend_callees,
+        trace_callees,
+    )
 
 
 def get_parser():
@@ -330,8 +338,9 @@ def merge_decorator_tags(op_name, backend_name, tags_dict):
         backend_config.tags if (backend_config and backend_config.tags) else []
     )
     if decorator_tags:
-        # Merge decorator tags with auto-detected tags (remove duplicates)
-        all_tags = list(set(decorator_tags + tags_dict["tags"]))
+        # Merge decorator tags with auto-detected tags (remove duplicates);
+        # sort for deterministic output
+        all_tags = sorted(set(decorator_tags + tags_dict["tags"]))
         tags_dict["tags"] = all_tags
 
     return tags_dict
@@ -354,19 +363,34 @@ def prevalidate_backends(backend_edges, op_name=None, opbench_file=None):
         elif any(["xformers" in callee for callee in callees]):
             op_with_tags[backend] = {"tags": ["xformers"]}
         elif any([callee.startswith("torch.ops.") for callee in callees]):
-            custom_op_category = [
-                callee for callee in callees if callee.startswith("torch.ops.")
-            ]
-            op_with_tags[backend] = {
-                "tags": ["native_custom_ops"],
-                "kernels": custom_op_category,
-            }
+            custom_op_category = sorted(
+                {callee for callee in callees if callee.startswith("torch.ops.")}
+            )
+            # Ops registered via torch._library.triton_op wrap real triton
+            # kernels; recover their names so they match the kineto trace.
+            triton_op_kernels = sorted(
+                {
+                    kernel
+                    for callee in custom_op_category
+                    for kernel in _resolve_triton_op_kernels(callee)
+                }
+            )
+            if triton_op_kernels:
+                op_with_tags[backend] = {
+                    "tags": ["triton"],
+                    "kernels": triton_op_kernels,
+                }
+            else:
+                op_with_tags[backend] = {
+                    "tags": ["native_custom_ops"],
+                    "kernels": custom_op_category,
+                }
+                if any(["fbgemm" in callee for callee in callees]):
+                    op_with_tags[backend]["tags"].append("fbgemm")
+                if any(["mslk" in callee for callee in callees]):
+                    op_with_tags[backend]["tags"].append("mslk")
             if opbench_file:
                 op_with_tags[backend]["files"] = [opbench_file]
-            if any(["fbgemm" in callee for callee in callees]):
-                op_with_tags[backend]["tags"].append("fbgemm")
-            if any(["mslk" in callee for callee in callees]):
-                op_with_tags[backend]["tags"].append("mslk")
 
     # Apply name-based heuristics for all prevalidated backends
     for backend in op_with_tags.keys():
@@ -382,11 +406,30 @@ def prevalidate_backends(backend_edges, op_name=None, opbench_file=None):
     return op_with_tags
 
 
+# Operators that cannot be statically analyzed and must be skipped:
+#   - alphakernel_conv1d: downloads an artifact and parses argv with its own
+#     argparse on import, which can abort the whole run.
+#   - aoti_kernel: kernels are AOT-compiled artifacts, not statically traceable.
+_SKIP_STATIC_ANALYSIS_OPS = frozenset(
+    {
+        "alphakernel_conv1d",
+        "aoti_kernel",
+    }
+)
+
+
 def trace_op(op):
     op_with_tags = {op: {}}
+    if op in _SKIP_STATIC_ANALYSIS_OPS:
+        logger.warning(f"Skipping static analysis for operator '{op}' (hardcoded).")
+        return op_with_tags
     try:
         opbench = load_operator_by_args(task_args=["--op", op])
-    except Exception as e:
+    except (Exception, SystemExit) as e:
+        # Some operators (e.g. alphakernel_conv1d) parse argv with their own
+        # argparse on import, which raises SystemExit on failure. Catch it
+        # alongside Exception so one bad operator does not abort tracing of
+        # the entire operator set.
         logger.warning(f"Failed to load operator '{op}': {e}. Skipping.")
         return op_with_tags
     opbench_file = inspect.getfile(opbench.__class__)
@@ -529,6 +572,40 @@ def run_kineto_validation(
         op_results = results.get(op, {})
         validation[op] = {}
         for backend, static_info in op_results.items():
+            # Skip backends whose kernels are intentionally not traced by
+            # static analysis, otherwise a kineto comparison always reports a
+            # spurious mismatch:
+            #   - xformers: dispatches into the external xformers library
+            #     (see prevalidate_backends)
+            #   - helion: generates its kernels at runtime (tagged when the
+            #     trace reaches a `helion.kernel` marker, see validate_edges)
+            #   - pt2: torch.compile / inductor generated kernels, which are
+            #     not statically traceable (see prevalidate_backends)
+            static_tags = static_info.get("tags", []) if static_info else []
+            skip_reason = next(
+                (tag for tag in ("xformers", "helion", "pt2") if tag in static_tags),
+                None,
+            )
+            # Backends that dispatch only into opaque native custom ops
+            # (fbgemm / mslk C++ ops, or other torch.ops not registered via
+            # torch._library.triton_op) cannot be traced past the op boundary:
+            # the recorded "kernel" is the `torch.ops.*` name itself, which
+            # never matches a real kineto kernel name. Such an op may launch a
+            # handwritten triton kernel internally, producing a spurious
+            # mismatch. Skip these -- but only when static analysis did not
+            # also recover real triton kernels for the backend (tag "triton"),
+            # in which case those kernels are still worth validating.
+            if (
+                skip_reason is None
+                and "native_custom_ops" in static_tags
+                and "triton" not in static_tags
+            ):
+                skip_reason = "native_custom_ops"
+            if skip_reason is not None:
+                logger.info(
+                    f"[{op}/{backend}] skipping kineto validation ({skip_reason} backend)"
+                )
+                continue
             static_kernels = static_info.get("kernels", []) if static_info else []
             kineto_kernels, status = collect_kineto_kernel_names_subprocess(
                 op, backend, trace_dir=kineto_trace_dir, bypass_run=bypass_run
