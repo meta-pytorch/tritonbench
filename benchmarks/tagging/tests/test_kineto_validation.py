@@ -6,6 +6,7 @@ import os
 import tempfile
 import unittest
 
+from pytorch.tritonbench.benchmarks.tagging.ast_analyzer import build_backend_callees
 from pytorch.tritonbench.benchmarks.tagging.run import (
     extract_kernel_names,
     parse_kineto_trace,
@@ -129,3 +130,44 @@ class ParseKinetoTraceFromJsonTest(unittest.TestCase):
             "https://www.internalfb.com/intern/perfdoctor/trace_view?filepath=foo"
         )
         self.assertEqual(names, [])
+
+
+class IfExpKernelResolutionTest(unittest.TestCase):
+    """Static analysis must resolve a kernel launched through a ternary-bound
+    variable (``fn = A if cond else B; fn[grid](...)``) to the real kernel
+    name(s), not the launcher-variable placeholder ``fn``. This mirrors
+    ``mslk.gemm.triton.grouped_gemm._grouped_gemm`` (fp8_gemm_rowwise_grouped).
+    """
+
+    SOURCE = (
+        "def _kernel_ws():\n"
+        "    pass\n"
+        "\n"
+        "def _kernel_plain():\n"
+        "    pass\n"
+        "\n"
+        "class Operator:\n"
+        "    def my_backend(self):\n"
+        "        fn = _kernel_ws if self.use_ws else _kernel_plain\n"
+        "        fn[grid](a, b)\n"
+    )
+
+    def _callee_simple_names(self):
+        backends = build_backend_callees(
+            source=self.SOURCE,
+            filename="operator.py",
+            module_name="tritonbench.operators.test.operator",
+            backends=["my_backend"],
+        )
+        # Recorded callees may be module-qualified; compare on the simple name,
+        # which is what is matched against kineto kernel names.
+        return {c.rsplit(".", 1)[-1] for c in backends["my_backend"]}
+
+    def test_resolves_both_ternary_branches(self) -> None:
+        names = self._callee_simple_names()
+        self.assertIn("_kernel_ws", names, f"actual={names}")
+        self.assertIn("_kernel_plain", names, f"actual={names}")
+
+    def test_does_not_record_launcher_variable(self) -> None:
+        # Without IfExp handling the analyzer recorded the bare ``fn`` name.
+        self.assertNotIn("fn", self._callee_simple_names())
