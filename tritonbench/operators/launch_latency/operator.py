@@ -1,4 +1,5 @@
 import os
+from contextlib import contextmanager
 
 import torch
 from torch import zeros
@@ -759,6 +760,59 @@ class Operator(BenchmarkOperator):
         # remove constexpr args
         cute_args = cute_args[:-5]
         return lambda: kernel(*cute_args)
+
+    @register_benchmark(enabled=is_cuda())
+    def auto_tma_launch(self, *args):
+        """Launch latency of an auto-TMA-promoted kernel (TRITON_AUTO_TMA=1).
+
+        Compares device-build vs host-build of the TMA descriptor: device-build
+        allocates global scratch + builds the CUtensorMap on-GPU each launch;
+        host-build (recipe core) builds it on the host with no scratch. Run this
+        on both the host-build and device-build commits to get the delta.
+        """
+        # Only benchmark once (for the empty-args input variant).
+        if len(args) != 0:
+            return lambda: None
+        import triton as _triton
+
+        from .kernels import auto_tma_add_kernel, make_auto_tma_inputs
+
+        # TRITON_AUTO_TMA gates auto-TMA promotion at compile time and is part
+        # of the kernel's compile options, so it must be active whenever this
+        # kernel is (re)compiled -- including the returned callable's first
+        # launch. Scope it around every launch (restoring the prior value)
+        # rather than mutating os.environ globally, so it can't leak into other
+        # benchmarks compiled later in the same process. The two dict ops are
+        # negligible vs. the launch overhead being measured and are present on
+        # both the host-build and device-build commits, so the delta is unaffected.
+        @contextmanager
+        def _auto_tma_env():
+            prev = os.environ.get("TRITON_AUTO_TMA")
+            os.environ["TRITON_AUTO_TMA"] = "1"
+            try:
+                yield
+            finally:
+                if prev is None:
+                    os.environ.pop("TRITON_AUTO_TMA", None)
+                else:
+                    os.environ["TRITON_AUTO_TMA"] = prev
+
+        # Allocator is required by device-build; harmless (unused) for host-build.
+        _triton.set_allocator(
+            lambda size, alignment, stream: torch.empty(
+                size, dtype=torch.int8, device="cuda"
+            )
+        )
+        x, y, out, N, block = make_auto_tma_inputs()
+        grid = (_triton.cdiv(N, block),)
+        with _auto_tma_env():
+            auto_tma_add_kernel[grid](x, y, out, N, BLOCK=block)  # warmup + compile
+
+        def _run():
+            with _auto_tma_env():
+                return auto_tma_add_kernel[grid](x, y, out, N, BLOCK=block)
+
+        return _run
 
     @register_benchmark(baseline=True)
     def nop_python_function(self, *args):

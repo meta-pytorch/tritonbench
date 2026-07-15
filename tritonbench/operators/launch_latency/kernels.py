@@ -239,6 +239,26 @@ def make_tensordesc_inputs(m_block: int = 8, n_block: int = 32):
     return out, desc, M, N, m_block, n_block
 
 
+# --- Auto-TMA-eligible kernel (plain masked block load) for device-vs-host
+# launch-latency comparison under TRITON_AUTO_TMA=1. Plain @triton.jit (no
+# c_cache) so it goes through the variadic CudaLauncher where auto-TMA recipes
+# are wired.
+@triton.jit
+def auto_tma_add_kernel(x_ptr, y_ptr, out_ptr, N, BLOCK: tl.constexpr):
+    offs = tl.program_id(0) * BLOCK + tl.arange(0, BLOCK)
+    mask = offs < N
+    x = tl.load(x_ptr + offs, mask=mask)
+    y = tl.load(y_ptr + offs, mask=mask)
+    tl.store(out_ptr + offs, x + y, mask=mask)
+
+
+def make_auto_tma_inputs(N: int = 8192, block: int = 256):
+    x = torch.randn(N, device="cuda", dtype=torch.float16)
+    y = torch.randn(N, device="cuda", dtype=torch.float16)
+    out = torch.empty(N, device="cuda", dtype=torch.float16)
+    return x, y, out, N, block
+
+
 # --- Autotuned kernel for benchmarking c_cache + autotune interaction ---
 # Uses num_ctas to exercise cluster dispatch path 1 (num_ctas > 1 → clusterDim.x = num_ctas).
 
