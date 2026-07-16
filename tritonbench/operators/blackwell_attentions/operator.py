@@ -317,6 +317,9 @@ def detach_inputs(*args):
 
 def multi_input_wrapper(fn):
     def wrapper(self, *args):
+        # Drop stale entries: they pin each prior input's q/k/v copies,
+        # which OOMs the GPU over a full SWEEP_SHAPES sweep.
+        self.optims.clear()
         preproc_fn, benchmark_fn = fn(self, *args)
         arg_len = len(args)
         assert arg_len % 3 == 0
