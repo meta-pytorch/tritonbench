@@ -23,7 +23,7 @@ dev-nvidia = [
     "matplotlib",
     "pyyaml",
     "nvidia-ml-py",
-    "transformers==5.0.0rc3",
+    "transformers==5.5.0",
 ]
 dev-amd = [
     "packaging",
@@ -31,7 +31,7 @@ dev-amd = [
     "tabulate",
     "matplotlib",
     "pyyaml",
-    "transformers==5.0.0rc3",
+    "transformers==5.5.0",
 ]
 dev-cpu = [
     "packaging",
@@ -39,7 +39,7 @@ dev-cpu = [
     "tabulate",
     "matplotlib",
     "pyyaml",
-    "transformers==5.0.0rc3",
+    "transformers==5.5.0",
 ]
 dev-tpu = [
     "packaging",
@@ -47,7 +47,7 @@ dev-tpu = [
     "tabulate",
     "matplotlib",
     "pyyaml",
-    "transformers==5.0.0rc3",
+    "transformers==5.5.0",
     # triton is not used on TPU (no Triton kernels run there), but many
     # operators `import triton` at module load; install it so they import.
     "triton",
