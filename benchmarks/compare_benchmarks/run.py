@@ -27,7 +27,7 @@ Examples:
     # Custom shape file instead of Hive:
     buck2 run @mode/opt //pytorch/tritonbench/benchmarks:compare_benchmarks -- \
         --custom-bench diode --ops gemm \
-        --input-loader fb/cmf/h100/shapes_mm.json
+        --input-loader fb/nvidia_h100/mm_cmf.json
 
     # Directory of shape files, filtered by substring:
     buck2 run @mode/opt //pytorch/tritonbench/benchmarks:compare_benchmarks -- \

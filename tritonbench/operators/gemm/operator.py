@@ -416,6 +416,12 @@ class Operator(BenchmarkOperator):
 
     @register_benchmark(enabled=IS_BLACKWELL and has_tlx())
     def torch_tlx_mm(self, a, b, bias) -> Callable:
+        # torch_tlx_<op> convention: PT2 (torch.compile max-autotune, TRITON
+        # backend) with TLX "allow" mode, so TLX templates compete against the
+        # standard Triton templates during autotuning. Identical to the
+        # pt2_triton_matmul baseline except for triton.tlx_mode, giving a clean
+        # PT2-vs-PT2+TLX comparison. force_disable_caches forces a real recompile
+        # so the TLX candidates aren't served from the baseline's autotune cache.
         torch._dynamo.reset()
         inductor_config_patch = {
             "max_autotune": True,
@@ -423,17 +429,18 @@ class Operator(BenchmarkOperator):
             "autotune_fallback_to_aten": False,
             "autotune_num_choices_displayed": self.inductor_autotune_num_choices_displayed,
             "force_disable_caches": True,
+            "triton.tlx_mode": "allow",
         }
-        from torch._inductor.fb.tlx_templates import tlx_config
+        if self.template_filter_regex is not None:
+            inductor_config_patch["test_configs.autotune_choice_name_regex"] = (
+                self.template_filter_regex
+            )
 
-        with (
-            tlx_config.patch(tlx_mode="force"),
-            inductor_config.patch(inductor_config_patch),
-        ):
+        with inductor_config.patch(inductor_config_patch):
             if bias is not None:
-                f = lambda a, b: a.contiguous().matmul(b.contiguous()) + bias
+                f = lambda a, b: a.matmul(b) + bias
             else:
-                f = lambda a, b: a.contiguous().matmul(b.contiguous())
+                f = lambda a, b: a.matmul(b)
             compiled = torch.compile(f, dynamic=False)
             compiled(a, b)
 
