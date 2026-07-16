@@ -6,8 +6,14 @@ from typing import Any, Callable, Generator, List, Optional, Tuple
 import torch
 import torch._inductor.config as inductor_config
 import triton
-from tritonbench.utils.env_utils import get_logger, IS_BLACKWELL, is_fbcode
+from tritonbench.utils.env_utils import (
+    get_logger,
+    IS_BLACKWELL,
+    is_fbcode,
+    is_hip_mi350,
+)
 from tritonbench.utils.python_utils import try_import
+from tritonbench.utils.triton_utils import has_tlx
 
 with try_import("HAS_HSTU"):
     try:
@@ -163,6 +169,30 @@ class Operator(BenchmarkOperator):
             max_autotune=True,
             max_autotune_gemm_backends="TRITON",
             autotune_fallback_to_aten=False,
+        ):
+            f = lambda a, mat1, mat2: torch.addmm(a, mat1, mat2)
+            compiled = torch.compile(f, dynamic=False)
+            compiled(a, mat1, mat2)
+        return lambda: compiled(a, mat1, mat2)
+
+    @register_benchmark(enabled=is_hip_mi350() and has_tlx())
+    def torch_tlx_addmm(self, a, mat1, mat2) -> Callable:
+        # torch_tlx_<op> convention: PT2 (torch.compile max-autotune, TRITON
+        # backend) with TLX "allow" mode, so TLX templates compete against the
+        # standard Triton templates during autotuning. Identical to the
+        # pt2_triton_matmul baseline except for triton.tlx_mode, giving a clean
+        # PT2-vs-PT2+TLX comparison. force_disable_caches forces a real recompile
+        # so the TLX candidates aren't served from the baseline's autotune cache.
+        # Gated to AMD MI350x (gfx950), where the TLX addmm template exists.
+        torch._dynamo.reset()
+        with inductor_config.patch(
+            {
+                "max_autotune": True,
+                "max_autotune_gemm_backends": "TRITON",
+                "autotune_fallback_to_aten": False,
+                "force_disable_caches": True,
+                "triton.tlx_mode": "allow",
+            }
         ):
             f = lambda a, mat1, mat2: torch.addmm(a, mat1, mat2)
             compiled = torch.compile(f, dynamic=False)
