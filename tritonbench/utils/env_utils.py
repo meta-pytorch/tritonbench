@@ -160,6 +160,20 @@ def is_blackwell() -> bool:
 IS_BLACKWELL = is_blackwell()
 
 
+def is_nvidia_blackwell() -> bool:
+    """NV datacenter Blackwell (B200/B300, sm_100). `<vendor>_<arch>`-named
+    predicate for TLX-template gating (thin wrapper over the IS_BLACKWELL check).
+    """
+    return IS_BLACKWELL
+
+
+def is_amd_gfx950() -> bool:
+    """AMD CDNA4 (gfx950 / MI350x). `<vendor>_<arch>`-named predicate for
+    TLX-template gating (thin wrapper over is_hip_mi350()).
+    """
+    return is_hip_mi350()
+
+
 def is_blackwell_consumer() -> bool:
     """Check if running on consumer/workstation Blackwell (sm_120: GB202 etc).
 
