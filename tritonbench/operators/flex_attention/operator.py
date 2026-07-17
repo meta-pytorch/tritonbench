@@ -31,7 +31,7 @@ from tritonbench.operators.flex_attention.triton_autows import (
     autows_flex_attention,
     autows_flex_attention_persistent,
 )
-from tritonbench.utils.env_utils import IS_BLACKWELL, is_hip
+from tritonbench.utils.env_utils import is_amd_gfx950, is_hip, is_nvidia_blackwell
 from tritonbench.utils.input import input_filter
 from tritonbench.utils.triton_op import (
     BenchmarkOperator,
@@ -356,7 +356,7 @@ class Operator(BenchmarkOperator):
             kernel_options=kernel_options,
         )
 
-    @register_benchmark(enabled=False)
+    @register_benchmark()
     def pt2_triton_flex_attention(
         self,
         q: torch.Tensor,
@@ -369,13 +369,16 @@ class Operator(BenchmarkOperator):
     ) -> Optional[Callable]:
         """`pt2_triton_<op>`-style alias of `compiled`, mirroring gemm's
         `pt2_triton_matmul` so the PT2/Triton baseline has a consistent name
-        across ops. Disabled by default (opt in with
-        `--only pt2_triton_flex_attention --force`) so it doesn't duplicate
-        `compiled` in CI; `compiled` stays the enabled baseline used by
-        ci.yaml / accuracy tests / servicelab."""
+        across ops. Enabled by default so it's the standing comparison for
+        `torch_tlx_flex_attention` (no `--force` needed). `compiled` remains the
+        provider pinned by ci.yaml / accuracy tests / servicelab (they select it
+        via `--only compiled`), so this alias does not affect those runs."""
         return self.compiled(q, k, v, score_mod, block_mask, mod_type, kernel_options)
 
-    @register_benchmark(enabled=IS_BLACKWELL and has_tlx(), fwd_only=True)
+    @register_benchmark(
+        enabled=(is_nvidia_blackwell() or is_amd_gfx950()) and has_tlx(),
+        fwd_only=True,
+    )
     def torch_tlx_flex_attention(
         self,
         q: torch.Tensor,
@@ -392,9 +395,11 @@ class Operator(BenchmarkOperator):
         # `compiled` max-autotune baseline except for triton.tlx_mode, giving a
         # clean PT2-vs-PT2+TLX comparison. force_disable_caches forces a real
         # recompile so the TLX candidate isn't served from the baseline's
-        # autotune cache. Gated to Nvidia Blackwell (B200), where the TLX flex
-        # template exists. The compile is warmed inside the patch so the TLX
-        # candidate is selected while tlx_mode is active.
+        # autotune cache. Device-agnostic: gated to archs that ship a TLX flex
+        # template -- Nvidia Blackwell (B200) and AMD MI350x (gfx950) -- and
+        # Inductor picks the matching per-device template during autotuning. The
+        # compile is warmed inside the patch so the TLX candidate is selected
+        # while tlx_mode is active.
         torch._dynamo.reset()
         with inductor_config.patch(
             {
