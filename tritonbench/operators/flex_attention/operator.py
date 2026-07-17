@@ -5,6 +5,7 @@ from itertools import product
 from typing import Any, Callable, Generator, List, NamedTuple, Optional, Tuple, Union
 
 import torch
+import torch._inductor.config as inductor_config
 from torch.nn.attention import sdpa_kernel, SDPBackend
 
 # from attn_gym.masks.document_mask import length_to_offsets
@@ -30,7 +31,7 @@ from tritonbench.operators.flex_attention.triton_autows import (
     autows_flex_attention,
     autows_flex_attention_persistent,
 )
-from tritonbench.utils.env_utils import is_hip
+from tritonbench.utils.env_utils import IS_BLACKWELL, is_hip
 from tritonbench.utils.input import input_filter
 from tritonbench.utils.triton_op import (
     BenchmarkOperator,
@@ -40,6 +41,7 @@ from tritonbench.utils.triton_op import (
     register_metric,
     register_x_val,
 )
+from tritonbench.utils.triton_utils import has_tlx
 
 from .mods import (
     causal_mask,
@@ -67,6 +69,10 @@ MOD_TYPES = [
     "prefix_lm",
     "softcap",
 ]
+
+# Soft cap value for the tanh-softcap score_mod, shared by the providers and the
+# eager reference.
+TANH_SOFTCAP = 20
 
 
 class FullShape(NamedTuple):
@@ -213,49 +219,53 @@ class Operator(BenchmarkOperator):
         mask_mods = MOD_TYPES if self.mod_type == "all" else [self.mod_type]
 
         for (q_shape, kv_shape), mod_type in product(shapes, mask_mods):
-            full_shape = self.get_full_shape(q_shape, kv_shape)
-            block_mask, mask_mod_kwargs = self.generate_block_mask(
-                mod_type, full_shape, self.sliding_window_size, self.prefix_length
-            )
-            score_mod = self.generate_score_mod(mod_type, full_shape)
-            B, Hq, M, Hkv, N, D = full_shape
-            if mod_type == "document_mask":
-                q_shape_packed = (1, Hq, M * B, D)
-                kv_shape_packed = (1, Hkv, N * B, D)
-            else:
-                q_shape_packed = q_shape
-                kv_shape_packed = kv_shape
+            yield self._build_input(q_shape, kv_shape, mod_type)
 
-            make_q = partial(
-                torch.rand,
-                q_shape_packed,
-                device=self.device,
-                dtype=self.dtype,
-                requires_grad=self.requires_grad,
-            )
-            make_kv = partial(
-                torch.rand,
-                kv_shape_packed,
-                device=self.device,
-                dtype=self.dtype,
-                requires_grad=self.requires_grad,
-            )
+    def _build_input(
+        self,
+        q_shape: Tuple[int, int, int, int],
+        kv_shape: Tuple[int, int, int, int],
+        mod_type: str,
+    ) -> Tuple:
+        """Build one flex_attention benchmark input tuple from q/kv shapes and a
+        mask/score-mod type. Shared by get_input_iter and the --input-loader
+        InputLoader so both paths derive block_mask / score_mod / kernel_options
+        identically."""
+        full_shape = self.get_full_shape(q_shape, kv_shape)
+        block_mask, _mask_mod_kwargs = self.generate_block_mask(
+            mod_type, full_shape, self.sliding_window_size, self.prefix_length
+        )
+        score_mod = self.generate_score_mod(mod_type, full_shape)
+        B, Hq, M, Hkv, N, D = full_shape
+        if mod_type == "document_mask":
+            q_shape_packed = (1, Hq, M * B, D)
+            kv_shape_packed = (1, Hkv, N * B, D)
+        else:
+            q_shape_packed = q_shape
+            kv_shape_packed = kv_shape
 
-            q = make_q()
-            k = make_kv()
-            v = make_kv()
+        make_q = partial(
+            torch.rand,
+            q_shape_packed,
+            device=self.device,
+            dtype=self.dtype,
+            requires_grad=self.requires_grad,
+        )
+        make_kv = partial(
+            torch.rand,
+            kv_shape_packed,
+            device=self.device,
+            dtype=self.dtype,
+            requires_grad=self.requires_grad,
+        )
 
-            # Default kernel options for flex_attention
-            kernel_options = self.get_kernel_options(mod_type, full_shape)
-            yield (
-                q,
-                k,
-                v,
-                score_mod,
-                block_mask,
-                mod_type,
-                kernel_options,
-            )
+        q = make_q()
+        k = make_kv()
+        v = make_kv()
+
+        # Default kernel options for flex_attention
+        kernel_options = self.get_kernel_options(mod_type, full_shape)
+        return (q, k, v, score_mod, block_mask, mod_type, kernel_options)
 
     @register_x_val(label="(B, Hq, M, Hkv, N, D) | Mask Type")
     def get_x_val(self, example_inputs) -> str:
@@ -283,23 +293,41 @@ class Operator(BenchmarkOperator):
 
         # Check if we should skip based on criteria
         should_skip = False
-        if mod_type == "document_mask" and B * S >= 4096:
+        if mod_type == "document_mask" and B * S > 8192:
             should_skip = True
             print(
-                f"Skipping eager for document_mask with batch*seq_len={B * S} >= 4096"
+                f"Skipping eager for document_mask with batch*seq_len={B * S} > 8192"
             )
         elif mod_type != "document_mask" and S > 8192:
             should_skip = True
             print(f"Skipping eager for {mod_type} with seq_len={S} > 8192")
 
-        # If should skip, return a function that raises an exception
+        # Oversized shapes OOM in eager (it materializes the full score matrix).
+        # Return None so the baseline registers as N/A: accuracy for the other
+        # providers is then reported as unmeasured rather than a misleading
+        # False. Returning a callable that raises would surface as accuracy=0.
         if should_skip:
-            # TODO  Figure out a way to skip the bigger shapes that will oom w/ eager
-            pass
+            return None
 
-        # Otherwise return the normal function
+        # The Nvidia approx-tanh softcap score_mod wraps a custom autograd
+        # Function (approx::tanh) that has no vmap rule, so it crashes the eager
+        # reference (which applies score_mod via vmap). Use an exact-tanh softcap
+        # for the reference; the providers under test keep the tanh.approx PTX
+        # path and the two agree within the accuracy tolerance. (softcap ignores
+        # the q/kv indices, so the decoding-offset wrapper does not apply here.)
+        if mod_type == "softcap":
+            score_mod = generate_tanh_softcap(TANH_SOFTCAP, approx=False)
+
+        # Pass score_mod as well as block_mask: the providers under test apply
+        # both, so the baseline must too, otherwise score-mod masks (rel, alibi)
+        # spuriously fail the accuracy check against a bias-free reference.
         return lambda: flex_attention(
-            q, k, v, block_mask=block_mask, kernel_options=kernel_options
+            q,
+            k,
+            v,
+            score_mod=score_mod,
+            block_mask=block_mask,
+            kernel_options=kernel_options,
         )
 
     @register_benchmark()
@@ -319,6 +347,74 @@ class Operator(BenchmarkOperator):
             flex_attention, fullgraph=True, mode=mode, dynamic=self.dynamic
         )
 
+        return lambda: compiled_fn(
+            q,
+            k,
+            v,
+            score_mod=score_mod,
+            block_mask=block_mask,
+            kernel_options=kernel_options,
+        )
+
+    @register_benchmark(enabled=False)
+    def pt2_triton_flex_attention(
+        self,
+        q: torch.Tensor,
+        k: torch.Tensor,
+        v: torch.Tensor,
+        score_mod: Optional[_score_mod_signature],
+        block_mask: Optional[BlockMask],
+        mod_type: str,
+        kernel_options: dict[str, Any],
+    ) -> Optional[Callable]:
+        """`pt2_triton_<op>`-style alias of `compiled`, mirroring gemm's
+        `pt2_triton_matmul` so the PT2/Triton baseline has a consistent name
+        across ops. Disabled by default (opt in with
+        `--only pt2_triton_flex_attention --force`) so it doesn't duplicate
+        `compiled` in CI; `compiled` stays the enabled baseline used by
+        ci.yaml / accuracy tests / servicelab."""
+        return self.compiled(q, k, v, score_mod, block_mask, mod_type, kernel_options)
+
+    @register_benchmark(enabled=IS_BLACKWELL and has_tlx(), fwd_only=True)
+    def torch_tlx_flex_attention(
+        self,
+        q: torch.Tensor,
+        k: torch.Tensor,
+        v: torch.Tensor,
+        score_mod: Optional[_score_mod_signature],
+        block_mask: Optional[BlockMask],
+        mod_type: str,
+        kernel_options: dict[str, Any],
+    ) -> Optional[Callable]:
+        # torch_tlx_<op> convention: PT2 (torch.compile max-autotune) with TLX
+        # "allow" mode, so the TLX flex-attention template competes against the
+        # standard Triton flex template during autotuning. Identical to the
+        # `compiled` max-autotune baseline except for triton.tlx_mode, giving a
+        # clean PT2-vs-PT2+TLX comparison. force_disable_caches forces a real
+        # recompile so the TLX candidate isn't served from the baseline's
+        # autotune cache. Gated to Nvidia Blackwell (B200), where the TLX flex
+        # template exists. The compile is warmed inside the patch so the TLX
+        # candidate is selected while tlx_mode is active.
+        torch._dynamo.reset()
+        with inductor_config.patch(
+            {
+                "max_autotune": True,
+                "autotune_fallback_to_aten": False,
+                "force_disable_caches": True,
+                "triton.tlx_mode": "allow",
+            }
+        ):
+            compiled_fn = torch.compile(
+                flex_attention, fullgraph=True, dynamic=self.dynamic
+            )
+            compiled_fn(
+                q,
+                k,
+                v,
+                score_mod=score_mod,
+                block_mask=block_mask,
+                kernel_options=kernel_options,
+            )
         return lambda: compiled_fn(
             q,
             k,
@@ -486,7 +582,14 @@ class Operator(BenchmarkOperator):
         if fn_name == "sdpa_cudnn":
             flops *= 0.5 if mod_type == "causal" else 1.0
         if self.mode in (BenchmarkMode.FWD, BenchmarkMode.FWD_NO_GRAD):
-            if fn_name == "compiled":
+            # The torch.compile paths (standard and TLX) skip fully-masked
+            # blocks, so account for block-mask sparsity for an apples-to-apples
+            # TFLOPS comparison between them.
+            if fn_name in (
+                "compiled",
+                "pt2_triton_flex_attention",
+                "torch_tlx_flex_attention",
+            ):
                 return self.calculate_flops(full_shape, block_mask)
             return flops
         if self.mode == BenchmarkMode.BWD:
@@ -708,7 +811,7 @@ class Operator(BenchmarkOperator):
             "sliding_window": None,
             "document_mask": None,
             "prefix_lm": None,
-            "softcap": generate_tanh_softcap(20, approx=approx),
+            "softcap": generate_tanh_softcap(TANH_SOFTCAP, approx=approx),
         }
 
         score_mod = function_dict[attn_type]
