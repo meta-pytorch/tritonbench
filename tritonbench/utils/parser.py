@@ -445,6 +445,16 @@ def get_parser(args=None):
         help="Skip the L2 cache clearing during benchmarking",
     )
     parser.add_argument(
+        "--ncu-kernel-name",
+        type=str,
+        default=None,
+        help="Restrict NCU profiling to kernels matching this name. Passed "
+        "verbatim to `ncu -k <name>`. Supports NCU's `regex:` prefix for regex "
+        "matching against the mangled kernel name, e.g. "
+        "'regex:.*gdpa_backward_tlx.*'. Only affects the ncu_rep/ncu_rep_ir "
+        "metrics.",
+    )
+    parser.add_argument(
         "--plugin",
         type=str,
         help="Load plugin from a Python function. This is for loading backends at runtime.",
