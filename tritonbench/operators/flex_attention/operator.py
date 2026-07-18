@@ -295,9 +295,7 @@ class Operator(BenchmarkOperator):
         should_skip = False
         if mod_type == "document_mask" and B * S > 8192:
             should_skip = True
-            print(
-                f"Skipping eager for document_mask with batch*seq_len={B * S} > 8192"
-            )
+            print(f"Skipping eager for document_mask with batch*seq_len={B * S} > 8192")
         elif mod_type != "document_mask" and S > 8192:
             should_skip = True
             print(f"Skipping eager for {mod_type} with seq_len={S} > 8192")
