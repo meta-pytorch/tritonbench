@@ -36,12 +36,45 @@ Reference implementations:
   - triton_mtia/third_party/triton/python/tutorials/10-block-scaled-matmul.py (block scaling)
 """
 
+import inspect
 from typing import Optional
 
 import torch
 import triton
 import triton.language as tl
 from triton.tools.tensor_descriptor import TensorDescriptor
+
+from tritonbench.utils.env_utils import is_meta_triton
+
+# OSS Triton's `tl.range` rejects the fbtriton-only pragmas
+# (`merge_epilogue_to_computation` / `separate_epilogue_store`); wrap it to drop
+# any kwargs the running triton doesn't accept (no-op on fbtriton).
+_RANGE_KWARGS = set(inspect.signature(tl.range).parameters)
+_HAS_FB_RANGE = {"merge_epilogue_to_computation", "separate_epilogue_store"} <= _RANGE_KWARGS
+if not _HAS_FB_RANGE:
+    _orig_range_init = tl.range.__init__
+
+    def _filtered_range_init(self, *args, **kwargs):
+        _orig_range_init(self, *args, **{k: v for k, v in kwargs.items() if k in _RANGE_KWARGS})
+
+    tl.range.__init__ = _filtered_range_init
+
+
+def _ws_supported() -> bool:
+    """Whether warp_specialize can lower on Blackwell.
+
+    fbtriton supports Meta-WS; OSS Triton needs the auto-WS fix landed in 3.7.0.
+    """
+    if is_meta_triton():
+        return True
+    try:
+        major, minor = (int(x) for x in triton.__version__.split(".")[:2])
+    except (ValueError, AttributeError):
+        return False
+    return (major, minor) >= (3, 7)
+
+
+_WS_SUPPORTED = _ws_supported()
 
 # ---------------------------------------------------------------------------
 # ScalingType enum (mirrors torch.nn.functional.ScalingType / at::blas::ScalingType)
@@ -698,8 +731,10 @@ def scaled_mm_autows(
 
     _ensure_triton_allocator(a.device)
 
-    # WS not supported for Symmetric 1x128 and MXFP8 yet.
-    ws_ok = not is_blockwise_1x128 and not is_mxfp8
+    # WS not supported for Symmetric 1x128 and MXFP8 yet, and requires a triton
+    # build whose Blackwell WS lowering works (fbtriton, or OSS >= 3.7.0);
+    # otherwise fall back to the plain persistent loop.
+    ws_ok = not is_blockwise_1x128 and not is_mxfp8 and _WS_SUPPORTED
     warp_specialize = is_blackwell and ws_ok
     separate_epilogue_store = is_blackwell and ws_ok
 

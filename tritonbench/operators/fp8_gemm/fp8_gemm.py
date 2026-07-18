@@ -447,7 +447,7 @@ class Operator(BenchmarkOperator):
             return lambda: compiled(a, b)
 
     # This impl is CUDA-specific
-    @register_benchmark(enabled=is_cuda() and has_tlx() and has_meta_ws())
+    @register_benchmark(enabled=is_cuda() and has_meta_ws())
     def triton_autows_fp8_gemm(self, a, b, scale_a, scale_b):
         # Per-operand recipe -> autows kernel mode. The kernel dispatches on the
         # (scale_a_mode, scale_b_mode) pair, so A and B are passed independently.
