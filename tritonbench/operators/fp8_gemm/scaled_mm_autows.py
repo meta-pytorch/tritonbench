@@ -203,6 +203,13 @@ def _get_autotune_configs():
         (128, 128, 128),
         (128, 256, 128),
         (256, 128, 128),
+        # 256x256 is 2-CTA-only (see the skip in the loop below): a 256x256 fp32
+        # accumulator is 256 KB = all of Blackwell TMEM, so it only fits under
+        # cta_group::2, where each CTA holds a 256x128 half. Matches cuBLAS's
+        # largest-shape nvjet ...256x256..._2cta kernel and wins at very large
+        # GEMMs (measured ~+6% at 16384^3, 0.90 -> 0.95x cuBLAS).
+        (256, 256, 64),
+        (256, 256, 128),
     ]
 
     # TWO_CTAS=True enables 2-CTA (cta_group::2) MMA via ctas_per_cga=(2,1,1) on
@@ -222,6 +229,10 @@ def _get_autotune_configs():
             for BLOCK_M, BLOCK_N, BLOCK_K in block_configs:
                 for EPILOGUE_SUBTILE in [1, 2, 4]:
                     for TWO_CTAS in two_cta_options:
+                        # 256x256 only fits TMEM under cta_group::2; skip the
+                        # 1-CTA variant (a 1-CTA 256x256 would OOM TMEM).
+                        if BLOCK_M == 256 and BLOCK_N == 256 and not TWO_CTAS:
+                            continue
                         extras = {"ctas_per_cga": (2, 1, 1)} if TWO_CTAS else {}
                         configs.append(
                             triton.Config(
