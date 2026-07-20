@@ -18,8 +18,8 @@ from tritonbench.operators.fp8_gemm.scaled_mm_autows import (
 )
 from tritonbench.utils.env_utils import (
     has_meta_ws,
-    IS_BLACKWELL,
     is_b200,
+    IS_BLACKWELL,
     is_cuda,
     is_fbcode,
     is_hip,
@@ -498,7 +498,9 @@ class Operator(BenchmarkOperator):
     # DeepSeek) recipe and RowWise. Inputs pass straight through -- scale layouts are
     # exactly what get_scale() produces (blockwise: scale_a M-major, scale_b
     # [N/128,K/128] row-major; rowwise: scale_a [M,1], scale_b [1,N]).
-    @register_benchmark(enabled=is_cuda() and has_tlx() and HAS_TLX_SCALED_MM and is_b200())
+    @register_benchmark(
+        enabled=is_cuda() and has_tlx() and HAS_TLX_SCALED_MM and is_b200()
+    )
     def tlx_scaled_mm_fp8_gemm(self, a, b, scale_a, scale_b):
         ra, rb = self.scaling_recipe_a, self.scaling_recipe_b
         if ra == ScalingType.BlockWise1x128 and rb == ScalingType.BlockWise128x128:

@@ -152,9 +152,9 @@ def check_ci_output(op):
     )
     # Make sure that all the ci_enabled impls are in the output
     logger.info(f"output impls: {output_impls}, ci_enabled impls: {ci_enabled_impls}")
-    assert set(output_impls) == set(
-        ci_enabled_impls
-    ), f"output impls: {output_impls} != ci_enabled impls: {ci_enabled_impls}"
+    assert set(output_impls) == set(ci_enabled_impls), (
+        f"output impls: {output_impls} != ci_enabled impls: {ci_enabled_impls}"
+    )
 
 
 class MaybeTestOperatorTask:
