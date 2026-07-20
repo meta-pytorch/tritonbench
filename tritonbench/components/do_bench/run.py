@@ -6,6 +6,7 @@ from typing import List, Optional
 
 import torch
 from torch._inductor.runtime.benchmarking import benchmarker
+from torch.utils._pytree import tree_leaves
 from tritonbench.components.do_bench.entropy.entropy_criterion import EntropyCriterion
 from tritonbench.utils.constants import DEFAULT_N_REP, DEFAULT_N_WARMUP
 from tritonbench.utils.cudagraph_utils import CudaGraphConfig
@@ -476,28 +477,73 @@ def _do_bench_cpu(
     return summarize_statistics(times, quantiles, return_mode)
 
 
+def _materialize_output(out: object) -> None:
+    """Force ``out`` to finish computing on-device, then drain the accelerator.
+
+    ``torch.accelerator.synchronize()`` is a device-wide barrier: it waits for
+    work already *dispatched*, but it does not *trigger* a lazily-executed
+    graph. On torch_tpu a ``torch.compile`` baseline (or a lazily-materialized
+    kernel) records its work and defers it, so the barrier returns before that
+    work runs; the deferred work then executes inside the *next* timed call —
+    measuring the lazy candidate as ~0 ms and inflating its neighbour. Waiting
+    on the produced tensors forces this call's work to materialize inside its
+    own timing window.
+
+    Non-TPU tensors dispatch eagerly (CUDA/CuTe), so there is nothing to force
+    and we just drain — leaving those backends' timing unchanged.
+
+    Limitation: if the call exposes no TPU tensor leaf (writes in place, returns
+    None, or wraps tensors in a pytree-unregistered object), there is nothing to
+    wait on and we fall back to the device-wide drain, which cannot force a lazy
+    graph — so such a candidate can still be under-measured. Most tritonbench
+    operators return their output tensor(s); this matches the Helion autotuner's
+    same-shaped fix.
+    """
+    tpu_tensors = [
+        leaf
+        for leaf in tree_leaves(out)
+        if isinstance(leaf, torch.Tensor) and leaf.device.type == "tpu"
+    ]
+    if tpu_tensors:
+        # A device-wide sync alone will not trigger the lazy graph; wait on the
+        # produced tensors so their work runs before we stop the timer.
+        from torch_tpu._internal.sync import synchronize as _tpu_sync
+
+        _tpu_sync(tpu_tensors, wait=True)
+    torch.accelerator.synchronize()
+
+
 def _do_bench_tpu(
     fn, warmup, rep, grad_to_none=None, quantiles=None, return_mode="mean"
 ):
     """Measure latency of a function on TPU (torch_tpu).
 
-    Same wall-clock approach as ``_do_bench_cpu`` but with an explicit
-    ``torch.accelerator.synchronize()`` around each timed region, since
-    torch_tpu executes asynchronously. CUDA event timing, CUDA graphs, and
-    Triton's driver benchmarker do not work on TPU, so this is the timing path
-    for ``--device tpu``. Requires torch_tpu >= 2026-06-05, where
-    ``torch.accelerator.synchronize()`` waits for all in-flight tensors.
+    Same wall-clock approach as ``_do_bench_cpu`` but each timed region ends by
+    materializing the output on-device (see ``_materialize_output``), since
+    torch_tpu executes asynchronously and lazily. CUDA event timing, CUDA
+    graphs, and Triton's driver benchmarker do not work on TPU, so this is the
+    timing path for ``--device tpu``. Requires torch_tpu >= 2026-06-05.
     """
     assert return_mode in ["min", "max", "mean", "median", "all"]
-    # Warm up once, then estimate the runtime of the function.
-    fn()
-    torch.accelerator.synchronize()
-    t0 = time.time_ns()
-    for _ in range(5):
-        fn()
-    torch.accelerator.synchronize()
-    t1 = time.time_ns()
-    estimate_ms = (t1 - t0) * NS_TO_MS / 5
+
+    def _timed_call() -> float:
+        # torch_tpu is asynchronous and lazy: bind the output and wait on it
+        # inside the timed window via _materialize_output(), which forces a
+        # (possibly lazy) torch.compile graph to actually run before we stop the
+        # clock. A bare device-wide sync would let lazy work defer into the next
+        # call — reading ~0 ms here and inflating the next candidate. The local
+        # is released when the call returns. Shared by the estimate, warmup, and
+        # measurement paths so all three time the identical per-call work
+        # (n_warmup/n_repeat match what we record).
+        t0 = time.time_ns()
+        _output = fn()
+        _materialize_output(_output)
+        t1 = time.time_ns()
+        return (t1 - t0) * NS_TO_MS
+
+    # Warm up once, then estimate the per-call runtime.
+    _timed_call()
+    estimate_ms = sum(_timed_call() for _ in range(5)) / 5
     warmup, rep = resolve_warmup_and_rep(warmup, rep, estimate_ms)
 
     # compute number of warmup and repeat
@@ -507,10 +553,11 @@ def _do_bench_tpu(
     else:
         n_warmup = max(1, int(warmup / estimate_ms))
         n_repeat = max(1, int(rep / estimate_ms))
+
     # Warm-up
     for _ in range(n_warmup):
-        fn()
-    torch.accelerator.synchronize()
+        _timed_call()
+
     times_ms = []
     # Benchmark
     for _i in range(n_repeat):
@@ -520,12 +567,7 @@ def _do_bench_tpu(
         if grad_to_none is not None:
             for x in grad_to_none:
                 x.grad = None
-        # record time of `fn`, synchronizing to capture async device work
-        t0 = time.time_ns()
-        fn()
-        torch.accelerator.synchronize()
-        t1 = time.time_ns()
-        times_ms.append((t1 - t0) * NS_TO_MS)
+        times_ms.append(_timed_call())
     times = torch.tensor(times_ms, dtype=torch.float)
     return summarize_statistics(times, quantiles, return_mode)
 
