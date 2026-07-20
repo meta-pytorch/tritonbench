@@ -64,9 +64,9 @@ if __name__ == "__main__":
             exit(e.returncode)
         exit(0)
 
-    assert BASELINE_LOG and os.path.exists(
-        BASELINE_LOG
-    ), f"BASELINE_LOG is not set or to a non-exist location: {BASELINE_LOG}."
+    assert BASELINE_LOG and os.path.exists(BASELINE_LOG), (
+        f"BASELINE_LOG is not set or to a non-exist location: {BASELINE_LOG}."
+    )
     try:
         baseline_signal = get_baseline(BASELINE_LOG)
     except Exception as e:

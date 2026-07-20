@@ -342,10 +342,22 @@ def run_benchmarks(config: BenchmarkConfig) -> None:
                 )
 
                 lhs_log = run_benchmark_with_logs(
-                    op, lhs_benchmark, config, output_dir, label, input_loader, scaling_pair
+                    op,
+                    lhs_benchmark,
+                    config,
+                    output_dir,
+                    label,
+                    input_loader,
+                    scaling_pair,
                 )
                 rhs_log = run_benchmark_with_logs(
-                    op, rhs_benchmark, config, output_dir, label, input_loader, scaling_pair
+                    op,
+                    rhs_benchmark,
+                    config,
+                    output_dir,
+                    label,
+                    input_loader,
+                    scaling_pair,
                 )
 
                 if not lhs_log or not rhs_log:

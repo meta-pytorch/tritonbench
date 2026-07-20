@@ -216,13 +216,19 @@ def log_benchmark(
                 scale_dtype = torch.float32
                 scale_a_recipe = (
                     _scale_recipe(
-                        (m_dim, k_dim), mat_dtype, (scale_a_row, scale_a_col), scale_dtype
+                        (m_dim, k_dim),
+                        mat_dtype,
+                        (scale_a_row, scale_a_col),
+                        scale_dtype,
                     )
                     or None
                 )
                 scale_b_recipe = (
                     _scale_recipe(
-                        (k_dim, n_dim), mat_dtype, (scale_b_row, scale_b_col), scale_dtype
+                        (k_dim, n_dim),
+                        mat_dtype,
+                        (scale_b_row, scale_b_col),
+                        scale_dtype,
                     )
                     or None
                 )
