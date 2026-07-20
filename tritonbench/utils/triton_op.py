@@ -2532,6 +2532,9 @@ class BenchmarkOperator(metaclass=PostInitProcessor):
             "--import-source",
             "yes",
         ]
+        ncu_kernel_name = getattr(self.tb_args, "ncu_kernel_name", None)
+        if ncu_kernel_name:
+            ncu_args.extend(["-k", ncu_kernel_name])
         ncu_args.extend(extend_ncu_args)
         if replay:
             ncu_args.extend(
