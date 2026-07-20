@@ -43,19 +43,23 @@ import torch
 import triton
 import triton.language as tl
 from triton.tools.tensor_descriptor import TensorDescriptor
-
 from tritonbench.utils.env_utils import is_meta_triton
 
 # OSS Triton's `tl.range` rejects the fbtriton-only pragmas
 # (`merge_epilogue_to_computation` / `separate_epilogue_store`); wrap it to drop
 # any kwargs the running triton doesn't accept (no-op on fbtriton).
 _RANGE_KWARGS = set(inspect.signature(tl.range).parameters)
-_HAS_FB_RANGE = {"merge_epilogue_to_computation", "separate_epilogue_store"} <= _RANGE_KWARGS
+_HAS_FB_RANGE = {
+    "merge_epilogue_to_computation",
+    "separate_epilogue_store",
+} <= _RANGE_KWARGS
 if not _HAS_FB_RANGE:
     _orig_range_init = tl.range.__init__
 
     def _filtered_range_init(self, *args, **kwargs):
-        _orig_range_init(self, *args, **{k: v for k, v in kwargs.items() if k in _RANGE_KWARGS})
+        _orig_range_init(
+            self, *args, **{k: v for k, v in kwargs.items() if k in _RANGE_KWARGS}
+        )
 
     tl.range.__init__ = _filtered_range_init
 
