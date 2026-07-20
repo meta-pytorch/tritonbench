@@ -203,34 +203,25 @@ def _get_autotune_configs():
         (128, 128, 128),
         (128, 256, 128),
         (256, 128, 128),
-        # 256x256 is 2-CTA-only (see the skip in the loop below): a 256x256 fp32
-        # accumulator is 256 KB = all of Blackwell TMEM, so it only fits under
-        # cta_group::2, where each CTA holds a 256x128 half. Matches cuBLAS's
-        # largest-shape nvjet ...256x256..._2cta kernel and wins at very large
-        # GEMMs (measured ~+6% at 16384^3, 0.90 -> 0.95x cuBLAS).
+        # 256x256 is 2-CTA-only (skip below): its 256 KB fp32 accumulator fills all
+        # of Blackwell TMEM, fitting only as 256x128 halves under cta_group::2.
+        # Matches cuBLAS's 256x256 2cta kernel; ~+6% at 16384^3.
         (256, 256, 64),
         (256, 256, 128),
     ]
 
-    # TWO_CTAS=True enables 2-CTA (cta_group::2) MMA via ctas_per_cga=(2,1,1) on
-    # the plain-tl.dot path. _prune_configs offers it as a tuning option for
-    # TensorWise/RowWise on Blackwell + Meta-WS, BM>=128 (see the RowWise caveat
-    # there: the autotuner can mis-pick the 2-CTA RowWise config).
-    #
-    # ctas_per_cga is an FBTriton/Meta-WS-only triton.Config arg, so only emit the
-    # 2-CTA configs when Meta-WS is available -- on OSS Triton _use_meta_ws() is
-    # False and no ctas_per_cga config is ever constructed.
+    # 2-CTA (cta_group::2) MMA via ctas_per_cga=(2,1,1); _prune_configs offers it for
+    # TensorWise/RowWise on Blackwell+Meta-WS, BM>=128. ctas_per_cga is Meta-WS-only,
+    # so only emit 2-CTA configs when Meta-WS is available.
     two_cta_options = [False, True] if _use_meta_ws() else [False]
-    # num_warps: Blackwell WS runs at 4 (the pass adds producer/epilogue warps on
-    # top); the Hopper plain-wgmma path needs 8 (two warpgroups) for a big-N fp8 tile.
-    # _prune_configs gates which survives per backend/tile.
+    # num_warps: Blackwell WS -> 4, Hopper wgmma big-N -> 8; _prune_configs gates
+    # which survives per backend/tile.
     for num_warps in [4, 8]:
         for num_stages in [3, 4, 5]:
             for BLOCK_M, BLOCK_N, BLOCK_K in block_configs:
                 for EPILOGUE_SUBTILE in [1, 2, 4]:
                     for TWO_CTAS in two_cta_options:
-                        # 256x256 only fits TMEM under cta_group::2; skip the
-                        # 1-CTA variant (a 1-CTA 256x256 would OOM TMEM).
+                        # 256x256 fits TMEM only under cta_group::2; skip 1-CTA.
                         if BLOCK_M == 256 and BLOCK_N == 256 and not TWO_CTAS:
                             continue
                         extras = {"ctas_per_cga": (2, 1, 1)} if TWO_CTAS else {}
@@ -262,11 +253,15 @@ def _prune_configs(configs, named_args, **kwargs):
     vec_size = kwargs.get("VEC_SIZE", named_args.get("VEC_SIZE", 0))
     M, N = named_args.get("M", 0), named_args.get("N", 0)
     is_blackwell = _is_blackwell()
-    is_tensorwise = a_mode == TENSORWISE and b_mode == TENSORWISE
-    is_rowwise = a_mode == ROWWISE and b_mode == ROWWISE
+    # TensorWise/RowWise scale in the epilogue; the fp32 blockwise modes rescale
+    # in-loop (symmetric 1x128/1x128 and DeepSeek 1x128/128x128).
+    is_epilogue_scale = a_mode == b_mode and a_mode in (TENSORWISE, ROWWISE)
     is_mxfp8 = a_mode == MXFP8 and b_mode == MXFP8
-    is_blockwise_1x128 = a_mode == BLOCKWISE_1x128 and b_mode == BLOCKWISE_1x128
     is_deepseek = a_mode == BLOCKWISE_1x128 and b_mode == BLOCKWISE_128x128
+    is_inloop_rescale = a_mode == BLOCKWISE_1x128 and b_mode in (
+        BLOCKWISE_1x128,
+        BLOCKWISE_128x128,
+    )
 
     pruned = []
     for config in configs:
@@ -274,44 +269,42 @@ def _prune_configs(configs, named_args, **kwargs):
         bm, bn, bk = c["BLOCK_SIZE_M"], c["BLOCK_SIZE_N"], c["BLOCK_SIZE_K"]
         nw, ns = config.num_warps, config.num_stages
 
-        if nw < 4 or (M and bm > M * 2) or (N and bn > N * 2):
+        if (M and bm > M * 2) or (N and bn > N * 2):
             continue
 
-        # num_warps: Hopper TensorWise/RowWise -> 8 for big-N tiles else 4;
-        # Blackwell DeepSeek (rescale-bound) -> 8; everything else -> 4.
-        if not is_blackwell and (is_tensorwise or is_rowwise):
-            if nw != (8 if bm * bn >= 128 * 256 else 4):
-                continue
+        # num_warps: Hopper epilogue-scale -> 8 for big-N tiles else 4; Blackwell
+        # DeepSeek (rescale-bound) -> 8; everything else -> 4.
+        if not is_blackwell and is_epilogue_scale:
+            want_nw = 8 if bm * bn >= 128 * 256 else 4
         elif is_blackwell and is_deepseek:
-            if nw != 8:
-                continue
-        elif nw != 4:
+            want_nw = 8
+        else:
+            want_nw = 4
+        if nw != want_nw:
             continue
 
-        # 2-CTA: TensorWise/RowWise only, Blackwell + Meta-WS, BM >= 128.
-        if c.get("TWO_CTAS", False):
-            if not (is_tensorwise or is_rowwise):
-                continue
-            if not (is_blackwell and _use_meta_ws()) or bm < 128:
-                continue
+        # 2-CTA: epilogue-scale only, Blackwell + Meta-WS, BM >= 128.
+        if c.get("TWO_CTAS", False) and not (
+            is_epilogue_scale and is_blackwell and _use_meta_ws() and bm >= 128
+        ):
+            continue
 
         # MXFP8: BLOCK_K must cover >= 4 scale vectors.
         if is_mxfp8 and vec_size > 0 and bk < vec_size * 4:
             continue
-        # DeepSeek: pin BK=BN=128 (one K-group + one B N-block per tile);
-        # BLOCK_M=128 crashes the Canonicalizer, so require BM>=256.
-        if is_deepseek and (bk != 128 or bn != 128 or bm == 128):
+        # fp32 blockwise: pin BK=128 (one K-group/tile); DeepSeek also pins BN=128
+        # and needs BM>=256 (BM=128 crashes the Canonicalizer).
+        if is_inloop_rescale and bk != 128:
             continue
-        # Symmetric 1x128: pin BK=128 (one K-group per tile).
-        if is_blockwise_1x128 and bk != 128:
+        if is_deepseek and (bn != 128 or bm == 128):
             continue
 
-        # num_stages: in-loop-rescale modes cap at 3 (OOM SMEM beyond); MXFP8 tries
-        # all (autotuner drops overflow); Blackwell TensorWise/RowWise need >= 4.
-        if is_deepseek or is_blockwise_1x128:
+        # num_stages: in-loop rescale caps at 3 (OOM SMEM beyond); Blackwell
+        # epilogue-scale needs >= 4; MXFP8 tries all (autotuner drops overflow).
+        if is_inloop_rescale:
             if ns > 3:
                 continue
-        elif not is_mxfp8 and is_blackwell and ns < 4:
+        elif is_blackwell and not is_mxfp8 and ns < 4:
             continue
 
         # Hopper: epilogue subtiling off (Blackwell keeps it for register relief).
