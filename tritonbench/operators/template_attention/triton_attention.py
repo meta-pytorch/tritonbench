@@ -78,33 +78,13 @@ def triton_tem_fused_no_exp2(
     off_hz = tl.program_id(1)
 
     qkv_offset = off_hz * stride_qh
-    Q_block_ptr = tl.make_block_ptr(
-        base=Q + qkv_offset,
-        shape=(N_CTX, BLOCK_DMODEL),
-        strides=(stride_qm, stride_qk),
-        offsets=(start_m * BLOCK_M, 0),
-        block_shape=(BLOCK_M, BLOCK_DMODEL),
-        order=(1, 0),
-    )
-    K_block_ptr = tl.make_block_ptr(
-        base=K + qkv_offset,
-        shape=(BLOCK_DMODEL, N_CTX),
-        strides=(stride_kk, stride_kn),
-        offsets=(0, 0),
-        block_shape=(BLOCK_DMODEL, BLOCK_N),
-        order=(0, 1),
-    )
-    V_block_ptr = tl.make_block_ptr(
-        base=V + qkv_offset,
-        shape=(N_CTX, BLOCK_DMODEL),
-        strides=(stride_vk, stride_vn),
-        offsets=(0, 0),
-        block_shape=(BLOCK_N, BLOCK_DMODEL),
-        order=(1, 0),
-    )
     # initialize offsets
     offs_m = start_m * BLOCK_M + tl.arange(0, BLOCK_M)
     offs_n = tl.arange(0, BLOCK_N)
+    offs_d = tl.arange(0, BLOCK_DMODEL)
+    Q_ptrs = Q + qkv_offset + offs_m[:, None] * stride_qm + offs_d[None, :] * stride_qk
+    K_ptrs = K + qkv_offset + offs_d[:, None] * stride_kk + offs_n[None, :] * stride_kn
+    V_ptrs = V + qkv_offset + offs_n[:, None] * stride_vk + offs_d[None, :] * stride_vn
     # initialize pointer to m and l
     m_i = tl.zeros([BLOCK_M], dtype=tl.float32) - float("inf")
     l_i = tl.zeros([BLOCK_M], dtype=tl.float32)
@@ -114,7 +94,7 @@ def triton_tem_fused_no_exp2(
     # don't work as expected with `exp` in the loop
     # TODO fix me
     # qk_scale = sm_scale * 1.44269504
-    q = tl.load(Q_block_ptr)
+    q = tl.load(Q_ptrs)
     q = (q * qk_scale).to(MATMUL_PRECISION)
     # loop over k, v and update accumulator
     lo = 0
@@ -122,8 +102,8 @@ def triton_tem_fused_no_exp2(
     for start_n in range(lo, hi, BLOCK_N):
         start_n = tl.multiple_of(start_n, BLOCK_N)
         # -- load k, v --
-        k = tl.load(K_block_ptr)
-        v = tl.load(V_block_ptr)
+        k = tl.load(K_ptrs)
+        v = tl.load(V_ptrs)
         # -- compute qk ---
         qk = tl.zeros([BLOCK_M, BLOCK_N], dtype=tl.float32)
         qk += tl.dot(q, k.to(MATMUL_PRECISION))
@@ -164,8 +144,8 @@ def triton_tem_fused_no_exp2(
         l_i = l_i * alpha + tl.sum(p, 1)
         m_i = m_i_new
         # update pointers
-        K_block_ptr = tl.advance(K_block_ptr, (0, BLOCK_N))
-        V_block_ptr = tl.advance(V_block_ptr, (BLOCK_N, 0))
+        K_ptrs += BLOCK_N * stride_kn
+        V_ptrs += BLOCK_N * stride_vk
 
     # write back l and m
     acc = acc / l_i[:, None]
@@ -254,39 +234,19 @@ def triton_tem_fused_with_exp2(
     off_hz = tl.program_id(1)
 
     qkv_offset = off_hz * stride_qh
-    Q_block_ptr = tl.make_block_ptr(
-        base=Q + qkv_offset,
-        shape=(N_CTX, BLOCK_DMODEL),
-        strides=(stride_qm, stride_qk),
-        offsets=(start_m * BLOCK_M, 0),
-        block_shape=(BLOCK_M, BLOCK_DMODEL),
-        order=(1, 0),
-    )
-    K_block_ptr = tl.make_block_ptr(
-        base=K + qkv_offset,
-        shape=(BLOCK_DMODEL, N_CTX),
-        strides=(stride_kk, stride_kn),
-        offsets=(0, 0),
-        block_shape=(BLOCK_DMODEL, BLOCK_N),
-        order=(0, 1),
-    )
-    V_block_ptr = tl.make_block_ptr(
-        base=V + qkv_offset,
-        shape=(N_CTX, BLOCK_DMODEL),
-        strides=(stride_vk, stride_vn),
-        offsets=(0, 0),
-        block_shape=(BLOCK_N, BLOCK_DMODEL),
-        order=(1, 0),
-    )
     # initialize offsets
     offs_m = start_m * BLOCK_M + tl.arange(0, BLOCK_M)
     offs_n = tl.arange(0, BLOCK_N)
+    offs_d = tl.arange(0, BLOCK_DMODEL)
+    Q_ptrs = Q + qkv_offset + offs_m[:, None] * stride_qm + offs_d[None, :] * stride_qk
+    K_ptrs = K + qkv_offset + offs_d[:, None] * stride_kk + offs_n[None, :] * stride_kn
+    V_ptrs = V + qkv_offset + offs_n[:, None] * stride_vk + offs_d[None, :] * stride_vn
     # initialize pointer to m and l
     m_i = tl.zeros([BLOCK_M], dtype=tl.float32) - float("inf")
     l_i = tl.zeros([BLOCK_M], dtype=tl.float32)
     acc = tl.zeros([BLOCK_M, BLOCK_DMODEL], dtype=tl.float32)
 
-    q = tl.load(Q_block_ptr)
+    q = tl.load(Q_ptrs)
     if SCORE_MOD_IS_LINEAR:
         qk_scale *= 1.44269504
     q = (q * qk_scale).to(MATMUL_PRECISION)
@@ -296,8 +256,8 @@ def triton_tem_fused_with_exp2(
     for start_n in range(lo, hi, BLOCK_N):
         start_n = tl.multiple_of(start_n, BLOCK_N)
         # -- load k, v --
-        k = tl.load(K_block_ptr)
-        v = tl.load(V_block_ptr)
+        k = tl.load(K_ptrs)
+        v = tl.load(V_ptrs)
         # -- compute qk ---
         qk = tl.zeros([BLOCK_M, BLOCK_N], dtype=tl.float32)
         qk = tl.dot(q, k.to(MATMUL_PRECISION), acc=qk)
@@ -338,8 +298,8 @@ def triton_tem_fused_with_exp2(
         l_i = l_i * alpha + tl.sum(p, 1)
         m_i = m_i_new
         # update pointers
-        K_block_ptr = tl.advance(K_block_ptr, (0, BLOCK_N))
-        V_block_ptr = tl.advance(V_block_ptr, (BLOCK_N, 0))
+        K_ptrs += BLOCK_N * stride_kn
+        V_ptrs += BLOCK_N * stride_vk
 
     # write back l and m
     acc = acc / l_i[:, None]

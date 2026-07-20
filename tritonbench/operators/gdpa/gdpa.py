@@ -78,18 +78,19 @@ def create_dummy_tensor(x):
 def _gdpa_fwd_inner_ws(
     acc,
     q,  #
-    K_block_ptr,
-    V_block_ptr,  #
+    K_ptrs,
+    V_ptrs,  #
     desc_k,
     desc_v,
     kv_offset,
     begin_k,
     stride_kn,
-    stride_kh,
+    stride_vn,
     start_m,
     BLOCK_M: tl.constexpr,
     BLOCK_D: tl.constexpr,
     BLOCK_N: tl.constexpr,  #
+    HEAD_DIM: tl.constexpr,
     STAGE: tl.constexpr,
     offs_m: tl.constexpr,
     offs_n: tl.constexpr,
@@ -118,8 +119,8 @@ def _gdpa_fwd_inner_ws(
         hi = min(hi, (start_m + 1) * BLOCK_M + WINDOW_SIZE)
 
     if not enable_tma:
-        K_block_ptr = tl.advance(K_block_ptr, (0, lo))
-        V_block_ptr = tl.advance(V_block_ptr, (lo, 0))
+        K_ptrs += lo * stride_kn
+        V_ptrs += lo * stride_vn
 
     # loop over k, v and update accumulator
     for start_n in range(lo, hi, BLOCK_N):
@@ -134,7 +135,8 @@ def _gdpa_fwd_inner_ws(
             )
             k = tl.trans(k)
         else:
-            k = tl.load(K_block_ptr, boundary_check=(0, 1), padding_option="zero")
+            k_mask = (offs_d[:, None] < HEAD_DIM) & (start_n + offs_n[None, :] < klen)
+            k = tl.load(K_ptrs, mask=k_mask, other=0.0)
 
         q = q.to(k.dtype)
         qk = tl.dot(q, k)
@@ -165,14 +167,15 @@ def _gdpa_fwd_inner_ws(
                 ],
             )
         else:
-            v = tl.load(V_block_ptr, boundary_check=(0, 1), padding_option="zero")
+            v_mask = (start_n + offs_n[:, None] < klen) & (offs_d[None, :] < HEAD_DIM)
+            v = tl.load(V_ptrs, mask=v_mask, other=0.0)
 
         p = p.to(v_dtype)
         acc = tl.dot(p, v, acc)
 
         if not enable_tma:
-            V_block_ptr = tl.advance(V_block_ptr, (BLOCK_N, 0))
-            K_block_ptr = tl.advance(K_block_ptr, (0, BLOCK_N))
+            V_ptrs += BLOCK_N * stride_vn
+            K_ptrs += BLOCK_N * stride_kn
     return acc
 
 
@@ -335,11 +338,10 @@ def _gdpa_fwd_compute(
     if start_m * BLOCK_M < qlen:
         begin_o = tl.load(Out_offsets + off_z)
 
-        # block pointers
-        Q_block_ptr = None
-        K_block_ptr = None
-        V_block_ptr = None
-        O_block_ptr = None
+        Q_ptrs = None
+        K_ptrs = None
+        V_ptrs = None
+        O_ptrs = None
         desc_q = None
         desc_out = None
         # can not reuse desc_k. jit error
@@ -350,34 +352,28 @@ def _gdpa_fwd_compute(
         offs_n = tl.arange(0, BLOCK_N)
         offs_d = tl.arange(0, BLOCK_D)
         if not enable_tma:
-            Q_block_ptr = tl.make_block_ptr(
-                base=Q + q_offset + begin_q * stride_qm,
-                shape=(qlen, HEAD_DIM),
-                strides=(stride_qm, stride_qk),
-                offsets=(start_m * BLOCK_M, 0),
-                block_shape=(BLOCK_M, BLOCK_D),
-                order=(1, 0),
+            Q_ptrs = (
+                Q
+                + q_offset
+                + begin_q * stride_qm
+                + offs_m[:, None] * stride_qm
+                + offs_d[None, :] * stride_qk
             )
-            v_order: tl.constexpr = (
-                (0, 1) if V.dtype.element_ty == tl.float8e5 else (1, 0)
+            V_ptrs = (
+                V
+                + kv_offset
+                + begin_k * stride_vn
+                + offs_n[:, None] * stride_vn
+                + offs_d[None, :] * stride_vk
             )
-            V_block_ptr = tl.make_block_ptr(
-                base=V + kv_offset + begin_k * stride_vn,
-                shape=(klen, HEAD_DIM),
-                strides=(stride_vn, stride_vk),
-                offsets=(0, 0),
-                block_shape=(BLOCK_N, BLOCK_D),
-                order=v_order,
+            K_ptrs = (
+                K
+                + kv_offset
+                + begin_k * stride_kn
+                + offs_d[:, None] * stride_kk
+                + offs_n[None, :] * stride_kn
             )
-            K_block_ptr = tl.make_block_ptr(
-                base=K + kv_offset + begin_k * stride_kn,
-                shape=(HEAD_DIM, klen),
-                strides=(stride_kk, stride_kn),
-                offsets=(0, 0),
-                block_shape=(BLOCK_D, BLOCK_N),
-                order=(0, 1),
-            )
-            O_block_ptr = (
+            O_ptrs = (
                 Out
                 + off_h.to(tl.int64) * stride_oh
                 + begin_o * stride_om
@@ -421,7 +417,8 @@ def _gdpa_fwd_compute(
                 ],
             )
         else:
-            q = tl.load(Q_block_ptr, boundary_check=(0, 1), padding_option="zero")
+            q_mask = (offs_m[:, None] < qlen) & (offs_d[None, :] < HEAD_DIM)
+            q = tl.load(Q_ptrs, mask=q_mask, other=0.0)
 
         # stage 1: off-band
         # For causal = True, STAGE = 3 and _gdpa_fwd_inner gets 1 as its STAGE
@@ -430,18 +427,19 @@ def _gdpa_fwd_compute(
         acc = _gdpa_fwd_inner_ws(
             acc,
             q,
-            K_block_ptr,
-            V_block_ptr,  #
+            K_ptrs,
+            V_ptrs,  #
             desc_k if IS_DENSE_KV else desc_k_tmp,
             desc_v if IS_DENSE_KV else desc_v_tmp,
             kv_offset,
             begin_k,
             stride_kn,
-            stride_kh,
+            stride_vn,
             start_m,  #
             BLOCK_M,
             BLOCK_D,
             BLOCK_N,  #
+            HEAD_DIM,
             4 - STAGE,
             offs_m,
             offs_n,
@@ -471,7 +469,7 @@ def _gdpa_fwd_compute(
             )
         else:
             o_mask = (offs_m[:, None] < qlen) & (offs_d[None, :] < HEAD_DIM)
-            tl.store(O_block_ptr, acc.to(Out.type.element_ty), mask=o_mask)
+            tl.store(O_ptrs, acc.to(Out.type.element_ty), mask=o_mask)
 
 
 @triton.jit
@@ -1843,9 +1841,9 @@ def generalized_dot_product_attention(
     fused_qkv = key is None and value is None
     fused_kv = key is not None and value is None
     if use_start_end_offsets:
-        assert not fused_qkv and not fused_kv and not broadcast_q, (
-            "fused_qkv/fused_kv/broadcast_q not supported with start/end offsets"
-        )
+        assert (
+            not fused_qkv and not fused_kv and not broadcast_q
+        ), "fused_qkv/fused_kv/broadcast_q not supported with start/end offsets"
         assert total_num_objects is not None, "total_num_objects must be provided"
 
     if qk_scale is None:
