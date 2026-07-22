@@ -42,6 +42,24 @@ import torch
 import triton
 import triton.language as tl
 from triton.tools.tensor_descriptor import TensorDescriptor
+from tritonbench.utils.env_utils import is_meta_triton
+
+
+def _ws_supported() -> bool:
+    """Whether warp_specialize can lower on Blackwell.
+
+    fbtriton supports Meta-WS; OSS Triton needs the auto-WS fix landed in 3.7.0.
+    """
+    if is_meta_triton():
+        return True
+    try:
+        major, minor = (int(x) for x in triton.__version__.split(".")[:2])
+    except (ValueError, AttributeError):
+        return False
+    return (major, minor) >= (3, 7)
+
+
+_WS_SUPPORTED = _ws_supported()
 
 # ---------------------------------------------------------------------------
 # ScalingType enum (mirrors torch.nn.functional.ScalingType / at::blas::ScalingType)
@@ -170,25 +188,27 @@ def _get_autotune_configs():
         (128, 128, 128),
         (128, 256, 128),
         (256, 128, 128),
+        # 256x256 is 2-CTA-only (skip below): its 256 KB fp32 accumulator fills all
+        # of Blackwell TMEM, fitting only as 256x128 halves under cta_group::2.
+        # Matches cuBLAS's 256x256 2cta kernel; ~+6% at 16384^3.
+        (256, 256, 64),
+        (256, 256, 128),
     ]
 
-    # TWO_CTAS=True enables 2-CTA (cta_group::2) MMA via ctas_per_cga=(2,1,1) on
-    # the plain-tl.dot path. _prune_configs offers it as a tuning option for
-    # TensorWise/RowWise on Blackwell + Meta-WS, BM>=128 (see the RowWise caveat
-    # there: the autotuner can mis-pick the 2-CTA RowWise config).
-    #
-    # ctas_per_cga is an FBTriton/Meta-WS-only triton.Config arg, so only emit the
-    # 2-CTA configs when Meta-WS is available -- on OSS Triton _use_meta_ws() is
-    # False and no ctas_per_cga config is ever constructed.
+    # 2-CTA (cta_group::2) MMA via ctas_per_cga=(2,1,1); _prune_configs offers it for
+    # TensorWise/RowWise on Blackwell+Meta-WS, BM>=128. ctas_per_cga is Meta-WS-only,
+    # so only emit 2-CTA configs when Meta-WS is available.
     two_cta_options = [False, True] if _use_meta_ws() else [False]
-    # num_warps: Blackwell WS runs at 4 (the pass adds producer/epilogue warps on
-    # top); the Hopper plain-wgmma path needs 8 (two warpgroups) for a big-N fp8 tile.
-    # _prune_configs gates which survives per backend/tile.
+    # num_warps: Blackwell WS -> 4, Hopper wgmma big-N -> 8; _prune_configs gates
+    # which survives per backend/tile.
     for num_warps in [4, 8]:
         for num_stages in [3, 4, 5]:
             for BLOCK_M, BLOCK_N, BLOCK_K in block_configs:
                 for EPILOGUE_SUBTILE in [1, 2, 4]:
                     for TWO_CTAS in two_cta_options:
+                        # 256x256 fits TMEM only under cta_group::2; skip 1-CTA.
+                        if BLOCK_M == 256 and BLOCK_N == 256 and not TWO_CTAS:
+                            continue
                         extras = {"ctas_per_cga": (2, 1, 1)} if TWO_CTAS else {}
                         configs.append(
                             triton.Config(
@@ -218,11 +238,15 @@ def _prune_configs(configs, named_args, **kwargs):
     vec_size = kwargs.get("VEC_SIZE", named_args.get("VEC_SIZE", 0))
     M, N = named_args.get("M", 0), named_args.get("N", 0)
     is_blackwell = _is_blackwell()
-    is_tensorwise = a_mode == TENSORWISE and b_mode == TENSORWISE
-    is_rowwise = a_mode == ROWWISE and b_mode == ROWWISE
+    # TensorWise/RowWise scale in the epilogue; the fp32 blockwise modes rescale
+    # in-loop (symmetric 1x128/1x128 and DeepSeek 1x128/128x128).
+    is_epilogue_scale = a_mode == b_mode and a_mode in (TENSORWISE, ROWWISE)
     is_mxfp8 = a_mode == MXFP8 and b_mode == MXFP8
-    is_blockwise_1x128 = a_mode == BLOCKWISE_1x128 and b_mode == BLOCKWISE_1x128
     is_deepseek = a_mode == BLOCKWISE_1x128 and b_mode == BLOCKWISE_128x128
+    is_inloop_rescale = a_mode == BLOCKWISE_1x128 and b_mode in (
+        BLOCKWISE_1x128,
+        BLOCKWISE_128x128,
+    )
 
     pruned = []
     for config in configs:
@@ -230,44 +254,42 @@ def _prune_configs(configs, named_args, **kwargs):
         bm, bn, bk = c["BLOCK_SIZE_M"], c["BLOCK_SIZE_N"], c["BLOCK_SIZE_K"]
         nw, ns = config.num_warps, config.num_stages
 
-        if nw < 4 or (M and bm > M * 2) or (N and bn > N * 2):
+        if (M and bm > M * 2) or (N and bn > N * 2):
             continue
 
-        # num_warps: Hopper TensorWise/RowWise -> 8 for big-N tiles else 4;
-        # Blackwell DeepSeek (rescale-bound) -> 8; everything else -> 4.
-        if not is_blackwell and (is_tensorwise or is_rowwise):
-            if nw != (8 if bm * bn >= 128 * 256 else 4):
-                continue
+        # num_warps: Hopper epilogue-scale -> 8 for big-N tiles else 4; Blackwell
+        # DeepSeek (rescale-bound) -> 8; everything else -> 4.
+        if not is_blackwell and is_epilogue_scale:
+            want_nw = 8 if bm * bn >= 128 * 256 else 4
         elif is_blackwell and is_deepseek:
-            if nw != 8:
-                continue
-        elif nw != 4:
+            want_nw = 8
+        else:
+            want_nw = 4
+        if nw != want_nw:
             continue
 
-        # 2-CTA: TensorWise/RowWise only, Blackwell + Meta-WS, BM >= 128.
-        if c.get("TWO_CTAS", False):
-            if not (is_tensorwise or is_rowwise):
-                continue
-            if not (is_blackwell and _use_meta_ws()) or bm < 128:
-                continue
+        # 2-CTA: epilogue-scale only, Blackwell + Meta-WS, BM >= 128.
+        if c.get("TWO_CTAS", False) and not (
+            is_epilogue_scale and is_blackwell and _use_meta_ws() and bm >= 128
+        ):
+            continue
 
         # MXFP8: BLOCK_K must cover >= 4 scale vectors.
         if is_mxfp8 and vec_size > 0 and bk < vec_size * 4:
             continue
-        # DeepSeek: pin BK=BN=128 (one K-group + one B N-block per tile);
-        # BLOCK_M=128 crashes the Canonicalizer, so require BM>=256.
-        if is_deepseek and (bk != 128 or bn != 128 or bm == 128):
+        # fp32 blockwise: pin BK=128 (one K-group/tile); DeepSeek also pins BN=128
+        # and needs BM>=256 (BM=128 crashes the Canonicalizer).
+        if is_inloop_rescale and bk != 128:
             continue
-        # Symmetric 1x128: pin BK=128 (one K-group per tile).
-        if is_blockwise_1x128 and bk != 128:
+        if is_deepseek and (bn != 128 or bm == 128):
             continue
 
-        # num_stages: in-loop-rescale modes cap at 3 (OOM SMEM beyond); MXFP8 tries
-        # all (autotuner drops overflow); Blackwell TensorWise/RowWise need >= 4.
-        if is_deepseek or is_blockwise_1x128:
+        # num_stages: in-loop rescale caps at 3 (OOM SMEM beyond); Blackwell
+        # epilogue-scale needs >= 4; MXFP8 tries all (autotuner drops overflow).
+        if is_inloop_rescale:
             if ns > 3:
                 continue
-        elif not is_mxfp8 and is_blackwell and ns < 4:
+        elif is_blackwell and not is_mxfp8 and ns < 4:
             continue
 
         # Hopper: epilogue subtiling off (Blackwell keeps it for register relief).
@@ -327,6 +349,198 @@ def _subtile_accumulator(
         return left_sub + right_sub
 
 
+@triton.jit
+def _scaled_mm_autows_loop_body(
+    tile_id,
+    tile_id_c,
+    a_desc,
+    b_desc,
+    c_desc,
+    scale_a_ptr,
+    scale_b_ptr,
+    scale_a_scalar,
+    scale_b_scalar,
+    M,
+    N,
+    K,
+    num_pid_in_group,
+    num_pid_m,
+    k_tiles,
+    BLOCK_SIZE_M: tl.constexpr,
+    BLOCK_SIZE_N: tl.constexpr,
+    BLOCK_SIZE_K: tl.constexpr,
+    GROUP_SIZE_M: tl.constexpr,
+    EPILOGUE_SUBTILE: tl.constexpr,
+    NUM_SMS: tl.constexpr,
+    VEC_SIZE: tl.constexpr,
+    OUT_DTYPE: tl.constexpr,
+    USE_SCALE_TMA: tl.constexpr,
+    IS_TENSORWISE: tl.constexpr,
+    IS_ROWWISE: tl.constexpr,
+    IS_MXFP8: tl.constexpr,
+    IS_BLOCKWISE_1x128: tl.constexpr,
+    IS_DEEPSEEK: tl.constexpr,
+    TWO_CTAS: tl.constexpr,
+):
+    if IS_MXFP8:
+        REP_M: tl.constexpr = BLOCK_SIZE_M // 128
+        REP_N: tl.constexpr = BLOCK_SIZE_N // 128
+        REP_K: tl.constexpr = triton.cdiv(BLOCK_SIZE_K // VEC_SIZE, 4)
+
+    pid_m, pid_n = _compute_pid(tile_id, num_pid_in_group, num_pid_m, GROUP_SIZE_M)
+    offs_am = pid_m * BLOCK_SIZE_M
+    offs_bn = pid_n * BLOCK_SIZE_N
+
+    accumulator = tl.zeros((BLOCK_SIZE_M, BLOCK_SIZE_N), dtype=tl.float32)
+
+    if IS_MXFP8:
+        # Block scaled K-loop: 5D TMA load of scales, fused into dot_scaled.
+        scale_m_tile = pid_m * REP_M
+        scale_n_tile = pid_n * REP_N
+        SCALE_K_PER_TILE: tl.constexpr = BLOCK_SIZE_K // VEC_SIZE
+
+        for ki in range(k_tiles):
+            offs_k = ki * BLOCK_SIZE_K
+            a_tile = a_desc.load([offs_am, offs_k])
+            b_tile = b_desc.load([offs_bn, offs_k])
+
+            scale_k_tile = ki * REP_K
+            sa_packed = scale_a_ptr.load([0, scale_m_tile, scale_k_tile, 0, 0])
+            sb_packed = scale_b_ptr.load([0, scale_n_tile, scale_k_tile, 0, 0])
+            sa = (
+                sa_packed.reshape(REP_M, REP_K, 32, 4, 4)
+                .trans(0, 3, 2, 1, 4)
+                .reshape(BLOCK_SIZE_M, SCALE_K_PER_TILE)
+            )
+            sb = (
+                sb_packed.reshape(REP_N, REP_K, 32, 4, 4)
+                .trans(0, 3, 2, 1, 4)
+                .reshape(BLOCK_SIZE_N, SCALE_K_PER_TILE)
+            )
+
+            accumulator = tl.dot_scaled(
+                a_tile, sa, "e4m3", b_tile.T, sb, "e4m3", accumulator
+            )
+    elif IS_DEEPSEEK:
+        # DeepSeek-style blockwise: scale_a is row-major [M, K//128];
+        # scale_b is row-major [N//128, K//128]. Both are fp32.
+        # Each 128-wide K group's partial dot is rescaled by
+        # sa[m,kb]*sb[n//128,kb] before accumulation.
+        num_k_groups = K // 128
+        offs_m_scale = offs_am + tl.arange(0, BLOCK_SIZE_M)
+        mask_m_scale = offs_m_scale < M
+        # B's scale is one fp32 per N-block. Load it as a [BLOCK_N] vector
+        # (all == scale_b[pid_n, ki]), not a scalar:
+        # a scalar in-loop load races the pipeliner at num_stages>=3.
+        offs_n_block = (offs_bn + tl.arange(0, BLOCK_SIZE_N)) // 128
+        for ki in range(k_tiles):
+            offs_k = ki * BLOCK_SIZE_K
+            a_tile = a_desc.load([offs_am, offs_k])
+            b_tile = b_desc.load([offs_bn, offs_k])
+            partial = tl.dot(
+                a_tile,
+                b_tile.T,
+                out_dtype=tl.float32,
+                allow_tf32=True,
+            )
+            sa = tl.load(
+                scale_a_ptr + offs_m_scale * num_k_groups + ki,
+                mask=mask_m_scale,
+                other=0.0,
+            )
+            sb = tl.load(scale_b_ptr + offs_n_block * num_k_groups + ki)
+            accumulator += partial * sa[:, None] * sb[None, :]
+    elif IS_BLOCKWISE_1x128:
+        # Symmetric fp32 blockwise: scale_a is row-major [M, K//128];
+        # scale_b is row-major [N, K//128]. Both are fp32.
+        # Each K group's partial dot is rescaled by sa[m,kb]*sb[n,kb].
+        num_k_groups = K // 128
+        offs_m_scale = offs_am + tl.arange(0, BLOCK_SIZE_M)
+        offs_n_scale = offs_bn + tl.arange(0, BLOCK_SIZE_N)
+        mask_m_scale = offs_m_scale < M
+        mask_n_scale = offs_n_scale < N
+        for ki in range(k_tiles):
+            offs_k = ki * BLOCK_SIZE_K
+            a_tile = a_desc.load([offs_am, offs_k])
+            b_tile = b_desc.load([offs_bn, offs_k])
+            partial = tl.dot(
+                a_tile,
+                b_tile.T,
+                out_dtype=tl.float32,
+                allow_tf32=True,
+            )
+            sa = tl.load(
+                scale_a_ptr + offs_m_scale * num_k_groups + ki,
+                mask=mask_m_scale,
+                other=0.0,
+            )
+            sb = tl.load(
+                scale_b_ptr + offs_n_scale * num_k_groups + ki,
+                mask=mask_n_scale,
+                other=0.0,
+            )
+            accumulator += partial * sa[:, None] * sb[None, :]
+    else:
+        for ki in range(k_tiles):
+            offs_k = ki * BLOCK_SIZE_K
+            a_tile = a_desc.load([offs_am, offs_k])
+            b_tile = b_desc.load([offs_bn, offs_k])
+            # TWO_CTAS is set only under Meta-WS
+            if TWO_CTAS:
+                accumulator = tl.dot(
+                    a_tile,
+                    b_tile.T,
+                    accumulator,
+                    out_dtype=tl.float32,
+                    allow_tf32=True,
+                    two_ctas=True,
+                )
+            else:
+                accumulator = tl.dot(
+                    a_tile,
+                    b_tile.T,
+                    accumulator,
+                    out_dtype=tl.float32,
+                    allow_tf32=True,
+                )
+
+        if IS_ROWWISE:
+            if USE_SCALE_TMA:
+                sa = scale_a_ptr.load([offs_am])
+            else:
+                offs_scale_m = offs_am + tl.arange(0, BLOCK_SIZE_M)
+                mask_m = offs_scale_m < M
+                sa = tl.load(scale_a_ptr + offs_scale_m, mask=mask_m, other=0.0)
+
+    # Epilogue: store with subtiling via TMA
+    tile_id_c += NUM_SMS
+    pid_m_c, pid_n_c = _compute_pid(
+        tile_id_c, num_pid_in_group, num_pid_m, GROUP_SIZE_M
+    )
+    offs_cm = pid_m_c * BLOCK_SIZE_M
+    offs_cn = pid_n_c * BLOCK_SIZE_N
+
+    subtiles = _subtile_accumulator(
+        accumulator, BLOCK_SIZE_M, BLOCK_SIZE_N, EPILOGUE_SUBTILE
+    )
+    sub_n: tl.constexpr = BLOCK_SIZE_N // EPILOGUE_SUBTILE
+    for i in tl.static_range(EPILOGUE_SUBTILE):
+        subtile = subtiles[i]
+        if IS_TENSORWISE:
+            subtile *= scale_a_scalar * scale_b_scalar
+        elif IS_ROWWISE:
+            if USE_SCALE_TMA:
+                sb = scale_b_ptr.load([offs_bn + i * sub_n])
+            else:
+                offs_scale_n = offs_bn + i * sub_n + tl.arange(0, sub_n)
+                mask_n = offs_scale_n < N
+                sb = tl.load(scale_b_ptr + offs_scale_n, mask=mask_n, other=0.0)
+            subtile *= sa[:, None] * sb[None, :]
+        subtile = subtile.to(OUT_DTYPE)
+        c_desc.store([offs_cm, offs_cn + i * sub_n], subtile)
+    return tile_id_c
+
+
 # ---------------------------------------------------------------------------
 # Main kernel: scaled_mm with AutoWS
 # ---------------------------------------------------------------------------
@@ -368,6 +582,7 @@ def scaled_mm_autows_kernel(
     EPILOGUE_SUBTILE: tl.constexpr,
     # Backend gating: Blackwell uses AutoWS + flattened tile loop;
     # Hopper falls back to a plain persistent loop (no WS, no flatten).
+    USE_FB_RANGE: tl.constexpr = False,
     FLATTEN: tl.constexpr = True,
     WARP_SPECIALIZE: tl.constexpr = True,
     SEPARATE_EPILOGUE_STORE: tl.constexpr = True,
@@ -404,6 +619,8 @@ def scaled_mm_autows_kernel(
     k_tiles = tl.cdiv(K, BLOCK_SIZE_K)
     num_tiles = num_pid_m * num_pid_n
 
+    scale_a_scalar = 0.0
+    scale_b_scalar = 0.0
     if IS_TENSORWISE:
         scale_a_scalar = tl.load(scale_a_ptr)
         scale_b_scalar = tl.load(scale_b_ptr)
@@ -411,178 +628,93 @@ def scaled_mm_autows_kernel(
     # ROWWISE host-side TMA: scale_a_ptr / scale_b_ptr are passed in as
     # TensorDescriptors when USE_SCALE_TMA -- no in-kernel descriptor build.
 
-    if IS_MXFP8:
-        # Host-side 5D TMA on the (1, M//128, K//VEC_SIZE//4, 2, 256) repack
-        # of the cuBLAS block-scale layout (32*4*4 == 2*256).
-        REP_M: tl.constexpr = BLOCK_SIZE_M // 128
-        REP_N: tl.constexpr = BLOCK_SIZE_N // 128
-        REP_K: tl.constexpr = triton.cdiv(BLOCK_SIZE_K // VEC_SIZE, 4)
-
     tile_id_c = start_pid - NUM_SMS
     num_pid_in_group = GROUP_SIZE_M * num_pid_n
 
-    for tile_id in tl.range(
-        start_pid,
-        num_tiles,
-        NUM_SMS,
-        flatten=FLATTEN,
-        warp_specialize=WARP_SPECIALIZE,
-        separate_epilogue_store=SEPARATE_EPILOGUE_STORE,
-        # DeepSeek: merge the epilogue into the computation partition so the
-        # register accumulator isn't spilled to a full-tile SMEM channel (OOMs).
-        merge_epilogue_to_computation=IS_DEEPSEEK,
-    ):
-        pid_m, pid_n = _compute_pid(tile_id, num_pid_in_group, num_pid_m, GROUP_SIZE_M)
-        offs_am = pid_m * BLOCK_SIZE_M
-        offs_bn = pid_n * BLOCK_SIZE_N
-
-        accumulator = tl.zeros((BLOCK_SIZE_M, BLOCK_SIZE_N), dtype=tl.float32)
-
-        if IS_MXFP8:
-            # Block scaled K-loop: 5D TMA load of scales, fused into dot_scaled.
-            scale_m_tile = pid_m * REP_M
-            scale_n_tile = pid_n * REP_N
-            SCALE_K_PER_TILE: tl.constexpr = BLOCK_SIZE_K // VEC_SIZE
-
-            for ki in range(k_tiles):
-                offs_k = ki * BLOCK_SIZE_K
-                a_tile = a_desc.load([offs_am, offs_k])
-                b_tile = b_desc.load([offs_bn, offs_k])
-
-                scale_k_tile = ki * REP_K
-                sa_packed = scale_a_ptr.load([0, scale_m_tile, scale_k_tile, 0, 0])
-                sb_packed = scale_b_ptr.load([0, scale_n_tile, scale_k_tile, 0, 0])
-                sa = (
-                    sa_packed.reshape(REP_M, REP_K, 32, 4, 4)
-                    .trans(0, 3, 2, 1, 4)
-                    .reshape(BLOCK_SIZE_M, SCALE_K_PER_TILE)
-                )
-                sb = (
-                    sb_packed.reshape(REP_N, REP_K, 32, 4, 4)
-                    .trans(0, 3, 2, 1, 4)
-                    .reshape(BLOCK_SIZE_N, SCALE_K_PER_TILE)
-                )
-
-                accumulator = tl.dot_scaled(
-                    a_tile, sa, "e4m3", b_tile.T, sb, "e4m3", accumulator
-                )
-        elif IS_DEEPSEEK:
-            # DeepSeek-style blockwise: scale_a is row-major [M, K//128];
-            # scale_b is row-major [N//128, K//128]. Both are fp32.
-            # Each 128-wide K group's partial dot is rescaled by
-            # sa[m,kb]*sb[n//128,kb] before accumulation.
-            num_k_groups = K // 128
-            offs_m_scale = offs_am + tl.arange(0, BLOCK_SIZE_M)
-            mask_m_scale = offs_m_scale < M
-            # B's scale is one fp32 per N-block. Load it as a [BLOCK_N] vector
-            # (all == scale_b[pid_n, ki]), not a scalar:
-            # a scalar in-loop load races the pipeliner at num_stages>=3.
-            offs_n_block = (offs_bn + tl.arange(0, BLOCK_SIZE_N)) // 128
-            for ki in range(k_tiles):
-                offs_k = ki * BLOCK_SIZE_K
-                a_tile = a_desc.load([offs_am, offs_k])
-                b_tile = b_desc.load([offs_bn, offs_k])
-                partial = tl.dot(
-                    a_tile,
-                    b_tile.T,
-                    out_dtype=tl.float32,
-                    allow_tf32=True,
-                )
-                sa = tl.load(
-                    scale_a_ptr + offs_m_scale * num_k_groups + ki,
-                    mask=mask_m_scale,
-                    other=0.0,
-                )
-                sb = tl.load(scale_b_ptr + offs_n_block * num_k_groups + ki)
-                accumulator += partial * sa[:, None] * sb[None, :]
-        elif IS_BLOCKWISE_1x128:
-            # Symmetric fp32 blockwise: scale_a is row-major [M, K//128];
-            # scale_b is row-major [N, K//128]. Both are fp32.
-            # Each K group's partial dot is rescaled by sa[m,kb]*sb[n,kb].
-            num_k_groups = K // 128
-            offs_m_scale = offs_am + tl.arange(0, BLOCK_SIZE_M)
-            offs_n_scale = offs_bn + tl.arange(0, BLOCK_SIZE_N)
-            mask_m_scale = offs_m_scale < M
-            mask_n_scale = offs_n_scale < N
-            for ki in range(k_tiles):
-                offs_k = ki * BLOCK_SIZE_K
-                a_tile = a_desc.load([offs_am, offs_k])
-                b_tile = b_desc.load([offs_bn, offs_k])
-                partial = tl.dot(
-                    a_tile,
-                    b_tile.T,
-                    out_dtype=tl.float32,
-                    allow_tf32=True,
-                )
-                sa = tl.load(
-                    scale_a_ptr + offs_m_scale * num_k_groups + ki,
-                    mask=mask_m_scale,
-                    other=0.0,
-                )
-                sb = tl.load(
-                    scale_b_ptr + offs_n_scale * num_k_groups + ki,
-                    mask=mask_n_scale,
-                    other=0.0,
-                )
-                accumulator += partial * sa[:, None] * sb[None, :]
-        else:
-            for ki in range(k_tiles):
-                offs_k = ki * BLOCK_SIZE_K
-                a_tile = a_desc.load([offs_am, offs_k])
-                b_tile = b_desc.load([offs_bn, offs_k])
-                # TWO_CTAS is set only under Meta-WS
-                if TWO_CTAS:
-                    accumulator = tl.dot(
-                        a_tile,
-                        b_tile.T,
-                        accumulator,
-                        out_dtype=tl.float32,
-                        allow_tf32=True,
-                        two_ctas=True,
-                    )
-                else:
-                    accumulator = tl.dot(
-                        a_tile,
-                        b_tile.T,
-                        accumulator,
-                        out_dtype=tl.float32,
-                        allow_tf32=True,
-                    )
-
-            if IS_ROWWISE:
-                if USE_SCALE_TMA:
-                    sa = scale_a_ptr.load([offs_am])
-                else:
-                    offs_scale_m = offs_am + tl.arange(0, BLOCK_SIZE_M)
-                    mask_m = offs_scale_m < M
-                    sa = tl.load(scale_a_ptr + offs_scale_m, mask=mask_m, other=0.0)
-
-        # Epilogue: store with subtiling via TMA
-        tile_id_c += NUM_SMS
-        pid_m_c, pid_n_c = _compute_pid(
-            tile_id_c, num_pid_in_group, num_pid_m, GROUP_SIZE_M
-        )
-        offs_cm = pid_m_c * BLOCK_SIZE_M
-        offs_cn = pid_n_c * BLOCK_SIZE_N
-
-        subtiles = _subtile_accumulator(
-            accumulator, BLOCK_SIZE_M, BLOCK_SIZE_N, EPILOGUE_SUBTILE
-        )
-        sub_n: tl.constexpr = BLOCK_SIZE_N // EPILOGUE_SUBTILE
-        for i in tl.static_range(EPILOGUE_SUBTILE):
-            subtile = subtiles[i]
-            if IS_TENSORWISE:
-                subtile *= scale_a_scalar * scale_b_scalar
-            elif IS_ROWWISE:
-                if USE_SCALE_TMA:
-                    sb = scale_b_ptr.load([offs_bn + i * sub_n])
-                else:
-                    offs_scale_n = offs_bn + i * sub_n + tl.arange(0, sub_n)
-                    mask_n = offs_scale_n < N
-                    sb = tl.load(scale_b_ptr + offs_scale_n, mask=mask_n, other=0.0)
-                subtile *= sa[:, None] * sb[None, :]
-            subtile = subtile.to(OUT_DTYPE)
-            c_desc.store([offs_cm, offs_cn + i * sub_n], subtile)
+    if USE_FB_RANGE:
+        for tile_id in tl.range(
+            start_pid,
+            num_tiles,
+            NUM_SMS,
+            flatten=FLATTEN,
+            warp_specialize=WARP_SPECIALIZE,
+            separate_epilogue_store=SEPARATE_EPILOGUE_STORE,
+            # DeepSeek: merge the epilogue into the computation partition so the
+            # register accumulator isn't spilled to a full-tile SMEM channel (OOMs).
+            merge_epilogue_to_computation=IS_DEEPSEEK,
+        ):
+            tile_id_c = _scaled_mm_autows_loop_body(
+                tile_id,
+                tile_id_c,
+                a_desc,
+                b_desc,
+                c_desc,
+                scale_a_ptr,
+                scale_b_ptr,
+                scale_a_scalar,
+                scale_b_scalar,
+                M,
+                N,
+                K,
+                num_pid_in_group,
+                num_pid_m,
+                k_tiles,
+                BLOCK_SIZE_M,
+                BLOCK_SIZE_N,
+                BLOCK_SIZE_K,
+                GROUP_SIZE_M,
+                EPILOGUE_SUBTILE,
+                NUM_SMS,
+                VEC_SIZE,
+                OUT_DTYPE,
+                USE_SCALE_TMA,
+                IS_TENSORWISE,
+                IS_ROWWISE,
+                IS_MXFP8,
+                IS_BLOCKWISE_1x128,
+                IS_DEEPSEEK,
+                TWO_CTAS,
+            )
+    else:
+        for tile_id in tl.range(
+            start_pid,
+            num_tiles,
+            NUM_SMS,
+            flatten=FLATTEN,
+            warp_specialize=WARP_SPECIALIZE,
+        ):
+            tile_id_c = _scaled_mm_autows_loop_body(
+                tile_id,
+                tile_id_c,
+                a_desc,
+                b_desc,
+                c_desc,
+                scale_a_ptr,
+                scale_b_ptr,
+                scale_a_scalar,
+                scale_b_scalar,
+                M,
+                N,
+                K,
+                num_pid_in_group,
+                num_pid_m,
+                k_tiles,
+                BLOCK_SIZE_M,
+                BLOCK_SIZE_N,
+                BLOCK_SIZE_K,
+                GROUP_SIZE_M,
+                EPILOGUE_SUBTILE,
+                NUM_SMS,
+                VEC_SIZE,
+                OUT_DTYPE,
+                USE_SCALE_TMA,
+                IS_TENSORWISE,
+                IS_ROWWISE,
+                IS_MXFP8,
+                IS_BLOCKWISE_1x128,
+                IS_DEEPSEEK,
+                TWO_CTAS,
+            )
 
 
 # ---------------------------------------------------------------------------
@@ -698,8 +830,10 @@ def scaled_mm_autows(
 
     _ensure_triton_allocator(a.device)
 
-    # WS not supported for Symmetric 1x128 and MXFP8 yet.
-    ws_ok = not is_blockwise_1x128 and not is_mxfp8
+    # WS not supported for Symmetric 1x128 and MXFP8 yet, and requires a triton
+    # build whose Blackwell WS lowering works (fbtriton, or OSS >= 3.7.0);
+    # otherwise fall back to the plain persistent loop.
+    ws_ok = not is_blockwise_1x128 and not is_mxfp8 and _WS_SUPPORTED
     warp_specialize = is_blackwell and ws_ok
     separate_epilogue_store = is_blackwell and ws_ok
 
@@ -718,6 +852,7 @@ def scaled_mm_autows(
         USE_SCALE_TMA=use_scale_tma,
         VEC_SIZE=vec_size,
         OUT_DTYPE=tl_out_dtype,
+        USE_FB_RANGE=is_meta_triton(),
         FLATTEN=False,
         WARP_SPECIALIZE=warp_specialize,
         SEPARATE_EPILOGUE_STORE=separate_epilogue_store,
