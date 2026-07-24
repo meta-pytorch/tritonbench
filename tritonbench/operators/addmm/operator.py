@@ -13,7 +13,7 @@ from tritonbench.utils.env_utils import (
     is_hip_mi350,
 )
 from tritonbench.utils.python_utils import try_import
-from tritonbench.utils.triton_utils import has_tlx
+from tritonbench.utils.triton_utils import has_tlx, has_torch_tlx
 
 with try_import("HAS_HSTU"):
     try:
@@ -175,7 +175,7 @@ class Operator(BenchmarkOperator):
             compiled(a, mat1, mat2)
         return lambda: compiled(a, mat1, mat2)
 
-    @register_benchmark(enabled=is_hip_mi350() and has_tlx())
+    @register_benchmark(enabled=is_hip_mi350() and has_tlx() and has_torch_tlx())
     def torch_tlx_addmm(self, a, mat1, mat2) -> Callable:
         # torch_tlx_<op> convention: PT2 (torch.compile max-autotune, TRITON
         # backend) with TLX "allow" mode, so TLX templates compete against the
