@@ -35,6 +35,24 @@ def has_tlx():
     return spec is not None
 
 
+@functools.lru_cache
+def has_torch_tlx():
+    """
+    Returns whether the installed torch exposes the inductor `triton.tlx_mode`
+    knob -- the torch-side half of torchTLX. Providers that run TLX templates
+    through torch.compile (torch_tlx_* benchmarks) need this in addition to
+    has_tlx(): has_tlx() only says the Triton TLX module exists, not that torch's
+    inductor config can select it. Older torch builds omit the knob and would
+    otherwise raise AttributeError inside inductor_config.patch(...).
+    """
+    try:
+        import torch._inductor.config as inductor_config
+
+        return hasattr(inductor_config.triton, "tlx_mode")
+    except (ImportError, AttributeError):
+        return False
+
+
 def has_experimental_descriptor():
     import triton.language as tl
 

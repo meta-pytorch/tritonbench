@@ -41,7 +41,7 @@ from tritonbench.utils.triton_op import (
     register_metric,
     register_x_val,
 )
-from tritonbench.utils.triton_utils import has_tlx
+from tritonbench.utils.triton_utils import has_tlx, has_torch_tlx
 
 from .mods import (
     causal_mask,
@@ -374,7 +374,9 @@ class Operator(BenchmarkOperator):
         return self.compiled(q, k, v, score_mod, block_mask, mod_type, kernel_options)
 
     @register_benchmark(
-        enabled=(is_nvidia_blackwell() or is_amd_gfx950()) and has_tlx(),
+        enabled=(is_nvidia_blackwell() or is_amd_gfx950())
+        and has_tlx()
+        and has_torch_tlx(),
         fwd_only=True,
     )
     def torch_tlx_flex_attention(

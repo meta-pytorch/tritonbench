@@ -21,7 +21,7 @@ if False:
         blackwell_matmul_tma_persistent,
         blackwell_matmul_tma_persistent_splitk,
     )
-from tritonbench.utils.triton_utils import has_tlx
+from tritonbench.utils.triton_utils import has_tlx, has_torch_tlx
 
 if has_tlx():
     from triton.language.extra.tlx.tutorials.blackwell_gemm_2cta import (
@@ -414,7 +414,7 @@ class Operator(BenchmarkOperator):
 
         return lambda: compiled(a, b)
 
-    @register_benchmark(enabled=IS_BLACKWELL and has_tlx())
+    @register_benchmark(enabled=IS_BLACKWELL and has_tlx() and has_torch_tlx())
     def torch_tlx_mm(self, a, b, bias) -> Callable:
         # torch_tlx_<op> convention: PT2 (torch.compile max-autotune, TRITON
         # backend) with TLX "allow" mode, so TLX templates compete against the
