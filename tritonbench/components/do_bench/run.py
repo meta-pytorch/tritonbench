@@ -6,7 +6,6 @@ from typing import List, Optional
 
 import torch
 from torch._inductor.runtime.benchmarking import benchmarker
-from torch.utils._pytree import tree_leaves
 from tritonbench.components.do_bench.entropy.entropy_criterion import EntropyCriterion
 from tritonbench.utils.constants import DEFAULT_N_REP, DEFAULT_N_WARMUP
 from tritonbench.utils.cudagraph_utils import CudaGraphConfig
@@ -477,67 +476,31 @@ def _do_bench_cpu(
     return summarize_statistics(times, quantiles, return_mode)
 
 
-def _materialize_output(out: object) -> None:
-    """Force ``out`` to finish computing on-device, then drain the accelerator.
-
-    ``torch.accelerator.synchronize()`` is a device-wide barrier: it waits for
-    work already *dispatched*, but it does not *trigger* a lazily-executed
-    graph. On torch_tpu a ``torch.compile`` baseline (or a lazily-materialized
-    kernel) records its work and defers it, so the barrier returns before that
-    work runs; the deferred work then executes inside the *next* timed call —
-    measuring the lazy candidate as ~0 ms and inflating its neighbour. Waiting
-    on the produced tensors forces this call's work to materialize inside its
-    own timing window.
-
-    Non-TPU tensors dispatch eagerly (CUDA/CuTe), so there is nothing to force
-    and we just drain — leaving those backends' timing unchanged.
-
-    Limitation: if the call exposes no TPU tensor leaf (writes in place, returns
-    None, or wraps tensors in a pytree-unregistered object), there is nothing to
-    wait on and we fall back to the device-wide drain, which cannot force a lazy
-    graph — so such a candidate can still be under-measured. Most tritonbench
-    operators return their output tensor(s); this matches the Helion autotuner's
-    same-shaped fix.
-    """
-    tpu_tensors = [
-        leaf
-        for leaf in tree_leaves(out)
-        if isinstance(leaf, torch.Tensor) and leaf.device.type == "tpu"
-    ]
-    if tpu_tensors:
-        # A device-wide sync alone will not trigger the lazy graph; wait on the
-        # produced tensors so their work runs before we stop the timer.
-        from torch_tpu._internal.sync import synchronize as _tpu_sync
-
-        _tpu_sync(tpu_tensors, wait=True)
-    torch.accelerator.synchronize()
-
-
 def _do_bench_tpu(
     fn, warmup, rep, grad_to_none=None, quantiles=None, return_mode="mean"
 ):
     """Measure latency of a function on TPU (torch_tpu).
 
-    Same wall-clock approach as ``_do_bench_cpu`` but each timed region ends by
-    materializing the output on-device (see ``_materialize_output``), since
-    torch_tpu executes asynchronously and lazily. CUDA event timing, CUDA
-    graphs, and Triton's driver benchmarker do not work on TPU, so this is the
-    timing path for ``--device tpu``. Requires torch_tpu >= 2026-06-05.
+    Same wall-clock approach as ``_do_bench_cpu`` but with a device sync around
+    each timed region, since torch_tpu executes asynchronously. CUDA event
+    timing, CUDA graphs, and Triton's driver benchmarker do not work on TPU, so
+    this is the timing path for ``--device tpu``. Requires a torch_tpu pin that
+    includes the fix for torch_tpu#2402 (device sync blocks on compiled-mode
+    execution); see .github/ci_commit_pins/torch_tpu.txt.
     """
     assert return_mode in ["min", "max", "mean", "median", "all"]
 
     def _timed_call() -> float:
-        # torch_tpu is asynchronous and lazy: bind the output and wait on it
-        # inside the timed window via _materialize_output(), which forces a
-        # (possibly lazy) torch.compile graph to actually run before we stop the
-        # clock. A bare device-wide sync would let lazy work defer into the next
-        # call — reading ~0 ms here and inflating the next candidate. The local
-        # is released when the call returns. Shared by the estimate, warmup, and
-        # measurement paths so all three time the identical per-call work
-        # (n_warmup/n_repeat match what we record).
+        # torch_tpu is asynchronous: bind the output so it stays alive across the
+        # sync (a bare call lets its DeviceBuffer teardown land in the timed
+        # region). With a torch_tpu pin that includes torch_tpu#2402's fix, a
+        # device-wide synchronize() blocks until the (possibly lazy torch.compile)
+        # work has run, so no per-output wait is needed. Shared by the estimate,
+        # warmup, and measurement paths so all three time the identical per-call
+        # work (n_warmup/n_repeat match what we record).
         t0 = time.time_ns()
         _output = fn()
-        _materialize_output(_output)
+        torch.accelerator.synchronize()
         t1 = time.time_ns()
         return (t1 - t0) * NS_TO_MS
 
