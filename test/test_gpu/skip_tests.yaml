@@ -40,6 +40,19 @@ blackwell_attentions_mxfp8:
   # Blackwell FA path (single-trip inner loop). Run seq>=256 in CI until that is
   # fixed. See T279315890.
   extra_args: --seq-len 256
+hstu_cross_attention_bwd:
+  devices:
+    - b200
+  # Blackwell reduce_dq backward op (autoWS / TLX 2-KV variants). The default
+  # kv-len sweep (256/384/512/1024) is heavy for CI; pin a single shape.
+  extra_args: --seq-len-kv 256
+ragged_attention:
+  # cuda covers all NVIDIA (keeps existing coverage); the literal b200 entry is
+  # required for the b200-only CI filter. This exercises hstu_tlx plus the
+  # default, manual-DP, and DQ-reduce AutoWS self-attention backends on b200.
+  devices:
+    - cuda
+    - b200
 nvfp4_gemm:
   devices:
     - b200
