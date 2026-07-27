@@ -481,23 +481,32 @@ def _do_bench_tpu(
 ):
     """Measure latency of a function on TPU (torch_tpu).
 
-    Same wall-clock approach as ``_do_bench_cpu`` but with an explicit
-    ``torch.accelerator.synchronize()`` around each timed region, since
-    torch_tpu executes asynchronously. CUDA event timing, CUDA graphs, and
-    Triton's driver benchmarker do not work on TPU, so this is the timing path
-    for ``--device tpu``. Requires torch_tpu >= 2026-06-05, where
-    ``torch.accelerator.synchronize()`` waits for all in-flight tensors.
+    Same wall-clock approach as ``_do_bench_cpu`` but with a device sync around
+    each timed region, since torch_tpu executes asynchronously. CUDA event
+    timing, CUDA graphs, and Triton's driver benchmarker do not work on TPU, so
+    this is the timing path for ``--device tpu``. Requires a torch_tpu pin that
+    includes the fix for torch_tpu#2402 (device sync blocks on compiled-mode
+    execution); see .github/ci_commit_pins/torch_tpu.txt.
     """
     assert return_mode in ["min", "max", "mean", "median", "all"]
-    # Warm up once, then estimate the runtime of the function.
-    fn()
-    torch.accelerator.synchronize()
-    t0 = time.time_ns()
-    for _ in range(5):
-        fn()
-    torch.accelerator.synchronize()
-    t1 = time.time_ns()
-    estimate_ms = (t1 - t0) * NS_TO_MS / 5
+
+    def _timed_call() -> float:
+        # torch_tpu is asynchronous: bind the output so it stays alive across the
+        # sync (a bare call lets its DeviceBuffer teardown land in the timed
+        # region). With a torch_tpu pin that includes torch_tpu#2402's fix, a
+        # device-wide synchronize() blocks until the (possibly lazy torch.compile)
+        # work has run, so no per-output wait is needed. Shared by the estimate,
+        # warmup, and measurement paths so all three time the identical per-call
+        # work (n_warmup/n_repeat match what we record).
+        t0 = time.time_ns()
+        _output = fn()
+        torch.accelerator.synchronize()
+        t1 = time.time_ns()
+        return (t1 - t0) * NS_TO_MS
+
+    # Warm up once, then estimate the per-call runtime.
+    _timed_call()
+    estimate_ms = sum(_timed_call() for _ in range(5)) / 5
     warmup, rep = resolve_warmup_and_rep(warmup, rep, estimate_ms)
 
     # compute number of warmup and repeat
@@ -507,10 +516,11 @@ def _do_bench_tpu(
     else:
         n_warmup = max(1, int(warmup / estimate_ms))
         n_repeat = max(1, int(rep / estimate_ms))
+
     # Warm-up
     for _ in range(n_warmup):
-        fn()
-    torch.accelerator.synchronize()
+        _timed_call()
+
     times_ms = []
     # Benchmark
     for _i in range(n_repeat):
@@ -520,12 +530,7 @@ def _do_bench_tpu(
         if grad_to_none is not None:
             for x in grad_to_none:
                 x.grad = None
-        # record time of `fn`, synchronizing to capture async device work
-        t0 = time.time_ns()
-        fn()
-        torch.accelerator.synchronize()
-        t1 = time.time_ns()
-        times_ms.append((t1 - t0) * NS_TO_MS)
+        times_ms.append(_timed_call())
     times = torch.tensor(times_ms, dtype=torch.float)
     return summarize_statistics(times, quantiles, return_mode)
 
