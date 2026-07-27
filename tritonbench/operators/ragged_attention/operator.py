@@ -51,6 +51,30 @@ if is_fbcode():
 else:
     get_prod_config = lambda x: None
 
+# HSTU self-attention kernels ported to MetaMain2 triton tutorials
+# (third_party/tlx/tutorials/hstu_self_attn), imported like the blackwell FA
+# tutorials. Multi-file port with bare intra-package imports, so add its
+# directory to sys.path and import the two entrypoints by module name:
+#   hstu_self_triton_mha - hammer-template Triton self-attn (fwd+bwd)
+#   hstu_self_tlx_mha     - hammer-template TLX Blackwell self-attn (fwd+bwd)
+HAS_HSTU_SELF_ATTN = False
+try:
+    import os as _os
+    import sys as _sys
+
+    import triton.language.extra.tlx.tutorials as _tlx_tut
+
+    _hstu_self_dir = _os.path.join(list(_tlx_tut.__path__)[0], "hstu_self_attn")
+    if _os.path.isdir(_hstu_self_dir):
+        if _hstu_self_dir not in _sys.path:
+            _sys.path.insert(0, _hstu_self_dir)
+        from triton_hstu_attention import triton_hstu_mha as hstu_self_triton_mha
+        from tlx_bw_hstu_attention import tlx_bw_hstu_mha as hstu_self_tlx_mha
+
+        HAS_HSTU_SELF_ATTN = True
+except Exception:
+    HAS_HSTU_SELF_ATTN = False
+
 
 def parse_op_args(args: List[str]):
     parser = argparse.ArgumentParser()
@@ -149,6 +173,52 @@ class Operator(BenchmarkOperator):
             contextual_seq_len=self.contextual_seq_len,
             sort_by_length=True,
             enable_tma=_enable_tma,
+        )
+
+    @register_benchmark(enabled=HAS_HSTU_SELF_ATTN and is_cuda())
+    def hstu_triton_hammer(
+        self, q, k, v, seq_offsets, num_targets, max_seq_len, sparsity
+    ):
+        # Hammer-template Triton self-attn (MetaMain2 port). Needs an explicit
+        # attn_scale tensor (the GR `hstu` baseline bakes 1/max_seq_len).
+        attn_scale = torch.tensor(
+            1.0 / max_seq_len, device=q.device, dtype=torch.float32
+        )
+        return lambda: hstu_self_triton_mha(
+            max_seq_len=max_seq_len,
+            alpha=self.alpha,
+            q=q,
+            k=k,
+            v=v,
+            seq_offsets=seq_offsets,
+            attn_scale=attn_scale,
+            num_targets=num_targets,
+            max_attn_len=self.max_attn_len,
+            contextual_seq_len=self.contextual_seq_len,
+            sort_by_length=True,
+            enable_tma=is_cuda(),
+        )
+
+    @register_benchmark(enabled=HAS_HSTU_SELF_ATTN and IS_BLACKWELL)
+    def hstu_tlx(self, q, k, v, seq_offsets, num_targets, max_seq_len, sparsity):
+        # Hammer-template TLX (Blackwell warp-specialized) self-attn. SiLU heads
+        # only (num_softmax_heads=0); scalar attn_scale.
+        attn_scale = torch.tensor(
+            1.0 / max_seq_len, device=q.device, dtype=torch.float32
+        )
+        return lambda: hstu_self_tlx_mha(
+            max_seq_len=max_seq_len,
+            alpha=self.alpha,
+            q=q,
+            k=k,
+            v=v,
+            seq_offsets=seq_offsets,
+            attn_scale=attn_scale,
+            num_softmax_heads=0,
+            num_targets=num_targets,
+            max_attn_len=self.max_attn_len,
+            contextual_seq_len=self.contextual_seq_len,
+            causal=True,
         )
 
     @register_benchmark(enabled=HAS_HAMMER)
