@@ -1,4 +1,6 @@
 import argparse
+import contextlib
+import os
 from typing import Any, Callable, List, Optional
 
 import torch
@@ -22,6 +24,29 @@ from .triton_autows import (
     triton_autows_ragged_hstu,
     triton_autows_ragged_hstu_persistent,
 )
+
+
+@contextlib.contextmanager
+def _scoped_env(overrides: dict[str, str]):
+    """Apply env overrides for the duration of the block, then restore them.
+
+    The meta-autoWS compiler toggles (TRITON_USE_META_WS etc.) are read at
+    compile time and are NOT part of the JIT cache key, so leaving them set leaks
+    into whichever backend recompiles next in the input sweep -- e.g. the non-WS
+    `hstu` baseline would silently recompile warp-specialized. Scoping them around
+    each autoWS kernel keeps every backend's config independent of run order.
+    """
+    prev = {k: os.environ.get(k) for k in overrides}
+    try:
+        os.environ.update(overrides)
+        yield
+    finally:
+        for k, old in prev.items():
+            if old is None:
+                os.environ.pop(k, None)
+            else:
+                os.environ[k] = old
+
 
 HAS_CUDA = False
 try:
@@ -68,8 +93,11 @@ try:
     if _os.path.isdir(_hstu_self_dir):
         if _hstu_self_dir not in _sys.path:
             _sys.path.insert(0, _hstu_self_dir)
-        from triton_hstu_attention import triton_hstu_mha as hstu_self_triton_mha
         from tlx_bw_hstu_attention import tlx_bw_hstu_mha as hstu_self_tlx_mha
+        from triton_hstu_attention import (
+            configure_autows as hstu_self_configure,
+            triton_hstu_mha as hstu_self_triton_mha,
+        )
 
         HAS_HSTU_SELF_ATTN = True
 except Exception:
@@ -181,6 +209,9 @@ class Operator(BenchmarkOperator):
     ):
         # Hammer-template Triton self-attn (MetaMain2 port). Needs an explicit
         # attn_scale tensor (the GR `hstu` baseline bakes 1/max_seq_len).
+        # Reset to the plain (non-autoWS) config in case an autoWS backend below
+        # switched it earlier in this process.
+        hstu_self_configure(autows=False)
         attn_scale = torch.tensor(
             1.0 / max_seq_len, device=q.device, dtype=torch.float32
         )
@@ -219,6 +250,122 @@ class Operator(BenchmarkOperator):
             max_attn_len=self.max_attn_len,
             contextual_seq_len=self.contextual_seq_len,
             causal=True,
+        )
+
+    def _hstu_self_autows(
+        self, cfg, q, k, v, seq_offsets, num_targets, max_seq_len, smem_search=False
+    ):
+        # Meta-autoWS self-attn. The structural config (autows/dp/manual_dp/...) is
+        # switched in-process via configure_autows() (rebuilds autotune configs +
+        # clears the JIT caches / used-global guard), so multiple autoWS variants
+        # can be benchmarked in one process. The compiler WS toggles are env vars
+        # scoped to the returned callable so they do not leak into other backends
+        # (e.g. the non-WS `hstu` baseline) that recompile later in the sweep.
+        ws_env = {
+            "TRITON_USE_META_WS": "1",
+            "TRITON_DISABLE_WSBARRIER_REORDER": "1",
+        }
+        if smem_search:
+            ws_env["TRITON_WS_SMEM_PLAN_SEARCH"] = "1"
+        with _scoped_env(ws_env):
+            hstu_self_configure(**cfg)
+        attn_scale = torch.tensor(
+            1.0 / max_seq_len, device=q.device, dtype=torch.float32
+        )
+
+        def _run():
+            with _scoped_env(ws_env):
+                return hstu_self_triton_mha(
+                    max_seq_len=max_seq_len,
+                    alpha=self.alpha,
+                    q=q,
+                    k=k,
+                    v=v,
+                    seq_offsets=seq_offsets,
+                    attn_scale=attn_scale,
+                    num_targets=num_targets,
+                    max_attn_len=self.max_attn_len,
+                    contextual_seq_len=self.contextual_seq_len,
+                    sort_by_length=True,
+                    enable_tma=is_cuda(),
+                )
+
+        return _run
+
+    # fwd_only: the fwd-data-partition variants share the same (RMW) WS backward,
+    # and two different WS backward configs cannot be compiled/run in one process
+    # (sequential meta-WS bwd launches deadlock), so only hstu_triton_autows_dqreduce
+    # exercises the WS backward -- these variants benchmark the forward only.
+    @register_benchmark(enabled=HAS_HSTU_SELF_ATTN and IS_BLACKWELL, fwd_only=True)
+    def hstu_triton_autows(
+        self, q, k, v, seq_offsets, num_targets, max_seq_len, sparsity
+    ):
+        # Default meta-autoWS: warp-specialized KV loop, DP=1 (fwd only).
+        return self._hstu_self_autows(
+            dict(autows=True, dp=1, pin=True),
+            q,
+            k,
+            v,
+            seq_offsets,
+            num_targets,
+            max_seq_len,
+        )
+
+    @register_benchmark(enabled=HAS_HSTU_SELF_ATTN and IS_BLACKWELL, fwd_only=True)
+    def hstu_triton_autows_manualdp(
+        self, q, k, v, seq_offsets, num_targets, max_seq_len, sparsity
+    ):
+        # Manual fwd data-partition (split BLOCK_M, shared K/V, 2 MMA groups).
+        return self._hstu_self_autows(
+            dict(autows=True, manual_dp=True, dp=2, warps=4, pin=True),
+            q,
+            k,
+            v,
+            seq_offsets,
+            num_targets,
+            max_seq_len,
+        )
+
+    @register_benchmark(enabled=False, fwd_only=True)
+    def hstu_triton_autows_dp2(
+        self, q, k, v, seq_offsets, num_targets, max_seq_len, sparsity
+    ):
+        # Compiler data_partition_factor=2 fwd.
+        return self._hstu_self_autows(
+            dict(autows=True, dp=2, warps=4, pin=True),
+            q,
+            k,
+            v,
+            seq_offsets,
+            num_targets,
+            max_seq_len,
+        )
+
+    @register_benchmark(enabled=HAS_HSTU_SELF_ATTN and IS_BLACKWELL)
+    def hstu_triton_autows_dqreduce(
+        self, q, k, v, seq_offsets, num_targets, max_seq_len, sparsity
+    ):
+        # TLX-matching dq-reduce bwd: BM=BN=128, ns=2, TMEM reuse, dq via TMA reduce.
+        return self._hstu_self_autows(
+            dict(
+                autows=True,
+                dq_reduce=True,
+                dq_reuse=True,
+                dp=1,
+                bwd_bm=128,
+                bwd_bn=128,
+                bwd_stages=2,
+                warps=4,
+                dq_iters=4,
+                pin=True,
+            ),
+            q,
+            k,
+            v,
+            seq_offsets,
+            num_targets,
+            max_seq_len,
+            smem_search=True,
         )
 
     @register_benchmark(enabled=HAS_HAMMER)
