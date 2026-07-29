@@ -1630,6 +1630,15 @@ class BenchmarkOperator(metaclass=PostInitProcessor):
 
         return grads
 
+    @property
+    def _accuracy_check_dtype(self) -> bool:
+        # On TPU, --precision force-casts inputs to bf16, but an impl may
+        # legitimately compute/return a higher-precision result (e.g. a loss
+        # reduction kept in fp32) while the eager baseline returns bf16. Those
+        # agree in value but not in storage dtype; compare values (not dtype)
+        # on TPU. Keep strict dtype checks on every other device.
+        return self.device != "tpu"
+
     def _check_gradients(self, grads, baseline_grads, mode=""):
         """Helper to check gradients between two sets of tensors.
 
@@ -1674,6 +1683,7 @@ class BenchmarkOperator(metaclass=PostInitProcessor):
                     baseline_grad,
                     rtol=self.tb_args.rtol,
                     atol=self.tb_args.atol,
+                    check_dtype=self._accuracy_check_dtype,
                     msg=f"{prefix}Gradient mismatch for tensor {i} with shape {grad.shape}",
                 )
 
@@ -1785,6 +1795,7 @@ class BenchmarkOperator(metaclass=PostInitProcessor):
                         baseline_output,
                         rtol=self.tb_args.rtol,
                         atol=self.tb_args.atol,
+                        check_dtype=self._accuracy_check_dtype,
                     )
             elif self.mode == Mode.BWD:
                 # Get tensors with gradients from both implementations
@@ -1828,6 +1839,7 @@ class BenchmarkOperator(metaclass=PostInitProcessor):
                             baseline_fwd_output,
                             rtol=self.tb_args.rtol,
                             atol=self.tb_args.atol,
+                            check_dtype=self._accuracy_check_dtype,
                         )
 
                     # Check backward gradients using helper
@@ -1854,6 +1866,7 @@ class BenchmarkOperator(metaclass=PostInitProcessor):
                         baseline_output,
                         rtol=self.tb_args.rtol,
                         atol=self.tb_args.atol,
+                        check_dtype=self._accuracy_check_dtype,
                     )
             return True
         except Exception as e:
