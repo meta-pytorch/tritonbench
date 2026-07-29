@@ -326,7 +326,7 @@ class Operator(BenchmarkOperator):
             max_seq_len,
         )
 
-    @register_benchmark(enabled=False, fwd_only=True)
+    @register_benchmark(enabled=HAS_HSTU_SELF_ATTN and IS_BLACKWELL, fwd_only=True)
     def hstu_triton_autows_dp2(
         self, q, k, v, seq_offsets, num_targets, max_seq_len, sparsity
     ):
