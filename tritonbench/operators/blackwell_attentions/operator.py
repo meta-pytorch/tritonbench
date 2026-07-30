@@ -91,9 +91,6 @@ except (ImportError, IOError, AttributeError):
 # [Optional] CuTe
 try:
     import cutlass
-    from mslk.attention.flash_attn.interface import (
-        flash_attn_func as facute_flash_attn_func,
-    )
 
     print(
         f"TRITONBENCH CUTLASS INFO: cutlass.CUDA_VERSION {cutlass.CUDA_VERSION}",
@@ -605,6 +602,10 @@ class Operator(BenchmarkOperator):
     @register_benchmark(enabled=(IS_BLACKWELL and HAS_FLASH_CUTE), label="FAv4")
     @multi_input_wrapper
     def cutedsl_blackwell(self, *args) -> Tuple[Callable, Callable]:
+        from mslk.attention.flash_attn.interface import (
+            flash_attn_func as facute_flash_attn_func,
+        )
+
         if self.varlen:
 
             def fn(q, k, v, cu_seqlens_q, cu_seqlens_k, max_seqlen_q, max_seqlen_k):
