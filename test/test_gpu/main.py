@@ -226,7 +226,7 @@ def make_test(operator):
         # Skip specific backends when the disabled_* condition matches.
         if operator in SKIP_BACKENDS:
             args.extend(["--skip", SKIP_BACKENDS[operator]])
-        in_task = not is_fbcode()
+        in_task = not is_fbcode() or os.environ.get("RUN_ISOLATED_TEST", "0") == "1"
         _run_one_operator(op=operator, args=args, in_task=in_task)
 
     return test_case
