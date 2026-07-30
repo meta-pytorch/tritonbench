@@ -1294,6 +1294,10 @@ class BenchmarkOperator(metaclass=PostInitProcessor):
                 y_vals: Dict[str, BenchmarkOperatorMetrics] = functools.reduce(
                     _reduce_benchmarks, benchmarks, {}
                 )
+                # All impls of this input have run; drop the shared backward
+                # grad_output so it does not persist across inputs. The next input
+                # rebuilds it lazily on the first backward call (see get_bwd_fn).
+                self._shared_bwd_grad = None
                 metrics.append((x_val, y_vals))
                 logger.warning(
                     f"Completed input ID {input_id}:\n{table}",
@@ -1373,8 +1377,26 @@ class BenchmarkOperator(metaclass=PostInitProcessor):
             if state["y"] is None:
                 output = fwd_fn()
                 state["y"] = output[0] if isinstance(output, tuple) else output
-                torch.manual_seed(0)
-                state["dy"] = 0.1 * torch.randn_like(state["y"])
+                # Share ONE upstream gradient across every implementation of this
+                # op/input so the backward accuracy check feeds all impls the
+                # identical grad_output. We used to regenerate it per-impl via
+                # `manual_seed(0); randn_like(...)`, which only yields the same
+                # tensor where the *device* RNG is reset by manual_seed. On CUDA it
+                # is, so per-impl regeneration matched. On TPU (torch_tpu) the
+                # device RNG is not reliably reset by manual_seed at runtime, so
+                # each impl drew a *different* grad_output and the backward check
+                # failed spuriously even though the kernels were correct. Computing
+                # it once is behavior-preserving on CUDA (same seeded values) and
+                # makes TPU behave the same. The cache is scoped to the current
+                # input: run() clears it once all impls of an input have run, so it
+                # never persists across inputs.
+                y = state["y"]
+                cached = getattr(self, "_shared_bwd_grad", None)
+                if cached is None:
+                    torch.manual_seed(0)
+                    cached = 0.1 * torch.randn_like(y)
+                    self._shared_bwd_grad = cached
+                state["dy"] = cached
 
             # Run backward
             state["y"].backward(state["dy"], retain_graph=True)
