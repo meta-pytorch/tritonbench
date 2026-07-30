@@ -22,6 +22,25 @@ from tritonbench.utils.run_utils import _env_check
 
 CUSTOM_SKIP_FILE_ENV = "TRITONBENCH_TEST_SKIP_FILE"
 
+
+def _resolve_skip_file(rel_path: str):
+    # In fbcode the yaml files are packaged as resources next to main.py. The
+    # reactor-ci runner imports this file standalone via spec_from_file_location(),
+    # which leaves __package__ == "" and makes importlib.resources.files("") raise
+    # "Empty module name"; fall back to a __file__-relative path in that case (the
+    # file is on disk in the staged test rootdir alongside main.py).
+    if is_fbcode() and __package__:
+        import importlib.resources
+
+        return importlib.resources.files(__package__).joinpath(rel_path)
+    return os.path.abspath(os.path.join(os.path.dirname(__file__), rel_path))
+
+
+def _load_skip_file(skip_file) -> dict:
+    with open(skip_file, "r") as f:
+        return yaml.safe_load(f) or {}
+
+
 if custom_skip_file := os.environ.get(CUSTOM_SKIP_FILE_ENV):
     # Allow users to override the skip list with a custom yaml file.
     if not os.path.isfile(custom_skip_file):
@@ -29,29 +48,12 @@ if custom_skip_file := os.environ.get(CUSTOM_SKIP_FILE_ENV):
             f"{CUSTOM_SKIP_FILE_ENV} is set to '{custom_skip_file}', "
             "but the file does not exist."
         )
-    SKIP_FILE = custom_skip_file
-elif is_fbcode():
-    import importlib
-
-    fbcode_skip_file_path = "fb/skip_tests.yaml"
-    # The reactor-ci runner imports this file standalone via
-    # spec_from_file_location(), which leaves __package__ == "" and makes
-    # importlib.resources.files("") raise "Empty module name". Fall back to a
-    # __file__-relative path in that case (the file is on disk in the staged
-    # test rootdir alongside main.py).
-    if __package__:
-        SKIP_FILE = importlib.resources.files(__package__).joinpath(
-            fbcode_skip_file_path
-        )
-    else:
-        SKIP_FILE = os.path.join(os.path.dirname(__file__), fbcode_skip_file_path)
+    skip_tests = _load_skip_file(custom_skip_file)
 else:
-    SKIP_FILE = os.path.abspath(
-        os.path.join(os.path.dirname(__file__), "skip_tests.yaml")
-    )
-
-with open(SKIP_FILE, "r") as f:
-    skip_tests = yaml.safe_load(f)
+    skip_tests = _load_skip_file(_resolve_skip_file("skip_tests.yaml"))
+    if is_fbcode():
+        # Layer the internal-only skip list on top of the base (OSS) one.
+        skip_tests.update(_load_skip_file(_resolve_skip_file("fb/skip_tests.yaml")))
 
 logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger(__name__)
