@@ -195,9 +195,10 @@ def _get_autotune_configs():
         (256, 256, 128),
     ]
 
-    # 2-CTA (cta_group::2) MMA via ctas_per_cga=(2,1,1); _prune_configs offers it for
-    # TensorWise/RowWise on Blackwell+Meta-WS, BM>=128. ctas_per_cga is Meta-WS-only,
-    # so only emit 2-CTA configs when Meta-WS is available.
+    # 2-CTA (cta_group::2) MMA via ctas_per_cga=(2,1,1) for both plain tl.dot
+    # (TensorWise/RowWise) and tl.dot_scaled (MXFP8); _prune_configs offers it for
+    # TensorWise/RowWise/MXFP8 on Blackwell+Meta-WS, BM>=128. ctas_per_cga is
+    # Meta-WS-only, so only emit 2-CTA configs when Meta-WS is available.
     two_cta_options = [False, True] if _use_meta_ws() else [False]
     # num_warps: Blackwell WS -> 4, Hopper wgmma big-N -> 8; _prune_configs gates
     # which survives per backend/tile.
@@ -268,9 +269,15 @@ def _prune_configs(configs, named_args, **kwargs):
         if nw != want_nw:
             continue
 
-        # 2-CTA: epilogue-scale only, Blackwell + Meta-WS, BM >= 128.
+        # 2-CTA: epilogue-scale (TensorWise/RowWise) or MXFP8 share one gate --
+        # Blackwell + Meta-WS + BM >= 128. (BN >= 128 always holds; BN=128 MXFP8
+        # 2-CTA emits real cta_group::2 and is bit-exact vs torch.) The fp32
+        # blockwise modes have no WS -> no 2-CTA.
         if c.get("TWO_CTAS", False) and not (
-            is_epilogue_scale and is_blackwell and _use_meta_ws() and bm >= 128
+            (is_epilogue_scale or is_mxfp8)
+            and is_blackwell
+            and _use_meta_ws()
+            and bm >= 128
         ):
             continue
 
@@ -419,7 +426,8 @@ def _scaled_mm_autows_loop_body(
             )
 
             accumulator = tl.dot_scaled(
-                a_tile, sa, "e4m3", b_tile.T, sb, "e4m3", accumulator
+                a_tile, sa, "e4m3", b_tile.T, sb, "e4m3", accumulator,
+                two_ctas=TWO_CTAS,
             )
     elif IS_DEEPSEEK:
         # DeepSeek-style blockwise: scale_a is row-major [M, K//128];
@@ -587,10 +595,10 @@ def scaled_mm_autows_kernel(
     WARP_SPECIALIZE: tl.constexpr = True,
     SEPARATE_EPILOGUE_STORE: tl.constexpr = True,
     # 2-CTA (cta_group::2) tcgen05 MMA across a contiguous CTA pair. Set by
-    # autotune configs that also carry ctas_per_cga=(2,1,1); only the plain
-    # tl.dot path uses it (compiler splits B per CTA + inserts cross-CTA sync).
-    # _prune_configs offers it as a tuning option for TensorWise/RowWise on
-    # Blackwell + Meta-WS, BM>=128.
+    # autotune configs that also carry ctas_per_cga=(2,1,1); used by both tl.dot
+    # (TensorWise/RowWise) and tl.dot_scaled (MXFP8). The compiler splits B per
+    # CTA and inserts the cross-CTA sync. _prune_configs offers it as a tuning
+    # option for TensorWise/RowWise/MXFP8 on Blackwell + Meta-WS, BM>=128.
     TWO_CTAS: tl.constexpr = False,
 ):
     """
@@ -611,10 +619,15 @@ def scaled_mm_autows_kernel(
     )
 
     start_pid = tl.program_id(axis=0)
-    num_pid_m = tl.cdiv(M, BLOCK_SIZE_M)
-    # 2-CTA pairs tile the M axis, so round the M tile count up to even.
+    # 2-CTA: the two CTAs of a cluster cooperate on the SAME output tile (the
+    # compiler splits the B operand across them), so both CTAs of a cluster must
+    # map to one tile. Under ctas_per_cga=(2,1,1), program_id is per-CTA, so
+    # pair them via //2 and step the persistent loop in cluster units. (Mirrors
+    # test/unit/language/test_dot_2cta.py.)
     if TWO_CTAS:
-        num_pid_m = (num_pid_m + 1) // 2 * 2
+        start_pid = start_pid // 2
+    PID_STEP: tl.constexpr = NUM_SMS // 2 if TWO_CTAS else NUM_SMS
+    num_pid_m = tl.cdiv(M, BLOCK_SIZE_M)
     num_pid_n = tl.cdiv(N, BLOCK_SIZE_N)
     k_tiles = tl.cdiv(K, BLOCK_SIZE_K)
     num_tiles = num_pid_m * num_pid_n
@@ -628,14 +641,14 @@ def scaled_mm_autows_kernel(
     # ROWWISE host-side TMA: scale_a_ptr / scale_b_ptr are passed in as
     # TensorDescriptors when USE_SCALE_TMA -- no in-kernel descriptor build.
 
-    tile_id_c = start_pid - NUM_SMS
+    tile_id_c = start_pid - PID_STEP
     num_pid_in_group = GROUP_SIZE_M * num_pid_n
 
     if USE_FB_RANGE:
         for tile_id in tl.range(
             start_pid,
             num_tiles,
-            NUM_SMS,
+            PID_STEP,
             flatten=FLATTEN,
             warp_specialize=WARP_SPECIALIZE,
             separate_epilogue_store=SEPARATE_EPILOGUE_STORE,
@@ -664,7 +677,7 @@ def scaled_mm_autows_kernel(
                 BLOCK_SIZE_K,
                 GROUP_SIZE_M,
                 EPILOGUE_SUBTILE,
-                NUM_SMS,
+                PID_STEP,
                 VEC_SIZE,
                 OUT_DTYPE,
                 USE_SCALE_TMA,
@@ -679,7 +692,7 @@ def scaled_mm_autows_kernel(
         for tile_id in tl.range(
             start_pid,
             num_tiles,
-            NUM_SMS,
+            PID_STEP,
             flatten=FLATTEN,
             warp_specialize=WARP_SPECIALIZE,
         ):
@@ -704,7 +717,7 @@ def scaled_mm_autows_kernel(
                 BLOCK_SIZE_K,
                 GROUP_SIZE_M,
                 EPILOGUE_SUBTILE,
-                NUM_SMS,
+                PID_STEP,
                 VEC_SIZE,
                 OUT_DTYPE,
                 USE_SCALE_TMA,
@@ -823,17 +836,20 @@ def scaled_mm_autows(
 
     def grid(META):
         num_pid_m = triton.cdiv(M, META["BLOCK_SIZE_M"])
-        if META.get("TWO_CTAS", False):
-            num_pid_m = triton.cdiv(num_pid_m, 2) * 2
         num_tiles = num_pid_m * triton.cdiv(N, META["BLOCK_SIZE_N"])
+        if META.get("TWO_CTAS", False):
+            # 2 CTAs per cluster cooperate on one tile, so launch 2 CTAs per
+            # tile (program_id is per-CTA under ctas_per_cga=(2,1,1); the kernel
+            # pairs them via //2).
+            return (min(num_sms, num_tiles * 2),)
         return (min(num_sms, num_tiles),)
 
     _ensure_triton_allocator(a.device)
 
-    # WS not supported for Symmetric 1x128 and MXFP8 yet, and requires a triton
-    # build whose Blackwell WS lowering works (fbtriton, or OSS >= 3.7.0);
-    # otherwise fall back to the plain persistent loop.
-    ws_ok = not is_blockwise_1x128 and not is_mxfp8 and _WS_SUPPORTED
+    # WS supported for all but Symmetric 1x128; requires a triton build whose
+    # Blackwell WS lowering works (fbtriton, or OSS >= 3.7.0). MXFP8 needs WS for
+    # its 2-CTA cross-CTA sync. Otherwise fall back to the plain persistent loop.
+    ws_ok = not is_blockwise_1x128 and _WS_SUPPORTED
     warp_specialize = is_blackwell and ws_ok
     separate_epilogue_store = is_blackwell and ws_ok
 
