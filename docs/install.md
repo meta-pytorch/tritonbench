@@ -18,10 +18,10 @@ If you run `python install.py` without any argument, it will do the following:
 - `--liger`: Install [liger-kernel-nightly](https://github.com/linkedin/Liger-Kernel) package (Triton).
 - `--fa3`: Install Flash Attention 3 (CUTLASS).
 - `--fa2`: Install Flash Attention 2 (CUTLASS).
-- `--fbgemm`: Install FBGEMM GPU kernels.
+- `--fbgemm`: Install FBGEMM GPU kernels. This is not included by `--all`.
 - `--mslk`: Install MSLK kernels (CUTLASS and Triton).
 - `--jax`: Install JAX (Pallas and Mosaic).
 - `--tk`: Install [ThunderKittens](https://github.com/HazyResearch/ThunderKittens).
 - `--tile`: Install [Tile Lang](https://github.com/tile-ai/tilelang).
 - `--aiter`: Install [AITer](https://github.com/ROCm/aiter).
-- `--all`: Install all of the above.
+- `--all`: Install the default set of custom kernel repos, excluding FBGEMM.
