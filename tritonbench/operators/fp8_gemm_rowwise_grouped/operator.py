@@ -27,7 +27,7 @@ To use this benchmark, simply run the buck cmd with the desired command-line arg
 * `--warp_specialization`: Whether to enable warp specialization.
 
 Example usage:
-buck2 run -c fbcode.platform010_cuda_version=12.4  @mode/opt //pytorch/tritonbench:run -- --op fp8_gemm_rowwise_grouped
+buck2 run -m ovr_config//third-party/cuda/constraints:12.4  @mode/opt //pytorch/tritonbench:run -- --op fp8_gemm_rowwise_grouped
 
 Functions/Classes
 -----------------

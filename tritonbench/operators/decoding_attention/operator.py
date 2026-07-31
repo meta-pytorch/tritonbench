@@ -119,7 +119,7 @@ from dataclasses import astuple, dataclass
 """
 - Runbook
 - Nvidia:
-buck2 run @mode/opt @mode/inplace -c fbcode.enable_gpu_sections=true -c fbcode.nvcc_arch=h100a -c fbcode.platform010_cuda_version=12.4 //pytorch/tritonbench:run -- --op decoding_attention --cudagraph --csv
+buck2 run @mode/opt @mode/inplace -c fbcode.enable_gpu_sections=true -c fbcode.nvcc_arch=h100a -m ovr_config//third-party/cuda/constraints:12.4 //pytorch/tritonbench:run -- --op decoding_attention --cudagraph --csv
 - AMD:
 buck2 run @mode/opt-amd-gpu @mode/inplace -c fbcode.enable_gpu_sections=true -c fbcode.rocm_arch=mi300 //pytorch/tritonbench:run -- --op decoding_attention --cudagraph --csv
 """
