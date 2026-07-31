@@ -94,7 +94,11 @@ def setup_hip(args: argparse.Namespace):
 if __name__ == "__main__":
     parser = argparse.ArgumentParser(allow_abbrev=False)
     parser.add_argument("--numpy", action="store_true", help="Install suggested numpy")
-    parser.add_argument("--fbgemm", action="store_true", help="Install prebuilt FBGEMM")
+    parser.add_argument(
+        "--fbgemm",
+        action="store_true",
+        help="Install prebuilt FBGEMM (not included by --all)",
+    )
     parser.add_argument("--mslk", action="store_true", help="Install prebuilt MSLK")
     parser.add_argument(
         "--mslk-compile",
@@ -128,7 +132,9 @@ if __name__ == "__main__":
         help="Build the INT21 RMSNorm CUDA (sm_100a) kernel and export it as a PyTorch custom op",
     )
     parser.add_argument(
-        "--all", action="store_true", help="Install all custom kernel repos"
+        "--all",
+        action="store_true",
+        help="Install the default custom kernel repos (excluding FBGEMM)",
     )
     args = parser.parse_args()
 
@@ -159,7 +165,7 @@ if __name__ == "__main__":
         from tools.flash_attn.install import install_fa3
 
         install_fa3()
-    if args.fbgemm or args.all:
+    if args.fbgemm:
         logger.info("[tritonbench] installing prebuilt FBGEMM GPU...")
         from tools.fbgemm.install import install_fbgemm, test_fbgemm
 
