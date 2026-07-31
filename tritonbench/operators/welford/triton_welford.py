@@ -235,7 +235,8 @@ def fused_native_layer_norm_no_welford(primals_1, primals_2, primals_3):
         buf2 = empty_strided_cuda((S, 1), (1, S), torch.float32)
         buf3 = reinterpret_tensor(buf2, (S, 1), (1, 1), 0)
         del buf2  # reuse
-        buf4 = empty_strided_cuda((S, D), (D, 1), torch.bfloat16)
+        # Output dtype tracks the input so accuracy()'s dtype check holds at any precision.
+        buf4 = empty_strided_cuda((S, D), (D, 1), primals_3.dtype)
         # Source Nodes: [fn], Original ATen: [aten.native_layer_norm]
         stream0 = get_raw_stream(0)
         grid = lambda META: (triton.cdiv(S, META["XBLOCK"]),)
@@ -260,7 +261,8 @@ def fused_native_layer_norm(primals_1, primals_2, primals_3):
         buf1 = empty_strided_cuda((S, 1), (1, S), torch.float32)
         buf3 = reinterpret_tensor(buf1, (S, 1), (1, 1), 0)
         del buf1  # reuse
-        buf4 = empty_strided_cuda((S, D), (D, 1), torch.bfloat16)
+        # Output dtype tracks the input so accuracy()'s dtype check holds at any precision.
+        buf4 = empty_strided_cuda((S, D), (D, 1), primals_3.dtype)
         # Source Nodes: [fn], Original ATen: [aten.native_layer_norm]
         stream0 = get_raw_stream(0)
         grid = lambda META: (triton.cdiv(S, META["XBLOCK"]),)
