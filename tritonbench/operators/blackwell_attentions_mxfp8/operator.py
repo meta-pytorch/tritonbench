@@ -19,14 +19,12 @@ name at import time (see the bottom of this file).
 """
 
 from collections import OrderedDict
-from typing import Callable, Tuple
+from typing import Callable
 
 import torch
 import triton
 from tritonbench.operators.blackwell_attentions.operator import (
-    multi_input_wrapper,
     Operator as BlackwellAttentionsOperator,
-    preproc_noop,
 )
 from tritonbench.utils.triton_op import (
     BASELINE_BENCHMARKS,
@@ -262,22 +260,42 @@ class _TLXBlackwellMXFP8Attention(torch.autograd.Function):
 
 
 class Operator(BlackwellAttentionsOperator):
-    # Only works with triton beta. Quantizes bf16 q/k/v to MXFP8 internally and
-    # benchmarks the MXFP8 Blackwell FA kernels (forward + backward), mirroring
-    # the `tlx_blackwell_ws_pipelined_persistent` registration pattern.
-    @register_benchmark(enabled=HAS_TLX_MXFP8, label="tlx-mxfp8")
-    @multi_input_wrapper
-    def tlx_blackwell_mxfp8(self, *args) -> Tuple[Callable, Callable]:
-        def fn(q, k, v):
-            return _TLXBlackwellMXFP8Attention.apply(
-                q,
-                k,
-                v,
-                self.sm_scale,
-                self.causal,
+    # Only works with triton beta. Quantization happens during benchmark setup;
+    # timed iterations measure only the MXFP8 Blackwell FA forward kernel.
+    @register_benchmark(enabled=HAS_TLX_MXFP8, label="tlx-mxfp8", fwd_only=True)
+    def tlx_blackwell_mxfp8(self, *args) -> Callable:
+        self.optims.clear()
+        assert len(args) % 3 == 0
+        dtype = torch.float8_e4m3fn
+        quantized_inputs = []
+        for i in range(0, len(args), 3):
+            q, k, v = args[i : i + 3]
+            q_fp8, q_scale = _mxfp8_quantize_operand(q, dtype)
+            k_fp8, k_scale = _mxfp8_quantize_operand(k, dtype)
+            v_fp8, v_scale = _mxfp8_quantize_operand(
+                v, dtype, transpose_for_reduction=True
+            )
+            quantized_inputs.append(
+                (q_fp8, k_fp8, v_fp8, q_scale, k_scale, v_scale)
             )
 
-        return preproc_noop, fn
+        def fn():
+            outputs = []
+            for q_fp8, k_fp8, v_fp8, q_scale, k_scale, v_scale in quantized_inputs:
+                output, _ = _mxfp8_forward_with_lse(
+                    q_fp8,
+                    k_fp8,
+                    v_fp8,
+                    q_scale,
+                    k_scale,
+                    v_scale,
+                    self.sm_scale,
+                    self.causal,
+                )
+                outputs.append(output)
+            return outputs
+
+        return fn
 
 
 # Clone the parent operator's registry buckets into this op's name so the bf16
