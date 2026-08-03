@@ -275,9 +275,7 @@ class Operator(BlackwellAttentionsOperator):
             v_fp8, v_scale = _mxfp8_quantize_operand(
                 v, dtype, transpose_for_reduction=True
             )
-            quantized_inputs.append(
-                (q_fp8, k_fp8, v_fp8, q_scale, k_scale, v_scale)
-            )
+            quantized_inputs.append((q_fp8, k_fp8, v_fp8, q_scale, k_scale, v_scale))
 
         def fn():
             outputs = []
