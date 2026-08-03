@@ -5,8 +5,8 @@ Based on https://github.com/pytorch/pytorch/issues/121661
 import torch
 import triton
 import triton.language as tl
+from tritonbench.utils.env_utils import get_device_module
 
-empty_strided_cuda = torch._C._dynamo.guards._empty_strided_cuda
 reinterpret_tensor = torch.ops.inductor._reinterpret_tensor
 assert_size_stride = torch._C._dynamo.guards.assert_size_stride
 
@@ -118,10 +118,10 @@ def triton_gemv_0(arg0_1, arg1_1, arg2_1):
     assert_size_stride(arg2_1, (S,), (1,))
     xnumel = 2 * S
     rnumel = S
-    with torch.cuda._DeviceGuard(0):
-        torch.cuda.set_device(0)
+    device = arg0_1.device
+    with get_device_module(device.type).device(device.index):
         # size will be double
-        buf1 = empty_strided_cuda((2 * S,), (1,), torch.bfloat16)
+        buf1 = torch.empty_strided((2 * S,), (1,), dtype=torch.bfloat16, device=device)
 
         grid = lambda META: (triton.cdiv(2 * S, META["XBLOCK"]),)
         triton_red_fused_mv_0[grid](arg1_1, arg0_1, arg2_1, buf1, xnumel, rnumel)

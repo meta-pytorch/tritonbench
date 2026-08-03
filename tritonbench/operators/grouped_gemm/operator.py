@@ -740,9 +740,13 @@ class Operator(BenchmarkOperator):
             g_lds += [A.stride(0), B.stride(0), C.stride(0)]
 
         # note these are device tensors
-        d_a_ptrs = torch.tensor(A_addrs, device=device)
-        d_b_ptrs = torch.tensor(B_addrs, device=device)
-        d_c_ptrs = torch.tensor(C_addrs, device=device)
+        # Raw data_ptr() values are unsigned 64-bit addresses. On some devices
+        # (e.g. Intel XPU) they exceed INT64_MAX, so torch's default int64
+        # inference raises "Overflow when unpacking long long". Pack them as
+        # uint64 explicitly; the kernel reinterprets each element as a pointer.
+        d_a_ptrs = torch.tensor(A_addrs, dtype=torch.uint64, device=device)
+        d_b_ptrs = torch.tensor(B_addrs, dtype=torch.uint64, device=device)
+        d_c_ptrs = torch.tensor(C_addrs, dtype=torch.uint64, device=device)
         d_g_sizes = torch.tensor(g_sizes, dtype=torch.int32, device=device)
         d_g_lds = torch.tensor(g_lds, dtype=torch.int32, device=device)
 

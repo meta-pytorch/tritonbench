@@ -3,6 +3,7 @@ import math
 import torch
 import triton
 import triton.language as tl
+from tritonbench.utils.env_utils import get_num_sms
 
 
 @triton.autotune(
@@ -104,7 +105,7 @@ class RMSNorm(torch.autograd.Function):
         dx = torch.empty_like(dy)
 
         M, N = x_arg.shape
-        NUM_SMS = torch.cuda.get_device_properties("cuda").multi_processor_count
+        NUM_SMS = get_num_sms(x.device)
         BLOCK_SIZE_M = min(2048, triton.next_power_of_2(M // (8 * NUM_SMS)))
         PARTIAL_SIZE = math.ceil(M / BLOCK_SIZE_M)
 

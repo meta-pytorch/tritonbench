@@ -4,6 +4,7 @@ import torch
 import triton
 import triton.language as tl
 from triton.tools.tensor_descriptor import TensorDescriptor
+from tritonbench.utils.env_utils import get_current_device
 
 # Compatibility: c_cache kwarg was added in a newer Triton version.
 # When tritonbench pins an older Triton, fall back to plain @triton.jit.
@@ -231,8 +232,9 @@ def nop_tensordesc_kernel_nocache(
 def make_tensordesc_inputs(m_block: int = 8, n_block: int = 32):
     M = m_block * 3
     N = n_block * 4
-    t = torch.zeros((M, N), device="cuda", dtype=torch.float16)
-    out = torch.zeros((m_block, n_block), device="cuda", dtype=torch.float16)
+    device = get_current_device()
+    t = torch.zeros((M, N), device=device, dtype=torch.float16)
+    out = torch.zeros((m_block, n_block), device=device, dtype=torch.float16)
     desc = TensorDescriptor(
         t, shape=t.shape, strides=t.stride(), block_shape=[m_block, n_block]
     )
@@ -253,9 +255,10 @@ def auto_tma_add_kernel(x_ptr, y_ptr, out_ptr, N, BLOCK: tl.constexpr):
 
 
 def make_auto_tma_inputs(N: int = 8192, block: int = 256):
-    x = torch.randn(N, device="cuda", dtype=torch.float16)
-    y = torch.randn(N, device="cuda", dtype=torch.float16)
-    out = torch.empty(N, device="cuda", dtype=torch.float16)
+    device = get_current_device()
+    x = torch.randn(N, device=device, dtype=torch.float16)
+    y = torch.randn(N, device=device, dtype=torch.float16)
+    out = torch.empty(N, device=device, dtype=torch.float16)
     return x, y, out, N, block
 
 
@@ -428,7 +431,7 @@ def get_inductor_nop_kernel_0arg():
     Internally operates on a pre-allocated tensor to force exactly one kernel
     launch, but the caller invokes it with no arguments.
     """
-    x = torch.zeros(1, device="cuda")
+    x = torch.zeros(1, device=get_current_device())
 
     @torch.compile
     def _nop_impl(x):
@@ -490,7 +493,7 @@ def get_inductor_nop_kernel(tensor_args=None):
     CachingAutotuner.run = capturing_run
     try:
         if len(targs) < 2:
-            x = torch.zeros(1, device="cuda")
+            x = torch.zeros(1, device=get_current_device())
 
             @torch.compile
             def _nop(t):

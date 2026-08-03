@@ -359,12 +359,12 @@ class Operator(BenchmarkOperator):
 
     def get_input_iter(self):
         yield tuple()
-        targs = [zeros(1, device="cuda") for _ in range(5)]
+        targs = [zeros(1, device=self.device) for _ in range(5)]
         iargs = [1 for _ in range(9)]
         cargs = [32 for _ in range(5)]
         yield tuple([*targs, *iargs, *cargs])
         # HSTU-like input: 14 pointers + 26 scalars + 18 constexprs = 58 args
-        hstu_ptrs = [zeros(1, device="cuda") for _ in range(14)]
+        hstu_ptrs = [zeros(1, device=self.device) for _ in range(14)]
         hstu_scalars = [1 for _ in range(26)]
         hstu_constexprs = [1 for _ in range(18)]
         yield tuple([*hstu_ptrs, *hstu_scalars, *hstu_constexprs])
@@ -475,13 +475,13 @@ class Operator(BenchmarkOperator):
         """
         if len(args) < 19:
             return lambda: nop_kernel[1,]()
-        q = zeros(1, device="cuda")
-        k = zeros(1, device="cuda")
-        v = zeros(1, device="cuda")
-        out = zeros(1, device="cuda")
-        bias = zeros(1, device="cuda")
-        mask = zeros(1, device="cuda")
-        scale = zeros(1, device="cuda")
+        q = zeros(1, device=self.device)
+        k = zeros(1, device=self.device)
+        v = zeros(1, device=self.device)
+        out = zeros(1, device=self.device)
+        bias = zeros(1, device=self.device)
+        mask = zeros(1, device=self.device)
+        scale = zeros(1, device=self.device)
         # First: warmup with REAL tensors to trigger autotune + compilation
         real_args = (q, k, v, out, bias, mask, scale, 128, 8)
         nop_autotuned_with_none_kernel[(1,)](*real_args)
@@ -591,8 +591,15 @@ class Operator(BenchmarkOperator):
             bin.packed_metadata if hasattr(bin, "packed_metadata") else bin.metadata
         )
         if hasattr(CompiledKernel, "launch_metadata"):
+            # The launcher dereferences the stream handle, so it has to be a
+            # real one. CUDA tolerates the 0 (default stream) sentinel, other
+            # backends (e.g. the SYCL queue used by XPU) do not.
+            from triton.runtime import driver
+
+            device = driver.active.get_current_device()
+            stream = driver.active.get_current_stream(device)
             return lambda: bin.run(
-                1, 1, 1, 0, function, metadata, None, None, None, *args
+                1, 1, 1, stream, function, metadata, None, None, None, *args
             )
         else:
             return lambda: bin.run(
@@ -632,7 +639,7 @@ class Operator(BenchmarkOperator):
         """
         import shutil
 
-        x = torch.zeros(1, device="cuda")
+        x = torch.zeros(1, device=self.device)
 
         # Clear triton cache
         import triton.knobs

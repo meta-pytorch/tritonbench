@@ -3,7 +3,7 @@
 #  op: to skip an entire operator
 #    extra_args: <extra args to pass to the test>
 #    extra_bwd_args: <extra args to pass to the backward test>
-#    devices: <list of devices> (options: "cuda", "hip", "h100", "mi350", "b200", default: ["h100", "mi350"])
+#    devices: <list of devices> (options: "cuda", "hip", "xpu", "h100", "mi350", "b200", default: ["h100", "mi350"])
 #    channels: <list of triton channels> (options: "triton-main", "meta-triton", default: ["triton-main", "meta-triton"])
 # to override the default, specify devices and channels to limit combinations
 # we rely on the code to determine specific backends to skip
@@ -68,3 +68,42 @@ embedding:
   report: true
   disabled_devices:
     - hip
+# TODO: times out on xpu (>10min). The torch_compile backend requests
+# mode="max-autotune-no-cudagraphs" over a 128256x4096 lm_head, which does not
+# converge in CI time on the Intel inductor backend.
+fused_linear_cross_entropy:
+  report: true
+  disabled_devices:
+    - xpu
+# TODO: crashes the Intel Graphics Compiler on xpu ("IGC: Internal Compiler
+# Error: Floating point exception"), which aborts the whole process. Reduced
+# repro: an online-softmax loop whose alpha/p are guarded by
+# `tl.where(m_i_new == float("-inf"), 0, tl.math.exp(...))`; dropping the
+# `== -inf` guard compiles fine, so this is a backend compiler bug rather than
+# something the kernel can work around.
+template_attention:
+  report: true
+  disabled_devices:
+    - xpu
+# TODO: times out on xpu (>30min). The liger/torch_compile backends lower a
+# fused JSD over a 128256-wide vocab, and the Intel inductor backend spends the
+# whole budget in kernel compilation and autotuning.
+fused_linear_jsd:
+  report: true
+  disabled_devices:
+    - xpu
+# TODO: times out on xpu (>30min), same root cause as fused_linear_jsd: the
+# torch_compile backend recompiles the fused geglu for every input shape and
+# does not converge in CI time on the Intel inductor backend.
+geglu:
+  report: true
+  disabled_devices:
+    - xpu
+# TODO: times out on xpu (>30min) in CI. The op does run correctly standalone
+# (~13min for a single input on an Arc B580), but every backend recompiles a
+# large jagged attention kernel from scratch, which is too slow to keep in the
+# per-operator CI budget.
+gdpa:
+  report: true
+  disabled_devices:
+    - xpu

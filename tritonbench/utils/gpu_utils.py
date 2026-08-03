@@ -5,10 +5,11 @@ from contextlib import contextmanager
 from typing import Dict, List, Optional
 
 try:
-    from tritonbench.utils.env_utils import is_hip, is_mtia
+    from tritonbench.utils.env_utils import is_hip, is_mtia, is_xpu
 except ModuleNotFoundError:
     is_hip = lambda: False
     is_mtia = lambda: False
+    is_xpu = lambda: False
 
 # Defer MTIA check to avoid triggering Triton driver initialization at import time
 try:
@@ -106,6 +107,8 @@ def get_gpu_device_name() -> str:
 
         if is_hip():
             return get_amd_device_name()
+        if is_xpu():
+            return torch.xpu.get_device_name()
         return torch.cuda.get_device_name()
     except Exception:
         return "None"

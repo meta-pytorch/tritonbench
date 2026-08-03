@@ -5,6 +5,7 @@ from typing import Any, Callable, Generator, List, Optional, Tuple
 import torch
 import triton
 from tritonbench.data import get_input_loader
+from tritonbench.kernels.profile import has_gpu_timer
 from tritonbench.utils.jagged_utils import (
     ABSOLUTE_TOLERANCE,
     generate_input_vals,
@@ -70,8 +71,12 @@ def execute_kernel_variable_length_loop(x, sum_then_buffer):
     B, M = x.shape[0], x.shape[2]
     grid = lambda meta: ((len(x.offsets()) - 1) * triton.cdiv(M, meta["BLOCK_SIZE_M"]),)
     kernel_output = torch.zeros((B, M), device=x.device)
-    # The size of the profile memory will be determined by the autotuner
-    profile_mem = torch.empty(0, dtype=torch.int64, device=x.device)
+    # The size of the profile memory will be determined by the autotuner.
+    # Platforms without an in-kernel timer (see has_gpu_timer) pass None so the
+    # instrumented branches are compiled out instead of recording bogus values.
+    profile_mem = (
+        torch.empty(0, dtype=torch.int64, device=x.device) if has_gpu_timer() else None
+    )
 
     if sum_then_buffer:
         triton_jagged_sum_kernel_variable_length_loop_sum_then_buffer[grid](

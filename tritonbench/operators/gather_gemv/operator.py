@@ -79,8 +79,8 @@ class Operator(BenchmarkOperator):
         for i in range(11, 15):
             S = 2**i
             arg0_1 = rand_strided(
-                (8, S, S), (S * S, S, 1), device="cuda:0", dtype=torch.int8
+                (8, S, S), (S * S, S, 1), device=self.device, dtype=torch.int8
             )
-            arg1_1 = rand_strided((2,), (1,), device="cuda:0", dtype=torch.int64)
-            arg2_1 = rand_strided((S,), (1,), device="cuda:0", dtype=torch.bfloat16)
+            arg1_1 = rand_strided((2,), (1,), device=self.device, dtype=torch.int64)
+            arg2_1 = rand_strided((S,), (1,), device=self.device, dtype=torch.bfloat16)
             yield arg0_1, arg1_1, arg2_1

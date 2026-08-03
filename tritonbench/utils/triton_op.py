@@ -41,7 +41,7 @@ except ImportError:
 
 from tritonbench.components.do_bench import do_bench_wrapper, Latency
 from tritonbench.components.do_bench.utils import (
-    estimate_cuda_runtime_ms,
+    estimate_gpu_runtime_ms,
     resolve_warmup_and_rep,
 )
 from tritonbench.components.export import export_data
@@ -62,9 +62,11 @@ from tritonbench.utils.diode_utils import (
 )
 from tritonbench.utils.env_utils import (
     apply_precision,
+    get_device_module,
     is_fbcode,
     is_hip,
     is_mtia,
+    is_xpu,
     override_default_precision_for_input_loader,
     reset_allow_tf32,
     set_allow_tf32,
@@ -175,13 +177,14 @@ class TimerContext:
 
 
 def do_bench_walltime(fn, warmup=None, rep=None):
+    device_module = get_device_module()
     fn()
-    torch.cuda.synchronize()
+    device_module.synchronize()
 
     with TimerContext() as timer:
         for _ in range(5):
             fn()
-        torch.cuda.synchronize()
+        device_module.synchronize()
     estimate_ms = timer.elapsed_ms / 5
     warmup, rep = resolve_warmup_and_rep(warmup, rep, estimate_ms)
 
@@ -196,19 +199,21 @@ def do_bench_walltime(fn, warmup=None, rep=None):
     # Warm-up
     for _ in range(n_warmup):
         fn()
-    torch.cuda.synchronize()
+    device_module.synchronize()
 
     # Benchmark
     start_time = time.perf_counter()
     for _ in range(n_repeat):
         fn()
-    torch.cuda.synchronize()
+    device_module.synchronize()
     end_time = time.perf_counter()
     wall_time_ms = (end_time - start_time) * 1e3 / n_repeat
     return wall_time_ms
 
 
 def _get_current_device_id() -> int:
+    if is_xpu():
+        return torch.xpu.current_device()
     return torch.cuda.current_device()
 
 
@@ -2718,10 +2723,11 @@ class BenchmarkOperator(metaclass=PostInitProcessor):
             flop_counter = FlopCounterMode()
 
             def work_func():
-                if self.device == "cuda":
-                    torch.cuda.synchronize()
+                if self.device in ("cuda", "xpu"):
+                    device_module = get_device_module(self.device)
+                    device_module.synchronize()
                     func()
-                    torch.cuda.synchronize()
+                    device_module.synchronize()
                 else:
                     func()
 

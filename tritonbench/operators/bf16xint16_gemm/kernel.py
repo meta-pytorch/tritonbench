@@ -5,7 +5,7 @@ Triton implementation by @jlebar: https://gist.github.com/jlebar/3435b2c00deea53
 import torch
 import triton
 import triton.language as tl
-from tritonbench.utils.env_utils import is_cuda
+from tritonbench.utils.env_utils import is_cuda, is_xpu
 
 
 def get_cuda_autotune_config():
@@ -236,6 +236,9 @@ def get_hip_autotune_config():
 
 def get_autotune_config():
     if is_cuda():
+        return get_cuda_autotune_config()
+    elif is_xpu():
+        # TODO: Add get_xpu_autotune_config() when we have a good config for xpu
         return get_cuda_autotune_config()
     else:
         return get_hip_autotune_config()
