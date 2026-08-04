@@ -10,7 +10,7 @@ logger = logging.getLogger(__name__)
 from torch._inductor import config as inductor_config
 from torch._inductor.utils import ensure_cute_available
 from tritonbench.components.do_bench.run import Latency
-from tritonbench.utils.env_utils import IS_BLACKWELL, is_cuda, is_fbcode
+from tritonbench.utils.env_utils import IS_BLACKWELL, is_cuda, is_fbcode, is_hip_mi350
 from tritonbench.utils.path_utils import add_path, REPO_PATH
 from tritonbench.utils.triton_op import (
     BenchmarkOperator,
@@ -484,7 +484,9 @@ class Operator(BenchmarkOperator):
     # Split-size interface benchmarks - these use the unified interface from ops.interfaces.gemm.grouped_gemm
     # Each benchmark tests a specific operation (fprop/dgrad/wgrad) with a specific backend
 
-    @register_benchmark(enabled=HAS_SPLIT_SIZE_GROUPED_GEMM and IS_BLACKWELL)
+    @register_benchmark(
+        enabled=HAS_SPLIT_SIZE_GROUPED_GEMM and (IS_BLACKWELL or is_hip_mi350())
+    )
     def split_size_grouped_gemm_fprop_native(
         self, group_A, group_B, w=None, split=None
     ):
@@ -499,7 +501,9 @@ class Operator(BenchmarkOperator):
 
         return _inner
 
-    @register_benchmark(enabled=HAS_SPLIT_SIZE_GROUPED_GEMM and IS_BLACKWELL)
+    @register_benchmark(
+        enabled=HAS_SPLIT_SIZE_GROUPED_GEMM and (IS_BLACKWELL or is_hip_mi350())
+    )
     def split_size_grouped_gemm_fprop_triton(
         self, group_A, group_B, w=None, split=None
     ):
@@ -527,7 +531,9 @@ class Operator(BenchmarkOperator):
 
         return _inner
 
-    @register_benchmark(enabled=HAS_SPLIT_SIZE_GROUPED_GEMM and IS_BLACKWELL)
+    @register_benchmark(
+        enabled=HAS_SPLIT_SIZE_GROUPED_GEMM and (IS_BLACKWELL or is_hip_mi350())
+    )
     def split_size_grouped_gemm_dgrad_native(
         self, group_A, group_B, w=None, split=None
     ):
@@ -546,7 +552,9 @@ class Operator(BenchmarkOperator):
 
         return _inner
 
-    @register_benchmark(enabled=HAS_SPLIT_SIZE_GROUPED_GEMM and IS_BLACKWELL)
+    @register_benchmark(
+        enabled=HAS_SPLIT_SIZE_GROUPED_GEMM and (IS_BLACKWELL or is_hip_mi350())
+    )
     def split_size_grouped_gemm_dgrad_triton(
         self, group_A, group_B, w=None, split=None
     ):
@@ -580,7 +588,9 @@ class Operator(BenchmarkOperator):
 
         return _inner
 
-    @register_benchmark(enabled=HAS_SPLIT_SIZE_GROUPED_GEMM and IS_BLACKWELL)
+    @register_benchmark(
+        enabled=HAS_SPLIT_SIZE_GROUPED_GEMM and (IS_BLACKWELL or is_hip_mi350())
+    )
     def split_size_grouped_gemm_wgrad_native(
         self, group_A, group_B, w=None, split=None
     ):
@@ -600,7 +610,9 @@ class Operator(BenchmarkOperator):
 
         return _inner
 
-    @register_benchmark(enabled=HAS_SPLIT_SIZE_GROUPED_GEMM and IS_BLACKWELL)
+    @register_benchmark(
+        enabled=HAS_SPLIT_SIZE_GROUPED_GEMM and (IS_BLACKWELL or is_hip_mi350())
+    )
     def split_size_grouped_gemm_wgrad_triton(
         self, group_A, group_B, w=None, split=None
     ):
