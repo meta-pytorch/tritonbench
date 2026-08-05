@@ -112,6 +112,42 @@ def is_hip() -> bool:
     return torch.version.hip is not None
 
 
+def is_xpu() -> bool:
+    return torch.version.xpu is not None
+
+
+def get_current_device() -> str:
+    """Return the device string of the accelerator available on this host.
+
+    Falls back to "cuda" when torch reports no accelerator, so that CUDA-only
+    hosts and CPU-only environments keep the historical default.
+    """
+    try:
+        accelerator = torch.accelerator.current_accelerator()
+    except Exception:
+        return "cuda"
+    return accelerator.type if accelerator is not None else "cuda"
+
+
+def get_device_module(device: Optional[str] = None):
+    """Return the ``torch.<device>`` module for ``device`` (default: current one)."""
+    return getattr(torch, device or get_current_device(), torch.cuda)
+
+
+def get_num_sms(device=None) -> int:
+    """Number of independently schedulable compute units on ``device``.
+
+    NVIDIA/AMD report this as ``multi_processor_count``; Intel XPU exposes the
+    equivalent quantity as ``gpu_subslice_count``. Persistent kernels use it to
+    size their grid, so it must be resolved per device type.
+    """
+    device = torch.device(device) if device is not None else None
+    device_type = device.type if device is not None else get_current_device()
+    if device_type == "xpu":
+        return torch.xpu.get_device_properties(device).gpu_subslice_count
+    return torch.cuda.get_device_properties(device).multi_processor_count
+
+
 def is_hip_mi200():
     try:
         target = triton.runtime.driver.active.get_current_target()
