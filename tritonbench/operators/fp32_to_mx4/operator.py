@@ -10,6 +10,12 @@ from tritonbench.utils.triton_op import BenchmarkOperatorMetrics, register_metri
 with try_import("HAS_FBGEMM"):
     from fbgemm_gpu.quantize_utils import fp32_to_mx4, RoundingMode
 
+if not HAS_FBGEMM:
+    # Fall back to the pure-torch re-implementation so that the operator still
+    # loads (input generation, x_vals) without fbgemm installed. The benchmark
+    # itself stays gated on HAS_FBGEMM.
+    from tritonbench.utils.fbgemm_utils import fp32_to_mx4, RoundingMode
+
 from tritonbench.utils.triton_op import (
     BenchmarkOperator,
     register_benchmark,
