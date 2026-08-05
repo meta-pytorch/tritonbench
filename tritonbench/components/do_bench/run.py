@@ -11,7 +11,7 @@ from tritonbench.utils.constants import DEFAULT_N_REP, DEFAULT_N_WARMUP
 from tritonbench.utils.cudagraph_utils import CudaGraphConfig
 
 from .common import summarize_statistics
-from .utils import estimate_cuda_runtime_ms, resolve_warmup_and_rep
+from .utils import estimate_gpu_runtime_ms, resolve_warmup_and_rep
 
 # Triton is optional: non-Triton devices (cpu, tpu) can run without it. The
 # Triton-backed timing paths (events, power, cudagraph, the driver benchmarker)
@@ -311,7 +311,7 @@ def _do_bench_profiler(
     )
 
     clear_cache_fn = cache.zero_ if not skip_cache_clearing else lambda *args: None
-    estimate_ms = estimate_cuda_runtime_ms(
+    estimate_ms = estimate_gpu_runtime_ms(
         fn,
         grad_to_none=grad_to_none,
         clear_cache_fn=clear_cache_fn,
@@ -733,7 +733,7 @@ def do_bench_wrapper(
         and device not in ("cpu", "tpu")
         and latency_measure_mode == "triton_do_bench"
     ):
-        estimate_runtime = estimate_cuda_runtime_ms(fn, grad_to_none=grad_to_none)
+        estimate_runtime = estimate_gpu_runtime_ms(fn, grad_to_none=grad_to_none)
         warmup, rep = resolve_warmup_and_rep(
             warmup,
             rep,
