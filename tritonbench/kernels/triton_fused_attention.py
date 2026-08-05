@@ -18,6 +18,7 @@ import torch
 import triton
 import triton.language as tl
 from triton import knobs
+from tritonbench.utils.env_utils import get_num_sms
 
 from .attention_utils import (
     HAS_EXPLICIT_WS,  # guard new tuning configs such as num_consumer_groups
@@ -2547,7 +2548,7 @@ class _attention_opt(torch.autograd.Function):
                 1,
             )
 
-        NUM_SMS = torch.cuda.get_device_properties("cuda").multi_processor_count
+        NUM_SMS = get_num_sms(q.device)
 
         def grid_tma_persistent(META):
             return (
@@ -2565,7 +2566,7 @@ class _attention_opt(torch.autograd.Function):
 
         # TMA descriptors require a global memory allocation
         def alloc_fn(size: int, alignment: int, stream: Optional[int]):
-            return torch.empty(size, device="cuda", dtype=torch.int8)
+            return torch.empty(size, device=q.device, dtype=torch.int8)
 
         if HAS_NEW_TMA:
             triton.set_allocator(alloc_fn)

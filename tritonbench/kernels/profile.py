@@ -14,6 +14,23 @@ IS_CUDA = tl.constexpr(is_cuda())
 IS_HIP = tl.constexpr(is_hip())
 
 
+def has_gpu_timer() -> bool:
+    """Whether ``time()``/``smid()`` below can be compiled on this platform.
+
+    Only CUDA and HIP expose the required intrinsics. Triton's Intel backend
+    declares ``tl.extra.intel.globaltimer``/``smid``, but both are verbatim
+    copies of the NVIDIA PTX inline asm, so they fail to build on SPIR-V
+    ("Constraints for inline assembly cannot be validated"). The portable
+    replacement, SPIR-V's ``OpReadClockKHR``, needs ``SPV_KHR_shader_clock``,
+    which Triton's SPIR-V translator does not currently allow either.
+
+    Callers should pass ``profile_mem=None`` when this returns False so that
+    the instrumented branches are never instantiated, rather than recording
+    bogus zero timestamps.
+    """
+    return is_cuda() or is_hip()
+
+
 @triton.jit
 def time(_semantic=None):
     if IS_HIP:

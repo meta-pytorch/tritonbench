@@ -30,7 +30,7 @@ import gc
 from typing import Any, Callable, Generator, List, Optional
 
 import torch
-from tritonbench.utils.env_utils import is_blackwell, is_hip
+from tritonbench.utils.env_utils import get_device_module, is_blackwell, is_hip
 from tritonbench.utils.triton_op import (
     BenchmarkOperator,
     BenchmarkOperatorMetrics,
@@ -525,6 +525,7 @@ class Operator(BenchmarkOperator):
                 dense_q_len=dense_q_len,
                 broadcast_q=broadcast_q,
                 dff=dff,
+                device=self.device,
             )
             jagged_data["max_seq_len"] = max_M
             jagged_data["q_offsets"] = jagged_data["q_offsets"].to(torch.int32)
@@ -624,16 +625,17 @@ class Operator(BenchmarkOperator):
 
         # Calculate activation
         gc.collect()
-        torch.cuda.empty_cache()
+        device_module = get_device_module(self.device)
+        device_module.empty_cache()
         MB = 1024.0 * 1024.0
-        torch.cuda.reset_peak_memory_stats(device="cuda")
-        memory_start = torch.cuda.max_memory_allocated(device="cuda") / MB
+        device_module.reset_peak_memory_stats(device=self.device)
+        memory_start = device_module.max_memory_allocated(device=self.device) / MB
 
         output = fwd_fn()
         do = torch.rand_like(output) * 0.01
         output.backward(do, retain_graph=True)
 
-        memory_end = torch.cuda.max_memory_allocated(device="cuda") / MB
+        memory_end = device_module.max_memory_allocated(device=self.device) / MB
         memory_used_MB = memory_end - memory_start
 
         return memory_used_MB

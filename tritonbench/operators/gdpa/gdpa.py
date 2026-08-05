@@ -46,7 +46,9 @@ except ImportError:
     HAS_TLX = False
 
 try:
-    BF16_ATOMIC_ADD_SUPPORTED = torch.cuda.get_device_capability() >= (9, 0)
+    BF16_ATOMIC_ADD_SUPPORTED = torch.cuda.is_available() and (
+        torch.cuda.get_device_capability() >= (9, 0)
+    )
 except RuntimeError:  # Not running on GPU device
     BF16_ATOMIC_ADD_SUPPORTED = False
 
@@ -1972,7 +1974,7 @@ def generalized_dot_product_attention(
     if enable_tma:
         # TMA descriptors require a global memory allocation
         def alloc_fn(size: int, alignment: int, stream: int | None):
-            return torch.empty(size, device="cuda", dtype=torch.int8)
+            return torch.empty(size, device=q.device, dtype=torch.int8)
 
         triton.set_allocator(alloc_fn)
 

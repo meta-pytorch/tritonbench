@@ -6,11 +6,10 @@ Generated from Inductor for forward layernorm with and without welford
 import torch
 import triton
 import triton.language as tl
-from torch._C import _cuda_getCurrentRawStream as get_raw_stream
 from torch._inductor.runtime import triton_helpers, triton_heuristics
 from torch._inductor.runtime.triton_helpers import libdevice
+from tritonbench.utils.env_utils import get_device_module
 
-empty_strided_cuda = torch._C._dynamo.guards._empty_strided_cuda
 reinterpret_tensor = torch.ops.inductor._reinterpret_tensor
 assert_size_stride = torch._C._dynamo.guards.assert_size_stride
 
@@ -322,10 +321,12 @@ def triton_attention_no_exp2(arg0_1, arg1_1, arg2_1):
     assert_size_stride(arg0_1, (16, 16, 4096, 64), (4194304, 262144, 64, 1))
     assert_size_stride(arg1_1, (16, 16, 4096, 64), (4194304, 262144, 64, 1))
     assert_size_stride(arg2_1, (16, 16, 4096, 64), (4194304, 262144, 64, 1))
-    with torch.cuda._DeviceGuard(0):
-        torch.cuda.set_device(0)
-        buf0 = empty_strided_cuda(
-            (16, 16, 4096, 64), (4194304, 262144, 64, 1), torch.float16
+    with get_device_module(arg0_1.device.type).device(arg0_1.device.index):
+        buf0 = torch.empty_strided(
+            (16, 16, 4096, 64),
+            (4194304, 262144, 64, 1),
+            dtype=torch.float16,
+            device=arg0_1.device,
         )
 
         # batch_size, num_heads, num_queries: 16, 16, 4096
@@ -345,10 +346,12 @@ def triton_attention_with_exp2(arg0_1, arg1_1, arg2_1):
     assert_size_stride(arg0_1, (16, 16, 4096, 64), (4194304, 262144, 64, 1))
     assert_size_stride(arg1_1, (16, 16, 4096, 64), (4194304, 262144, 64, 1))
     assert_size_stride(arg2_1, (16, 16, 4096, 64), (4194304, 262144, 64, 1))
-    with torch.cuda._DeviceGuard(0):
-        torch.cuda.set_device(0)
-        buf0 = empty_strided_cuda(
-            (16, 16, 4096, 64), (4194304, 262144, 64, 1), torch.float16
+    with get_device_module(arg0_1.device.type).device(arg0_1.device.index):
+        buf0 = torch.empty_strided(
+            (16, 16, 4096, 64),
+            (4194304, 262144, 64, 1),
+            dtype=torch.float16,
+            device=arg0_1.device,
         )
 
         # batch_size, num_heads, num_queries: 16, 16, 4096

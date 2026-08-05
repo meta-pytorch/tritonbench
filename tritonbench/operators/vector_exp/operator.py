@@ -2,6 +2,7 @@ from typing import Any, Callable, Generator, List
 
 import torch
 import triton
+from tritonbench.kernels.profile import has_gpu_timer
 from tritonbench.utils.triton_op import (
     BenchmarkOperator,
     BenchmarkOperatorMetrics,
@@ -47,9 +48,15 @@ class Operator(BenchmarkOperator):
     def triton_exp(self, x: torch.Tensor):
         n_elements = x.numel()
         # Prepare a memory buffer to store the profiled data, with the size equal to the number of programs.
+        # Platforms without an in-kernel timer (see has_gpu_timer) pass None so
+        # the instrumented branches are compiled out.
         BLOCK_SIZE = 1024
         n_programs = triton.cdiv(n_elements, BLOCK_SIZE)
-        profile_mem = torch.empty(n_programs, dtype=torch.int64, device=self.device)
+        profile_mem = (
+            torch.empty(n_programs, dtype=torch.int64, device=self.device)
+            if has_gpu_timer()
+            else None
+        )
 
         def _inner():
             output = TritonExpFunction.apply(x, BLOCK_SIZE, profile_mem)

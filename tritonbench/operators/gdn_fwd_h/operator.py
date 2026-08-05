@@ -252,7 +252,7 @@ class Operator(BenchmarkOperator):
             )
             nchunks = (seqlen + chunk_size - 1) // chunk_size
             k = torch.randn(
-                batch, seqlen, nheads, dhead, dtype=torch.bfloat16, device="cuda"
+                batch, seqlen, nheads, dhead, dtype=torch.bfloat16, device=self.device
             )
             w = torch.randn(
                 batch,
@@ -261,7 +261,7 @@ class Operator(BenchmarkOperator):
                 nheads,
                 dhead,
                 dtype=torch.float32,
-                device="cuda",
+                device=self.device,
             )
             wu, ws, wv = torch.linalg.svd(w.permute(0, 1, 3, 2, 4), full_matrices=False)
             w = torch.einsum("bnhik,bnhkj->bnhij", wu, wv)
@@ -276,12 +276,14 @@ class Operator(BenchmarkOperator):
                 nheads,
                 expand_v * dhead,
                 dtype=torch.bfloat16,
-                device="cuda",
+                device=self.device,
             )
             g = torch.cumsum(
                 0.5
                 * math.log(1 / dhead)
-                * torch.rand(batch, seqlen, nheads, dtype=torch.float32, device="cuda"),
+                * torch.rand(
+                    batch, seqlen, nheads, dtype=torch.float32, device=self.device
+                ),
                 dim=1,
             )
             yield k, w, u, g, chunk_size

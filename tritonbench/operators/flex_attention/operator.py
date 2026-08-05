@@ -31,7 +31,13 @@ from tritonbench.operators.flex_attention.triton_autows import (
     autows_flex_attention,
     autows_flex_attention_persistent,
 )
-from tritonbench.utils.env_utils import is_amd_gfx950, is_hip, is_nvidia_blackwell
+from tritonbench.utils.env_utils import (
+    get_current_device,
+    get_num_sms,
+    is_amd_gfx950,
+    is_hip,
+    is_nvidia_blackwell,
+)
 from tritonbench.utils.input import input_filter
 from tritonbench.utils.triton_op import (
     BenchmarkOperator,
@@ -73,6 +79,13 @@ MOD_TYPES = [
 # Soft cap value for the tanh-softcap score_mod, shared by the providers and the
 # eager reference.
 TANH_SOFTCAP = 20
+
+
+def _accel_device() -> str:
+    """Current accelerator device string ("cuda", "xpu", ...), defaulting to
+    "cuda". Used in place of hardcoded "cuda" so this operator's input/mask
+    construction runs on non-CUDA accelerators (e.g. Intel XPU)."""
+    return get_current_device()
 
 
 class FullShape(NamedTuple):
@@ -500,7 +513,7 @@ class Operator(BenchmarkOperator):
 
         if mod_type == "alibi":
             """
-            h = torch.arange(Hq, dtype=torch.float32, device="cuda")
+            h = torch.arange(Hq, dtype=torch.float32, device=_accel_device())
             alibi_slopes = torch.exp2(-((h + 1) * 8.0 / Hq))
             FA_kwargs["alibi_slopes"] = alibi_slopes
 
@@ -693,7 +706,9 @@ class Operator(BenchmarkOperator):
                     "BLOCK_M2": 64,
                     "BLOCK_N2": 64,
                 }
-                if torch.cuda.get_device_capability() >= (8, 0) and D <= 128
+                if torch.cuda.is_available()
+                and torch.cuda.get_device_capability() >= (8, 0)
+                and D <= 128
                 else None
             ),
             "prefix_lm": None,
@@ -701,7 +716,7 @@ class Operator(BenchmarkOperator):
         }
 
         def get_default_split_k(B: int, H: int, Mk: int) -> int:
-            num_SM = torch.cuda.get_device_properties("cuda").multi_processor_count
+            num_SM = get_num_sms()
             """Heuristic for the number of splits from xformer"""
             bh = max(B * H, 1)  # NOTE: Handle B*h=0 case
             split_k = num_SM // bh * 2  # Each SM should at least get one block.
@@ -751,7 +766,7 @@ class Operator(BenchmarkOperator):
         if attn_type == "document_mask":
             random.seed(0)
             lengths = generate_random_lengths(N * B, B)
-            mask_mod_kwargs = dict(offsets=length_to_offsets(lengths, "cuda"))
+            mask_mod_kwargs = dict(offsets=length_to_offsets(lengths, _accel_device()))
 
         mask_mod_dict = {
             "noop": None,
@@ -771,7 +786,7 @@ class Operator(BenchmarkOperator):
             mask_mod = mask_mod(**mask_mod_kwargs)
 
         if is_decoding and mask_mod:
-            cached_seq_len = torch.tensor(N // 2).to("cuda")
+            cached_seq_len = torch.tensor(N // 2).to(_accel_device())
 
             def decoding_w_cached_seq_len(b, h, m, n):
                 return mask_mod(b, h, m + cached_seq_len, n)
@@ -785,7 +800,7 @@ class Operator(BenchmarkOperator):
         )
         compiled_block_mask = torch.compile(create_block_mask)
         block_mask = (
-            compiled_block_mask(new_mask_mod, *mask_shape, "cuda")
+            compiled_block_mask(new_mask_mod, *mask_shape, _accel_device())
             if new_mask_mod
             else None
         )
@@ -822,7 +837,7 @@ class Operator(BenchmarkOperator):
         score_mod = function_dict[attn_type]
         is_decoding = M == 1
         if is_decoding and score_mod:
-            offset = torch.tensor(N // 2).to("cuda")
+            offset = torch.tensor(N // 2).to(_accel_device())
 
             def score_mod_w_offset(score, b, h, m, n):
                 return score_mod(score, b, h, m + offset, n)
