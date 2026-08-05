@@ -14,6 +14,7 @@ from tritonbench.operators_collection import (
     list_operators_by_collection,  # @manual=//pytorch/tritonbench:tritonbench
 )
 from tritonbench.utils.env_utils import (
+    get_current_device,  # @manual=//pytorch/tritonbench:tritonbench
     is_blackwell,  # @manual=//pytorch/tritonbench:tritonbench
     is_fbcode,  # @manual=//pytorch/tritonbench:tritonbench
 )
@@ -40,6 +41,8 @@ def _load_skip_file(skip_file) -> dict:
     with open(skip_file, "r") as f:
         return yaml.safe_load(f) or {}
 
+# Run the suite on whatever accelerator this host exposes (cuda, xpu, ...).
+TEST_DEVICE = get_current_device()
 
 if custom_skip_file := os.environ.get(CUSTOM_SKIP_FILE_ENV):
     # Allow users to override the skip list with a custom yaml file.
@@ -220,7 +223,7 @@ def make_test(operator):
             "--op",
             operator,
             "--device",
-            "cuda",
+            TEST_DEVICE,
             "--num-inputs",
             "1",
             "--test-only",
