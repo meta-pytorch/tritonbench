@@ -125,9 +125,13 @@ class Operator(BenchmarkOperator):
     def get_input_iter(self) -> Generator:
         for shape in self.shapes:
             s, d = shape
-            p1 = rand_strided((d,), (1,), device=self.device, dtype=torch.bfloat16)
-            p2 = rand_strided((d,), (1,), device=self.device, dtype=torch.bfloat16)
-            p3 = rand_strided((s, d), (d, 1), device=self.device, dtype=torch.bfloat16)
+            # Honor --precision so callers can request fp32; welford's bf16
+            # layer-norm output trips the 1e-2 accuracy tolerance on near-zero
+            # values. Default to bf16 (self.dtype is None when precision is unset).
+            dt = self.dtype or torch.bfloat16
+            p1 = rand_strided((d,), (1,), device=self.device, dtype=dt)
+            p2 = rand_strided((d,), (1,), device=self.device, dtype=dt)
+            p3 = rand_strided((s, d), (d, 1), device=self.device, dtype=dt)
             yield p1, p2, p3
 
     def accuracy(self, fn: Callable, baseline_fn: Callable) -> bool:
