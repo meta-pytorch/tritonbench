@@ -1034,7 +1034,7 @@ class BenchmarkOperator(metaclass=PostInitProcessor):
 
             def fwd_no_grad_fn():
                 with torch.no_grad():
-                    fwd_fn()
+                    return fwd_fn()
 
             setattr(fwd_no_grad_fn, "_name", bm_func_name)
             return fwd_no_grad_fn
@@ -1774,6 +1774,19 @@ class BenchmarkOperator(metaclass=PostInitProcessor):
             logger.error(f"Exception during determinism check: {e}")
             return DeterminismResult.FAIL
 
+    def _assert_outputs_not_none(self, output: Any, baseline_output: Any) -> None:
+        """A None output means the backend dropped its result, which would
+        otherwise make the accuracy check trivially pass."""
+        none_outputs = [
+            name
+            for name, out in (("impl", output), ("baseline", baseline_output))
+            if out is None
+        ]
+        if none_outputs:
+            raise ValueError(
+                f"Accuracy check requires non-None outputs, but {' and '.join(none_outputs)} returned None."
+            )
+
     def accuracy(self, fn: Callable, baseline_fn: Callable) -> bool:
         # Poison the CUDA caching allocator to detect stale memory reuse.
         # Without this, torch.empty() may return memory from a previous
@@ -1795,6 +1808,7 @@ class BenchmarkOperator(metaclass=PostInitProcessor):
             if self.mode == Mode.FWD:
                 output = fn()
                 baseline_output = baseline_fn()
+                self._assert_outputs_not_none(output, baseline_output)
                 if self.tb_args.bitwise:
                     # Bitwise comparison: exact equality, no tolerance
                     if not torch.equal(output, baseline_output):
@@ -1864,6 +1878,7 @@ class BenchmarkOperator(metaclass=PostInitProcessor):
             else:  # FWD_NO_GRAD
                 output = fn()
                 baseline_output = baseline_fn()
+                self._assert_outputs_not_none(output, baseline_output)
                 if self.tb_args.bitwise:
                     # Bitwise comparison: exact equality, no tolerance
                     if not torch.equal(output, baseline_output):
