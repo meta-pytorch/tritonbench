@@ -630,17 +630,21 @@ class Operator(BenchmarkOperator):
         With D103454938 (shared launcher): ~23ms (Triton compile only)
         Without D103454938 (gcc launcher): ~40ms (Triton compile + gcc)
         """
-        import shutil
-
         x = torch.zeros(1, device="cuda")
 
-        # Clear triton cache
+        # Redirect Triton at a private, empty cache dir so every compile below
+        # is cold. Wiping the shared cache dir in place races with anything else
+        # writing into it (OSError: Directory not empty) and would also blow away
+        # the user's global cache.
+        import atexit
+        import shutil
+        import tempfile
+
         import triton.knobs
 
-        cache_dir = triton.knobs.cache.dir
-        if os.path.isdir(cache_dir):
-            shutil.rmtree(cache_dir)
-            os.makedirs(cache_dir, exist_ok=True)
+        cache_dir = tempfile.mkdtemp(prefix="tritonbench_cold_start_")
+        atexit.register(shutil.rmtree, cache_dir, ignore_errors=True)
+        triton.knobs.cache.dir = cache_dir
 
         # Warmup: cold compile a different kernel to init compiler pipeline
         nop_kernel[(1,)]()
