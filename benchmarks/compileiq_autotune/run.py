@@ -4,17 +4,15 @@ import subprocess
 import sys
 import logging
 
-from pathlib import Path
-
-import evo_solar.evo
-from evo_solar.evo import EvoSearch
-from evo_solar.config.types import EvoConfiguration, WorkerTypes
+from compileiq.ciq import Search
+from compileiq.search_spaces.compilers import LocalSearchSpaceBin
+from compileiq.types import SearchConfiguration, WorkerTypes
 
 from .shim import get_metric_name_from_config, get_date_string, save_context, REPO_WORK_DIR, CONTEXT_FILE
 from .objective import objective_func, KNOBS_FILENAME, run_tritonbench_in_temp_dir, DEFAULT_CONFIG_FILE, TRITONBENCH_CONFIGS_DIR
 from .extract_config import extract_best_configs
 
-from ...common import setup_tritonbench_cwd
+from ..common import setup_tritonbench_cwd
 
 from typing import Optional, List
 
@@ -25,25 +23,13 @@ MANIFOLD_URI_PREFIX = f"manifold://{MANIFOLD_BUCKET}/tree/compileiq"
 
 MAX_METRIC_NAME = ["tflops"]
 MIN_METRIC_NAME = ["latency"]
-EVO_SOLAR_PATH = Path(evo_solar.evo.__file__).parent.absolute()
-PTXAS_CONFIG_FILE = "cuda-12.8-ptxas-p2.config"
+
+# The pre-built PTXAS search space. Triton dispatches to ptxas-blackwell (13.3)
+# for arch >= 100, see get_ptxas() in the Triton nvidia backend compiler.
+DEFAULT_SEARCH_SPACE = f"{MANIFOLD_URI_PREFIX}/ptxas_knobs/ptxas13.3_search_space.bin"
 
 logger = logging.getLogger(__name__)
 logger.setLevel(logging.INFO)
-
-def get_sizes(num_objectives):
-    # when num_objectives=1:
-    # pollsize = 12
-    # cullsize = 10
-    cull = 0.75
-    target = (2 * num_objectives) + 1
-    poolsize = int(target / (1 - cull))
-    poolsize = max(poolsize, 32)
-    poolsize = poolsize if poolsize % 2 == 0 else poolsize + 1
-    cullsize = int(poolsize * cull)
-    cullsize = cullsize if cullsize % 2 == 0 else cullsize - 1
-
-    return poolsize, cullsize
 
 def mount_manifold_bucket(bucket=MANIFOLD_BUCKET, uri_prefix=MANIFOLD_URI_PREFIX):
     mast_job_name = os.environ.get("MAST_HPC_JOB_NAME")
@@ -84,29 +70,49 @@ def mount_manifold_bucket(bucket=MANIFOLD_BUCKET, uri_prefix=MANIFOLD_URI_PREFIX
     return True
 
 
-def write_validate_script(output_dir, tritonbench_config, evo_acf_file):
+def resolve_search_space(search_space):
+    """Resolve the search space to a local binary CompileIQ can sample from.
+
+    `search_space` is either a local path or a manifold:// URI, in which case it
+    is downloaded into REPO_WORK_DIR once and reused on later runs.
+    """
+    if search_space.startswith("manifold://"):
+        manifold_path = search_space[len("manifold://"):]
+        local_path = REPO_WORK_DIR.joinpath(os.path.basename(manifold_path))
+        if not local_path.exists():
+            logger.info(f"[tritonbench_compileiq] Downloading search space {search_space} to {local_path}")
+            subprocess.run(
+                ["manifold", "get", manifold_path, str(local_path)],
+                check=True,
+            )
+    else:
+        local_path = search_space
+    return LocalSearchSpaceBin(path=local_path)
+
+
+def write_validate_script(output_dir, tritonbench_config, acf_file):
     """Write a validate.sh into output_dir that re-applies an ACF config and re-runs
     the ptxas check for the search's tritonbench config.
 
-    TRITONBENCH_ROOT and EVO_ACF can be overridden via env vars; they default to a
-    local fbsource-evo checkout and the best extracted ACF file respectively.
+    TRITONBENCH_ROOT and CIQ_ACF can be overridden via env vars; they default to a
+    local tritonbench checkout and the best extracted ACF file respectively.
     """
     script = f"""CURDIR=$PWD
 
 if [ -z ${{TRITONBENCH_ROOT:-}} ]; then
-  TRITONBENCH_ROOT=$HOME/local/fbsource-evo/fbcode/pytorch/tritonbench
+  TRITONBENCH_ROOT=$HOME/local/tritonbench
 fi
 
-EVO_AUTOTUNE_ROOT=$TRITONBENCH_ROOT/benchmarks/fb/evo_autotune
-EVO_AUTOTUNE_FILE={tritonbench_config}
+TRITONBENCH_CONFIGS_DIR=$TRITONBENCH_ROOT/benchmarks/run_config
+TRITONBENCH_CONFIG_FILE={tritonbench_config}
 
-if [ ! -f $CURDIR/$EVO_ACF ]; then
-  EVO_ACF="{evo_acf_file}"
+if [ ! -f $CURDIR/$CIQ_ACF ]; then
+  CIQ_ACF="{acf_file}"
 fi
 
 cd $TRITONBENCH_ROOT
 
-PTXAS_OPTIONS="--apply-controls=$CURDIR/$EVO_ACF" TRITONBENCH_RUN_CONFIG="$EVO_AUTOTUNE_ROOT/$EVO_AUTOTUNE_FILE" python -m benchmarks.ptxas_check.run
+PTXAS_OPTIONS="--apply-controls=$CURDIR/$CIQ_ACF" TRITONBENCH_RUN_CONFIG="$TRITONBENCH_CONFIGS_DIR/$TRITONBENCH_CONFIG_FILE" python -m benchmarks.ptxas_check.run
 
 cd -
 """
@@ -117,7 +123,7 @@ cd -
     return script_path
 
 
-def search(dbname, generations, short, metric_name, tritonbench_config, has_manifold=False):
+def search(results_csv, generations, short, metric_name, tritonbench_config, search_space, has_manifold=False):
     # Remove the .yaml extension
     tritonbench_config_name = os.path.splitext(tritonbench_config)[0]
 
@@ -126,18 +132,21 @@ def search(dbname, generations, short, metric_name, tritonbench_config, has_mani
         pool_size = 8
         cull_size = 4
     else:
-        pool_size, cull_size = get_sizes(1)
+        # CompileIQ derives pool_size/cull_size from num_objectives when unset.
+        pool_size, cull_size = None, None
 
     run_name = f"{tritonbench_config_name}-{get_date_string()}"
-    dna_config = os.path.join(EVO_SOLAR_PATH, PTXAS_CONFIG_FILE)
+    search_space_bin = resolve_search_space(search_space)
     search_context = {
         "short": short,
         "name": run_name,
         "metric_name": metric_name,
-        "dna_config": dna_config,
+        "search_space": search_space,
     }
 
-    logger.info(f"[tritonbench_evo] Search starts with context: {search_context}")
+    search_context["generations"] = generations
+    search_context["pool_size"] = pool_size
+    logger.info(f"[tritonbench_compileiq] Search starts with context: {search_context}")
 
     save_context(
         path=os.path.join(REPO_WORK_DIR, CONTEXT_FILE),
@@ -154,23 +163,21 @@ def search(dbname, generations, short, metric_name, tritonbench_config, has_mani
     else:
         raise RuntimeError(f"Unknown metric: {metric_name}")
 
-    main_config = EvoConfiguration(
-        qualitative=True,
+    main_config = SearchConfiguration(
+        normalize=False,
         pool_size=pool_size,
         cull_size=cull_size,
         generations=generations,
         mutate_rate=0.25,
         problem_type=problem_type,
         num_objectives=1,
-        enable_db=True,
-        results_database=dbname,
-        search_max_time=864000,
     )
-    tuner = EvoSearch(
+    tuner = Search(
         objective_function=objective_func,
-        search_space=dna_config,
-        evo_config=main_config,
+        search_space=search_space_bin,
+        search_config=main_config,
         worker_type=WorkerTypes.RAY,
+        dump_results=results_csv,
         debug=False,
     )
     # NOTE: num_cpus=1 and num_gpus=1 in RAY means:
@@ -180,7 +187,7 @@ def search(dbname, generations, short, metric_name, tritonbench_config, has_mani
     results = tuner.start(num_cpus=num_cpus, num_gpus=num_gpus)
 
     logger.info(results.get_best_result())
-    logger.info(f"[tritonbench_evo] Search ends, result saves to {dbname}")
+    logger.info(f"[tritonbench_compileiq] Search ends, result saves to {results_csv}")
 
     # Upload results to Manifold if running in a MAST job
     if has_manifold:
@@ -189,48 +196,49 @@ def search(dbname, generations, short, metric_name, tritonbench_config, has_mani
         mast_job_attempt = os.environ.get("MAST_HPC_JOB_ATTEMPT_INDEX")
         manifold_path = f"{mast_job_name}_v{mast_job_version}_attempt{mast_job_attempt}"
         target_path = f"/mnt/{MANIFOLD_BUCKET}/{manifold_path}"
-        logger.info(f"[tritonbench_evo] Uploading {dbname} to manifold mount: {target_path}")
+        logger.info(f"[tritonbench_compileiq] Uploading {results_csv} to manifold mount: {target_path}")
         try:
             subprocess.run(
                 ["mkdir", target_path],
                 check=True,
             )
             subprocess.run(
-                ["cp", dbname, target_path],
+                ["cp", results_csv, target_path],
                 check=True,
             )
-            logger.info(f"[tritonbench_evo] Upload complete: {MANIFOLD_URI_PREFIX}/{manifold_path}")
+            logger.info(f"[tritonbench_compileiq] Upload complete: {MANIFOLD_URI_PREFIX}/{manifold_path}")
         except subprocess.CalledProcessError as e:
-            logger.error(f"[tritonbench_evo] Failed to upload to manifold: {e}")
+            logger.error(f"[tritonbench_compileiq] Failed to upload to manifold: {e}")
 
         # Extract the best 3 configs and a validate.sh, then save them to the manifold mount
         try:
             best_configs = extract_best_configs(
-                database=dbname,
+                results=results,
                 output_dir=target_path,
                 best_number=3,
                 file_prefix=tritonbench_config_name,
                 higher_is_better=metric_name in MAX_METRIC_NAME,
             )
-            logger.info(f"[tritonbench_evo] Saved best {len(best_configs)} configs to manifold mount: {best_configs}")
+            logger.info(f"[tritonbench_compileiq] Saved best {len(best_configs)} configs to manifold mount: {best_configs}")
             if best_configs:
                 validate_script = write_validate_script(
                     output_dir=target_path,
                     tritonbench_config=tritonbench_config,
-                    evo_acf_file=os.path.basename(best_configs[0]),
+                    acf_file=os.path.basename(best_configs[0]),
                 )
-                logger.info(f"[tritonbench_evo] Wrote validation script to manifold mount: {validate_script}")
+                logger.info(f"[tritonbench_compileiq] Wrote validation script to manifold mount: {validate_script}")
         except Exception as e:
-            logger.error(f"[tritonbench_evo] Failed to extract best configs or write validation script: {e}")
+            logger.error(f"[tritonbench_compileiq] Failed to extract best configs or write validation script: {e}")
 
 
 def get_parser():
-    parser = argparse.ArgumentParser(description="Top level for the Evo Search.")
+    parser = argparse.ArgumentParser(description="Top level for the CompileIQ Search.")
     parser.add_argument("--test", action="store_true", help="Run in test mode.")
-    parser.add_argument("--dbname", type=str, default=str(REPO_WORK_DIR.joinpath("result-evo.sqlite").absolute()), help="The name of the db file to store results")
+    parser.add_argument("--results-csv", type=str, default=str(REPO_WORK_DIR.joinpath("result-compileiq.csv").absolute()), help="The name of the csv file to store results")
     parser.add_argument('--short', action='store_true', help="Short run for testing")
     parser.add_argument('--generations', type=int, default=110, help="Generations to tune, default to 110.")
     parser.add_argument('--tritonbench-config', type=str, default=DEFAULT_CONFIG_FILE, help="The Tritonbench config file to use. This is a file name in the Tritonbench config directory.")
+    parser.add_argument('--search-space', type=str, default=DEFAULT_SEARCH_SPACE, help="The CompileIQ ptxas search space. Either a local path or a manifold:// URI.")
     return parser
 
 def run(args: Optional[List[str]] = None):
@@ -280,11 +288,19 @@ def run(args: Optional[List[str]] = None):
 
     # This is the full search run
     else:
-        logger.info(f"Starting evo search with generations: {args.generations}. CUDA VISIBLE DEVICES: " + os.environ.get("CUDA_VISIBLE_DEVICES", "CUDA_VISIBLE_DEVICES not set"))
+        logger.info("Starting CompileIQ search. CUDA VISIBLE DEVICES: " + os.environ.get("CUDA_VISIBLE_DEVICES", "CUDA_VISIBLE_DEVICES not set"))
         import torch
         cuda_version = torch.version.cuda if hasattr(torch, "version") and hasattr(torch.version, "cuda") else "cuda not set"
         logger.info("torch version: " + torch.__version__ + " cuda version: " + cuda_version + " cuda devices available: " + str(torch.cuda.device_count()))
-        search(dbname=args.dbname, generations=args.generations, short=args.short, metric_name=metric_name, tritonbench_config=args.tritonbench_config, has_manifold=has_manifold)
+        search(
+            results_csv=args.results_csv,
+            generations=args.generations,
+            short=args.short,
+            metric_name=metric_name,
+            tritonbench_config=args.tritonbench_config,
+            search_space=args.search_space,
+            has_manifold=has_manifold,
+        )
 
 
 if __name__ == "__main__":

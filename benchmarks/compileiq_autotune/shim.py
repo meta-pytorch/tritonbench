@@ -1,4 +1,5 @@
-mport subprocess
+import subprocess
+import sys
 import pandas as pd
 from datetime import datetime
 import yaml
@@ -7,11 +8,16 @@ import json
 from pathlib import Path
 import logging
 
-from ...common import REPO_PATH
+from compileiq.utils.helpers import save_compiler_config
 
-REPO_WORK_DIR = Path("/tmp/tritonbench_evo_search")
+from ..common import REPO_PATH
+
+REPO_WORK_DIR = Path("/tmp/tritonbench_compileiq_search")
 DEFAULT_CONFIG_FILE = "gemm_config_3.yaml"
 CONTEXT_FILE = "context.json"
+# Per-benchmark timeout. One evaluation of a `--rep 3000` config takes minutes on
+# its own, and the search runs one per GPU concurrently, so this needs headroom.
+RUN_TIMEOUT_SEC = int(os.environ.get("TRITONBENCH_COMPILEIQ_TIMEOUT", "1800"))
 
 logger = logging.getLogger(__name__)
 logger.setLevel(logging.INFO)
@@ -62,6 +68,12 @@ def extract_performance_metric(output):
         return float(last_line.split(",")[0].strip())
     return float(last_line.split()[-1])
 
+def truncate_output(output, limit=128):
+    # subprocess.TimeoutExpired may carry stdout/stderr as None.
+    if not output:
+        return ""
+    return output[-min(limit, len(output)):]
+
 def write_encrypted_knobs(config: dict|bytes, knobs_file: str):
     """
     To be used if encrypted knobs are provided.
@@ -70,8 +82,9 @@ def write_encrypted_knobs(config: dict|bytes, knobs_file: str):
         with open(knobs_file, "w") as f:
             f.write(yaml.dump(config))
         return
-    with open(knobs_file, "wb") as f:
-        f.write(bytes.fromhex(config))
+    # CompileIQ hands out a file-backed search space candidate as a hex string,
+    # which decodes into the binary Advanced Control File (ACF).
+    save_compiler_config(knobs_file, config)
 
 def run_tritonbench(num_runs, workdir, metric_name="tflops", mock=False, knobs_file=None, config_file="example_config.yaml", csv_file=None, verbose=False):
     """
@@ -102,7 +115,7 @@ def run_tritonbench(num_runs, workdir, metric_name="tflops", mock=False, knobs_f
     if mock:
         cmd = "echo blablabla && echo 1.234567890 && echo blablabla"
     else:
-        cmd = f"python run.py"
+        cmd = f"{sys.executable} run.py"
 
     df = pd.DataFrame(columns=["timestamp", metric_name])
     for i in range(num_runs):
@@ -113,19 +126,19 @@ def run_tritonbench(num_runs, workdir, metric_name="tflops", mock=False, knobs_f
         try:
             output = subprocess.run(
                 cmd,
-                timeout=600,
+                timeout=RUN_TIMEOUT_SEC,
                 shell=True,
                 capture_output=True,
                 text=True,
                 env=cmd_env,
                 cwd=REPO_PATH,
             )
-            truncated_output_stdout = output.stdout[-min(128, len(output.stdout)):]
-            truncated_output_stderr = output.stderr[-min(128, len(output.stderr)):]
+            truncated_output_stdout = truncate_output(output.stdout)
+            truncated_output_stderr = truncate_output(output.stderr)
         except subprocess.TimeoutExpired as e:
-            truncated_output_stdout = e.stdout[-min(128, len(e.stdout)):]
-            truncated_output_stderr = e.stderr[-min(128, len(e.stderr)):]
-            error_msg = f"[GPU ID {GPU_ID}] Timeout running Tritonbench. stdout: {truncated_output_stdout}, stderr: {truncated_output_stderr}"
+            truncated_output_stdout = truncate_output(e.stdout)
+            truncated_output_stderr = truncate_output(e.stderr)
+            error_msg = f"[GPU ID {GPU_ID}] Timeout ({RUN_TIMEOUT_SEC}s) running Tritonbench. stdout: {truncated_output_stdout}, stderr: {truncated_output_stderr}"
             print(error_msg)
             raise RuntimeError(error_msg)
         else:

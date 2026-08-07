@@ -2,7 +2,7 @@ import os
 import tempfile
 import shutil
 
-from evo_solar.evo import BASELINE_DNA
+from compileiq.types import BASELINE_CONFIG, INVALID_SCORE
 
 from .shim import (
     get_mean_and_std,
@@ -15,12 +15,11 @@ from .shim import (
     CONTEXT_FILE,
 )
 
-from ...common import REPO_PATH
+from ..common import REPO_PATH
 
 KNOBS_FILENAME="knobs.bin"
-INVALID_SCORE = '*'
 
-TRITONBENCH_CONFIGS_DIR=os.path.join(REPO_PATH, "benchmarks", "fb", "evo_autotune")
+TRITONBENCH_CONFIGS_DIR=os.path.join(REPO_PATH, "benchmarks", "run_config")
 
 def run_tritonbench_in_temp_dir(config:dict|bytes, knobs_file:str|None, iterations:int, metric_name: str, tritonbench_config:str=DEFAULT_CONFIG_FILE, verbose:bool=False):
     # Create a temporary directory for the run in the current working directory
@@ -55,7 +54,7 @@ def objective_func(config, verbose=False):
     """
     GPU_ID = os.getenv("CUDA_VISIBLE_DEVICES", "CUDA_VISIBLE_DEVICES not set")
 
-    if config == BASELINE_DNA:
+    if config == BASELINE_CONFIG:
         run_type = "baseline"
         iterations = 10
         knobs_file = None
@@ -65,9 +64,7 @@ def objective_func(config, verbose=False):
         knobs_file = KNOBS_FILENAME
 
     context = load_context(os.path.join(REPO_WORK_DIR, CONTEXT_FILE))
-    context["baseline"] = True if config == BASELINE_DNA else False
-
-    # print(f"[xzhao9] Worker Start GPUID: {GPU_ID}, context: {context}.", flush=True)
+    context["baseline"] = True if config == BASELINE_CONFIG else False
 
     metric_name = context["metric_name"]
 
@@ -89,10 +86,8 @@ def objective_func(config, verbose=False):
     finally:
         pass
 
-    # FIXME: This does not work
-    # if run_type == "baseline" and score != BADSCORE:
-    #     with get_run(run_id=mlflow_context["run_id"]) as run:
-    #         mlf_log_run_params(baseline_tflops=score, baseline_std=bs_std)
-
-    print(f"[xzhao9] Worker End GPUID: {GPU_ID}, context: {context}, returning score: {score}.", flush=True)
+    # NOTE: the baseline score/std is not logged to an experiment tracker here.
+    #       CompileIQ can do that natively via `tracker_config=MLflowTrackerConfig(...)`
+    #       (compileiq.types) passed to `Search`.
+    print(f"[tritonbench_compileiq] Worker End GPUID: {GPU_ID}, context: {context}, returning score: {score}.", flush=True)
     return score
