@@ -16,8 +16,10 @@ REPO_WORK_DIR = Path("/tmp/tritonbench_compileiq_search")
 DEFAULT_CONFIG_FILE = "gemm_config_3.yaml"
 CONTEXT_FILE = "context.json"
 # Per-benchmark timeout. One evaluation of a `--rep 3000` config takes minutes on
-# its own, and the search runs one per GPU concurrently, so this needs headroom.
-RUN_TIMEOUT_SEC = int(os.environ.get("TRITONBENCH_COMPILEIQ_TIMEOUT", "1800"))
+# its own, so this needs some headroom -- but a bad set of ptxas controls can deadlock
+# the kernel on its first launch, and every such candidate burns the whole timeout on
+# a GPU, so keep it close to the expected runtime rather than generously large.
+RUN_TIMEOUT_SEC = int(os.environ.get("TRITONBENCH_COMPILEIQ_TIMEOUT", "360"))
 
 logger = logging.getLogger(__name__)
 logger.setLevel(logging.INFO)
@@ -62,13 +64,18 @@ def extract_performance_metric(output):
     # "NCCL INFO ENV/Plugin: Could not find: libnccl-env.so"
     # "NCCL INFO ENV/Plugin: Closing env plugin ncclEnvDefault"
     # Error messages. These are not related to benchmarking and is safe to bypass.
-    last_line = [x for x in output.stdout.splitlines() if "NCCL INFO ENV/Plugin" not in x and "ncclEnvDefault" not in x][-1]
+    lines = [x for x in output.stdout.splitlines() if "NCCL INFO ENV/Plugin" not in x and "ncclEnvDefault" not in x]
+    if not lines:
+        # Tritonbench exits 0 without printing a metric when the benchmarked
+        # kernel fails to build or run, e.g. under a bad set of ptxas controls.
+        raise RuntimeError("Tritonbench produced no metric on stdout")
+    last_line = lines[-1]
     # return the first metric
     if "," in last_line:
         return float(last_line.split(",")[0].strip())
     return float(last_line.split()[-1])
 
-def truncate_output(output, limit=128):
+def truncate_output(output, limit=int(os.environ.get("TRITONBENCH_COMPILEIQ_LOG_CHARS", "2048"))):
     # subprocess.TimeoutExpired may carry stdout/stderr as None.
     if not output:
         return ""
