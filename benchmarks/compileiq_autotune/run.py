@@ -66,7 +66,7 @@ def mount_manifold_bucket(bucket=MANIFOLD_BUCKET, uri_prefix=MANIFOLD_URI_PREFIX
         ],
         check=True,
     )
-    logger.info(f"Mounted {bucket}/{uri_prefix} to {target_path}")
+    logger.info(f"[tritonbench_compileiq] Mounted {bucket}/{uri_prefix} to {target_path}")
     return True
 
 
@@ -186,7 +186,7 @@ def search(results_csv, generations, short, metric_name, tritonbench_config, sea
     num_cpus, num_gpus = 1, 1
     results = tuner.start(num_cpus=num_cpus, num_gpus=num_gpus)
 
-    logger.info(results.get_best_result())
+    logger.info(f"[tritonbench_compileiq] Best result: {results.get_best_result()}")
     logger.info(f"[tritonbench_compileiq] Search ends, result saves to {results_csv}")
 
     # Upload results to Manifold if running in a MAST job
@@ -254,12 +254,12 @@ def run(args: Optional[List[str]] = None):
     ):
         # running on MAST, check local rank
         if not local_rank:
-            logger.info("LOCAL_RANK env not set. Exiting the search.")
+            logger.info("[tritonbench_compileiq] LOCAL_RANK env not set. Exiting the search.")
             exit(1)
         if local_rank and local_rank != "0":
-            logger.info(f"Skipping search for non-zero local rank: {local_rank}")
+            logger.info(f"[tritonbench_compileiq] Skipping search for non-zero local rank: {local_rank}")
             return
-        logger.info("Running in MAST environment. Mounting manifold bucket...")
+        logger.info("[tritonbench_compileiq] Running in MAST environment. Mounting manifold bucket...")
         has_manifold = mount_manifold_bucket()
     else:
         has_manifold = False
@@ -273,7 +273,7 @@ def run(args: Optional[List[str]] = None):
 
     # This is a test run to check that the objective function is working correctly
     if args.test:
-        logger.info("[test] Starting test run...")
+        logger.info("[tritonbench_compileiq] [test] Starting test run...")
         config = None
         try:
             results = run_tritonbench_in_temp_dir(config, metric_name=metric_name, knobs_file=KNOBS_FILENAME, iterations=1, tritonbench_config=args.tritonbench_config, verbose=True)
@@ -282,16 +282,16 @@ def run(args: Optional[List[str]] = None):
             logger.error(f"Error running tritonbench: {e}")
         else:
             exit_code = 0
-            logger.info(results)
+            logger.info(f"[tritonbench_compileiq] [test] {results}")
         finally:
             exit(exit_code)
 
     # This is the full search run
     else:
-        logger.info("Starting CompileIQ search. CUDA VISIBLE DEVICES: " + os.environ.get("CUDA_VISIBLE_DEVICES", "CUDA_VISIBLE_DEVICES not set"))
+        logger.info("[tritonbench_compileiq] Starting CompileIQ search. CUDA VISIBLE DEVICES: " + os.environ.get("CUDA_VISIBLE_DEVICES", "CUDA_VISIBLE_DEVICES not set"))
         import torch
         cuda_version = torch.version.cuda if hasattr(torch, "version") and hasattr(torch.version, "cuda") else "cuda not set"
-        logger.info("torch version: " + torch.__version__ + " cuda version: " + cuda_version + " cuda devices available: " + str(torch.cuda.device_count()))
+        logger.info("[tritonbench_compileiq] torch version: " + torch.__version__ + " cuda version: " + cuda_version + " cuda devices available: " + str(torch.cuda.device_count()))
         search(
             results_csv=args.results_csv,
             generations=args.generations,

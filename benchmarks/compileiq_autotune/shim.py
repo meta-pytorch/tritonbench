@@ -169,7 +169,7 @@ def get_metric_name_from_config(config_file):
     first_benchmark_args = list(config.items())[0][1]["args"].split(" ")
     assert "--metrics" in first_benchmark_args, "No metrics found in config file."
     metric_index = first_benchmark_args.index("--metrics")
-    logger.info("Found tritonbench metrics: {}".format(first_benchmark_args[metric_index + 1]))
+    logger.info("[tritonbench_compileiq] Found tritonbench metrics: {}".format(first_benchmark_args[metric_index + 1]))
     metric_name = first_benchmark_args[metric_index + 1]
     if "," in metric_name:
         metric_name = metric_name.split(",")[0]
