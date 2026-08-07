@@ -31,11 +31,12 @@ from tritonbench.utils.env_utils import (
     is_triton_beta,
     is_triton_main,
     is_triton_stable,
+    is_xpu,
     set_torchrun_env,
 )
 from tritonbench.utils.git_utils import get_branch, get_commit_time, get_current_hash
 from tritonbench.utils.gpu_telemetry_observer import TelemetryContext
-from tritonbench.utils.gpu_utils import get_amd_device_name, gpu_lockdown
+from tritonbench.utils.gpu_utils import get_gpu_device_name, gpu_lockdown
 from tritonbench.utils.helion_utils import apply_helion_backend_override
 from tritonbench.utils.list_operator_details import list_operator_details
 from tritonbench.utils.parser import get_parser
@@ -78,6 +79,7 @@ ENV_CHECK_MAP = {
         "b200": is_blackwell,
         "cuda": is_cuda,
         "hip": is_hip,
+        "xpu": is_xpu,
     },
     "channels": {
         "triton-main": is_triton_main,
@@ -105,14 +107,14 @@ def get_run_env(
     run_env["benchmark_date"] = run_timestamp
     if is_hip():
         run_env["cuda_version"] = torch.version.hip
+    elif is_xpu():
+        run_env["cuda_version"] = str(torch.version.xpu)
     else:
         run_env["cuda_version"] = (
             torch.version.cuda if torch.version.cuda else "unknown"
         )
     try:
-        run_env["device"] = (
-            get_amd_device_name() if is_hip() else torch.cuda.get_device_name()
-        )
+        run_env["device"] = get_gpu_device_name()
     except AssertionError:
         run_env["device"] = "unknown"
     run_env["conda_env"] = os.environ.get("CONDA_ENV", "unknown")

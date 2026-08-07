@@ -2,6 +2,7 @@ from typing import Callable, Iterable, Optional, Tuple
 
 import torch
 from tritonbench.utils.constants import DEFAULT_WARMUP_REP_BY_ESTIMATED_KERNEL_MS
+from tritonbench.utils.env_utils import get_device_module
 
 
 def resolve_warmup_and_rep(
@@ -19,14 +20,16 @@ def resolve_warmup_and_rep(
     )
 
 
-def estimate_cuda_runtime_ms(
+def estimate_gpu_runtime_ms(
     fn: Callable,
     grad_to_none: Optional[Iterable[torch.Tensor]] = None,
     clear_cache_fn: Optional[Callable[[], None]] = None,
     iters: int = 5,
     prime: bool = True,
 ) -> float:
+    """Estimate the per-iteration runtime of ``fn`` using GPU events."""
     clear_cache_fn = clear_cache_fn or (lambda: None)
+    device_module = get_device_module()
 
     def run_once() -> None:
         if grad_to_none is not None:
@@ -37,13 +40,18 @@ def estimate_cuda_runtime_ms(
 
     if prime:
         run_once()
-        torch.cuda.synchronize()
+        device_module.synchronize()
 
-    start_event = torch.cuda.Event(enable_timing=True)
-    end_event = torch.cuda.Event(enable_timing=True)
+    start_event = device_module.Event(enable_timing=True)
+    end_event = device_module.Event(enable_timing=True)
     start_event.record()
     for _ in range(iters):
         run_once()
     end_event.record()
-    torch.cuda.synchronize()
+    device_module.synchronize()
     return start_event.elapsed_time(end_event) / iters
+
+
+# Deprecated alias: this helper is no longer CUDA-specific. Kept so out-of-tree
+# callers keep working; prefer `estimate_gpu_runtime_ms`.
+estimate_cuda_runtime_ms = estimate_gpu_runtime_ms

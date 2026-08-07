@@ -9,7 +9,7 @@ from typing import Callable, Optional
 import torch
 import torch.profiler as profiler
 from tritonbench.components.do_bench.utils import (
-    estimate_cuda_runtime_ms,
+    estimate_gpu_runtime_ms,
     resolve_warmup_and_rep,
 )
 from tritonbench.utils.constants import DEFAULT_N_REP, DEFAULT_N_WARMUP
@@ -185,7 +185,7 @@ def do_bench_kineto(
     else:
         clear_cache = lambda *args: None
 
-    estimate_ms = estimate_cuda_runtime_ms(fn, clear_cache_fn=clear_cache)
+    estimate_ms = estimate_gpu_runtime_ms(fn, clear_cache_fn=clear_cache)
     warmup, rep = resolve_warmup_and_rep(warmup, rep, estimate_ms)
 
     # Calculate number of iterations based on target rep time
