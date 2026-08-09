@@ -829,6 +829,51 @@ class Operator(BenchmarkOperator):
 
         return preproc_noop, fn
 
+    @register_benchmark(enabled=HAS_TLX, label="tlx-1cta")
+    @multi_input_wrapper
+    def tlx_blackwell_1cta(self, *args) -> Tuple[Callable, Callable]:
+        cfg = {
+            "BLOCK_M": 256,
+            "BLOCK_N": 128,
+            "NUM_BUFFERS_Q": 1,
+            "NUM_BUFFERS_KV": 3,
+            "NUM_BUFFERS_QK": 1,
+            "NUM_MMA_GROUPS": 2,
+            "NUM_MMA_SLICES": 2,
+            "GROUP_SIZE_N": 1,
+            "RESCALE_OPT": True,
+            "USE_WHERE": False,
+            "USE_WARP_BARRIER": False,
+        }
+
+        def fn(q, k, v):
+            return tlx_blackwell(q, k, v, self.sm_scale, self.causal, config=cfg)
+
+        return preproc_noop, fn
+
+    @register_benchmark(enabled=HAS_TLX, label="tlx-2cta")
+    @multi_input_wrapper
+    def tlx_blackwell_2cta(self, *args) -> Tuple[Callable, Callable]:
+        cfg = {
+            "BLOCK_M": 256,
+            "BLOCK_N": 128,
+            "NUM_BUFFERS_Q": 1,
+            "NUM_BUFFERS_KV": 5,
+            "NUM_BUFFERS_QK": 1,
+            "NUM_MMA_GROUPS": 2,
+            "NUM_MMA_SLICES": 2,
+            "GROUP_SIZE_N": 1,
+            "RESCALE_OPT": True,
+            "USE_WHERE": False,
+            "USE_WARP_BARRIER": False,
+            "NUM_CTAS": 2,
+        }
+
+        def fn(q, k, v):
+            return tlx_blackwell(q, k, v, self.sm_scale, self.causal, config=cfg)
+
+        return preproc_noop, fn
+
     @register_benchmark(
         enabled=IS_BLACKWELL and HAS_TLX_HSTU and is_triton_beta(),
         label="tlx-hstu",
