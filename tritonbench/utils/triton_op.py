@@ -320,6 +320,7 @@ class BenchmarkOperatorResult:
     simple_mode: bool
     # Tuple: (x_val, Dict[impl_name, BenchmarkOperatorMetrics])
     result: List[Tuple[Any, Dict[str, BenchmarkOperatorMetrics]]]
+    expected_num_inputs: Optional[int] = None
     _result_dict: Optional[Dict[Number, Dict[str, BenchmarkOperatorMetrics]]] = None
 
     def _table(self):
@@ -531,6 +532,22 @@ class BenchmarkOperatorResult:
         # Userbenchmark Metric key format:
         # tritonbench_{op_name}_{op_mode}[{x_val}-{provider}-{metric}]
         userbenchmark_metrics_dict = {}
+        result_count = sum(1 for x_val, _ in self.result if x_val != "hashes")
+        expected_agg_values = (
+            self.expected_num_inputs
+            if self.expected_num_inputs is not None
+            else result_count
+        )
+        benchmark_complete = (
+            expected_agg_values > 0
+            and result_count == expected_agg_values
+            and all(
+                not metrics.error_msg
+                for x_val, backend_metrics in self.result
+                if x_val != "hashes"
+                for metrics in backend_metrics.values()
+            )
+        )
         headers, table = self._table()
         table = self._post_process_table(table)
         agg_data = {}
@@ -539,7 +556,7 @@ class BenchmarkOperatorResult:
             if self.benchmark_name
             else f"{self.op_name}_{self.op_mode}"
         )
-        for row in table:
+        for row_index, row in enumerate(table):
             x_val = row[0]
 
             for ind, v in enumerate(row[1:]):
@@ -555,6 +572,8 @@ class BenchmarkOperatorResult:
                         f"tritonbench_{benchmark_name}[x_{x_val}-{provider}]_{metrics}"
                     )
                     userbenchmark_metrics_dict[metric_name] = value
+                    if row_index >= result_count:
+                        continue
                     agg_metric_name = (
                         f"tritonbench_{benchmark_name}[{provider}]-{metrics}-avg"
                     )
@@ -570,8 +589,15 @@ class BenchmarkOperatorResult:
                         agg_data[agg_metric_name] = agg_data.get(
                             agg_metric_name, []
                         ) + [numeric_value]
-        final_agg_data = {k: sum(v) / len(v) for k, v in agg_data.items()}
+        final_agg_data = {
+            key: sum(values) / len(values)
+            for key, values in agg_data.items()
+            if benchmark_complete and len(values) == expected_agg_values
+        }
         userbenchmark_metrics_dict.update(final_agg_data)
+        userbenchmark_metrics_dict[f"tritonbench_{benchmark_name}-pass"] = int(
+            benchmark_complete
+        )
 
         return userbenchmark_metrics_dict
 
@@ -1344,6 +1370,7 @@ class BenchmarkOperator(metaclass=PostInitProcessor):
                 metrics=self.required_metrics,
                 simple_mode=self.tb_args.simple_output,
                 result=metrics,
+                expected_num_inputs=len(self._input_ids),
             )
             if self.tb_args.power_chart:
                 power_manager_task.stop()
