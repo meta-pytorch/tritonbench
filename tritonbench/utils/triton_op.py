@@ -320,7 +320,7 @@ class BenchmarkOperatorResult:
     simple_mode: bool
     # Tuple: (x_val, Dict[impl_name, BenchmarkOperatorMetrics])
     result: List[Tuple[Any, Dict[str, BenchmarkOperatorMetrics]]]
-    expected_num_inputs: Optional[int] = None
+    expected_num_inputs: int
     _result_dict: Optional[Dict[Number, Dict[str, BenchmarkOperatorMetrics]]] = None
 
     def _table(self):
@@ -364,10 +364,11 @@ class BenchmarkOperatorResult:
                 headers.append(f"{label}-{metric}")
         # generate rows
         hashes = {}
+        results = self.result
         if "kernel_source_hash" in self.metrics:
-            self.result.append(tuple(["hashes", {}]))
+            results = [*results, ("hashes", {})]
         avg_row = []
-        for x_val, y_val in self.result:
+        for x_val, y_val in results:
             col_num = 0
             row = []
             row.append(x_val)
@@ -532,22 +533,25 @@ class BenchmarkOperatorResult:
         # Userbenchmark Metric key format:
         # tritonbench_{op_name}_{op_mode}[{x_val}-{provider}-{metric}]
         userbenchmark_metrics_dict = {}
-        result_count = sum(1 for x_val, _ in self.result if x_val != "hashes")
-        expected_agg_values = (
-            self.expected_num_inputs
-            if self.expected_num_inputs is not None
-            else result_count
+        result_count = len(self.result)
+        has_errors = any(
+            metrics.error_msg
+            for _, backend_metrics in self.result
+            for metrics in backend_metrics.values()
         )
         benchmark_complete = (
-            expected_agg_values > 0
-            and result_count == expected_agg_values
-            and all(
-                not metrics.error_msg
-                for x_val, backend_metrics in self.result
-                if x_val != "hashes"
-                for metrics in backend_metrics.values()
-            )
+            self.expected_num_inputs > 0
+            and result_count == self.expected_num_inputs
+            and not has_errors
         )
+        if not benchmark_complete:
+            error_note = " with backend errors" if has_errors else ""
+            logger.warning(
+                "Skipping aggregate metrics: expected %d input results, got %d%s",
+                self.expected_num_inputs,
+                result_count,
+                error_note,
+            )
         headers, table = self._table()
         table = self._post_process_table(table)
         agg_data = {}
@@ -572,6 +576,7 @@ class BenchmarkOperatorResult:
                         f"tritonbench_{benchmark_name}[x_{x_val}-{provider}]_{metrics}"
                     )
                     userbenchmark_metrics_dict[metric_name] = value
+                    # _table adds hash and average rows after the input rows.
                     if row_index >= result_count:
                         continue
                     agg_metric_name = (
@@ -589,11 +594,18 @@ class BenchmarkOperatorResult:
                         agg_data[agg_metric_name] = agg_data.get(
                             agg_metric_name, []
                         ) + [numeric_value]
-        final_agg_data = {
-            key: sum(values) / len(values)
-            for key, values in agg_data.items()
-            if benchmark_complete and len(values) == expected_agg_values
-        }
+        final_agg_data = {}
+        if benchmark_complete:
+            for key, values in agg_data.items():
+                if len(values) != self.expected_num_inputs:
+                    logger.warning(
+                        "Skipping aggregate metric %s: expected %d values, got %d",
+                        key,
+                        self.expected_num_inputs,
+                        len(values),
+                    )
+                    continue
+                final_agg_data[key] = sum(values) / len(values)
         userbenchmark_metrics_dict.update(final_agg_data)
         userbenchmark_metrics_dict[f"tritonbench_{benchmark_name}-pass"] = int(
             benchmark_complete

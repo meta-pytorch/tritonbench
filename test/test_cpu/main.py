@@ -88,10 +88,18 @@ class TestTritonbenchCpu(unittest.TestCase):
         self.assertAlmostEqual(complete_metrics[avg_key], 23 / 3)
         self.assertEqual(complete_metrics[pass_key], 1)
 
+        benchmark_result.metrics.append("kernel_source_hash")
+        hash_metrics = benchmark_result.userbenchmark_dict
+        self.assertAlmostEqual(hash_metrics[avg_key], 23 / 3)
+        self.assertEqual(len(benchmark_result.result), 3)
+        benchmark_result.metrics.remove("kernel_source_hash")
+
         last_result = benchmark_result.result.pop()
-        truncated_metrics = benchmark_result.userbenchmark_dict
+        with self.assertLogs("tritonbench.utils.triton_op", level="WARNING") as logs:
+            truncated_metrics = benchmark_result.userbenchmark_dict
         self.assertNotIn(avg_key, truncated_metrics)
         self.assertEqual(truncated_metrics[pass_key], 0)
+        self.assertIn("expected 3 input results, got 2", logs.output[0])
 
         benchmark_result.result.append(last_result)
         failed_metrics = next(iter(benchmark_result.result[1][1].values()))
