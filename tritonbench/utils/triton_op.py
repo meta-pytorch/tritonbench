@@ -320,6 +320,7 @@ class BenchmarkOperatorResult:
     simple_mode: bool
     # Tuple: (x_val, Dict[impl_name, BenchmarkOperatorMetrics])
     result: List[Tuple[Any, Dict[str, BenchmarkOperatorMetrics]]]
+    expected_num_inputs: int
     _result_dict: Optional[Dict[Number, Dict[str, BenchmarkOperatorMetrics]]] = None
 
     def _table(self):
@@ -363,10 +364,11 @@ class BenchmarkOperatorResult:
                 headers.append(f"{label}-{metric}")
         # generate rows
         hashes = {}
+        results = self.result
         if "kernel_source_hash" in self.metrics:
-            self.result.append(tuple(["hashes", {}]))
+            results = [*results, ("hashes", {})]
         avg_row = []
-        for x_val, y_val in self.result:
+        for x_val, y_val in results:
             col_num = 0
             row = []
             row.append(x_val)
@@ -531,6 +533,25 @@ class BenchmarkOperatorResult:
         # Userbenchmark Metric key format:
         # tritonbench_{op_name}_{op_mode}[{x_val}-{provider}-{metric}]
         userbenchmark_metrics_dict = {}
+        result_count = len(self.result)
+        has_errors = any(
+            metrics.error_msg
+            for _, backend_metrics in self.result
+            for metrics in backend_metrics.values()
+        )
+        benchmark_complete = (
+            self.expected_num_inputs > 0
+            and result_count == self.expected_num_inputs
+            and not has_errors
+        )
+        if not benchmark_complete:
+            error_note = " with backend errors" if has_errors else ""
+            logger.warning(
+                "Skipping aggregate metrics: expected %d input results, got %d%s",
+                self.expected_num_inputs,
+                result_count,
+                error_note,
+            )
         headers, table = self._table()
         table = self._post_process_table(table)
         agg_data = {}
@@ -539,7 +560,7 @@ class BenchmarkOperatorResult:
             if self.benchmark_name
             else f"{self.op_name}_{self.op_mode}"
         )
-        for row in table:
+        for row_index, row in enumerate(table):
             x_val = row[0]
 
             for ind, v in enumerate(row[1:]):
@@ -555,6 +576,9 @@ class BenchmarkOperatorResult:
                         f"tritonbench_{benchmark_name}[x_{x_val}-{provider}]_{metrics}"
                     )
                     userbenchmark_metrics_dict[metric_name] = value
+                    # _table adds hash and average rows after the input rows.
+                    if row_index >= result_count:
+                        continue
                     agg_metric_name = (
                         f"tritonbench_{benchmark_name}[{provider}]-{metrics}-avg"
                     )
@@ -570,8 +594,22 @@ class BenchmarkOperatorResult:
                         agg_data[agg_metric_name] = agg_data.get(
                             agg_metric_name, []
                         ) + [numeric_value]
-        final_agg_data = {k: sum(v) / len(v) for k, v in agg_data.items()}
+        final_agg_data = {}
+        if benchmark_complete:
+            for key, values in agg_data.items():
+                if len(values) != self.expected_num_inputs:
+                    logger.warning(
+                        "Skipping aggregate metric %s: expected %d values, got %d",
+                        key,
+                        self.expected_num_inputs,
+                        len(values),
+                    )
+                    continue
+                final_agg_data[key] = sum(values) / len(values)
         userbenchmark_metrics_dict.update(final_agg_data)
+        userbenchmark_metrics_dict[f"tritonbench_{benchmark_name}-pass"] = int(
+            benchmark_complete
+        )
 
         return userbenchmark_metrics_dict
 
@@ -1344,6 +1382,7 @@ class BenchmarkOperator(metaclass=PostInitProcessor):
                 metrics=self.required_metrics,
                 simple_mode=self.tb_args.simple_output,
                 result=metrics,
+                expected_num_inputs=len(self._input_ids),
             )
             if self.tb_args.power_chart:
                 power_manager_task.stop()

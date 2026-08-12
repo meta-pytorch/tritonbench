@@ -54,7 +54,17 @@ def post_run_callback(
     else:
         with open(output_file, "r") as f:
             obj = json.load(f)
-        obj[f"tritonbench_{benchmark}-pass"] = 1
+        reported_pass_keys = [
+            key
+            for key in obj
+            if key.startswith("tritonbench_")
+            and key.endswith("-pass")
+            and "[" not in key
+        ]
+        pass_value = (
+            min(obj.pop(key) for key in reported_pass_keys) if reported_pass_keys else 1
+        )
+        obj[f"tritonbench_{benchmark}-pass"] = pass_value
         with open(output_file, "w") as f:
             json.dump(obj, f, indent=4)
     output_files.append(output_file)

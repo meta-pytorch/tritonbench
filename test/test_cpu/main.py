@@ -1,5 +1,10 @@
+import json
+import logging
+import tempfile
 import unittest
+from pathlib import Path
 
+from benchmarks.common import post_run_callback
 from tritonbench.operators import load_opbench_by_name
 from tritonbench.operators_collection import list_operators_by_collection
 from tritonbench.utils.parser import get_parser
@@ -62,6 +67,70 @@ class TestTritonbenchCpu(unittest.TestCase):
         self.assertFalse(
             any(["test_op-" in header for header in headers])
         )  # default benchmark label should not be present in headers
+
+    def test_ci_aggregate_metrics_are_all_or_nothing(self):
+        test_op = self._get_test_op(
+            extra_args=[
+                "--metrics",
+                "test_metric_per_benchmark",
+            ]
+        )
+        test_op.run()
+        benchmark_result = test_op.output
+        for _, backend_metrics in benchmark_result.result:
+            metrics = next(iter(backend_metrics.values()))
+            metric_value = metrics.extra_metrics["test_metric_per_benchmark"]
+            metrics.extra_metrics["test_metric_per_benchmark"] = metric_value[0]
+        avg_key = "tritonbench_test_op_fwd[new_op_label]-test_metric_per_benchmark-avg"
+        pass_key = "tritonbench_test_op_fwd-pass"
+
+        complete_metrics = benchmark_result.userbenchmark_dict
+        self.assertAlmostEqual(complete_metrics[avg_key], 23 / 3)
+        self.assertEqual(complete_metrics[pass_key], 1)
+
+        benchmark_result.metrics.append("kernel_source_hash")
+        hash_metrics = benchmark_result.userbenchmark_dict
+        self.assertAlmostEqual(hash_metrics[avg_key], 23 / 3)
+        self.assertEqual(len(benchmark_result.result), 3)
+        benchmark_result.metrics.remove("kernel_source_hash")
+
+        last_result = benchmark_result.result.pop()
+        with self.assertLogs("tritonbench.utils.triton_op", level="WARNING") as logs:
+            truncated_metrics = benchmark_result.userbenchmark_dict
+        self.assertNotIn(avg_key, truncated_metrics)
+        self.assertEqual(truncated_metrics[pass_key], 0)
+        self.assertIn("expected 3 input results, got 2", logs.output[0])
+
+        benchmark_result.result.append(last_result)
+        failed_metrics = next(iter(benchmark_result.result[1][1].values()))
+        failed_metrics.error_msg = "test failure"
+        partial_metrics = benchmark_result.userbenchmark_dict
+        self.assertNotIn(avg_key, partial_metrics)
+        self.assertEqual(partial_metrics[pass_key], 0)
+
+    def test_ci_callback_preserves_partial_failure(self):
+        reported_pass_key = "tritonbench_test_op_fwd-pass"
+        ci_pass_key = "tritonbench_configured_test_op-pass"
+        with tempfile.TemporaryDirectory() as temp_dir:
+            output_file = Path(temp_dir) / "test_op.json"
+            with open(output_file, "w") as file:
+                json.dump({reported_pass_key: 0}, file)
+            output_files = []
+
+            post_run_callback(
+                logging.getLogger(__name__),
+                "test_group",
+                "configured_test_op",
+                output_file,
+                output_files,
+                disabled=False,
+            )
+
+            with open(output_file, "r") as file:
+                metrics = json.load(file)
+            self.assertEqual(metrics[ci_pass_key], 0)
+            self.assertNotIn(reported_pass_key, metrics)
+            self.assertEqual(output_files, [output_file])
 
     def test_cpu_list_operators_by_collection(self):
         all_ops = list_operators_by_collection(op_collection="all")
