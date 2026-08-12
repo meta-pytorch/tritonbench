@@ -43,6 +43,16 @@ if has_tlx():
         )
     except (ImportError, ModuleNotFoundError):
         _hopper_tlx_matmul_ws = None
+
+    # gfx950 (MI350X / CDNA4) inter-wave FP16 GEMM. Guarded separately from the
+    # NVIDIA tutorials above: it lives under a package path that only exists in
+    # Triton builds carrying the gfx9 tutorials.
+    try:
+        from triton.language.extra.tlx.tutorials.gfx9_gemm.inter_wave.a16w16.matmul_kernel import (
+            matmul as _tlx_matmul_gfx950,
+        )
+    except (ImportError, ModuleNotFoundError):
+        _tlx_matmul_gfx950 = None
 else:
 
     def _tlx_matmul_2cta(*args, **kwargs):
@@ -56,6 +66,8 @@ else:
 
     def _tlx_matmul_ws(*args, **kwargs):
         raise RuntimeError("TLX not available in this Triton version")
+
+    _tlx_matmul_gfx950 = None
 
 
 from tritonbench.utils.path_utils import ensure_build_subdir_on_sys_path
@@ -78,6 +90,7 @@ from tritonbench.utils.env_utils import (
     is_cu130,
     is_cuda,
     is_fbcode,
+    is_hip_mi350,
     IS_HOPPER,
     supports_tma,
 )
@@ -619,6 +632,40 @@ class Operator(BenchmarkOperator):
             return lambda: compiled_decompose_k(a, b) + bias
         else:
             return lambda: compiled_decompose_k(a, b)
+
+    @register_benchmark(
+        enabled=has_tlx() and is_hip_mi350(),
+        fwd_only=True,
+        tags=["tlx", "amd", "gfx950"],
+    )
+    def tlx_matmul_gfx950(self, a, b, bias) -> Callable:
+        """TLX FP16/BF16 GEMM for gfx950 (MI350X).
+
+        The kernel picks its own tile and split-K from the shape, so there is
+        nothing to tune here. B must be column-major, handled outside the timed
+        region: feeding a row-major B does not produce wrong numbers, it fails
+        to compile -- the direct-to-LDS load cannot be coalesced -- so the
+        transpose is mandatory, not an optimisation.
+        """
+        if _tlx_matmul_gfx950 is None:
+            return None
+
+        a_in = a if a.is_contiguous() else a.contiguous()
+        # b is (K, N); column-major means stride(0) == 1.
+        b_in = b if b.stride(0) == 1 else b.T.contiguous().T
+
+        # Probe rather than restate the kernel's shape constraints. It states
+        # them as plain asserts covering more than a minimum K -- K must also
+        # divide by BLOCK_K after the split -- and a partial copy here turns an
+        # unsupported shape into a failed benchmark run instead of a skip.
+        try:
+            _tlx_matmul_gfx950(a_in, b_in)
+        except AssertionError:
+            return None
+
+        if bias is not None:
+            return lambda: _tlx_matmul_gfx950(a_in, b_in) + bias
+        return lambda: _tlx_matmul_gfx950(a_in, b_in)
 
     @register_benchmark(
         enabled=has_tlx() and (IS_HOPPER or IS_BLACKWELL), fwd_only=True
