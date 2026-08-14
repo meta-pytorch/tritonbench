@@ -38,6 +38,15 @@ def tritonparse_init(tritonparse_log_path):
                 f"{tritonparse_log_path}/raw_logs",
                 enable_trace_launch=True,
                 enable_more_tensor_information=True,
+                # Capture the whole Python file, not just the kernel's function
+                # definition. Tritonbench is a benchmarking harness whose traces
+                # are meant to be diffed and browsed afterwards, so trace
+                # completeness is worth more than the compile-time cost of one
+                # extra file read per kernel. Function-only capture is actively
+                # wrong for nested kernels: a thin @triton.jit wrapper that just
+                # calls the real kernel yields a source snippet containing none
+                # of the real kernel body.
+                enable_full_python_source=True,
             )
             print(
                 f"TritonParse structured logging initialized with log path: {tritonparse_log_path}"
