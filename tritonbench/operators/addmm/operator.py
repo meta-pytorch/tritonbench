@@ -205,12 +205,9 @@ class Operator(BenchmarkOperator):
 
     @register_benchmark(enabled=is_hip_mi350() and has_tlx() and has_torch_tlx())
     def torch_tlx_addmm(self, a, mat1, mat2) -> Callable:
-        # torch_tlx_<op> convention: PT2 (torch.compile max-autotune, TRITON
-        # backend) with TLX "allow" mode, so TLX templates compete against the
-        # standard Triton templates during autotuning. Identical to the
-        # pt2_triton_matmul baseline except for triton.tlx_mode, giving a clean
-        # PT2-vs-PT2+TLX comparison. force_disable_caches forces a real recompile
-        # so the TLX candidates aren't served from the baseline's autotune cache.
+        # Force PT2 to select only TLX templates, excluding stock Triton choices.
+        # force_disable_caches prevents a prior allow-mode or stock-Triton choice
+        # from being reused through the autotune cache.
         # Gated to AMD MI350x (gfx950), where the TLX addmm template exists.
         torch._dynamo.reset()
         with inductor_config.patch(
@@ -219,7 +216,7 @@ class Operator(BenchmarkOperator):
                 "max_autotune_gemm_backends": "TRITON",
                 "autotune_fallback_to_aten": False,
                 "force_disable_caches": True,
-                "triton.tlx_mode": "allow",
+                "triton.tlx_mode": "force",
             }
         ):
             f = lambda a, mat1, mat2: torch.addmm(a, mat1, mat2)
