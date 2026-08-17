@@ -15,6 +15,16 @@ from tritonbench.utils.env_utils import (
 from tritonbench.utils.python_utils import try_import
 from tritonbench.utils.triton_utils import has_tlx, has_torch_tlx
 
+if has_tlx():
+    try:
+        from triton.language.extra.tlx.tutorials.amd_addmm_gfx950 import (
+            addmm as _tlx_addmm_gfx950,
+        )
+    except (ImportError, ModuleNotFoundError):
+        _tlx_addmm_gfx950 = None
+else:
+    _tlx_addmm_gfx950 = None
+
 with try_import("HAS_HSTU"):
     try:
         from hammer.ops.triton.triton_hstu_linear import (
@@ -174,6 +184,24 @@ class Operator(BenchmarkOperator):
             compiled = torch.compile(f, dynamic=False)
             compiled(a, mat1, mat2)
         return lambda: compiled(a, mat1, mat2)
+
+    @register_benchmark(
+        enabled=is_hip_mi350() and has_tlx(),
+        fwd_only=True,
+        tags=["tlx", "amd", "gfx950"],
+    )
+    def tlx_addmm_gfx950(self, a, mat1, mat2) -> Callable:
+        """Standalone fused TLX addmm for gfx950 (MI350X)."""
+        if _tlx_addmm_gfx950 is None:
+            return None
+
+        mat1_in = mat1 if mat1.is_contiguous() else mat1.contiguous()
+        mat2_in = mat2 if mat2.stride(0) == 1 else mat2.T.contiguous().T
+        try:
+            _tlx_addmm_gfx950(a, mat1_in, mat2_in)
+        except (AssertionError, ValueError):
+            return None
+        return lambda: _tlx_addmm_gfx950(a, mat1_in, mat2_in)
 
     @register_benchmark(enabled=is_hip_mi350() and has_tlx() and has_torch_tlx())
     def torch_tlx_addmm(self, a, mat1, mat2) -> Callable:
