@@ -80,7 +80,8 @@ def run_benchmark_config_ci(
     ci: bool = False,
     log_scuba: bool = False,
     logging_group: str | None = None,
-):
+) -> str | Path:
+    """Run a benchmark config, returning the output dir holding the result jsons."""
     from tritonbench.utils.run_utils import run_config, SPECIAL_CONFIG_FIELDS
     from tritonbench.utils.scuba_utils import decorate_benchmark_data, log_benchmark
 
@@ -161,6 +162,8 @@ def run_benchmark_config_ci(
             pass_rate=pass_rate,
             failed_benchmarks=failed_benchmarks,
         )
+
+    return output_dir
 
 
 def setup_output_dir(bm_name: str, ci: bool = False, output_dir: str | None = None):
