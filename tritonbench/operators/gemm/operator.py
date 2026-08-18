@@ -44,11 +44,11 @@ if has_tlx():
     except (ImportError, ModuleNotFoundError):
         _hopper_tlx_matmul_ws = None
 
-    # gfx950 (MI350X / CDNA4) inter-wave FP16 GEMM. Guarded separately from the
-    # NVIDIA tutorials above: it lives under a package path that only exists in
-    # Triton builds carrying the gfx9 tutorials.
+    # gfx950 (MI350X / CDNA4) GEMM. Guarded separately from the NVIDIA
+    # tutorials above: it lives under a package path that only exists in Triton
+    # builds carrying the gfx9 tutorials.
     try:
-        from triton.language.extra.tlx.tutorials.gfx9_gemm.inter_wave.a16w16.matmul_kernel import (
+        from triton.language.extra.tlx.tutorials.gfx9_gemm.a16w16_matmul import (
             matmul as _tlx_matmul_gfx950,
         )
     except (ImportError, ModuleNotFoundError):
@@ -641,11 +641,9 @@ class Operator(BenchmarkOperator):
     def tlx_matmul_gfx950(self, a, b, bias) -> Callable:
         """TLX FP16/BF16 GEMM for gfx950 (MI350X).
 
-        The kernel picks its own tile and split-K from the shape, so there is
-        nothing to tune here. B must be column-major, handled outside the timed
-        region: feeding a row-major B does not produce wrong numbers, it fails
-        to compile -- the direct-to-LDS load cannot be coalesced -- so the
-        transpose is mandatory, not an optimisation.
+        The public a16w16 entry selects a persistent specialization or the
+        general inter-wave fallback. B must be column-major, handled outside
+        the timed region.
         """
         if _tlx_matmul_gfx950 is None:
             return None
