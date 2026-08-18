@@ -829,7 +829,7 @@ class Operator(BenchmarkOperator):
 
         return preproc_noop, fn
 
-    @register_benchmark(enabled=HAS_TLX, label="tlx-1cta")
+    @register_benchmark(enabled=HAS_TLX and is_triton_beta(), label="tlx-1cta")
     @multi_input_wrapper
     def tlx_blackwell_1cta(self, *args) -> Tuple[Callable, Callable]:
         cfg = {
@@ -851,7 +851,7 @@ class Operator(BenchmarkOperator):
 
         return preproc_noop, fn
 
-    @register_benchmark(enabled=HAS_TLX, label="tlx-2cta")
+    @register_benchmark(enabled=HAS_TLX and is_triton_beta(), label="tlx-2cta")
     @multi_input_wrapper
     def tlx_blackwell_2cta(self, *args) -> Tuple[Callable, Callable]:
         cfg = {
