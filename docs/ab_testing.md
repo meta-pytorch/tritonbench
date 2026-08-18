@@ -14,7 +14,16 @@ python run.py --op <operator> --side-a="<configuration A>" --side-b="<configurat
 ### Parameters
 - `--op`: Name of the operator to test (single operator only)
 - `--side-a`: Parameter string for configuration A
-- `--side-b`: Parameter string for configuration B
+- `--side-b`: Parameter string for configuration B (optional)
+
+### Single-Side Runs
+`--side-b` is optional. With only `--side-a`, that configuration runs by itself and
+its latency samples are analyzed, which is a quick way to see how noisy a
+configuration is before comparing anything against it:
+```bash
+python run.py --op vector_add --side-a="--warmup 25"
+```
+`--side-b` on its own is an error: it always needs a `--side-a` to compare against.
 
 ## Configuration Types
 
@@ -79,7 +88,8 @@ python run.py --op flash_attention --side-a="--warmup 50 --dtype fp16 --batch-si
 
 ## Output Format
 
-A/B test output consists of three sections:
+A/B test output consists of four sections (a single-side run prints only the
+latency analysis):
 
 ### 1. Configuration Analysis
 Shows differences between the two configurations:
@@ -114,6 +124,28 @@ torch_add      4096                0.009       0.007       -22.2%
                8192                0.007       0.007        +0.0%
                16384               0.008       0.007       -12.5%
 ...
+```
+
+### 4. Latency Analysis
+Printed whenever the `latency` metric was collected, from the raw per-iteration
+samples that `do_bench` keeps (see `tritonbench/components/do_bench/latency_analysis.py`).
+Each side gets descriptive statistics (min/max/mean/median/stddev/stderr, CV, IQR)
+plus a Student-t and a bootstrap confidence interval. When both sides are present,
+Shapiro-Wilk decides which test to run: Welch's t-test with Cohen's d if both
+samples look normal, otherwise the Mann-Whitney U test with a rank-biserial
+correlation. Either way the percent change is reported with a bootstrap CI:
+```
+triton_add @ x_val=4096:
+  Config A (n=200):
+    min=0.0071  max=0.0093  mean=0.0080  median=0.0080
+    stddev=0.0003  stderr=0.0000  CV=3.75%  IQR=0.0004 [Q1=0.0078, Q3=0.0082]
+    95% CI (t): [0.0080, 0.0081]  bootstrap mean: [0.0080, 0.0081]  bootstrap median: [0.0079, 0.0081]
+  Config B (n=200):
+    ...
+    Shapiro-Wilk: Config A: W=0.9946, p=0.6840 (normal); Config B: W=0.9953, p=0.7956 (normal)
+    Welch's t-test: t=23.413, dof=396.2, p=<1e-4 (significant at alpha=0.05)
+    Cohen's d: 2.341 (large)
+    Percent change (Config B vs Config A): +4.78% [95% CI: +4.36%, +5.17%]
 ```
 
 ## Error Handling

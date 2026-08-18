@@ -436,6 +436,7 @@ def get_parser(args=None):
         type=str,
         default=None,
         help="Configuration B for A/B testing. Specify operator-specific arguments as a string. "
+        "Optional: with only --side-a, that single configuration is run and analyzed. "
         "Example: '--side-b \"--dynamic\"'",
     )
     parser.add_argument("--log-scuba", action="store_true", help="Log to scuba.")
@@ -536,13 +537,12 @@ def get_parser(args=None):
         )
 
     # A/B Testing validation
-    if (args.side_a is not None) != (args.side_b is not None):
-        parser.error(
-            "A/B testing requires both --side-a and --side-b arguments to be specified together"
-        )
+    if args.side_b is not None and args.side_a is None:
+        parser.error("--side-b requires --side-a to be specified")
 
-    if args.side_a is not None and args.side_b is not None:
-        # A/B mode is enabled
+    if args.side_a is not None:
+        # A/B mode is enabled. --side-b is optional: with only --side-a we run
+        # that single configuration and report its latency analysis.
         if not args.op:
             parser.error(
                 "A/B testing requires a specific operator (--op) to be specified"

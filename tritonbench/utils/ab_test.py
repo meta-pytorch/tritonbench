@@ -1,11 +1,25 @@
-"""A/B testing utilities for tritonbench."""
+"""A/B testing utilities for tritonbench.
+
+Side B is optional: with only ``--side-a`` we run that single configuration and
+report the statistical analysis of its latency samples, which is useful to
+gauge how noisy a configuration is before comparing anything against it.
+"""
 
 import argparse
+import logging
 import shlex
-from typing import Dict, List, Tuple
+from typing import Dict, List, Optional, Tuple
+
+from tritonbench.components.do_bench.latency_analysis import (
+    analyze_latency,
+    format_latency_analysis,
+    MIN_SAMPLE,
+)
 
 from .parser import get_parser
 from .triton_op import BenchmarkOperatorResult, REGISTERED_X_VALS
+
+logger = logging.getLogger(__name__)
 
 
 def parse_ab_config(config_str: str) -> List[str]:
@@ -108,11 +122,11 @@ def update_args_with_global(
 
     except SystemExit as e:
         # If parsing fails, keep original args
-        print(
-            f"WARNING: Failed to parse global arguments {global_args}, using original args: {e}"
+        logger.warning(
+            f"Failed to parse global arguments {global_args}, using original args: {e}"
         )
     except Exception as e:
-        print(f"WARNING: Unexpected error parsing global arguments {global_args}: {e}")
+        logger.warning(f"Unexpected error parsing global arguments {global_args}: {e}")
 
     return updated_args
 
@@ -218,20 +232,149 @@ def _calculate_performance_summary(
     return summary
 
 
+LATENCY_METRIC = "latency"
+
+
+def _has_latency_metric(*results: Optional[BenchmarkOperatorResult]) -> bool:
+    """True if any result collected the latency metric."""
+    return any(
+        result is not None and LATENCY_METRIC in (result.metrics or [])
+        for result in results
+    )
+
+
+def _latency_samples(metrics_obj) -> Optional[List[float]]:
+    """Raw per-iteration latency samples (in ms) held by a metrics entry."""
+    latency = getattr(metrics_obj, LATENCY_METRIC, None)
+    times = getattr(latency, "times", None)
+    if not times:
+        return None
+    return [float(t) for t in times]
+
+
+def _log_latency_analysis(
+    result_dict_a: Dict,
+    x_vals: List,
+    backends: List[str],
+    x_val_name: str,
+    result_dict_b: Optional[Dict] = None,
+    label_a: str = "Config A",
+    label_b: str = "Config B",
+):
+    """Report the statistical analysis of the raw latency samples.
+
+    With a single side this is descriptive statistics plus confidence
+    intervals. With both sides it also runs the normality test, the hypothesis
+    test it selects, and the percent change with its bootstrap CI.
+    """
+    lines = [
+        "",
+        "-" * 70,
+        "Latency Analysis (All latencies in ms)",
+        "-" * 70,
+    ]
+    if result_dict_b is not None:
+        lines.append(
+            f"Percent change is {label_b} vs {label_a} (positive = B is slower)."
+        )
+
+    analyzed = 0
+    for backend in backends:
+        for x_val in x_vals:
+            metrics_a = result_dict_a.get(x_val, {}).get(backend)
+            if metrics_a is None:
+                continue
+            samples_a = _latency_samples(metrics_a)
+            if not samples_a:
+                continue
+
+            samples_b = None
+            if result_dict_b is not None:
+                metrics_b = result_dict_b.get(x_val, {}).get(backend)
+                samples_b = _latency_samples(metrics_b) if metrics_b else None
+
+            analysis = analyze_latency(samples_a, samples_b)
+            if analysis is None:
+                continue
+
+            lines.append(f"\n{backend} @ {x_val_name}={x_val}:")
+            lines.extend(
+                format_latency_analysis(
+                    analysis, label_a=label_a, label_b=label_b, indent="  "
+                )
+            )
+            if result_dict_b is not None and samples_b is None:
+                lines.append(f"  ({label_b} has no latency samples, side A only)")
+            analyzed += 1
+
+    if not analyzed:
+        lines.append(
+            f"\nNo latency analysis available: needs at least {MIN_SAMPLE} raw "
+            "latency samples per side"
+        )
+    logger.info("\n".join(lines))
+
+
+def report_single_side_results(
+    result_a: BenchmarkOperatorResult,
+    config_a_args: List[str],
+):
+    """Report a single configuration (only --side-a was specified)."""
+    if not result_a or not result_a.result:
+        logger.error("[A/B Comparison] No benchmark data available for Side A")
+        return
+
+    x_vals = sorted({x_val for x_val, _ in result_a.result})
+    result_dict_a = {x_val: metrics_dict for x_val, metrics_dict in result_a.result}
+    backends = sorted(
+        {backend for x_val in x_vals for backend in result_dict_a[x_val].keys()}
+    )
+
+    logger.info(
+        "\n".join(
+            [
+                "",
+                "=" * 70,
+                f"Single-Side Test Results: {result_a.op_name}",
+                "=" * 70,
+                f"Configuration A: {' '.join(config_a_args) or '(defaults)'}",
+                f"\nTest Scope: {len(x_vals)} input shapes, {len(backends)} backends",
+                f"Metrics: {', '.join(result_a.metrics)}",
+            ]
+        )
+    )
+
+    if _has_latency_metric(result_a):
+        _log_latency_analysis(
+            result_dict_a,
+            x_vals,
+            backends,
+            REGISTERED_X_VALS.get(result_a.op_name, "x_val"),
+        )
+
+
 def compare_ab_results(
     result_a: BenchmarkOperatorResult,
-    result_b: BenchmarkOperatorResult,
+    result_b: Optional[BenchmarkOperatorResult],
     config_a_args: List[str],
-    config_b_args: List[str],
+    config_b_args: Optional[List[str]] = None,
 ):
-    """Compare A/B test results"""
-    if not result_a or not result_b:
-        print("\n[A/B Comparison] ERROR: One or both results are invalid")
+    """Compare A/B test results.
+
+    When ``result_b`` is None only side A was run, so we report that side on
+    its own instead of a comparison.
+    """
+    if not result_a:
+        logger.error("[A/B Comparison] Side A result is invalid")
+        return
+
+    if result_b is None:
+        report_single_side_results(result_a, config_a_args)
         return
 
     # Check if both results have data
     if not result_a.result or not result_b.result:
-        print("ERROR: No benchmark data available for comparison")
+        logger.error("No benchmark data available for comparison")
         return
 
     # Get common data for analysis
@@ -240,7 +383,7 @@ def compare_ab_results(
     common_x_vals = sorted(x_vals_a.intersection(x_vals_b))
 
     if not common_x_vals:
-        print("ERROR: No common input shapes found between configurations")
+        logger.error("No common input shapes found between configurations")
         return
 
     # Get common backends
@@ -255,50 +398,51 @@ def compare_ab_results(
     common_backends = sorted(all_backends_a.intersection(all_backends_b))
 
     if not common_backends:
-        print("ERROR: No common backends found between configurations")
+        logger.error("No common backends found between configurations")
         return
 
     # ============================================================================
     # SECTION 1: Configuration Analysis
     # ============================================================================
-    print("\n" + "=" * 70)
-    print(f"A/B Test Results: {result_a.op_name}")
-    print("=" * 70)
-
-    print("Configuration Differences:")
+    lines = [
+        "",
+        "=" * 70,
+        f"A/B Test Results: {result_a.op_name}",
+        "=" * 70,
+        "Configuration Differences:",
+    ]
     try:
         differences = _analyze_config_differences(config_a_args, config_b_args)
 
         if differences:
             for param, (val_a, val_b) in differences.items():
-                print(f"  {param:<15}: {val_a:<15} → {val_b}")
+                lines.append(f"  {param:<15}: {val_a:<15} → {val_b}")
         else:
-            print("  No configuration differences detected")
+            lines.append("  No configuration differences detected")
     except Exception as e:
-        print(f"  ERROR: Failed to analyze configuration differences: {e}")
+        lines.append(f"  ERROR: Failed to analyze configuration differences: {e}")
 
-    print(
+    lines.append(
         f"\nTest Scope: {len(common_x_vals)} input shapes, {len(common_backends)} backends"
     )
-    print(f"Metrics: {', '.join(result_a.metrics)}")
+    lines.append(f"Metrics: {', '.join(result_a.metrics)}")
+    logger.info("\n".join(lines))
 
     # ============================================================================
     # SECTION 2: Performance Summary
     # ============================================================================
-    print("\n" + "-" * 70)
-    print("Performance Summary")
-    print("-" * 70)
+    lines = ["", "-" * 70, "Performance Summary", "-" * 70]
 
     summary = _calculate_performance_summary(
         result_a, result_b, common_x_vals, common_backends
     )
 
     for backend in common_backends:
-        print(f"\n{backend}:")
+        lines.append(f"\n{backend}:")
         backend_data = summary.get(backend, {})
 
         if not backend_data:
-            print("  No comparable data")
+            lines.append("  No comparable data")
             continue
 
         for metric, stats in backend_data.items():
@@ -306,28 +450,29 @@ def compare_ab_results(
             min_improvement = stats["min_improvement"]
             max_improvement = stats["max_improvement"]
 
-            print(
+            lines.append(
                 f"  {metric:<12}: {avg_improvement:+5.1f}% avg [{min_improvement:+.1f}% to {max_improvement:+.1f}%]"
             )
+    logger.info("\n".join(lines))
 
     # ============================================================================
     # SECTION 3: Detailed Comparison (Compact)
     # ============================================================================
-    print("\n" + "-" * 70)
-    print("Detailed Comparison")
-    print("-" * 70)
+    lines = ["", "-" * 70, "Detailed Comparison", "-" * 70]
 
     x_val_name = REGISTERED_X_VALS.get(result_a.op_name, "x_val")
 
     # Show all metrics for detailed comparison
     for metric in result_a.metrics:
-        print(f"\nMetric: {metric}")
-        print("Backend".ljust(15), end="")
-        print(x_val_name.ljust(20), end="")
-        print("Config A".ljust(12), end="")
-        print("Config B".ljust(12), end="")
-        print("Difference".ljust(12))
-        print("-" * 71)
+        lines.append(f"\nMetric: {metric}")
+        lines.append(
+            "Backend".ljust(15)
+            + x_val_name.ljust(20)
+            + "Config A".ljust(12)
+            + "Config B".ljust(12)
+            + "Difference".ljust(12)
+        )
+        lines.append("-" * 71)
 
         for backend in common_backends:
             first_row = True
@@ -366,90 +511,117 @@ def compare_ab_results(
                         val_a_str = str(val_a_num)
                         val_b_str = str(val_b_num)
 
-                    # Print row
+                    # Row of the comparison table
                     backend_name = backend if first_row else ""
-                    print(
+                    lines.append(
                         f"{backend_name:<15}{str(x_val):<20}{val_a_str:<12}{val_b_str:<12}{diff_pct:+5.1f}%"
                     )
                     first_row = False
 
-            if not first_row:  # Only print separator if we printed data
-                print()
+            if not first_row:  # Only add a separator if we added data
+                lines.append("")
+    logger.info("\n".join(lines))
+
+    # ============================================================================
+    # SECTION 4: Latency Analysis
+    # ============================================================================
+    if _has_latency_metric(result_a, result_b):
+        _log_latency_analysis(
+            result_dict_a,
+            common_x_vals,
+            common_backends,
+            x_val_name,
+            result_dict_b=result_dict_b,
+        )
 
 
 def run_ab_test(
     base_args: argparse.Namespace, base_extra_args: List[str], _run_func
-) -> Tuple[BenchmarkOperatorResult, BenchmarkOperatorResult]:
-    """Run A/B test with two configurations and return both results."""
+) -> Tuple[BenchmarkOperatorResult, Optional[BenchmarkOperatorResult]]:
+    """Run the A/B test and return both results.
+
+    Side B is optional: when ``--side-b`` is not specified only side A runs and
+    the second result is None.
+    """
 
     # Parse A and B configurations
     try:
         config_a_args = parse_ab_config(base_args.side_a)
     except ValueError as e:
-        print(f"ERROR: Failed to parse Side A configuration: {e}")
+        logger.error(f"Failed to parse Side A configuration: {e}")
         raise
 
-    try:
-        config_b_args = parse_ab_config(base_args.side_b)
-    except ValueError as e:
-        print(f"ERROR: Failed to parse Side B configuration: {e}")
-        raise
+    run_side_b = base_args.side_b is not None
+    config_b_args = []
+    if run_side_b:
+        try:
+            config_b_args = parse_ab_config(base_args.side_b)
+        except ValueError as e:
+            logger.error(f"Failed to parse Side B configuration: {e}")
+            raise
 
-    print(f"[A/B Test] Configuration A: {' '.join(config_a_args)}")
-    print(f"[A/B Test] Configuration B: {' '.join(config_b_args)}")
+    lines = [f"[A/B Test] Configuration A: {' '.join(config_a_args)}"]
+    if run_side_b:
+        lines.append(f"[A/B Test] Configuration B: {' '.join(config_b_args)}")
+    else:
+        lines.append("[A/B Test] Configuration B: (not specified, running side A only)")
 
     # Separate global and operator-specific arguments
     global_a_args, op_a_args = separate_global_and_op_args(config_a_args)
     global_b_args, op_b_args = separate_global_and_op_args(config_b_args)
 
     if global_a_args:
-        print(f"[A/B Test] Global args A: {' '.join(global_a_args)}")
+        lines.append(f"[A/B Test] Global args A: {' '.join(global_a_args)}")
     if op_a_args:
-        print(f"[A/B Test] Operator args A: {' '.join(op_a_args)}")
+        lines.append(f"[A/B Test] Operator args A: {' '.join(op_a_args)}")
     if global_b_args:
-        print(f"[A/B Test] Global args B: {' '.join(global_b_args)}")
+        lines.append(f"[A/B Test] Global args B: {' '.join(global_b_args)}")
     if op_b_args:
-        print(f"[A/B Test] Operator args B: {' '.join(op_b_args)}")
-    print()
+        lines.append(f"[A/B Test] Operator args B: {' '.join(op_b_args)}")
+    logger.info("\n".join(lines))
 
     # Update args with global parameters
     args_a = update_args_with_global(base_args, global_a_args)
-    args_b = update_args_with_global(base_args, global_b_args)
 
     # Combine extra_args with operator-specific args only
     extra_args_a = base_extra_args + op_a_args
-    extra_args_b = base_extra_args + op_b_args
 
-    print("=" * 60)
-    print(f"Running Side A: {' '.join(config_a_args)}")
+    lines = ["", "=" * 60, f"Running Side A: {' '.join(config_a_args)}"]
     if global_a_args:
-        print(f"  Global args: {' '.join(global_a_args)}")
+        lines.append(f"  Global args: {' '.join(global_a_args)}")
     if op_a_args:
-        print(f"  Operator args: {' '.join(op_a_args)}")
-    print("=" * 60)
+        lines.append(f"  Operator args: {' '.join(op_a_args)}")
+    lines.append("=" * 60)
+    logger.info("\n".join(lines))
 
     try:
         result_a = _run_func(args_a, extra_args_a)
         if not result_a:
             raise RuntimeError("Side A returned empty result")
     except Exception as e:
-        print(f"ERROR: Side A failed to run: {e}")
+        logger.error(f"Side A failed to run: {e}")
         raise RuntimeError(f"A/B test failed - Side A error: {e}")
 
-    print("\n" + "=" * 60)
-    print(f"Running Side B: {' '.join(config_b_args)}")
+    if not run_side_b:
+        return result_a, None
+
+    args_b = update_args_with_global(base_args, global_b_args)
+    extra_args_b = base_extra_args + op_b_args
+
+    lines = ["", "=" * 60, f"Running Side B: {' '.join(config_b_args)}"]
     if global_b_args:
-        print(f"  Global args: {' '.join(global_b_args)}")
+        lines.append(f"  Global args: {' '.join(global_b_args)}")
     if op_b_args:
-        print(f"  Operator args: {' '.join(op_b_args)}")
-    print("=" * 60)
+        lines.append(f"  Operator args: {' '.join(op_b_args)}")
+    lines.append("=" * 60)
+    logger.info("\n".join(lines))
 
     try:
         result_b = _run_func(args_b, extra_args_b)
         if not result_b:
             raise RuntimeError("Side B returned empty result")
     except Exception as e:
-        print(f"ERROR: Side B failed to run: {e}")
+        logger.error(f"Side B failed to run: {e}")
         raise RuntimeError(f"A/B test failed - Side B error: {e}")
 
     return result_a, result_b

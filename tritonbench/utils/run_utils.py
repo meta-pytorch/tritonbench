@@ -590,8 +590,8 @@ def tritonbench_run(args: Optional[List[str]] = None):
 
     modes = args.mode.split(",")
 
-    # Check if A/B testing mode is enabled
-    if args.side_a is not None and args.side_b is not None:
+    # Check if A/B testing mode is enabled (--side-b is optional)
+    if args.side_a is not None:
         # A/B testing mode - only support single operator
         assert len(ops) == 1, (
             "A/B testing validation should have caught multiple operators"
@@ -599,7 +599,10 @@ def tritonbench_run(args: Optional[List[str]] = None):
         op = ops[0]
         args.op = op
 
-        print("[A/B Testing Mode Enabled]")
+        if args.side_b is not None:
+            print("[A/B Testing Mode Enabled]")
+        else:
+            print("[A/B Testing Mode Enabled: side A only]")
         print(f"Operator: {op}")
         print()
 
@@ -613,7 +616,11 @@ def tritonbench_run(args: Optional[List[str]] = None):
                     from tritonbench.utils.ab_test import parse_ab_config
 
                     config_a_args = parse_ab_config(args.side_a)
-                    config_b_args = parse_ab_config(args.side_b)
+                    config_b_args = (
+                        parse_ab_config(args.side_b)
+                        if args.side_b is not None
+                        else None
+                    )
                     compare_ab_results(result_a, result_b, config_a_args, config_b_args)
 
                 except Exception as e:
