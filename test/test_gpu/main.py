@@ -215,7 +215,8 @@ def _run_one_operator(op: str, args: List[str], in_task: bool = False):
 
 def make_test(operator):
     def test_case(self):
-        # Add `--test-only` to disable Triton autotune in tests
+        # Limit benchmark work; the BUCK target separately disables ADS MKL
+        # autotuning so correctness tests use each kernel's fixed config.
         args = [
             "--op",
             operator,
