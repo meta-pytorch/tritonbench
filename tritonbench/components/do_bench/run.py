@@ -11,7 +11,11 @@ from tritonbench.utils.constants import DEFAULT_N_REP, DEFAULT_N_WARMUP
 from tritonbench.utils.cudagraph_utils import CudaGraphConfig
 
 from .common import summarize_statistics
-from .utils import estimate_gpu_runtime_ms, resolve_warmup_and_rep
+from .utils import (
+    estimate_gpu_runtime_ms,
+    prime_cache_clear_buffer,
+    resolve_warmup_and_rep,
+)
 
 # Triton is optional: non-Triton devices (cpu, tpu) can run without it. The
 # Triton-backed timing paths (events, power, cudagraph, the driver benchmarker)
@@ -725,6 +729,13 @@ def do_bench_wrapper(
         entropy_window_size: Size of rolling window for entropy tracking
         entropy_max_samples: Maximum samples before stopping warmup (safety limit)
     """
+    # Every cache-clearing timing path below flushes the L2 through the shared
+    # benchmark buffer. Pay its one-off first-touch cost here so it cannot land
+    # inside a runtime estimate (ours or the one inside triton's do_bench) and
+    # skew the sample count of whichever backend runs first.
+    if device not in ("cpu", "tpu") and not skip_cache_clearing:
+        prime_cache_clear_buffer()
+
     # skip runtime estimation when using triton_do_bench
     # all other benchmarkers are using their own runtime estimation
     if (
