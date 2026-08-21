@@ -100,3 +100,20 @@ def plot_latencies(output_dir, gpu_id, metrics: "BenchmarkOperatorResult") -> No
             dpi=300,
             bbox_inches="tight",
         )
+
+        # Histogram of the latency distribution per backend
+        plt.figure(figsize=(10, 6))
+        for backend in result_dict[x_val]:
+            latency_times = result_dict[x_val][backend].latency.times[1:]
+            plt.hist(latency_times, bins=50, alpha=0.5, label=backend)
+        plt.legend()
+        plt.xlabel("Latency (ms)")
+        plt.ylabel("Count")
+        plt.title(
+            f"[tritonbench] latency histogram on device {gpu_id} for {op_name} input {x_val}"
+        )
+        plt.savefig(
+            os.path.join(output_dir, f"{op_name}_input_{x_val}_latency_histogram.png"),
+            dpi=300,
+            bbox_inches="tight",
+        )
