@@ -295,7 +295,8 @@ class Operator(BenchmarkOperator):
     # fwd_only: the fwd-data-partition variants share the same (RMW) WS backward,
     # and two different WS backward configs cannot be compiled/run in one process
     # (sequential meta-WS bwd launches deadlock), so only hstu_triton_autows_dqreduce
-    # exercises the WS backward -- these variants benchmark the forward only.
+    # exercises the WS backward -- these variants benchmark the forward only. That
+    # backend is currently disabled (see below), so no backend covers the WS bwd.
     @register_benchmark(enabled=HAS_HSTU_SELF_ATTN and IS_BLACKWELL, fwd_only=True)
     def hstu_triton_autows(
         self, q, k, v, seq_offsets, num_targets, max_seq_len, sparsity
@@ -341,7 +342,21 @@ class Operator(BenchmarkOperator):
             max_seq_len,
         )
 
-    @register_benchmark(enabled=HAS_HSTU_SELF_ATTN and IS_BLACKWELL)
+    # TODO: Re-enable (fwd and bwd) once the backward stops aborting the Triton
+    # compiler. Disabled in both modes today for this reason:
+    # `_scoped_env` only wraps the forward call, so `_hstu_attn_bwd` -- compiled
+    # later by autograd, outside that scope -- runs through the *upstream* autoWS
+    # pipeline (`use-meta-ws=false`) on a `tt.warp_specialize` loop and trips
+    # `InsertAref.cpp: assert(consumers.size() > 0)` in NVWSInsertAref, surfaced as
+    # `RuntimeError: PassManager::run failed`. Holding the WS env across the
+    # backward does compile and run it, so the fix is on the caller side, plus a
+    # compiler that rejects WS instead of asserting -- there is no non-WS fallback
+    # for this config either (with WS off these bwd tiles, BM=BN=128 / ns=2 /
+    # dq_reuse, need 640 TMEM columns against a 512 limit).
+    # The forward compiles and runs fine on its own; it is disabled along with the
+    # backward rather than demoted to fwd_only because this is the only backend
+    # covering the WS backward and the whole variant is what needs to come back.
+    @register_benchmark(enabled=HAS_HSTU_SELF_ATTN and IS_BLACKWELL and False)
     def hstu_triton_autows_dqreduce(
         self, q, k, v, seq_offsets, num_targets, max_seq_len, sparsity
     ):
