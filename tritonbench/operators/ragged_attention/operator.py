@@ -342,7 +342,8 @@ class Operator(BenchmarkOperator):
             max_seq_len,
         )
 
-    # Disabled in both fwd and bwd: the backward aborts the Triton compiler.
+    # TODO: Re-enable (fwd and bwd) once the backward stops aborting the Triton
+    # compiler. Disabled in both modes today for this reason:
     # `_scoped_env` only wraps the forward call, so `_hstu_attn_bwd` -- compiled
     # later by autograd, outside that scope -- runs through the *upstream* autoWS
     # pipeline (`use-meta-ws=false`) on a `tt.warp_specialize` loop and trips
