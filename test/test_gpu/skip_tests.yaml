@@ -49,7 +49,8 @@ hstu_cross_attention_bwd:
 ragged_attention:
   # cuda covers all NVIDIA (keeps existing coverage); the literal b200 entry is
   # required for the b200-only CI filter. This exercises hstu_tlx plus the
-  # default, manual-DP, and DQ-reduce AutoWS self-attention backends on b200.
+  # default and manual-DP AutoWS self-attention backends on b200 (the DQ-reduce
+  # variant is disabled in the operator -- its bwd aborts the Triton compiler).
   devices:
     - cuda
     - b200
