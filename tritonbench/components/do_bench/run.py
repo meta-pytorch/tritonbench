@@ -718,6 +718,7 @@ def do_bench_wrapper(
     entropy_max_samples: int = 10000,
     entropy_min_warmup_samples: int = 20,
     cudagraph_config: Optional[CudaGraphConfig] = None,
+    remove_outliers: bool = True,
 ) -> Optional[Latency]:
     """Wrapper to triton's do_bench to gain latency.
 
@@ -728,6 +729,9 @@ def do_bench_wrapper(
         entropy_min_r2: Minimum R² for linear regression fit
         entropy_window_size: Size of rolling window for entropy tracking
         entropy_max_samples: Maximum samples before stopping warmup (safety limit)
+        remove_outliers: Drop samples outside 1.5x IQR. Turn this off when the
+            caller analyses the sample distribution itself -- filtering first
+            hides the dispersion it is trying to measure.
     """
     # Every cache-clearing timing path below flushes the L2 through the shared
     # benchmark buffer. Pay its one-off first-touch cost here so it cannot land
@@ -760,7 +764,8 @@ def do_bench_wrapper(
                     rep=rep,
                     return_mode="all",
                     grad_to_none=grad_to_none,
-                )
+                ),
+                remove_outliers=remove_outliers,
             )
         elif device == "tpu":
             return Latency(
@@ -770,7 +775,8 @@ def do_bench_wrapper(
                     rep=rep,
                     return_mode="all",
                     grad_to_none=grad_to_none,
-                )
+                ),
+                remove_outliers=remove_outliers,
             )
         elif entropy_criterion and not use_cuda_graphs:
             return Latency(
@@ -786,7 +792,8 @@ def do_bench_wrapper(
                     max_samples=entropy_max_samples,
                     min_warmup_samples=entropy_min_warmup_samples,
                     repcnt=repcnt,
-                )
+                ),
+                remove_outliers=remove_outliers,
             )
         elif use_cuda_graphs and latency_measure_mode != "gpu_events":
             with torch.cuda.stream(torch.cuda.Stream()):
@@ -802,7 +809,8 @@ def do_bench_wrapper(
                         return_mode="all",
                         grad_to_none=grad_to_none,
                         skip_cache_clearing=skip_cache_clearing,
-                    )
+                    ),
+                    remove_outliers=remove_outliers,
                 )
         elif repcnt:
             # benchmark using repcnt
@@ -831,7 +839,8 @@ def do_bench_wrapper(
                     skip_cache_clearing=skip_cache_clearing,
                     use_cudagraph=use_cuda_graphs,
                     cudagraph_config=cudagraph_config,
-                )
+                ),
+                remove_outliers=remove_outliers,
             )
         else:
             bench_fn = (
@@ -851,7 +860,8 @@ def do_bench_wrapper(
                     rep=rep,
                     return_mode="all",
                     grad_to_none=grad_to_none,
-                )
+                ),
+                remove_outliers=remove_outliers,
             )
     except Exception as e:
         if not bypass_fail:

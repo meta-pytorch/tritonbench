@@ -129,6 +129,11 @@ torch_add      4096                0.009       0.007       -22.2%
 ### 4. Latency Analysis
 Printed whenever the `latency` metric was collected, from the raw per-iteration
 samples that `do_bench` keeps (see `tritonbench/components/do_bench/latency_analysis.py`).
+A/B runs disable the 1.5x IQR outlier filter that `do_bench` normally applies, so
+these statistics describe the full distribution -- including the tails, which is
+what makes the dispersion and hypothesis tests meaningful. The `min`/`max` in the
+results table above therefore span the untrimmed range and can look far wider
+than in a non-A/B run of the same benchmark.
 Each side gets descriptive statistics (min/max/mean/median/stddev/stderr, CV, IQR)
 plus a Student-t and a bootstrap confidence interval. When both sides are present,
 Shapiro-Wilk decides which test to run: Welch's t-test with Cohen's d if both
