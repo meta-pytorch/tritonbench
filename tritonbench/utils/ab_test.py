@@ -8,7 +8,8 @@ gauge how noisy a configuration is before comparing anything against it.
 import argparse
 import logging
 import shlex
-from typing import Dict, List, Optional, Tuple
+import sys
+from typing import Dict, Iterator, List, Optional, Tuple
 
 from tritonbench.components.do_bench.latency_analysis import (
     analyze_latency,
@@ -98,6 +99,67 @@ def separate_global_and_op_args(config_args: List[str]) -> Tuple[List[str], List
             i += 1
 
     return global_args, op_args
+
+
+def _iter_arg_groups(args: List[str]) -> Iterator[Tuple[Optional[str], List[str]]]:
+    """Yield ``(option_name, tokens)`` for each option and the value it owns.
+
+    ``option_name`` is None for a bare token that does not follow an option.
+    Values are claimed the same way ``separate_global_and_op_args`` claims
+    them, so both functions group a given command line identically.
+    """
+    i = 0
+    while i < len(args):
+        arg = args[i]
+        i += 1
+        if not arg.startswith("--"):
+            yield None, [arg]
+            continue
+        group = [arg]
+        if "=" not in arg and i < len(args) and not args[i].startswith("-"):
+            group.append(args[i])
+            i += 1
+        yield arg.split("=")[0], group
+
+
+# These select the configurations to compare; they belong to neither side.
+_SIDE_OPTIONS = ("--side-a", "--side-b")
+
+
+def base_global_args(argv: Optional[List[str]] = None) -> List[str]:
+    """Global tritonbench args the process was invoked with.
+
+    Both sides inherit these, so a side's global configuration only reads
+    correctly with them included: ``--side-a "--rep 1000"`` on an
+    ``--op softmax --num-inputs 1`` run really means
+    ``--op softmax --num-inputs 1 --rep 1000``.
+    """
+    argv = sys.argv[1:] if argv is None else argv
+    global_args, _ = separate_global_and_op_args(argv)
+    return [
+        token
+        for name, tokens in _iter_arg_groups(global_args)
+        if name not in _SIDE_OPTIONS
+        for token in tokens
+    ]
+
+
+def merge_global_args(base_args: List[str], side_args: List[str]) -> List[str]:
+    """Effective global args of one side, with its own args taking precedence.
+
+    Mirrors :func:`update_args_with_global`, which applies the side's globals
+    on top of the base namespace, so the printed args match what actually ran.
+    An overridden option keeps the position it had on the command line.
+    """
+    merged: Dict[str, List[str]] = {}
+    loose: List[str] = []
+    for source in (base_args, side_args):
+        for name, tokens in _iter_arg_groups(source):
+            if name is None:
+                loose.extend(tokens)
+            else:
+                merged[name] = tokens
+    return [token for tokens in merged.values() for token in tokens] + loose
 
 
 def update_args_with_global(
@@ -570,12 +632,18 @@ def run_ab_test(
     global_a_args, op_a_args = separate_global_and_op_args(config_a_args)
     global_b_args, op_b_args = separate_global_and_op_args(config_b_args)
 
-    if global_a_args:
-        lines.append(f"[A/B Test] Global args A: {' '.join(global_a_args)}")
+    # Report the globals each side actually runs with: the ones on the command
+    # line, overridden by the ones the side specifies.
+    base_globals = base_global_args()
+    effective_global_a = merge_global_args(base_globals, global_a_args)
+    effective_global_b = merge_global_args(base_globals, global_b_args)
+
+    if effective_global_a:
+        lines.append(f"[A/B Test] Global args A: {' '.join(effective_global_a)}")
     if op_a_args:
         lines.append(f"[A/B Test] Operator args A: {' '.join(op_a_args)}")
-    if global_b_args:
-        lines.append(f"[A/B Test] Global args B: {' '.join(global_b_args)}")
+    if run_side_b and effective_global_b:
+        lines.append(f"[A/B Test] Global args B: {' '.join(effective_global_b)}")
     if op_b_args:
         lines.append(f"[A/B Test] Operator args B: {' '.join(op_b_args)}")
     logger.info("\n".join(lines))
@@ -587,8 +655,8 @@ def run_ab_test(
     extra_args_a = base_extra_args + op_a_args
 
     lines = ["", "=" * 60, f"Running Side A: {' '.join(config_a_args)}"]
-    if global_a_args:
-        lines.append(f"  Global args: {' '.join(global_a_args)}")
+    if effective_global_a:
+        lines.append(f"  Global args: {' '.join(effective_global_a)}")
     if op_a_args:
         lines.append(f"  Operator args: {' '.join(op_a_args)}")
     lines.append("=" * 60)
@@ -609,8 +677,8 @@ def run_ab_test(
     extra_args_b = base_extra_args + op_b_args
 
     lines = ["", "=" * 60, f"Running Side B: {' '.join(config_b_args)}"]
-    if global_b_args:
-        lines.append(f"  Global args: {' '.join(global_b_args)}")
+    if effective_global_b:
+        lines.append(f"  Global args: {' '.join(effective_global_b)}")
     if op_b_args:
         lines.append(f"  Operator args: {' '.join(op_b_args)}")
     lines.append("=" * 60)

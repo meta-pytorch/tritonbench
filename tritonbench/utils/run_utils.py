@@ -599,13 +599,6 @@ def tritonbench_run(args: Optional[List[str]] = None):
         op = ops[0]
         args.op = op
 
-        if args.side_b is not None:
-            print("[A/B Testing Mode Enabled]")
-        else:
-            print("[A/B Testing Mode Enabled: side A only]")
-        print(f"Operator: {op}")
-        print()
-
         lockdown_enabled = args.gpu_lockdown or (args.gpu_lock_clock_mhz is not None)
         with gpu_lockdown(lockdown_enabled, args.gpu_lock_clock_mhz):
             for mode in modes:
