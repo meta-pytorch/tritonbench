@@ -51,7 +51,7 @@ from tritonbench.kernels.proton_fused_attention import (
 from tritonbench.kernels.triton_fused_attention import (
     attention_opt as triton_tutorial_FA2_opt,
 )
-from tritonbench.utils.env_utils import IS_BLACKWELL, is_hip
+from tritonbench.utils.env_utils import IS_BLACKWELL, is_hip, is_hip_mi350
 from tritonbench.utils.path_utils import add_ld_library_path
 from tritonbench.utils.python_utils import try_import
 from tritonbench.utils.triton_op import is_fbcode
@@ -122,7 +122,80 @@ from tritonbench.utils.triton_op import (
     register_metric,
     register_x_val,
 )
-from tritonbench.utils.triton_utils import has_new_tma, has_warp_spec
+from tritonbench.utils.triton_utils import has_new_tma, has_tlx, has_warp_spec
+
+if has_tlx():
+    try:
+        from triton.language.extra.tlx.tutorials.amd_fa_pipelined import (
+            attention as _tlx_amd_fa_pipelined,
+        )
+    except (ImportError, ModuleNotFoundError):
+        _tlx_amd_fa_pipelined = None
+else:
+    _tlx_amd_fa_pipelined = None
+
+if has_tlx() and is_hip_mi350():
+    try:
+        from triton.language.extra.tlx.tutorials.amd_fa_bwd import (
+            fa_backward as _tlx_amd_fa_backward,
+        )
+    except (ImportError, ModuleNotFoundError) as error:
+        if is_hip_mi350():
+            logger.warning("AMD TLX Flash Attention backward is unavailable: %s", error)
+        _tlx_amd_fa_backward = None
+else:
+    _tlx_amd_fa_backward = None
+
+
+class _TlxAmdFlashAttention(torch.autograd.Function):
+    @staticmethod
+    def forward(ctx, q, k, v, sm_scale, causal):
+        tlx_attention = _tlx_amd_fa_pipelined
+        assert tlx_attention is not None
+        config = {
+            "BLOCK_M": 256,
+            "BLOCK_N": 64,
+            "num_warps": 8,
+            "PREFETCH": True,
+        }
+        output = tlx_attention(
+            q,
+            k,
+            v,
+            sm_scale,
+            causal,
+            config=config,
+        )
+        _, lse, *_ = torch.ops.aten._scaled_dot_product_flash_attention.default(
+            q,
+            k,
+            v,
+            0.0,
+            causal,
+            False,
+            scale=sm_scale,
+        )
+        ctx.save_for_backward(q, k, v, output, lse)
+        ctx.sm_scale = sm_scale
+        ctx.causal = causal
+        return output
+
+    @staticmethod
+    def backward(ctx, do):
+        tlx_backward = _tlx_amd_fa_backward
+        assert tlx_backward is not None
+        q, k, v, output, lse = ctx.saved_tensors
+        dq, dk, dv = tlx_backward(
+            q,
+            k,
+            v,
+            output,
+            do.contiguous(),
+            lse,
+            ctx.sm_scale,
+            ctx.causal,
+        )
+        return dq, dk, dv, None, None
 
 
 def parse_op_args(args: List[str]):
@@ -195,7 +268,8 @@ def multi_input_wrapper(fn):
                 outputs.append(benchmark_fn(*i))
             return outputs
 
-        self.optims[multi_input_fn] = torch.optim.SGD(all_inputs)
+        # Citrine C2: use the multi-tensor optimizer implementation.
+        self.optims[multi_input_fn] = torch.optim.SGD(all_inputs, foreach=True)
 
         return multi_input_fn
 
@@ -307,6 +381,45 @@ class Operator(BenchmarkOperator):
             # includes base (default scheduling) + opt (optimized loop scheduling based on heuristics)
             return triton_tutorial_FA2_opt(
                 q, k, v, self.causal, self.sm_scale, "base_opt"
+            )
+
+        return preproc_noop, fn
+
+    @register_benchmark(
+        enabled=(
+            is_hip_mi350()
+            and _tlx_amd_fa_pipelined is not None
+            and _tlx_amd_fa_backward is not None
+        ),
+        tags=["tlx", "amd", "gfx950"],
+    )
+    @multi_input_wrapper
+    def tlx_amd_fa_pipelined(self, *args) -> Tuple[Callable, Callable]:
+        tlx_attention = _tlx_amd_fa_pipelined
+        assert tlx_attention is not None
+        config = {
+            "BLOCK_M": 256,
+            "BLOCK_N": 64,
+            "num_warps": 8,
+            "PREFETCH": True,
+        }
+
+        def fn(q, k, v):
+            if self.mode in (BenchmarkMode.BWD, BenchmarkMode.FWD_BWD):
+                return _TlxAmdFlashAttention.apply(
+                    q,
+                    k,
+                    v,
+                    self.sm_scale,
+                    self.causal,
+                )
+            return tlx_attention(
+                q,
+                k,
+                v,
+                self.sm_scale,
+                self.causal,
+                config=config,
             )
 
         return preproc_noop, fn
