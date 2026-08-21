@@ -1,20 +1,30 @@
 import argparse
+import logging
 import os
 import subprocess
 import sys
-import logging
+from typing import List, Optional
 
 from compileiq.ciq import Search
 from compileiq.search_spaces.compilers import LocalSearchSpaceBin
 from compileiq.types import SearchConfiguration, WorkerTypes
 
-from .shim import get_metric_name_from_config, get_date_string, save_context, REPO_WORK_DIR, CONTEXT_FILE
-from .objective import objective_func, KNOBS_FILENAME, run_tritonbench_in_temp_dir, DEFAULT_CONFIG_FILE, TRITONBENCH_CONFIGS_DIR
-from .extract_config import extract_best_configs
-
 from ..common import setup_tritonbench_cwd
-
-from typing import Optional, List
+from .extract_config import extract_best_configs
+from .objective import (
+    DEFAULT_CONFIG_FILE,
+    KNOBS_FILENAME,
+    objective_func,
+    run_tritonbench_in_temp_dir,
+    TRITONBENCH_CONFIGS_DIR,
+)
+from .shim import (
+    CONTEXT_FILE,
+    get_date_string,
+    get_metric_name_from_config,
+    REPO_WORK_DIR,
+    save_context,
+)
 
 setup_tritonbench_cwd()
 
@@ -30,6 +40,7 @@ DEFAULT_SEARCH_SPACE = f"{MANIFOLD_URI_PREFIX}/ptxas_knobs/ptxas13.3_search_spac
 
 logger = logging.getLogger(__name__)
 logger.setLevel(logging.INFO)
+
 
 def mount_manifold_bucket(bucket=MANIFOLD_BUCKET, uri_prefix=MANIFOLD_URI_PREFIX):
     mast_job_name = os.environ.get("MAST_HPC_JOB_NAME")
@@ -66,7 +77,9 @@ def mount_manifold_bucket(bucket=MANIFOLD_BUCKET, uri_prefix=MANIFOLD_URI_PREFIX
         ],
         check=True,
     )
-    logger.info(f"[tritonbench_compileiq] Mounted {bucket}/{uri_prefix} to {target_path}")
+    logger.info(
+        f"[tritonbench_compileiq] Mounted {bucket}/{uri_prefix} to {target_path}"
+    )
     return True
 
 
@@ -77,10 +90,12 @@ def resolve_search_space(search_space):
     is downloaded into REPO_WORK_DIR once and reused on later runs.
     """
     if search_space.startswith("manifold://"):
-        manifold_path = search_space[len("manifold://"):]
+        manifold_path = search_space[len("manifold://") :]
         local_path = REPO_WORK_DIR.joinpath(os.path.basename(manifold_path))
         if not local_path.exists():
-            logger.info(f"[tritonbench_compileiq] Downloading search space {search_space} to {local_path}")
+            logger.info(
+                f"[tritonbench_compileiq] Downloading search space {search_space} to {local_path}"
+            )
             subprocess.run(
                 ["manifold", "get", manifold_path, str(local_path)],
                 check=True,
@@ -123,7 +138,15 @@ cd -
     return script_path
 
 
-def search(results_csv, generations, short, metric_name, tritonbench_config, search_space, has_manifold=False):
+def search(
+    results_csv,
+    generations,
+    short,
+    metric_name,
+    tritonbench_config,
+    search_space,
+    has_manifold=False,
+):
     # Remove the .yaml extension
     tritonbench_config_name = os.path.splitext(tritonbench_config)[0]
 
@@ -196,7 +219,9 @@ def search(results_csv, generations, short, metric_name, tritonbench_config, sea
         mast_job_attempt = os.environ.get("MAST_HPC_JOB_ATTEMPT_INDEX")
         manifold_path = f"{mast_job_name}_v{mast_job_version}_attempt{mast_job_attempt}"
         target_path = f"/mnt/{MANIFOLD_BUCKET}/{manifold_path}"
-        logger.info(f"[tritonbench_compileiq] Uploading {results_csv} to manifold mount: {target_path}")
+        logger.info(
+            f"[tritonbench_compileiq] Uploading {results_csv} to manifold mount: {target_path}"
+        )
         try:
             subprocess.run(
                 ["mkdir", target_path],
@@ -206,7 +231,9 @@ def search(results_csv, generations, short, metric_name, tritonbench_config, sea
                 ["cp", results_csv, target_path],
                 check=True,
             )
-            logger.info(f"[tritonbench_compileiq] Upload complete: {MANIFOLD_URI_PREFIX}/{manifold_path}")
+            logger.info(
+                f"[tritonbench_compileiq] Upload complete: {MANIFOLD_URI_PREFIX}/{manifold_path}"
+            )
         except subprocess.CalledProcessError as e:
             logger.error(f"[tritonbench_compileiq] Failed to upload to manifold: {e}")
 
@@ -219,27 +246,54 @@ def search(results_csv, generations, short, metric_name, tritonbench_config, sea
                 file_prefix=tritonbench_config_name,
                 higher_is_better=metric_name in MAX_METRIC_NAME,
             )
-            logger.info(f"[tritonbench_compileiq] Saved best {len(best_configs)} configs to manifold mount: {best_configs}")
+            logger.info(
+                f"[tritonbench_compileiq] Saved best {len(best_configs)} configs to manifold mount: {best_configs}"
+            )
             if best_configs:
                 validate_script = write_validate_script(
                     output_dir=target_path,
                     tritonbench_config=tritonbench_config,
                     acf_file=os.path.basename(best_configs[0]),
                 )
-                logger.info(f"[tritonbench_compileiq] Wrote validation script to manifold mount: {validate_script}")
+                logger.info(
+                    f"[tritonbench_compileiq] Wrote validation script to manifold mount: {validate_script}"
+                )
         except Exception as e:
-            logger.error(f"[tritonbench_compileiq] Failed to extract best configs or write validation script: {e}")
+            logger.error(
+                f"[tritonbench_compileiq] Failed to extract best configs or write validation script: {e}"
+            )
 
 
 def get_parser():
     parser = argparse.ArgumentParser(description="Top level for the CompileIQ Search.")
     parser.add_argument("--test", action="store_true", help="Run in test mode.")
-    parser.add_argument("--results-csv", type=str, default=str(REPO_WORK_DIR.joinpath("result-compileiq.csv").absolute()), help="The name of the csv file to store results")
-    parser.add_argument('--short', action='store_true', help="Short run for testing")
-    parser.add_argument('--generations', type=int, default=110, help="Generations to tune, default to 110.")
-    parser.add_argument('--tritonbench-config', type=str, default=DEFAULT_CONFIG_FILE, help="The Tritonbench config file to use. This is a file name in the Tritonbench config directory.")
-    parser.add_argument('--search-space', type=str, default=DEFAULT_SEARCH_SPACE, help="The CompileIQ ptxas search space. Either a local path or a manifold:// URI.")
+    parser.add_argument(
+        "--results-csv",
+        type=str,
+        default=str(REPO_WORK_DIR.joinpath("result-compileiq.csv").absolute()),
+        help="The name of the csv file to store results",
+    )
+    parser.add_argument("--short", action="store_true", help="Short run for testing")
+    parser.add_argument(
+        "--generations",
+        type=int,
+        default=110,
+        help="Generations to tune, default to 110.",
+    )
+    parser.add_argument(
+        "--tritonbench-config",
+        type=str,
+        default=DEFAULT_CONFIG_FILE,
+        help="The Tritonbench config file to use. This is a file name in the Tritonbench config directory.",
+    )
+    parser.add_argument(
+        "--search-space",
+        type=str,
+        default=DEFAULT_SEARCH_SPACE,
+        help="The CompileIQ ptxas search space. Either a local path or a manifold:// URI.",
+    )
     return parser
+
 
 def run(args: Optional[List[str]] = None):
     parser = get_parser()
@@ -254,29 +308,48 @@ def run(args: Optional[List[str]] = None):
     ):
         # running on MAST, check local rank
         if not local_rank:
-            logger.info("[tritonbench_compileiq] LOCAL_RANK env not set. Exiting the search.")
+            logger.info(
+                "[tritonbench_compileiq] LOCAL_RANK env not set. Exiting the search."
+            )
             exit(1)
         if local_rank and local_rank != "0":
-            logger.info(f"[tritonbench_compileiq] Skipping search for non-zero local rank: {local_rank}")
+            logger.info(
+                f"[tritonbench_compileiq] Skipping search for non-zero local rank: {local_rank}"
+            )
             return
-        logger.info("[tritonbench_compileiq] Running in MAST environment. Mounting manifold bucket...")
+        logger.info(
+            "[tritonbench_compileiq] Running in MAST environment. Mounting manifold bucket..."
+        )
         has_manifold = mount_manifold_bucket()
     else:
         has_manifold = False
 
     # Check that the tritonbench_config file exists
-    if not os.path.exists(os.path.join(TRITONBENCH_CONFIGS_DIR, args.tritonbench_config)):
-        logger.error(f"Error: Tritonbench config needs to point to a file name in the Tritonbench config directory.\n{args.tritonbench_config} does not exist in {TRITONBENCH_CONFIGS_DIR}")
+    if not os.path.exists(
+        os.path.join(TRITONBENCH_CONFIGS_DIR, args.tritonbench_config)
+    ):
+        logger.error(
+            f"Error: Tritonbench config needs to point to a file name in the Tritonbench config directory.\n{args.tritonbench_config} does not exist in {TRITONBENCH_CONFIGS_DIR}"
+        )
         exit(1)
 
-    metric_name = get_metric_name_from_config(os.path.join(TRITONBENCH_CONFIGS_DIR, args.tritonbench_config))
+    metric_name = get_metric_name_from_config(
+        os.path.join(TRITONBENCH_CONFIGS_DIR, args.tritonbench_config)
+    )
 
     # This is a test run to check that the objective function is working correctly
     if args.test:
         logger.info("[tritonbench_compileiq] [test] Starting test run...")
         config = None
         try:
-            results = run_tritonbench_in_temp_dir(config, metric_name=metric_name, knobs_file=KNOBS_FILENAME, iterations=1, tritonbench_config=args.tritonbench_config, verbose=True)
+            results = run_tritonbench_in_temp_dir(
+                config,
+                metric_name=metric_name,
+                knobs_file=KNOBS_FILENAME,
+                iterations=1,
+                tritonbench_config=args.tritonbench_config,
+                verbose=True,
+            )
         except Exception as e:
             exit_code = 1
             logger.error(f"Error running tritonbench: {e}")
@@ -288,10 +361,25 @@ def run(args: Optional[List[str]] = None):
 
     # This is the full search run
     else:
-        logger.info("[tritonbench_compileiq] Starting CompileIQ search. CUDA VISIBLE DEVICES: " + os.environ.get("CUDA_VISIBLE_DEVICES", "CUDA_VISIBLE_DEVICES not set"))
+        logger.info(
+            "[tritonbench_compileiq] Starting CompileIQ search. CUDA VISIBLE DEVICES: "
+            + os.environ.get("CUDA_VISIBLE_DEVICES", "CUDA_VISIBLE_DEVICES not set")
+        )
         import torch
-        cuda_version = torch.version.cuda if hasattr(torch, "version") and hasattr(torch.version, "cuda") else "cuda not set"
-        logger.info("[tritonbench_compileiq] torch version: " + torch.__version__ + " cuda version: " + cuda_version + " cuda devices available: " + str(torch.cuda.device_count()))
+
+        cuda_version = (
+            torch.version.cuda
+            if hasattr(torch, "version") and hasattr(torch.version, "cuda")
+            else "cuda not set"
+        )
+        logger.info(
+            "[tritonbench_compileiq] torch version: "
+            + torch.__version__
+            + " cuda version: "
+            + cuda_version
+            + " cuda devices available: "
+            + str(torch.cuda.device_count())
+        )
         search(
             results_csv=args.results_csv,
             generations=args.generations,

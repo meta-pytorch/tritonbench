@@ -1,34 +1,43 @@
 import os
-import tempfile
 import shutil
+import tempfile
 
 from compileiq.types import BASELINE_CONFIG, INVALID_SCORE
 
+from ..common import REPO_PATH
 from .shim import (
+    CONTEXT_FILE,
+    DEFAULT_CONFIG_FILE,
     get_mean_and_std,
     get_metric_from_df,
-    run_tritonbench,
-    write_encrypted_knobs,
     load_context,
     REPO_WORK_DIR,
-    DEFAULT_CONFIG_FILE,
-    CONTEXT_FILE,
+    run_tritonbench,
+    write_encrypted_knobs,
 )
 
-from ..common import REPO_PATH
+KNOBS_FILENAME = "knobs.bin"
 
-KNOBS_FILENAME="knobs.bin"
+TRITONBENCH_CONFIGS_DIR = os.path.join(REPO_PATH, "benchmarks", "run_config")
 
-TRITONBENCH_CONFIGS_DIR=os.path.join(REPO_PATH, "benchmarks", "run_config")
 
-def run_tritonbench_in_temp_dir(config:dict|bytes, knobs_file:str|None, iterations:int, metric_name: str, tritonbench_config:str=DEFAULT_CONFIG_FILE, verbose:bool=False):
+def run_tritonbench_in_temp_dir(
+    config: dict | bytes,
+    knobs_file: str | None,
+    iterations: int,
+    metric_name: str,
+    tritonbench_config: str = DEFAULT_CONFIG_FILE,
+    verbose: bool = False,
+):
     # Create a temporary directory for the run in the current working directory
     # This function assumes that tritonbench_config is a file in the TRITONBENCH_CONFIGS_DIR
     with tempfile.TemporaryDirectory(dir=REPO_WORK_DIR) as temp_dir:
         os.chmod(temp_dir, 0o777)
 
         config_file_temp = os.path.join(temp_dir, tritonbench_config)
-        shutil.copy(os.path.join(TRITONBENCH_CONFIGS_DIR, tritonbench_config), config_file_temp)
+        shutil.copy(
+            os.path.join(TRITONBENCH_CONFIGS_DIR, tritonbench_config), config_file_temp
+        )
         os.chmod(config_file_temp, 0o777)
 
         if knobs_file and isinstance(config, str):
@@ -36,8 +45,16 @@ def run_tritonbench_in_temp_dir(config:dict|bytes, knobs_file:str|None, iteratio
             write_encrypted_knobs(config, knobs_file_temp)
         else:
             knobs_file = None
-        results = run_tritonbench(iterations, temp_dir, metric_name=metric_name, knobs_file=knobs_file, config_file=tritonbench_config, mock=False)
+        results = run_tritonbench(
+            iterations,
+            temp_dir,
+            metric_name=metric_name,
+            knobs_file=knobs_file,
+            config_file=tritonbench_config,
+            mock=False,
+        )
     return results
+
 
 def print_bm_error(e):
     print("ERROR: Benchmark failed")
@@ -69,10 +86,17 @@ def objective_func(config, verbose=False):
     metric_name = context["metric_name"]
 
     try:
-        results = run_tritonbench_in_temp_dir(config, knobs_file, iterations, metric_name=metric_name, tritonbench_config=context["tritonbench_config"], verbose=verbose)
+        results = run_tritonbench_in_temp_dir(
+            config,
+            knobs_file,
+            iterations,
+            metric_name=metric_name,
+            tritonbench_config=context["tritonbench_config"],
+            verbose=verbose,
+        )
         # For baseline, we want to get the mean of the metric name
         if run_type == "baseline":
-            score , bs_std = get_mean_and_std(results, metric_name=metric_name)
+            score, bs_std = get_mean_and_std(results, metric_name=metric_name)
         # For evaluation, we want to get the first row
         else:
             bs_std = None
@@ -89,5 +113,8 @@ def objective_func(config, verbose=False):
     # NOTE: the baseline score/std is not logged to an experiment tracker here.
     #       CompileIQ can do that natively via `tracker_config=MLflowTrackerConfig(...)`
     #       (compileiq.types) passed to `Search`.
-    print(f"[tritonbench_compileiq] Worker End GPUID: {GPU_ID}, context: {context}, returning score: {score}.", flush=True)
+    print(
+        f"[tritonbench_compileiq] Worker End GPUID: {GPU_ID}, context: {context}, returning score: {score}.",
+        flush=True,
+    )
     return score

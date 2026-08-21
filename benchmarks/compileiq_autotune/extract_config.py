@@ -12,7 +12,6 @@ matter of sorting by score and writing those blobs back out as binary files.
 import argparse
 import os
 import sys
-
 from typing import List, Optional
 
 from compileiq.results import SearchResult
