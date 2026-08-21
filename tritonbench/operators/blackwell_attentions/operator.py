@@ -604,7 +604,9 @@ class Operator(BenchmarkOperator):
         )
         return preproc_noop, fn
 
-    @register_benchmark(enabled=(IS_BLACKWELL and HAS_FLASH_CUTE and is_fbcode()), label="FAv4")
+    @register_benchmark(
+        enabled=(IS_BLACKWELL and HAS_FLASH_CUTE and is_fbcode()), label="FAv4"
+    )
     @multi_input_wrapper
     def cutedsl_blackwell(self, *args) -> Tuple[Callable, Callable]:
         from mslk.attention.flash_attn.interface import (

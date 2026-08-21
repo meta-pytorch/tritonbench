@@ -1,13 +1,13 @@
+import json
+import logging
+import os
 import subprocess
 import sys
-import pandas as pd
 from datetime import datetime
-import yaml
-import os
-import json
 from pathlib import Path
-import logging
 
+import pandas as pd
+import yaml
 from compileiq.utils.helpers import save_compiler_config
 
 from ..common import REPO_PATH
@@ -24,8 +24,10 @@ RUN_TIMEOUT_SEC = int(os.environ.get("TRITONBENCH_COMPILEIQ_TIMEOUT", "360"))
 logger = logging.getLogger(__name__)
 logger.setLevel(logging.INFO)
 
+
 def get_repo_root():
     return REPO_PATH
+
 
 def get_gpu_info():
     """
@@ -43,20 +45,31 @@ def get_gpu_info():
     finally:
         return gpu_info
 
+
 # FIXME: This will break for multi-GPU systems
 def get_gpu_name():
     # Get the name of the GPU
-    return subprocess.check_output("nvidia-smi --query-gpu=name --format=csv,noheader", shell=True).decode("utf-8").strip()
+    return (
+        subprocess.check_output(
+            "nvidia-smi --query-gpu=name --format=csv,noheader", shell=True
+        )
+        .decode("utf-8")
+        .strip()
+    )
+
 
 def get_mean_and_std(df, metric_name):
     # Get the mean and standard deviation of the performance metrics
     return df[metric_name].mean(), df[metric_name].std()
 
+
 def get_metric_from_df(df: pd.DataFrame, index: int, metric_name):
     return df.iloc[index][metric_name]
 
+
 def get_date_string():
     return datetime.now().strftime("%Y%m%d_%H%M%S")
+
 
 def extract_performance_metric(output):
     # Extract the performance metric from the output
@@ -64,7 +77,11 @@ def extract_performance_metric(output):
     # "NCCL INFO ENV/Plugin: Could not find: libnccl-env.so"
     # "NCCL INFO ENV/Plugin: Closing env plugin ncclEnvDefault"
     # Error messages. These are not related to benchmarking and is safe to bypass.
-    lines = [x for x in output.stdout.splitlines() if "NCCL INFO ENV/Plugin" not in x and "ncclEnvDefault" not in x]
+    lines = [
+        x
+        for x in output.stdout.splitlines()
+        if "NCCL INFO ENV/Plugin" not in x and "ncclEnvDefault" not in x
+    ]
     if not lines:
         # Tritonbench exits 0 without printing a metric when the benchmarked
         # kernel fails to build or run, e.g. under a bad set of ptxas controls.
@@ -75,13 +92,17 @@ def extract_performance_metric(output):
         return float(last_line.split(",")[0].strip())
     return float(last_line.split()[-1])
 
-def truncate_output(output, limit=int(os.environ.get("TRITONBENCH_COMPILEIQ_LOG_CHARS", "2048"))):
+
+def truncate_output(
+    output, limit=int(os.environ.get("TRITONBENCH_COMPILEIQ_LOG_CHARS", "2048"))
+):
     # subprocess.TimeoutExpired may carry stdout/stderr as None.
     if not output:
         return ""
-    return output[-min(limit, len(output)):]
+    return output[-min(limit, len(output)) :]
 
-def write_encrypted_knobs(config: dict|bytes, knobs_file: str):
+
+def write_encrypted_knobs(config: dict | bytes, knobs_file: str):
     """
     To be used if encrypted knobs are provided.
     """
@@ -93,7 +114,17 @@ def write_encrypted_knobs(config: dict|bytes, knobs_file: str):
     # which decodes into the binary Advanced Control File (ACF).
     save_compiler_config(knobs_file, config)
 
-def run_tritonbench(num_runs, workdir, metric_name="tflops", mock=False, knobs_file=None, config_file="example_config.yaml", csv_file=None, verbose=False):
+
+def run_tritonbench(
+    num_runs,
+    workdir,
+    metric_name="tflops",
+    mock=False,
+    knobs_file=None,
+    config_file="example_config.yaml",
+    csv_file=None,
+    verbose=False,
+):
     """
     Runs the tritonbench locally  and returns a dataframe with the performance metrics.
 
@@ -108,10 +139,11 @@ def run_tritonbench(num_runs, workdir, metric_name="tflops", mock=False, knobs_f
     else:
         knobs_env = ""
 
-
     cmd_env = os.environ.copy()
     assert os.path.exists(f"{workdir}/{config_file}")
-    assert os.path.exists(REPO_PATH.joinpath("run.py")), f"run.py not found in {REPO_PATH}"
+    assert os.path.exists(REPO_PATH.joinpath("run.py")), (
+        f"run.py not found in {REPO_PATH}"
+    )
 
     cmd_env["TRITONBENCH_RUN_CONFIG"] = f"{workdir}/{config_file}"
     cmd_env["TRITON_ALWAYS_COMPILE"] = "1"
@@ -127,7 +159,7 @@ def run_tritonbench(num_runs, workdir, metric_name="tflops", mock=False, knobs_f
     df = pd.DataFrame(columns=["timestamp", metric_name])
     for i in range(num_runs):
         if verbose:
-            print(f"Running run {i+1} of {num_runs}, cmd: {cmd}")
+            print(f"Running run {i + 1} of {num_runs}, cmd: {cmd}")
         GPU_ID = os.environ.get("CUDA_VISIBLE_DEVICES", None)
         # Run the docker container
         try:
@@ -158,14 +190,22 @@ def run_tritonbench(num_runs, workdir, metric_name="tflops", mock=False, knobs_f
                 try:
                     performance_metric = extract_performance_metric(output)
                 except Exception as e:
-                    print(f"[GPU ID {GPU_ID}] Error extracting performance metric: {e}\nstdout:\n{output.stdout[-200:]} stderr:\n{output.stderr[-200:]}\n")
-                    raise RuntimeError(f"[GPU ID {GPU_ID}]Error extracting performance metric: {e}\n{output.stdout}\n{output.stderr}")
+                    print(
+                        f"[GPU ID {GPU_ID}] Error extracting performance metric: {e}\nstdout:\n{output.stdout[-200:]} stderr:\n{output.stderr[-200:]}\n"
+                    )
+                    raise RuntimeError(
+                        f"[GPU ID {GPU_ID}]Error extracting performance metric: {e}\n{output.stdout}\n{output.stderr}"
+                    )
                 else:
                     # Store the performance metric in the dataframe
-                    df.loc[len(df)] = {"timestamp": get_date_string(), metric_name: performance_metric}
+                    df.loc[len(df)] = {
+                        "timestamp": get_date_string(),
+                        metric_name: performance_metric,
+                    }
                     if csv_file:
                         df.to_csv(csv_file, mode="w", header=True)
     return df
+
 
 def get_metric_name_from_config(config_file):
     """
@@ -176,7 +216,11 @@ def get_metric_name_from_config(config_file):
     first_benchmark_args = list(config.items())[0][1]["args"].split(" ")
     assert "--metrics" in first_benchmark_args, "No metrics found in config file."
     metric_index = first_benchmark_args.index("--metrics")
-    logger.info("[tritonbench_compileiq] Found tritonbench metrics: {}".format(first_benchmark_args[metric_index + 1]))
+    logger.info(
+        "[tritonbench_compileiq] Found tritonbench metrics: {}".format(
+            first_benchmark_args[metric_index + 1]
+        )
+    )
     metric_name = first_benchmark_args[metric_index + 1]
     if "," in metric_name:
         metric_name = metric_name.split(",")[0]
@@ -189,6 +233,7 @@ def save_context(path=CONTEXT_FILE, **kwargs):
         obj[key] = item
     with open(path, "w") as f:
         json.dump(obj, f)
+
 
 def load_context(path: str = CONTEXT_FILE):
     with open(path, "r") as f:
