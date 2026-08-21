@@ -36,7 +36,7 @@ class Operator(BenchmarkOperator):
     FWD_ONLY = True
 
     @register_benchmark(baseline=True)
-    def torch(
+    def eager(
         self,
         inputs: torch.Tensor,
         topk_weights: torch.Tensor,
