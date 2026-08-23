@@ -1,4 +1,3 @@
-# pyre-strict
 import argparse
 from typing import Callable, Generator, List, Optional, Tuple
 

@@ -1,6 +1,5 @@
 # (c) Meta Platforms, Inc. and affiliates.
 
-# pyre-strict
 import math
 from functools import lru_cache
 from typing import Any, List, Optional

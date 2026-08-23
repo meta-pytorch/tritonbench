@@ -1,6 +1,5 @@
 # (c) Meta Platforms, Inc. and affiliates.
 
-# pyre-unsafe
 
 """
 This file defines common math functions, sometimes relying on optimized PTX for performance. Note that the functions relying on PTX
