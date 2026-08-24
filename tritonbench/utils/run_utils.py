@@ -620,45 +620,46 @@ def tritonbench_run(args: Optional[List[str]] = None):
                     print(f"A/B test failed: {e}")
                     if not args.bypass_fail:
                         raise
-    else:
-        # Normal mode
-        # Force isolation in subprocess if testing more than one op.
-        if len(ops) >= 2:
-            args.isolate = True
+        return
 
-        multi_mode = len(modes) > 1
-        orig_output = args.output
-        orig_output_json = args.output_json
-        orig_output_dir = args.output_dir
+    # Normal mode
+    # Force isolation in subprocess if testing more than one op.
+    if len(ops) >= 2:
+        args.isolate = True
 
-        lockdown_enabled = args.gpu_lockdown or (args.gpu_lock_clock_mhz is not None)
-        with gpu_lockdown(lockdown_enabled, args.gpu_lock_clock_mhz):
-            for op in ops:
-                args.op = op
-                for mode in modes:
-                    args.mode = mode
-                    if multi_mode:
-                        args.output = (
-                            _add_mode_suffix(orig_output, mode) if orig_output else None
-                        )
-                        args.output_json = (
-                            _add_mode_suffix(orig_output_json, mode)
-                            if orig_output_json
-                            else None
-                        )
-                        if orig_output_dir:
-                            args.output_dir = os.path.join(orig_output_dir, mode)
-                            os.makedirs(args.output_dir, exist_ok=True)
-                    if args.isolate:
-                        _run_in_task_single_mode(
-                            op,
-                            mode,
-                            output=args.output,
-                            output_json=args.output_json,
-                            output_dir=args.output_dir,
-                        )
-                    else:
-                        _run(args, extra_args)
+    multi_mode = len(modes) > 1
+    orig_output = args.output
+    orig_output_json = args.output_json
+    orig_output_dir = args.output_dir
+
+    lockdown_enabled = args.gpu_lockdown or (args.gpu_lock_clock_mhz is not None)
+    with gpu_lockdown(lockdown_enabled, args.gpu_lock_clock_mhz):
+        for op in ops:
+            args.op = op
+            for mode in modes:
+                args.mode = mode
+                if multi_mode:
+                    args.output = (
+                        _add_mode_suffix(orig_output, mode) if orig_output else None
+                    )
+                    args.output_json = (
+                        _add_mode_suffix(orig_output_json, mode)
+                        if orig_output_json
+                        else None
+                    )
+                    if orig_output_dir:
+                        args.output_dir = os.path.join(orig_output_dir, mode)
+                        os.makedirs(args.output_dir, exist_ok=True)
+                if args.isolate:
+                    _run_in_task_single_mode(
+                        op,
+                        mode,
+                        output=args.output,
+                        output_json=args.output_json,
+                        output_dir=args.output_dir,
+                    )
+                else:
+                    _run(args, extra_args)
 
     tritonparse_parse(args.tritonparse)
 
