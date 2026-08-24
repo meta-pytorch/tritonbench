@@ -6,14 +6,19 @@ gauge how noisy a configuration is before comparing anything against it.
 """
 
 import argparse
+import json
 import logging
+import math
 import shlex
+import statistics
 import sys
-from typing import Dict, Iterator, List, Optional, Tuple
+from dataclasses import asdict
+from typing import Any, Dict, Iterator, List, NamedTuple, Optional, Tuple
 
 from tritonbench.components.do_bench.latency_analysis import (
     analyze_latency,
     format_latency_analysis,
+    LatencyAnalysis,
     MIN_SAMPLE,
 )
 
@@ -124,6 +129,9 @@ def _iter_arg_groups(args: List[str]) -> Iterator[Tuple[Optional[str], List[str]
 
 # These select the configurations to compare; they belong to neither side.
 _SIDE_OPTIONS = ("--side-a", "--side-b")
+# --output-json is consumed by the A/B harness, which writes a single combined
+# report for both sides, so it is not part of a side's configuration either.
+_HARNESS_OPTIONS = _SIDE_OPTIONS + ("--output-json",)
 
 
 def base_global_args(argv: Optional[List[str]] = None) -> List[str]:
@@ -139,7 +147,7 @@ def base_global_args(argv: Optional[List[str]] = None) -> List[str]:
     return [
         token
         for name, tokens in _iter_arg_groups(global_args)
-        if name not in _SIDE_OPTIONS
+        if name not in _HARNESS_OPTIONS
         for token in tokens
     ]
 
@@ -314,33 +322,28 @@ def _latency_samples(metrics_obj) -> Optional[List[float]]:
     return [float(t) for t in times]
 
 
-def _log_latency_analysis(
+class LatencyEntry(NamedTuple):
+    """One analyzed (backend, x_val) cell of the latency matrix."""
+
+    backend: str
+    x_val: Any
+    analysis: LatencyAnalysis
+    # True when side B ran this cell but kept no raw latency samples for it.
+    b_missing: bool
+
+
+def _collect_latency_analyses(
     result_dict_a: Dict,
     x_vals: List,
     backends: List[str],
-    x_val_name: str,
     result_dict_b: Optional[Dict] = None,
-    label_a: str = "Config A",
-    label_b: str = "Config B",
-):
-    """Report the statistical analysis of the raw latency samples.
+) -> List[LatencyEntry]:
+    """Analyze the raw latency samples of every (backend, x_val) cell.
 
-    With a single side this is descriptive statistics plus confidence
-    intervals. With both sides it also runs the normality test, the hypothesis
-    test it selects, and the percent change with its bootstrap CI.
+    The analysis is bootstrap-heavy, so it is computed once here and shared by
+    the log report and the JSON report.
     """
-    lines = [
-        "",
-        "-" * 70,
-        "Latency Analysis (All latencies in ms)",
-        "-" * 70,
-    ]
-    if result_dict_b is not None:
-        lines.append(
-            f"Percent change is {label_b} vs {label_a} (positive = B is slower)."
-        )
-
-    analyzed = 0
+    entries = []
     for backend in backends:
         for x_val in x_vals:
             metrics_a = result_dict_a.get(x_val, {}).get(backend)
@@ -358,18 +361,52 @@ def _log_latency_analysis(
             analysis = analyze_latency(samples_a, samples_b)
             if analysis is None:
                 continue
-
-            lines.append(f"\n{backend} @ {x_val_name}={x_val}:")
-            lines.extend(
-                format_latency_analysis(
-                    analysis, label_a=label_a, label_b=label_b, indent="  "
+            entries.append(
+                LatencyEntry(
+                    backend=backend,
+                    x_val=x_val,
+                    analysis=analysis,
+                    b_missing=result_dict_b is not None and samples_b is None,
                 )
             )
-            if result_dict_b is not None and samples_b is None:
-                lines.append(f"  ({label_b} has no latency samples, side A only)")
-            analyzed += 1
+    return entries
 
-    if not analyzed:
+
+def _log_latency_analysis(
+    entries: List[LatencyEntry],
+    x_val_name: str,
+    two_sided: bool,
+    label_a: str = "Config A",
+    label_b: str = "Config B",
+):
+    """Report the statistical analysis of the raw latency samples.
+
+    With a single side this is descriptive statistics plus confidence
+    intervals. With both sides it also runs the normality test, the hypothesis
+    test it selects, and the percent change with its bootstrap CI.
+    """
+    lines = [
+        "",
+        "-" * 70,
+        "Latency Analysis (All latencies in ms)",
+        "-" * 70,
+    ]
+    if two_sided:
+        lines.append(
+            f"Percent change is {label_b} vs {label_a} (positive = B is slower)."
+        )
+
+    for entry in entries:
+        lines.append(f"\n{entry.backend} @ {x_val_name}={entry.x_val}:")
+        lines.extend(
+            format_latency_analysis(
+                entry.analysis, label_a=label_a, label_b=label_b, indent="  "
+            )
+        )
+        if entry.b_missing:
+            lines.append(f"  ({label_b} has no latency samples, side A only)")
+
+    if not entries:
         lines.append(
             f"\nNo latency analysis available: needs at least {MIN_SAMPLE} raw "
             "latency samples per side"
@@ -377,14 +414,116 @@ def _log_latency_analysis(
     logger.info("\n".join(lines))
 
 
+# ============================================================================
+# JSON report
+# ============================================================================
+
+SIDE_A_KEY = "side-a"
+SIDE_B_KEY = "side-b"
+AB_COMPARISON_KEY = "ab-comparison"
+
+
+def _json_safe(value: Any) -> Any:
+    """Coerce a value into something ``json.dump`` writes as valid JSON.
+
+    NaN and +/-inf (which the statistics produce for degenerate samples) become
+    null rather than the JSON-invalid ``NaN``/``Infinity`` literals, and x_vals
+    of unsupported types (tuples of shapes, dtypes, ...) fall back to str.
+    """
+    if value is None or isinstance(value, (bool, int, str)):
+        return value
+    if isinstance(value, float):
+        return value if math.isfinite(value) else None
+    if isinstance(value, dict):
+        return {str(k): _json_safe(v) for k, v in value.items()}
+    if isinstance(value, (list, tuple)):
+        return [_json_safe(v) for v in value]
+    return str(value)
+
+
+def _metric_key(op_name: str, backend: str, x_val: Any) -> str:
+    """Key of one (backend, x_val) cell in a side's ``metrics`` dict."""
+    return f"tritonbench_{op_name}[{backend}-{x_val}]"
+
+
+def _cell_metrics(metrics_obj, metric_names: List[str]) -> Dict[str, Any]:
+    """The metrics collected for one (backend, x_val) cell.
+
+    Metrics live either on the dataclass or in ``extra_metrics``. Each is
+    reported as a single p50 -- of a ``Latency``, or of a numeric sequence such
+    as the ``(p50, low, high)`` triple a few operators return for ``gbps`` --
+    so a cell is directly comparable across sides. For latency the full picture
+    is the descriptive statistics :func:`_side_report` adds alongside it.
+    """
+    extra = getattr(metrics_obj, "extra_metrics", None) or {}
+    values = {}
+    for name in metric_names:
+        value = extra[name] if name in extra else getattr(metrics_obj, name, None)
+        if value is None:
+            continue
+        if hasattr(value, "p50"):
+            value = value.p50
+        elif isinstance(value, (list, tuple)) and all(
+            isinstance(v, (int, float)) for v in value
+        ):
+            value = statistics.median(value) if value else None
+        values[name] = _json_safe(value)
+    if getattr(metrics_obj, "error_msg", None):
+        values["error_msg"] = metrics_obj.error_msg
+    return values
+
+
+def _side_report(
+    result: BenchmarkOperatorResult,
+    config_args: List[str],
+    latency_entries: List[LatencyEntry],
+    is_side_a: bool = True,
+) -> Dict[str, Any]:
+    """JSON report of one side: its configuration and its per-cell metrics.
+
+    Each ``metrics`` entry is one (backend, x_val) cell, holding the metrics
+    that were collected for it plus -- when the raw latency samples support it
+    -- the descriptive statistics of those samples (mean, median, stddev, CV,
+    IQR, confidence intervals). ``latency_entries`` are the shared analyses;
+    ``is_side_a`` picks which half of each one to report.
+    """
+    global_args, op_args = separate_global_and_op_args(config_args)
+    stats_by_cell = {}
+    for entry in latency_entries:
+        side_stats = entry.analysis.side_a if is_side_a else entry.analysis.side_b
+        if side_stats is not None:
+            stats_by_cell[(entry.backend, entry.x_val)] = side_stats
+
+    metrics = {}
+    for x_val, backend_metrics in result.result:
+        for backend, metrics_obj in backend_metrics.items():
+            cell = _cell_metrics(metrics_obj, result.metrics)
+            side_stats = stats_by_cell.get((backend, x_val))
+            if side_stats is not None:
+                cell.update(_json_safe(asdict(side_stats)))
+            metrics[_metric_key(result.op_name, backend, x_val)] = cell
+
+    return {
+        "config": list(config_args),
+        "global_args": merge_global_args(base_global_args(), global_args),
+        "op_args": op_args,
+        "op_name": result.op_name,
+        "op_mode": result.op_mode,
+        "metrics": metrics,
+    }
+
+
 def report_single_side_results(
     result_a: BenchmarkOperatorResult,
     config_a_args: List[str],
-):
-    """Report a single configuration (only --side-a was specified)."""
+) -> Optional[Dict[str, Any]]:
+    """Report a single configuration (only --side-a was specified).
+
+    Returns the JSON report, or None when there is nothing to report.
+    """
     if not result_a or not result_a.result:
         logger.error("[A/B Comparison] No benchmark data available for Side A")
-        return
+        return None
 
     x_vals = sorted({x_val for x_val, _ in result_a.result})
     result_dict_a = {x_val: metrics_dict for x_val, metrics_dict in result_a.result}
@@ -406,13 +545,13 @@ def report_single_side_results(
         )
     )
 
+    x_val_name = REGISTERED_X_VALS.get(result_a.op_name, "x_val")
+    latency_entries = []
     if _has_latency_metric(result_a):
-        _log_latency_analysis(
-            result_dict_a,
-            x_vals,
-            backends,
-            REGISTERED_X_VALS.get(result_a.op_name, "x_val"),
-        )
+        latency_entries = _collect_latency_analyses(result_dict_a, x_vals, backends)
+        _log_latency_analysis(latency_entries, x_val_name, two_sided=False)
+
+    return {SIDE_A_KEY: _side_report(result_a, config_a_args, latency_entries)}
 
 
 def compare_ab_results(
@@ -420,24 +559,25 @@ def compare_ab_results(
     result_b: Optional[BenchmarkOperatorResult],
     config_a_args: List[str],
     config_b_args: Optional[List[str]] = None,
-):
+) -> Optional[Dict[str, Any]]:
     """Compare A/B test results.
 
     When ``result_b`` is None only side A was run, so we report that side on
     its own instead of a comparison.
+
+    Returns the JSON report, or None when there is nothing to report.
     """
     if not result_a:
         logger.error("[A/B Comparison] Side A result is invalid")
-        return
+        return None
 
     if result_b is None:
-        report_single_side_results(result_a, config_a_args)
-        return
+        return report_single_side_results(result_a, config_a_args)
 
     # Check if both results have data
     if not result_a.result or not result_b.result:
         logger.error("No benchmark data available for comparison")
-        return
+        return None
 
     # Get common data for analysis
     x_vals_a = {x_val for x_val, _ in result_a.result}
@@ -446,7 +586,7 @@ def compare_ab_results(
 
     if not common_x_vals:
         logger.error("No common input shapes found between configurations")
-        return
+        return None
 
     # Get common backends
     result_dict_a = {x_val: metrics_dict for x_val, metrics_dict in result_a.result}
@@ -461,7 +601,7 @@ def compare_ab_results(
 
     if not common_backends:
         logger.error("No common backends found between configurations")
-        return
+        return None
 
     # ============================================================================
     # SECTION 1: Configuration Analysis
@@ -473,6 +613,7 @@ def compare_ab_results(
         "=" * 70,
         "Configuration Differences:",
     ]
+    differences = {}
     try:
         differences = _analyze_config_differences(config_a_args, config_b_args)
 
@@ -523,6 +664,7 @@ def compare_ab_results(
     lines = ["", "-" * 70, "Detailed Comparison", "-" * 70]
 
     x_val_name = REGISTERED_X_VALS.get(result_a.op_name, "x_val")
+    detailed_rows: List[Dict[str, Any]] = []
 
     # Show all metrics for detailed comparison
     for metric in result_a.metrics:
@@ -579,6 +721,17 @@ def compare_ab_results(
                         f"{backend_name:<15}{str(x_val):<20}{val_a_str:<12}{val_b_str:<12}{diff_pct:+5.1f}%"
                     )
                     first_row = False
+                    detailed_rows.append(
+                        {
+                            "metric": metric,
+                            "backend": backend,
+                            "x_val_name": x_val_name,
+                            "x_val": _json_safe(x_val),
+                            SIDE_A_KEY: _json_safe(val_a_num),
+                            SIDE_B_KEY: _json_safe(val_b_num),
+                            "pct_change": _json_safe(diff_pct),
+                        }
+                    )
 
             if not first_row:  # Only add a separator if we added data
                 lines.append("")
@@ -587,14 +740,63 @@ def compare_ab_results(
     # ============================================================================
     # SECTION 4: Latency Analysis
     # ============================================================================
+    latency_entries = []
     if _has_latency_metric(result_a, result_b):
-        _log_latency_analysis(
-            result_dict_a,
-            common_x_vals,
-            common_backends,
-            x_val_name,
-            result_dict_b=result_dict_b,
+        latency_entries = _collect_latency_analyses(
+            result_dict_a, common_x_vals, common_backends, result_dict_b=result_dict_b
         )
+        _log_latency_analysis(latency_entries, x_val_name, two_sided=True)
+
+    # ============================================================================
+    # SECTION 5: JSON report
+    # ============================================================================
+    latency_comparison = [
+        {
+            "backend": entry.backend,
+            "x_val_name": x_val_name,
+            "x_val": _json_safe(entry.x_val),
+            "comparison": _json_safe(asdict(entry.analysis.comparison)),
+        }
+        for entry in latency_entries
+        if entry.analysis.comparison is not None
+    ]
+    comparison_report = {
+        "op_name": result_a.op_name,
+        "op_mode": result_a.op_mode,
+        "x_val_name": x_val_name,
+        "x_vals": _json_safe(common_x_vals),
+        "backends": common_backends,
+        "metrics": list(result_a.metrics),
+        "config_differences": {
+            param: {SIDE_A_KEY: val_a, SIDE_B_KEY: val_b}
+            for param, (val_a, val_b) in differences.items()
+        },
+        "performance_summary": _json_safe(summary),
+        "detailed_comparison": detailed_rows,
+    }
+    if latency_comparison:
+        comparison_report["latency_comparison"] = latency_comparison
+
+    return {
+        SIDE_A_KEY: _side_report(
+            result_a, config_a_args, latency_entries, is_side_a=True
+        ),
+        SIDE_B_KEY: _side_report(
+            result_b, config_b_args or [], latency_entries, is_side_a=False
+        ),
+        AB_COMPARISON_KEY: comparison_report,
+    }
+
+
+def write_ab_json(output_json: str, report: Dict[str, Any]) -> None:
+    """Write the A/B report to ``output_json``.
+
+    The file always has a ``side-a`` key; ``side-b`` and ``ab-comparison`` are
+    only present when ``--side-b`` was specified.
+    """
+    with open(output_json, "w") as f:
+        json.dump(report, f, indent=4)
+    logger.info(f"[tritonbench] Output A/B result json to {output_json}")
 
 
 def run_ab_test(

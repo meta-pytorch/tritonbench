@@ -153,6 +153,83 @@ triton_add @ x_val=4096:
     Percent change (Config B vs Config A): +4.78% [95% CI: +4.36%, +5.17%]
 ```
 
+## JSON Output
+
+`--output-json <path>` writes the whole A/B run to a single file instead of the
+per-run file a normal benchmark produces (both sides share one `--output-json`,
+so writing it per side would just have B overwrite A):
+
+```bash
+python run.py --op vector_add --side-a="--warmup 25" --side-b="--warmup 100" --output-json ab.json
+```
+
+```json
+{
+    "side-a": { },
+    "side-b": { },
+    "ab-comparison": { }
+}
+```
+
+`side-b` and `ab-comparison` are only present when `--side-b` is specified.
+
+Each side holds its own configuration and results:
+
+| Key | Contents |
+| --- | --- |
+| `config` | The `--side-x` args as given |
+| `global_args` | Effective tritonbench globals: the command line's, overridden by the side's |
+| `op_args` | Operator-specific args of the side |
+| `op_name`, `op_mode` | Operator and mode that ran |
+| `metrics` | One entry per `(backend, x_val)` cell, keyed `tritonbench_<op>[<backend>-<x_val>]` |
+
+A `metrics` entry holds the metrics collected for that cell -- each reported as
+a single p50 -- followed by the descriptive statistics of the raw latency
+samples behind them (omitted when the `latency` metric was not collected, or
+when there were too few samples to analyze):
+
+```json
+{
+    "config": ["--warmup", "25"],
+    "metrics": {
+        "tritonbench_vector_add[triton_add-4096]": {
+            "latency": 0.006272,
+            "gbps": 7.836,
+            "n": 2140,
+            "min": 0.005952,
+            "max": 0.015904,
+            "mean": 0.006552,
+            "median": 0.006272,
+            "stddev": 0.000499,
+            "stderr": 0.0000108,
+            "cv": 7.629,
+            "q1": 0.006176,
+            "q3": 0.007040,
+            "iqr": 0.000864,
+            "confidence": 0.95,
+            "mean_ci": [0.006531, 0.006573],
+            "bootstrap_mean_ci": [0.006532, 0.006574],
+            "bootstrap_median_ci": [0.006240, 0.006304]
+        }
+    }
+}
+```
+
+`ab-comparison` holds the same four report sections that are printed to the log:
+
+| Key | Contents |
+| --- | --- |
+| `config_differences` | `{param: {"side-a": ..., "side-b": ...}}` |
+| `x_vals`, `backends`, `metrics` | The compared scope (the intersection of both sides) |
+| `performance_summary` | Per backend and metric: `avg`/`min`/`max_improvement` and `count` |
+| `detailed_comparison` | One row per `(metric, backend, x_val)` with both values and `pct_change` |
+| `latency_comparison` | Per `(backend, x_val)` normality test, hypothesis test, effect size and percent change CI; omitted when the `latency` metric was not collected |
+
+Statistics that are undefined for the samples at hand (e.g. a percent change
+against a zero mean) are written as `null` rather than the JSON-invalid `NaN`.
+
+With `--mode fwd,bwd` each mode gets its own file (`ab_fwd.json`, `ab_bwd.json`).
+
 ## Error Handling
 
 The system automatically handles the following error conditions:

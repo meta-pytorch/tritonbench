@@ -599,6 +599,12 @@ def tritonbench_run(args: Optional[List[str]] = None):
         op = ops[0]
         args.op = op
 
+        # Both sides run through _run with a copy of these args, so a per-side
+        # write would just have each side clobber the other's file. Suppress it
+        # and emit one combined side-a/side-b/ab-comparison json instead.
+        ab_output_json = args.output_json
+        args.output_json = None
+
         lockdown_enabled = args.gpu_lockdown or (args.gpu_lock_clock_mhz is not None)
         with gpu_lockdown(lockdown_enabled, args.gpu_lock_clock_mhz):
             for mode in modes:
@@ -606,7 +612,7 @@ def tritonbench_run(args: Optional[List[str]] = None):
                 try:
                     result_a, result_b = run_ab_test(args, extra_args, _run)
 
-                    from tritonbench.utils.ab_test import parse_ab_config
+                    from tritonbench.utils.ab_test import parse_ab_config, write_ab_json
 
                     config_a_args = parse_ab_config(args.side_a)
                     config_b_args = (
@@ -614,7 +620,17 @@ def tritonbench_run(args: Optional[List[str]] = None):
                         if args.side_b is not None
                         else None
                     )
-                    compare_ab_results(result_a, result_b, config_a_args, config_b_args)
+                    report = compare_ab_results(
+                        result_a, result_b, config_a_args, config_b_args
+                    )
+
+                    if ab_output_json and report:
+                        write_ab_json(
+                            _add_mode_suffix(ab_output_json, mode)
+                            if len(modes) > 1
+                            else ab_output_json,
+                            report,
+                        )
 
                 except Exception as e:
                     print(f"A/B test failed: {e}")
