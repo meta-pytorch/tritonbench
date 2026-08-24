@@ -11,6 +11,7 @@ from tritonbench.components.do_bench.run import Latency
 from tritonbench.utils.ab_test import (
     AB_COMPARISON_KEY,
     compare_ab_results,
+    merge_ab_reports,
     SIDE_A_KEY,
     SIDE_B_KEY,
     write_ab_json,
@@ -129,13 +130,74 @@ class AbTestJsonTest(unittest.TestCase):
             self.assertTrue(entry["comparison"]["significant"])
             self.assertAlmostEqual(entry["comparison"]["pct_change"], 20.0, delta=1.0)
 
+    def test_merge_makes_every_measurement_a_list_per_repeat(self):
+        key = f"tritonbench_{OP_NAME}_fwd[x_1024-triton]"
+        repeats = [
+            compare_ab_results(
+                _make_result(seed, 1.0), _make_result(seed + 100, 1.2), [], []
+            )
+            for seed in (0, 1000, 2000)
+        ]
+        merged = merge_ab_reports(repeats)
+
+        cell = merged[SIDE_A_KEY]["metrics"][key]
+        self.assertEqual(
+            cell["latency"], [r[SIDE_A_KEY]["metrics"][key]["latency"] for r in repeats]
+        )
+        self.assertEqual(len(cell["mean"]), 3)
+        # A value that was already a list becomes a list per repeat.
+        self.assertEqual(len(cell["mean_ci"]), 3)
+        self.assertEqual(len(cell["mean_ci"][0]), 2)
+
+        # What a number describes stays scalar; only measurements become lists.
+        side_a = merged[SIDE_A_KEY]
+        self.assertEqual(side_a["op_name"], OP_NAME)
+        self.assertEqual(side_a["config"], [])
+        comparison = merged[AB_COMPARISON_KEY]
+        self.assertEqual(comparison["backends"], sorted(BACKENDS))
+        self.assertEqual(comparison["metrics"], ["latency", "speedup"])
+        self.assertEqual(comparison["config_differences"], {})
+
+        # Rows keep one entry per repeat, lined up by what they describe.
+        row = comparison["detailed_comparison"][0]
+        self.assertIn(row["backend"], BACKENDS)
+        self.assertEqual(len(row["pct_change"]), 3)
+        verdict = comparison["latency_comparison"][0]["comparison"]
+        self.assertEqual(len(verdict["pct_change"]), 3)
+        self.assertEqual(verdict["significant"], [True, True, True])
+
+    def test_merge_of_a_single_run_still_yields_lists(self):
+        report = compare_ab_results(_make_result(0, 1.0), None, [])
+        merged = merge_ab_reports([report])
+        key = f"tritonbench_{OP_NAME}_fwd[x_1024-triton]"
+        cell = merged[SIDE_A_KEY]["metrics"][key]
+        self.assertEqual(len(cell["latency"]), 1)
+        self.assertEqual(len(cell["mean"]), 1)
+
+    def test_merge_pads_a_cell_missing_from_one_repeat(self):
+        full = compare_ab_results(_make_result(0, 1.0), None, [])
+        partial_result = _make_result(0, 1.0)
+        # Drop one backend from the second repeat.
+        partial_result.result = [
+            (x_val, {b: m for b, m in backends.items() if b != "torch"})
+            for x_val, backends in partial_result.result
+        ]
+        partial = compare_ab_results(partial_result, None, [])
+
+        merged = merge_ab_reports([full, partial])
+        dropped = merged[SIDE_A_KEY]["metrics"][
+            f"tritonbench_{OP_NAME}_fwd[x_1024-torch]"
+        ]
+        self.assertEqual(len(dropped["latency"]), 2)
+        self.assertIsNone(dropped["latency"][1])
+
     def test_written_json_is_valid_and_round_trips(self):
         # parse_constant fires on NaN/Infinity, which are not valid JSON.
         def _reject(constant):
             raise AssertionError(f"invalid JSON constant: {constant}")
 
-        report = compare_ab_results(
-            _make_result(0, 1.0), _make_result(100, 1.2), [], []
+        report = merge_ab_reports(
+            [compare_ab_results(_make_result(0, 1.0), _make_result(100, 1.2), [], [])]
         )
         with tempfile.TemporaryDirectory() as tmpdir:
             path = Path(tmpdir) / "ab.json"

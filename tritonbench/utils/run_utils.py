@@ -605,14 +605,18 @@ def tritonbench_run(args: Optional[List[str]] = None):
         ab_output_json = args.output_json
         args.output_json = None
 
+        ab_repeat = args.ab_repeat or 1
+
         lockdown_enabled = args.gpu_lockdown or (args.gpu_lock_clock_mhz is not None)
         with gpu_lockdown(lockdown_enabled, args.gpu_lock_clock_mhz):
             for mode in modes:
                 args.mode = mode
                 try:
-                    result_a, result_b = run_ab_test(args, extra_args, _run)
-
-                    from tritonbench.utils.ab_test import parse_ab_config, write_ab_json
+                    from tritonbench.utils.ab_test import (
+                        merge_ab_reports,
+                        parse_ab_config,
+                        write_ab_json,
+                    )
 
                     config_a_args = parse_ab_config(args.side_a)
                     config_b_args = (
@@ -620,10 +624,25 @@ def tritonbench_run(args: Optional[List[str]] = None):
                         if args.side_b is not None
                         else None
                     )
-                    report = compare_ab_results(
-                        result_a, result_b, config_a_args, config_b_args
-                    )
 
+                    # Repeats alternate A, B, A, B, ... so that slow drift
+                    # (clocks, thermals) lands on both sides alike.
+                    reports = []
+                    for repeat in range(ab_repeat):
+                        if ab_repeat > 1:
+                            logger.info(
+                                f"\n{'=' * 60}\n"
+                                f"A/B repeat {repeat + 1}/{ab_repeat}\n"
+                                f"{'=' * 60}"
+                            )
+                        result_a, result_b = run_ab_test(args, extra_args, _run)
+                        reports.append(
+                            compare_ab_results(
+                                result_a, result_b, config_a_args, config_b_args
+                            )
+                        )
+
+                    report = merge_ab_reports(reports)
                     if ab_output_json and report:
                         write_ab_json(
                             _add_mode_suffix(ab_output_json, mode)

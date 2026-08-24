@@ -129,9 +129,10 @@ def _iter_arg_groups(args: List[str]) -> Iterator[Tuple[Optional[str], List[str]
 
 # These select the configurations to compare; they belong to neither side.
 _SIDE_OPTIONS = ("--side-a", "--side-b")
-# --output-json is consumed by the A/B harness, which writes a single combined
-# report for both sides, so it is not part of a side's configuration either.
-_HARNESS_OPTIONS = _SIDE_OPTIONS + ("--output-json",)
+# --output-json and --ab-repeat are consumed by the A/B harness, which writes a
+# single combined report for both sides, so they are not part of a side's
+# configuration either.
+_HARNESS_OPTIONS = _SIDE_OPTIONS + ("--output-json", "--ab-repeat")
 
 
 def base_global_args(argv: Optional[List[str]] = None) -> List[str]:
@@ -791,6 +792,99 @@ def compare_ab_results(
         ),
         AB_COMPARISON_KEY: comparison_report,
     }
+
+
+# ============================================================================
+# Merging repeats
+# ============================================================================
+
+# Values that identify what a number describes rather than being a measurement
+# of it. They are the same in every repeat, so they stay scalar while
+# everything else becomes a list with one entry per repeat.
+_IDENTITY_KEYS = frozenset(
+    {
+        "config",
+        "global_args",
+        "op_args",
+        "op_name",
+        "op_mode",
+        "metrics",
+        "backends",
+        "x_vals",
+        "x_val",
+        "x_val_name",
+        "backend",
+        "metric",
+    }
+)
+# Identity fields that are themselves dicts, so they have to be kept before the
+# recursion rule below gets to them.
+_IDENTITY_DICT_KEYS = frozenset({"config_differences"})
+# Fields that identify a row of ``detailed_comparison`` / ``latency_comparison``,
+# so rows can be lined up across repeats instead of merged by position.
+_ROW_IDENTITY = ("metric", "backend", "x_val_name", "x_val")
+
+
+def _merge_rows(per_repeat: List[Optional[List[Dict]]]) -> List[Dict[str, Any]]:
+    """Merge a list-of-rows field, lining rows up by what they describe."""
+    ordered: Dict[Any, List[Optional[Dict]]] = {}
+    for index, rows in enumerate(per_repeat):
+        for row in rows or []:
+            key = tuple(str(row.get(k)) for k in _ROW_IDENTITY)
+            slots = ordered.setdefault(key, [None] * len(per_repeat))
+            slots[index] = row
+    return [_merge_dicts(slots) for slots in ordered.values()]
+
+
+def _merge_field(key: Optional[str], per_repeat: List[Any]) -> Any:
+    """Merge one field across repeats: recurse, keep, or collect into a list."""
+    present = [value for value in per_repeat if value is not None]
+    if key in _IDENTITY_DICT_KEYS:
+        return present[0] if present else None
+    if present and all(isinstance(value, dict) for value in present):
+        return _merge_dicts(per_repeat)
+    if present and all(
+        isinstance(value, list) and all(isinstance(row, dict) for row in value)
+        for value in present
+    ):
+        return _merge_rows(per_repeat)
+    if key in _IDENTITY_KEYS:
+        return present[0] if present else None
+    return list(per_repeat)
+
+
+def _merge_dicts(per_repeat: List[Optional[Dict]]) -> Dict[str, Any]:
+    """Merge dicts across repeats, keeping the key order of the first repeat.
+
+    A key missing from a repeat contributes ``None``, so every merged list has
+    one entry per repeat and stays positionally meaningful.
+    """
+    keys = {}
+    for entry in per_repeat:
+        for key in entry or {}:
+            keys[key] = None
+    return {
+        key: _merge_field(
+            key,
+            [
+                entry.get(key) if isinstance(entry, dict) else None
+                for entry in per_repeat
+            ],
+        )
+        for key in keys
+    }
+
+
+def merge_ab_reports(reports: List[Dict[str, Any]]) -> Optional[Dict[str, Any]]:
+    """Merge the per-repeat A/B reports into the one that gets written out.
+
+    Every measured value becomes a list with one entry per repeat -- a single
+    run included, so the shape does not depend on ``--ab-repeat``.
+    """
+    reports = [report for report in reports if report]
+    if not reports:
+        return None
+    return _merge_dicts(reports)
 
 
 def write_ab_json(output_json: str, report: Dict[str, Any]) -> None:

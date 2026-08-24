@@ -186,34 +186,41 @@ Each side holds its own configuration and results:
 A `metrics` entry holds the metrics collected for that cell -- each reported as
 a single p50 -- followed by the descriptive statistics of the raw latency
 samples behind them (omitted when the `latency` metric was not collected, or
-when there were too few samples to analyze):
+when there were too few samples to analyze).
+
+Every measured value is a **list with one entry per repeat** (see
+`--ab-repeat` below), so a plain single run reports lists of one and the shape
+never depends on how the run was invoked:
 
 ```json
 {
     "config": ["--warmup", "25"],
     "metrics": {
         "tritonbench_vector_add_fwd[x_4096-triton_add]": {
-            "latency": 0.006272,
-            "gbps": 7.836,
-            "n": 2140,
-            "min": 0.005952,
-            "max": 0.015904,
-            "mean": 0.006552,
-            "median": 0.006272,
-            "stddev": 0.000499,
-            "stderr": 0.0000108,
-            "cv": 7.629,
-            "q1": 0.006176,
-            "q3": 0.007040,
-            "iqr": 0.000864,
-            "confidence": 0.95,
-            "mean_ci": [0.006531, 0.006573],
-            "bootstrap_mean_ci": [0.006532, 0.006574],
-            "bootstrap_median_ci": [0.006240, 0.006304]
+            "latency": [0.006272, 0.006304, 0.006272],
+            "gbps": [7.836, 7.796, 7.836],
+            "n": [1858, 2068, 2110],
+            "min": [0.005952, 0.005952, 0.005952],
+            "max": [0.015904, 0.011616, 0.012640],
+            "mean": [0.006544, 0.006597, 0.006543],
+            "median": [0.006272, 0.006304, 0.006272],
+            "stddev": [0.000463, 0.000459, 0.000437],
+            "stderr": [0.0000107, 0.0000101, 0.0000095],
+            "cv": [7.087, 6.969, 6.686],
+            "q1": [0.006176, 0.006176, 0.006176],
+            "q3": [0.007040, 0.007040, 0.007040],
+            "iqr": [0.000864, 0.000864, 0.000864],
+            "confidence": [0.95, 0.95, 0.95],
+            "mean_ci": [[0.006523, 0.006565], [0.006578, 0.006617], [0.006524, 0.006562]],
+            "bootstrap_mean_ci": [[...], [...], [...]],
+            "bootstrap_median_ci": [[...], [...], [...]]
         }
     }
 }
 ```
+
+A cell that is missing from one repeat (a backend that failed that time)
+contributes `null` at that position, so the lists stay aligned by repeat.
 
 `ab-comparison` holds the same four report sections that are printed to the log:
 
@@ -225,10 +232,34 @@ when there were too few samples to analyze):
 | `detailed_comparison` | One row per `(metric, backend, x_val)` with both values and `pct_change` |
 | `latency_comparison` | Per `(backend, x_val)` normality test, hypothesis test, effect size and percent change CI; omitted when the `latency` metric was not collected |
 
+Its measured values are lists per repeat too; what a number *describes* stays
+scalar (`backends`, `x_vals`, `config_differences`, and each row's `metric` /
+`backend` / `x_val`).
+
 Statistics that are undefined for the samples at hand (e.g. a percent change
 against a zero mean) are written as `null` rather than the JSON-invalid `NaN`.
 
 With `--mode fwd,bwd` each mode gets its own file (`ab_fwd.json`, `ab_bwd.json`).
+
+## Repeating the Test
+
+`--ab-repeat <N>` runs the whole A/B test N times. The sides alternate
+(A, B, A, B, ...) so that slow drift -- clocks warming up, another job landing
+on the machine -- hits both sides alike instead of penalizing whichever ran
+last:
+
+```bash
+python run.py --op vector_add --metrics latency \
+  --side-a="--warmup 25" --side-b="--warmup 100" \
+  --ab-repeat 3 --output-json ab.json
+```
+
+Each repeat prints its own analysis, and the JSON gains one entry per repeat in
+every measured value. Repeats are the answer to "is this 0.4% difference real,
+or would a second run have said something else?" -- the within-run confidence
+intervals cannot tell you that, because they only see one run's samples.
+
+`--ab-repeat` requires `--side-a` and multiplies the runtime by N.
 
 ## Error Handling
 

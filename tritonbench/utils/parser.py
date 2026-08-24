@@ -439,6 +439,14 @@ def get_parser(args=None):
         "Optional: with only --side-a, that single configuration is run and analyzed. "
         "Example: '--side-b \"--dynamic\"'",
     )
+    parser.add_argument(
+        "--ab-repeat",
+        type=int,
+        default=None,
+        help="Repeat the whole A/B test N times (sides alternate A, B, A, B, ...). "
+        "Each metric in --output-json then holds one value per repeat, which is "
+        "how run-to-run variation shows up. Default: 1.",
+    )
     parser.add_argument("--log-scuba", action="store_true", help="Log to scuba.")
     parser.add_argument(
         "--skip-cache-clearing",
@@ -539,6 +547,12 @@ def get_parser(args=None):
     # A/B Testing validation
     if args.side_b is not None and args.side_a is None:
         parser.error("--side-b requires --side-a to be specified")
+
+    if args.ab_repeat is not None:
+        if args.side_a is None:
+            parser.error("--ab-repeat requires --side-a to be specified")
+        if args.ab_repeat < 1:
+            parser.error("--ab-repeat must be at least 1")
 
     if args.side_a is not None:
         # A/B mode is enabled. --side-b is optional: with only --side-a we run
