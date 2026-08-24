@@ -153,6 +153,17 @@ def base_global_args(argv: Optional[List[str]] = None) -> List[str]:
     ]
 
 
+def base_op_args(argv: Optional[List[str]] = None) -> List[str]:
+    """Operator-specific args the process was invoked with.
+
+    The counterpart of :func:`base_global_args`: both sides inherit these too,
+    since they are forwarded to the operator ahead of the side's own args.
+    """
+    argv = sys.argv[1:] if argv is None else argv
+    _, op_args = separate_global_and_op_args(argv)
+    return op_args
+
+
 def merge_global_args(base_args: List[str], side_args: List[str]) -> List[str]:
     """Effective global args of one side, with its own args taking precedence.
 
@@ -486,13 +497,22 @@ def _side_report(
 ) -> Dict[str, Any]:
     """JSON report of one side: its configuration and its per-cell metrics.
 
+    ``config`` is the full effective command line of the side -- the args the
+    process was invoked with, overridden by the side's own -- as one string.
+
     Each ``metrics`` entry is one (backend, x_val) cell, holding the metrics
     that were collected for it plus -- when the raw latency samples support it
     -- the descriptive statistics of those samples (mean, median, stddev, CV,
     IQR, confidence intervals). ``latency_entries`` are the shared analyses;
     ``is_side_a`` picks which half of each one to report.
     """
-    global_args, op_args = separate_global_and_op_args(config_args)
+    side_globals, side_ops = separate_global_and_op_args(config_args)
+    # Both sides inherit the command line's args and the side's own override
+    # them, the same way argparse resolves a repeated option: last one wins.
+    config = merge_global_args(base_global_args(), side_globals) + merge_global_args(
+        base_op_args(), side_ops
+    )
+
     stats_by_cell = {}
     for entry in latency_entries:
         side_stats = entry.analysis.side_a if is_side_a else entry.analysis.side_b
@@ -510,9 +530,7 @@ def _side_report(
             metrics[key] = cell
 
     return {
-        "config": list(config_args),
-        "global_args": merge_global_args(base_global_args(), global_args),
-        "op_args": op_args,
+        "config": " ".join(config),
         "op_name": result.op_name,
         "op_mode": result.op_mode,
         "metrics": metrics,
@@ -804,8 +822,6 @@ def compare_ab_results(
 _IDENTITY_KEYS = frozenset(
     {
         "config",
-        "global_args",
-        "op_args",
         "op_name",
         "op_mode",
         "metrics",

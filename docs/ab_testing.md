@@ -177,9 +177,7 @@ Each side holds its own configuration and results:
 
 | Key | Contents |
 | --- | --- |
-| `config` | The `--side-x` args as given |
-| `global_args` | Effective tritonbench globals: the command line's, overridden by the side's |
-| `op_args` | Operator-specific args of the side |
+| `config` | The side's full effective command line as one string: the args the run was invoked with, overridden by the side's own (globals first, then operator args) |
 | `op_name`, `op_mode` | Operator and mode that ran |
 | `metrics` | One entry per `(backend, x_val)` cell, keyed `tritonbench_<op_name>_<mode>[x_<x_val>-<backend>]` |
 
@@ -194,7 +192,7 @@ never depends on how the run was invoked:
 
 ```json
 {
-    "config": ["--warmup", "25"],
+    "config": "--op vector_add --metrics latency,gbps --warmup 25",
     "metrics": {
         "tritonbench_vector_add_fwd[x_4096-triton_add]": {
             "latency": [0.006272, 0.006304, 0.006272],

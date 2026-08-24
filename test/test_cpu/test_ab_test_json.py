@@ -2,10 +2,12 @@
 
 import json
 import random
+import sys
 import tempfile
 import unittest
 from collections import OrderedDict
 from pathlib import Path
+from unittest.mock import patch
 
 from tritonbench.components.do_bench.run import Latency
 from tritonbench.utils.ab_test import (
@@ -59,6 +61,11 @@ def _make_result(seed_offset: int, scale: float) -> BenchmarkOperatorResult:
     )
 
 
+# The command line a side's `config` is reported relative to. Patched in so the
+# reports do not pick up whatever argv the test runner was started with.
+BASE_ARGV = ["run.py", "--op", "softmax", "--num-inputs", "2", "--M", "4096"]
+
+
 class AbTestJsonTest(unittest.TestCase):
     @classmethod
     def setUpClass(cls):
@@ -66,6 +73,11 @@ class AbTestJsonTest(unittest.TestCase):
         REGISTERED_BENCHMARKS[OP_NAME] = OrderedDict(
             (b, BenchmarkOperatorBackend(name=b, label=b)) for b in BACKENDS
         )
+
+    def setUp(self):
+        patcher = patch.object(sys, "argv", list(BASE_ARGV))
+        patcher.start()
+        self.addCleanup(patcher.stop)
 
     @classmethod
     def tearDownClass(cls):
@@ -77,8 +89,11 @@ class AbTestJsonTest(unittest.TestCase):
         self.assertEqual(list(report.keys()), [SIDE_A_KEY])
 
         side_a = report[SIDE_A_KEY]
-        self.assertEqual(side_a["config"], ["--rep", "1000"])
-        self.assertEqual(side_a["global_args"][-2:], ["--rep", "1000"])
+        # The command line, plus the side's own args, globals then operator
+        # args -- one string. --M 4096 is an operator arg, so it comes last.
+        self.assertEqual(
+            side_a["config"], "--op softmax --num-inputs 2 --rep 1000 --M 4096"
+        )
         self.assertEqual(side_a["op_name"], OP_NAME)
 
         # One metrics entry per (backend, x_val) cell.
@@ -104,7 +119,10 @@ class AbTestJsonTest(unittest.TestCase):
         self.assertEqual(
             sorted(report.keys()), sorted([SIDE_A_KEY, SIDE_B_KEY, AB_COMPARISON_KEY])
         )
-        self.assertEqual(report[SIDE_B_KEY]["config"], ["--rep", "2000"])
+        self.assertEqual(
+            report[SIDE_B_KEY]["config"],
+            "--op softmax --num-inputs 2 --rep 2000 --M 4096",
+        )
         # Side B is 20% slower by construction.
         key = f"tritonbench_{OP_NAME}_fwd[x_1024-triton]"
         self.assertAlmostEqual(
@@ -152,7 +170,7 @@ class AbTestJsonTest(unittest.TestCase):
         # What a number describes stays scalar; only measurements become lists.
         side_a = merged[SIDE_A_KEY]
         self.assertEqual(side_a["op_name"], OP_NAME)
-        self.assertEqual(side_a["config"], [])
+        self.assertEqual(side_a["config"], "--op softmax --num-inputs 2 --M 4096")
         comparison = merged[AB_COMPARISON_KEY]
         self.assertEqual(comparison["backends"], sorted(BACKENDS))
         self.assertEqual(comparison["metrics"], ["latency", "speedup"])
