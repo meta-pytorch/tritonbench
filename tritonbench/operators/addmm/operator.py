@@ -209,6 +209,8 @@ class Operator(BenchmarkOperator):
         # force_disable_caches prevents a prior allow-mode or stock-Triton choice
         # from being reused through the autotune cache.
         # Gated to AMD MI350x (gfx950), where the TLX addmm template exists.
+        mat1_in = mat1 if mat1.is_contiguous() else mat1.contiguous()
+        mat2_in = mat2 if mat2.stride(0) == 1 else mat2.T.contiguous().T
         torch._dynamo.reset()
         with inductor_config.patch(
             {
@@ -221,8 +223,8 @@ class Operator(BenchmarkOperator):
         ):
             f = lambda a, mat1, mat2: torch.addmm(a, mat1, mat2)
             compiled = torch.compile(f, dynamic=False)
-            compiled(a, mat1, mat2)
-        return lambda: compiled(a, mat1, mat2)
+            compiled(a, mat1_in, mat2_in)
+        return lambda: compiled(a, mat1_in, mat2_in)
 
     @register_benchmark(enabled=False)
     def pt2_addmm_maxautotune(self, a, mat1, mat2) -> Callable:
