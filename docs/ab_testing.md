@@ -181,7 +181,7 @@ Each side holds its own configuration and results:
 | `global_args` | Effective tritonbench globals: the command line's, overridden by the side's |
 | `op_args` | Operator-specific args of the side |
 | `op_name`, `op_mode` | Operator and mode that ran |
-| `metrics` | One entry per `(backend, x_val)` cell, keyed `tritonbench_<op>[<backend>-<x_val>]` |
+| `metrics` | One entry per `(backend, x_val)` cell, keyed `tritonbench_<op_name>_<mode>[x_<x_val>-<backend>]` |
 
 A `metrics` entry holds the metrics collected for that cell -- each reported as
 a single p50 -- followed by the descriptive statistics of the raw latency
@@ -192,7 +192,7 @@ when there were too few samples to analyze):
 {
     "config": ["--warmup", "25"],
     "metrics": {
-        "tritonbench_vector_add[triton_add-4096]": {
+        "tritonbench_vector_add_fwd[x_4096-triton_add]": {
             "latency": 0.006272,
             "gbps": 7.836,
             "n": 2140,

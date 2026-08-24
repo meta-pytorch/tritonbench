@@ -441,9 +441,13 @@ def _json_safe(value: Any) -> Any:
     return str(value)
 
 
-def _metric_key(op_name: str, backend: str, x_val: Any) -> str:
-    """Key of one (backend, x_val) cell in a side's ``metrics`` dict."""
-    return f"tritonbench_{op_name}[{backend}-{x_val}]"
+def _metric_key(op_name: str, op_mode: str, backend: str, x_val: Any) -> str:
+    """Key of one (backend, x_val) cell in a side's ``metrics`` dict.
+
+    Same shape as the keys a non-A/B ``--output-json`` writes, minus the metric
+    name suffix -- here the metrics are the entry's own keys.
+    """
+    return f"tritonbench_{op_name}_{op_mode}[x_{x_val}-{backend}]"
 
 
 def _cell_metrics(metrics_obj, metric_names: List[str]) -> Dict[str, Any]:
@@ -501,7 +505,8 @@ def _side_report(
             side_stats = stats_by_cell.get((backend, x_val))
             if side_stats is not None:
                 cell.update(_json_safe(asdict(side_stats)))
-            metrics[_metric_key(result.op_name, backend, x_val)] = cell
+            key = _metric_key(result.op_name, result.op_mode, backend, x_val)
+            metrics[key] = cell
 
     return {
         "config": list(config_args),

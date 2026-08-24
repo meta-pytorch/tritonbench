@@ -83,7 +83,7 @@ class AbTestJsonTest(unittest.TestCase):
         # One metrics entry per (backend, x_val) cell.
         metrics = side_a["metrics"]
         self.assertEqual(len(metrics), len(BACKENDS) * len(X_VALS))
-        cell = metrics[f"tritonbench_{OP_NAME}[triton-1024]"]
+        cell = metrics[f"tritonbench_{OP_NAME}_fwd[x_1024-triton]"]
         # The collected metrics, ...
         self.assertGreater(cell["latency"], 0)
         self.assertEqual(cell["speedup"], 1.0)
@@ -105,7 +105,7 @@ class AbTestJsonTest(unittest.TestCase):
         )
         self.assertEqual(report[SIDE_B_KEY]["config"], ["--rep", "2000"])
         # Side B is 20% slower by construction.
-        key = f"tritonbench_{OP_NAME}[triton-1024]"
+        key = f"tritonbench_{OP_NAME}_fwd[x_1024-triton]"
         self.assertAlmostEqual(
             report[SIDE_B_KEY]["metrics"][key]["mean"],
             1.2 * report[SIDE_A_KEY]["metrics"][key]["mean"],
