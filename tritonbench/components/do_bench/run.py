@@ -26,6 +26,8 @@ except ImportError:
     triton = None
 
 NS_TO_MS = 1e-6
+# Keep HIP/CUDA graph capture from expanding to tens of thousands of nodes.
+MAX_CUDAGRAPH_REPEAT = 1000
 logger = logging.getLogger(__name__)
 # Kernel name for L2 cache clearing - we want to exclude this from latency measurements
 # On NVIDIA: FillFunctor<int>, on AMD/ROCm: FillFunctor<float> with [clone .kd] suffix
@@ -40,6 +42,12 @@ def _is_cache_clear_kernel(name: str) -> bool:
     with [clone .kd] suffix) variants.
     """
     return "vectorized_elementwise_kernel" in name and "FillFunctor" in name
+
+
+def _get_cudagraph_n_repeat(rep: int, estimate_ms: float) -> int:
+    if estimate_ms <= 0:
+        return MAX_CUDAGRAPH_REPEAT
+    return min(MAX_CUDAGRAPH_REPEAT, max(1, int(rep / estimate_ms)))
 
 
 class Latency:
@@ -233,7 +241,7 @@ def _do_bench_cudagraph_with_cache_clear(
         estimate_ms = start_event.elapsed_time(end_event) / 5
         _, rep = resolve_warmup_and_rep(None, rep, estimate_ms)
 
-        n_repeat = 1000 if estimate_ms == 0 else max(1, int(rep / estimate_ms))
+        n_repeat = _get_cudagraph_n_repeat(rep, estimate_ms)
 
         g = torch.cuda.CUDAGraph()
         with torch.cuda.graph(g):
