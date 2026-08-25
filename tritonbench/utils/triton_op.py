@@ -1153,8 +1153,6 @@ class BenchmarkOperator(metaclass=PostInitProcessor):
                 self.tb_args.output_dir,
             )
             power_manager_task.start()
-            if not self.tb_args.repcnt:
-                self.tb_args.repcnt = DEFAULT_POWER_REPCNT
         try:
             if "proton" in self.required_metrics:
                 import triton.profiler as proton

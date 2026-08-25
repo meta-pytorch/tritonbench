@@ -185,7 +185,14 @@ def merge_global_args(base_args: List[str], side_args: List[str]) -> List[str]:
 def update_args_with_global(
     base_args: argparse.Namespace, global_args: List[str]
 ) -> argparse.Namespace:
-    """Update base args with global arguments from A/B config."""
+    """Update base args with global arguments from A/B config.
+
+    Only the options the side actually specifies are applied. They are parsed
+    straight into a copy of the base namespace, which argparse fills in without
+    touching attributes that are already set -- so a base flag the side is
+    silent about (``--power-chart``, ``--cudagraph``, ``--sleep 1.0``, ...)
+    survives instead of being reset to the parser default.
+    """
     if not global_args:
         return argparse.Namespace(**vars(base_args))
 
@@ -195,12 +202,7 @@ def update_args_with_global(
     # Parse global args and update the namespace
     temp_parser = get_parser()
     try:
-        parsed_globals, _ = temp_parser.parse_known_args(global_args)
-
-        # Update the namespace with new global values
-        for key, value in vars(parsed_globals).items():
-            if value is not None and key not in ["side_a", "side_b"]:
-                setattr(updated_args, key, value)
+        temp_parser.parse_known_args(global_args, namespace=updated_args)
 
     except SystemExit as e:
         # If parsing fails, keep original args
@@ -494,6 +496,7 @@ def _side_report(
     config_args: List[str],
     latency_entries: List[LatencyEntry],
     is_side_a: bool = True,
+    power_output_dir: Optional[str] = None,
 ) -> Dict[str, Any]:
     """JSON report of one side: its configuration and its per-cell metrics.
 
@@ -505,6 +508,9 @@ def _side_report(
     -- the descriptive statistics of those samples (mean, median, stddev, CV,
     IQR, confidence intervals). ``latency_entries`` are the shared analyses;
     ``is_side_a`` picks which half of each one to report.
+
+    ``power_output_dir`` is recorded on every cell when ``--power-chart`` ran,
+    so a repeat's measurements point at the power trace taken alongside them.
     """
     side_globals, side_ops = separate_global_and_op_args(config_args)
     # Both sides inherit the command line's args and the side's own override
@@ -526,6 +532,8 @@ def _side_report(
             side_stats = stats_by_cell.get((backend, x_val))
             if side_stats is not None:
                 cell.update(_json_safe(asdict(side_stats)))
+            if power_output_dir:
+                cell["power_output_dir"] = power_output_dir
             key = _metric_key(result.op_name, result.op_mode, backend, x_val)
             metrics[key] = cell
 
@@ -540,6 +548,7 @@ def _side_report(
 def report_single_side_results(
     result_a: BenchmarkOperatorResult,
     config_a_args: List[str],
+    power_dirs: Optional[Dict[str, str]] = None,
 ) -> Optional[Dict[str, Any]]:
     """Report a single configuration (only --side-a was specified).
 
@@ -575,7 +584,14 @@ def report_single_side_results(
         latency_entries = _collect_latency_analyses(result_dict_a, x_vals, backends)
         _log_latency_analysis(latency_entries, x_val_name, two_sided=False)
 
-    return {SIDE_A_KEY: _side_report(result_a, config_a_args, latency_entries)}
+    return {
+        SIDE_A_KEY: _side_report(
+            result_a,
+            config_a_args,
+            latency_entries,
+            power_output_dir=(power_dirs or {}).get("a"),
+        )
+    }
 
 
 def compare_ab_results(
@@ -583,6 +599,7 @@ def compare_ab_results(
     result_b: Optional[BenchmarkOperatorResult],
     config_a_args: List[str],
     config_b_args: Optional[List[str]] = None,
+    power_dirs: Optional[Dict[str, str]] = None,
 ) -> Optional[Dict[str, Any]]:
     """Compare A/B test results.
 
@@ -596,7 +613,7 @@ def compare_ab_results(
         return None
 
     if result_b is None:
-        return report_single_side_results(result_a, config_a_args)
+        return report_single_side_results(result_a, config_a_args, power_dirs)
 
     # Check if both results have data
     if not result_a.result or not result_b.result:
@@ -801,12 +818,21 @@ def compare_ab_results(
     if latency_comparison:
         comparison_report["latency_comparison"] = latency_comparison
 
+    power_dirs = power_dirs or {}
     return {
         SIDE_A_KEY: _side_report(
-            result_a, config_a_args, latency_entries, is_side_a=True
+            result_a,
+            config_a_args,
+            latency_entries,
+            is_side_a=True,
+            power_output_dir=power_dirs.get("a"),
         ),
         SIDE_B_KEY: _side_report(
-            result_b, config_b_args or [], latency_entries, is_side_a=False
+            result_b,
+            config_b_args or [],
+            latency_entries,
+            is_side_a=False,
+            power_output_dir=power_dirs.get("b"),
         ),
         AB_COMPARISON_KEY: comparison_report,
     }
@@ -915,12 +941,19 @@ def write_ab_json(output_json: str, report: Dict[str, Any]) -> None:
 
 
 def run_ab_test(
-    base_args: argparse.Namespace, base_extra_args: List[str], _run_func
+    base_args: argparse.Namespace,
+    base_extra_args: List[str],
+    _run_func,
+    output_dirs: Optional[Dict[str, str]] = None,
 ) -> Tuple[BenchmarkOperatorResult, Optional[BenchmarkOperatorResult]]:
     """Run the A/B test and return both results.
 
     Side B is optional: when ``--side-b`` is not specified only side A runs and
     the second result is None.
+
+    ``output_dirs`` optionally maps ``"a"``/``"b"`` to the ``--output-dir`` that
+    side should write to. The power chart names its files after the benchmark,
+    so without a directory of its own each side would overwrite the other's.
     """
 
     # Parse A and B configurations
@@ -967,6 +1000,8 @@ def run_ab_test(
 
     # Update args with global parameters
     args_a = update_args_with_global(base_args, global_a_args)
+    if output_dirs and output_dirs.get("a"):
+        args_a.output_dir = output_dirs["a"]
 
     # Combine extra_args with operator-specific args only
     extra_args_a = base_extra_args + op_a_args
@@ -991,6 +1026,8 @@ def run_ab_test(
         return result_a, None
 
     args_b = update_args_with_global(base_args, global_b_args)
+    if output_dirs and output_dirs.get("b"):
+        args_b.output_dir = output_dirs["b"]
     extra_args_b = base_extra_args + op_b_args
 
     lines = ["", "=" * 60, f"Running Side B: {' '.join(config_b_args)}"]

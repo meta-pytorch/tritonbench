@@ -19,7 +19,7 @@ class AbTestInterruptTest(unittest.TestCase):
         """Run the A/B loop with the Nth repeat raising KeyboardInterrupt."""
         started = []
 
-        def fake_run_ab_test(args, extra_args, run_func):
+        def fake_run_ab_test(args, extra_args, run_func, output_dirs=None):
             started.append(len(started) + 1)
             if len(started) == interrupt_on:
                 raise KeyboardInterrupt

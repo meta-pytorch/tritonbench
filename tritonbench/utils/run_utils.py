@@ -488,6 +488,28 @@ def _add_mode_suffix(filepath: str, mode: str) -> str:
     return f"{base}_{mode}{ext}"
 
 
+def _ab_power_dirs(
+    power_root: Optional[str],
+    mode: Optional[str],
+    repeat: int,
+    has_side_b: bool,
+) -> Optional[Dict[str, str]]:
+    """One power-chart output directory per side of one A/B repeat.
+
+    Laid out as ``<root>/[<mode>/]side_<x>_repeat_<n>``. Returns None when
+    ``--power-chart`` was not requested, which leaves --output-dir alone.
+    """
+    if not power_root:
+        return None
+    parent = os.path.join(power_root, mode) if mode else power_root
+    dirs = {}
+    for side in ["a"] + (["b"] if has_side_b else []):
+        path = os.path.join(parent, f"side_{side}_repeat_{repeat}")
+        os.makedirs(path, exist_ok=True)
+        dirs[side] = path
+    return dirs
+
+
 def _run_in_task_single_mode(
     op: str,
     mode: str,
@@ -607,6 +629,16 @@ def tritonbench_run(args: Optional[List[str]] = None):
 
         ab_repeat = args.ab_repeat or 1
 
+        # The power chart names its files after the benchmark, not the run, so
+        # every side of every repeat needs an --output-dir of its own or they
+        # all overwrite one another and only the last survives.
+        power_root = None
+        if getattr(args, "power_chart", False):
+            power_root = args.output_dir or tempfile.mkdtemp(
+                prefix="tritonbench_power_"
+            )
+            logger.info(f"[tritonbench] Power chart output root: {power_root}")
+
         lockdown_enabled = args.gpu_lockdown or (args.gpu_lock_clock_mhz is not None)
         with gpu_lockdown(lockdown_enabled, args.gpu_lock_clock_mhz):
             for mode in modes:
@@ -636,11 +668,23 @@ def tritonbench_run(args: Optional[List[str]] = None):
                                 f"A/B repeat {repeat + 1}/{ab_repeat}\n"
                                 f"{'=' * 60}"
                             )
+                        power_dirs = _ab_power_dirs(
+                            power_root,
+                            mode if len(modes) > 1 else None,
+                            repeat + 1,
+                            args.side_b is not None,
+                        )
                         try:
-                            result_a, result_b = run_ab_test(args, extra_args, _run)
+                            result_a, result_b = run_ab_test(
+                                args, extra_args, _run, output_dirs=power_dirs
+                            )
                             reports.append(
                                 compare_ab_results(
-                                    result_a, result_b, config_a_args, config_b_args
+                                    result_a,
+                                    result_b,
+                                    config_a_args,
+                                    config_b_args,
+                                    power_dirs=power_dirs,
                                 )
                             )
                         except KeyboardInterrupt:
