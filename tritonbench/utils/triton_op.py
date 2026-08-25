@@ -2044,6 +2044,10 @@ class BenchmarkOperator(metaclass=PostInitProcessor):
         it more representative to alternate with low compute ops to better represent
         model steady state.
         """
+        # A/B mode reports the dispersion of the raw samples and runs hypothesis
+        # tests over them, so keep every sample: IQR filtering would trim the
+        # tails that analysis exists to characterize.
+        ab_test_mode = getattr(self.tb_args, "side_a", None) is not None
         return do_bench_wrapper(
             fn,
             warmup,
@@ -2061,6 +2065,7 @@ class BenchmarkOperator(metaclass=PostInitProcessor):
             entropy_window_size=getattr(self.tb_args, "entropy_window_size", 299),
             entropy_max_samples=getattr(self.tb_args, "entropy_max_samples", 10000),
             cudagraph_config=self.cudagraph_config,
+            remove_outliers=True,
         )
 
     def _do_bench(

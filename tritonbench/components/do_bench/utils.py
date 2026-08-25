@@ -1,8 +1,46 @@
+import logging
 from typing import Callable, Iterable, Optional, Tuple
 
 import torch
 from tritonbench.utils.constants import DEFAULT_WARMUP_REP_BY_ESTIMATED_KERNEL_MS
 from tritonbench.utils.env_utils import get_device_module
+
+logger = logging.getLogger(__name__)
+
+_cache_clear_buffer_primed = False
+
+
+def prime_cache_clear_buffer() -> None:
+    """Allocate and first-touch the L2 cache-clear buffer, once per process.
+
+    Benchmarkers flush the L2 by zeroing the ~256MB scratch buffer returned by
+    ``get_empty_cache_for_benchmark()``. Zeroing a freshly allocated buffer
+    pays a one-off page-mapping cost (measured ~6ms, versus ~0.04ms once the
+    pages are resident). Triton's ``do_bench`` runs its 5-iteration runtime
+    estimate with no prior flush, so whichever backend happens to be measured
+    first in a process folds that one-off into its ``estimate_ms`` -- inflating
+    it by two orders of magnitude and shrinking the sample count it derives,
+    ``n_repeat = rep / estimate_ms``, by the same factor.
+
+    One throwaway flush here keeps that cost out of every estimate. The buffer
+    is not retained: it goes back to the caching allocator's pool, so later
+    ``get_empty_cache_for_benchmark()`` calls reuse the same resident pages.
+
+    Idempotent, and a no-op on backends with no benchmark cache buffer.
+    """
+    global _cache_clear_buffer_primed
+    if _cache_clear_buffer_primed:
+        return
+    # Mark upfront so an unsupported backend is not retried on every call.
+    _cache_clear_buffer_primed = True
+    try:
+        import triton
+
+        driver = triton.runtime.driver.active
+        driver.clear_cache(driver.get_empty_cache_for_benchmark())
+        get_device_module().synchronize()
+    except Exception as e:
+        logger.warning("Could not prime the cache-clear buffer: %s", e)
 
 
 def resolve_warmup_and_rep(

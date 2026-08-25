@@ -590,8 +590,8 @@ def tritonbench_run(args: Optional[List[str]] = None):
 
     modes = args.mode.split(",")
 
-    # Check if A/B testing mode is enabled
-    if args.side_a is not None and args.side_b is not None:
+    # Check if A/B testing mode is enabled (--side-b is optional)
+    if args.side_a is not None:
         # A/B testing mode - only support single operator
         assert len(ops) == 1, (
             "A/B testing validation should have caught multiple operators"
@@ -599,66 +599,118 @@ def tritonbench_run(args: Optional[List[str]] = None):
         op = ops[0]
         args.op = op
 
-        print("[A/B Testing Mode Enabled]")
-        print(f"Operator: {op}")
-        print()
+        # Both sides run through _run with a copy of these args, so a per-side
+        # write would just have each side clobber the other's file. Suppress it
+        # and emit one combined side-a/side-b/ab-comparison json instead.
+        ab_output_json = args.output_json
+        args.output_json = None
+
+        ab_repeat = args.ab_repeat or 1
 
         lockdown_enabled = args.gpu_lockdown or (args.gpu_lock_clock_mhz is not None)
         with gpu_lockdown(lockdown_enabled, args.gpu_lock_clock_mhz):
             for mode in modes:
                 args.mode = mode
                 try:
-                    result_a, result_b = run_ab_test(args, extra_args, _run)
-
-                    from tritonbench.utils.ab_test import parse_ab_config
+                    from tritonbench.utils.ab_test import (
+                        merge_ab_reports,
+                        parse_ab_config,
+                        write_ab_json,
+                    )
 
                     config_a_args = parse_ab_config(args.side_a)
-                    config_b_args = parse_ab_config(args.side_b)
-                    compare_ab_results(result_a, result_b, config_a_args, config_b_args)
+                    config_b_args = (
+                        parse_ab_config(args.side_b)
+                        if args.side_b is not None
+                        else None
+                    )
+
+                    # Repeats alternate A, B, A, B, ... so that slow drift
+                    # (clocks, thermals) lands on both sides alike.
+                    reports = []
+                    interrupted = False
+                    for repeat in range(ab_repeat):
+                        if ab_repeat > 1:
+                            logger.info(
+                                f"\n{'=' * 60}\n"
+                                f"A/B repeat {repeat + 1}/{ab_repeat}\n"
+                                f"{'=' * 60}"
+                            )
+                        try:
+                            result_a, result_b = run_ab_test(args, extra_args, _run)
+                            reports.append(
+                                compare_ab_results(
+                                    result_a, result_b, config_a_args, config_b_args
+                                )
+                            )
+                        except KeyboardInterrupt:
+                            # Stop here rather than starting another repeat, but
+                            # still report the ones that did finish.
+                            logger.warning(
+                                "[tritonbench] KeyboardInterrupt received during "
+                                "repeat %d/%d, stopping with %d completed repeat(s)",
+                                repeat + 1,
+                                ab_repeat,
+                                len(reports),
+                            )
+                            interrupted = True
+                            break
+
+                    report = merge_ab_reports(reports)
+                    if ab_output_json and report:
+                        write_ab_json(
+                            _add_mode_suffix(ab_output_json, mode)
+                            if len(modes) > 1
+                            else ab_output_json,
+                            report,
+                        )
+                    if interrupted:
+                        sys.exit(1)
 
                 except Exception as e:
                     print(f"A/B test failed: {e}")
                     if not args.bypass_fail:
                         raise
-    else:
-        # Normal mode
-        # Force isolation in subprocess if testing more than one op.
-        if len(ops) >= 2:
-            args.isolate = True
+        return
 
-        multi_mode = len(modes) > 1
-        orig_output = args.output
-        orig_output_json = args.output_json
-        orig_output_dir = args.output_dir
+    # Normal mode
+    # Force isolation in subprocess if testing more than one op.
+    if len(ops) >= 2:
+        args.isolate = True
 
-        lockdown_enabled = args.gpu_lockdown or (args.gpu_lock_clock_mhz is not None)
-        with gpu_lockdown(lockdown_enabled, args.gpu_lock_clock_mhz):
-            for op in ops:
-                args.op = op
-                for mode in modes:
-                    args.mode = mode
-                    if multi_mode:
-                        args.output = (
-                            _add_mode_suffix(orig_output, mode) if orig_output else None
-                        )
-                        args.output_json = (
-                            _add_mode_suffix(orig_output_json, mode)
-                            if orig_output_json
-                            else None
-                        )
-                        if orig_output_dir:
-                            args.output_dir = os.path.join(orig_output_dir, mode)
-                            os.makedirs(args.output_dir, exist_ok=True)
-                    if args.isolate:
-                        _run_in_task_single_mode(
-                            op,
-                            mode,
-                            output=args.output,
-                            output_json=args.output_json,
-                            output_dir=args.output_dir,
-                        )
-                    else:
-                        _run(args, extra_args)
+    multi_mode = len(modes) > 1
+    orig_output = args.output
+    orig_output_json = args.output_json
+    orig_output_dir = args.output_dir
+
+    lockdown_enabled = args.gpu_lockdown or (args.gpu_lock_clock_mhz is not None)
+    with gpu_lockdown(lockdown_enabled, args.gpu_lock_clock_mhz):
+        for op in ops:
+            args.op = op
+            for mode in modes:
+                args.mode = mode
+                if multi_mode:
+                    args.output = (
+                        _add_mode_suffix(orig_output, mode) if orig_output else None
+                    )
+                    args.output_json = (
+                        _add_mode_suffix(orig_output_json, mode)
+                        if orig_output_json
+                        else None
+                    )
+                    if orig_output_dir:
+                        args.output_dir = os.path.join(orig_output_dir, mode)
+                        os.makedirs(args.output_dir, exist_ok=True)
+                if args.isolate:
+                    _run_in_task_single_mode(
+                        op,
+                        mode,
+                        output=args.output,
+                        output_json=args.output_json,
+                        output_dir=args.output_dir,
+                    )
+                else:
+                    _run(args, extra_args)
 
     tritonparse_parse(args.tritonparse)
 
@@ -703,6 +755,11 @@ def _run(args: argparse.Namespace, extra_args: List[str]) -> BenchmarkOperatorRe
                     "[tritonbench] GPU telemetry requested but observer not available"
                 )
 
+        # The `return` at the end of the finally block below discards whatever
+        # exception is in flight, which is what keeps a failed run reporting its
+        # partial results. An interrupt must not be swallowed that way, so hold
+        # it here and re-raise once the partial results have been written out.
+        interrupt: Optional[KeyboardInterrupt] = None
         try:
             # Start telemetry if enabled
             if telemetry_ctx is not None:
@@ -710,6 +767,8 @@ def _run(args: argparse.Namespace, extra_args: List[str]) -> BenchmarkOperatorRe
                 telemetry_ctx.annotate("benchmark_start")
 
             opbench.run(args.warmup, args.rep, sleep=args.sleep)
+        except KeyboardInterrupt as e:
+            interrupt = e
         finally:
             metrics = opbench.output
 
@@ -806,6 +865,8 @@ def _run(args: argparse.Namespace, extra_args: List[str]) -> BenchmarkOperatorRe
                         f"[ai-analysis] failed to build link ({e}); skipping",
                         file=sys.stderr,
                     )
+            if interrupt is not None:
+                raise interrupt
             return metrics
 
 
