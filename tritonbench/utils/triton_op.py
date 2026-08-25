@@ -2065,7 +2065,7 @@ class BenchmarkOperator(metaclass=PostInitProcessor):
             entropy_window_size=getattr(self.tb_args, "entropy_window_size", 299),
             entropy_max_samples=getattr(self.tb_args, "entropy_max_samples", 10000),
             cudagraph_config=self.cudagraph_config,
-            remove_outliers=not ab_test_mode,
+            remove_outliers=True,
         )
 
     def _do_bench(

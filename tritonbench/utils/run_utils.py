@@ -628,6 +628,7 @@ def tritonbench_run(args: Optional[List[str]] = None):
                     # Repeats alternate A, B, A, B, ... so that slow drift
                     # (clocks, thermals) lands on both sides alike.
                     reports = []
+                    interrupted = False
                     for repeat in range(ab_repeat):
                         if ab_repeat > 1:
                             logger.info(
@@ -635,12 +636,25 @@ def tritonbench_run(args: Optional[List[str]] = None):
                                 f"A/B repeat {repeat + 1}/{ab_repeat}\n"
                                 f"{'=' * 60}"
                             )
-                        result_a, result_b = run_ab_test(args, extra_args, _run)
-                        reports.append(
-                            compare_ab_results(
-                                result_a, result_b, config_a_args, config_b_args
+                        try:
+                            result_a, result_b = run_ab_test(args, extra_args, _run)
+                            reports.append(
+                                compare_ab_results(
+                                    result_a, result_b, config_a_args, config_b_args
+                                )
                             )
-                        )
+                        except KeyboardInterrupt:
+                            # Stop here rather than starting another repeat, but
+                            # still report the ones that did finish.
+                            logger.warning(
+                                "[tritonbench] KeyboardInterrupt received during "
+                                "repeat %d/%d, stopping with %d completed repeat(s)",
+                                repeat + 1,
+                                ab_repeat,
+                                len(reports),
+                            )
+                            interrupted = True
+                            break
 
                     report = merge_ab_reports(reports)
                     if ab_output_json and report:
@@ -650,6 +664,8 @@ def tritonbench_run(args: Optional[List[str]] = None):
                             else ab_output_json,
                             report,
                         )
+                    if interrupted:
+                        sys.exit(1)
 
                 except Exception as e:
                     print(f"A/B test failed: {e}")
@@ -739,6 +755,11 @@ def _run(args: argparse.Namespace, extra_args: List[str]) -> BenchmarkOperatorRe
                     "[tritonbench] GPU telemetry requested but observer not available"
                 )
 
+        # The `return` at the end of the finally block below discards whatever
+        # exception is in flight, which is what keeps a failed run reporting its
+        # partial results. An interrupt must not be swallowed that way, so hold
+        # it here and re-raise once the partial results have been written out.
+        interrupt: Optional[KeyboardInterrupt] = None
         try:
             # Start telemetry if enabled
             if telemetry_ctx is not None:
@@ -746,6 +767,8 @@ def _run(args: argparse.Namespace, extra_args: List[str]) -> BenchmarkOperatorRe
                 telemetry_ctx.annotate("benchmark_start")
 
             opbench.run(args.warmup, args.rep, sleep=args.sleep)
+        except KeyboardInterrupt as e:
+            interrupt = e
         finally:
             metrics = opbench.output
 
@@ -842,6 +865,8 @@ def _run(args: argparse.Namespace, extra_args: List[str]) -> BenchmarkOperatorRe
                         f"[ai-analysis] failed to build link ({e}); skipping",
                         file=sys.stderr,
                     )
+            if interrupt is not None:
+                raise interrupt
             return metrics
 
 
