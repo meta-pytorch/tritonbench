@@ -9,6 +9,7 @@ from tritonbench.utils.env_utils import (
     IS_BLACKWELL,
     is_cuda,
     is_fbcode,
+    is_hip_mi350,
 )
 from tritonbench.utils.input import input_filter
 from tritonbench.utils.triton_op import (
@@ -103,6 +104,37 @@ try:
 except Exception:
     HAS_HSTU_SELF_ATTN = False
 
+# gfx950 (MI350X) TLX HSTU self-attention, from the same tutorials directory.
+# Separate try block from the Blackwell import above so neither disables the
+# other: only one of the two ever has usable hardware in a given run.
+# Defined unconditionally: parse_op_args() reads them to build --tlx-gfx950-bwd-variant
+# regardless of platform. The `isdir` check below can fail *without* raising -- the
+# tutorials module imports fine under the fbcode triton while hstu_self_attn/ is not
+# materialized on disk -- so relying on the `except` branch to define them left them
+# unbound and NameError'd the whole operator on non-gfx950 CI.
+HAS_HSTU_TLX_GFX950 = False
+HSTU_GFX950_BWD_VARIANTS: dict = {}
+HSTU_GFX950_DEFAULT_BWD_VARIANT: str = ""
+try:
+    import os as _os
+    import sys as _sys
+
+    import triton.language.extra.tlx.tutorials as _tlx_tut
+
+    _hstu_self_dir = _os.path.join(list(_tlx_tut.__path__)[0], "hstu_self_attn")
+    if _os.path.isdir(_hstu_self_dir):
+        if _hstu_self_dir not in _sys.path:
+            _sys.path.insert(0, _hstu_self_dir)
+        from tlx_gfx950_ragged_hstu_attention import (
+            BWD_VARIANTS as HSTU_GFX950_BWD_VARIANTS,
+            DEFAULT_BWD_VARIANT as HSTU_GFX950_DEFAULT_BWD_VARIANT,
+            tlx_gfx950_hstu_mha,
+        )
+
+        HAS_HSTU_TLX_GFX950 = True
+except Exception:
+    HAS_HSTU_TLX_GFX950 = False
+
 
 def parse_op_args(args: List[str]):
     parser = argparse.ArgumentParser()
@@ -123,6 +155,17 @@ def parse_op_args(args: List[str]):
     parser.add_argument("--sampling-alpha", type=float, default=1.7)
     parser.add_argument("--causal", action="store_true")
     parser.add_argument("--attn-mask-type", type=str, default="lower_triangular")
+    parser.add_argument(
+        "--tlx-gfx950-bwd-variant",
+        type=str,
+        default=None,
+        choices=sorted(HSTU_GFX950_BWD_VARIANTS) or None,
+        help=(
+            "Backward schedule for the hstu_tlx_gfx950 backend "
+            f"(default: {HSTU_GFX950_DEFAULT_BWD_VARIANT or 'n/a'}). "
+            "Forward is identical across variants."
+        ),
+    )
     parser.add_argument(
         "--config",
         type=str,
@@ -182,6 +225,9 @@ class Operator(BenchmarkOperator):
             self.attn_mask_type = args.attn_mask_type
         self.causal = args.causal
         self.sampling_alpha = args.sampling_alpha
+        self.tlx_gfx950_bwd_variant = (
+            args.tlx_gfx950_bwd_variant or HSTU_GFX950_DEFAULT_BWD_VARIANT
+        )
         self.requires_grad = not (self.mode == Mode.FWD_NO_GRAD)
 
     @register_benchmark(enabled=is_cuda(), baseline=True)
@@ -250,6 +296,85 @@ class Operator(BenchmarkOperator):
             max_attn_len=self.max_attn_len,
             contextual_seq_len=self.contextual_seq_len,
             causal=True,
+        )
+
+    def _hstu_tlx_gfx950(
+        self, bwd_variant, q, k, v, seq_offsets, num_targets, max_seq_len
+    ):
+        # gfx950 TLX HSTU. `attn_scale=None` makes the kernel fold 1/max_seq_len
+        # into the silu itself, which is what the `hstu` baseline does -- and the
+        # FA-schedule backwards reject an explicit attn_scale outright.
+        #
+        # The FA-schedule variants additionally require the plain causal HSTU
+        # path: num_targets set, no contextual prefix / max_attn_len /
+        # full_attn_size, no length sorting, silu heads only, Dq=Dv=128. Run with
+        # the operator defaults (--target-size 20 --attn-dim 128 --hidden-dim 128)
+        # or pick `default` / `native_mfma_*` for the unconstrained backward.
+        return lambda: tlx_gfx950_hstu_mha(
+            max_seq_len=max_seq_len,
+            alpha=self.alpha,
+            q=q,
+            k=k,
+            v=v,
+            seq_offsets=seq_offsets,
+            attn_scale=None,
+            num_targets=num_targets,
+            invalid_attn_mask_type=self.attn_mask_type,
+            max_attn_len=self.max_attn_len,
+            contextual_seq_len=self.contextual_seq_len,
+            full_attn_size=0,
+            sort_by_length=False,
+            num_softmax_heads=0,
+            bwd_variant=bwd_variant,
+        )
+
+    @register_benchmark(
+        enabled=HAS_HSTU_TLX_GFX950 and is_hip_mi350(),
+        tags=["tlx", "amd", "gfx950"],
+    )
+    def hstu_tlx_gfx950(self, q, k, v, seq_offsets, num_targets, max_seq_len, sparsity):
+        # Backward schedule from --tlx-gfx950-bwd-variant; defaults to the
+        # BN128 resident-K mask-peel variant, which is the fastest at N >= 2048.
+        return self._hstu_tlx_gfx950(
+            self.tlx_gfx950_bwd_variant,
+            q,
+            k,
+            v,
+            seq_offsets,
+            num_targets,
+            max_seq_len,
+        )
+
+    @register_benchmark(
+        enabled=HAS_HSTU_TLX_GFX950 and is_hip_mi350(),
+        tags=["tlx", "amd", "gfx950"],
+    )
+    def hstu_tlx_gfx950_bn256(
+        self, q, k, v, seq_offsets, num_targets, max_seq_len, sparsity
+    ):
+        # BN256 direct-load FA schedule: still the best backward at N == 1024.
+        return self._hstu_tlx_gfx950(
+            "kv_parallel_fa_schedule_bn256_direct_qdo_g2l",
+            q,
+            k,
+            v,
+            seq_offsets,
+            num_targets,
+            max_seq_len,
+        )
+
+    @register_benchmark(
+        enabled=HAS_HSTU_TLX_GFX950 and is_hip_mi350(),
+        tags=["tlx", "amd", "gfx950"],
+    )
+    def hstu_tlx_gfx950_ordinary_dot(
+        self, q, k, v, seq_offsets, num_targets, max_seq_len, sparsity
+    ):
+        # Ordinary-dot dQ backward with the kernel's own kv_parallel heuristic.
+        # The one variant with no FA-schedule preconditions, so it is the
+        # backend to use for masked / contextual / softmax-head shapes.
+        return self._hstu_tlx_gfx950(
+            "default", q, k, v, seq_offsets, num_targets, max_seq_len
         )
 
     def _hstu_self_autows(
