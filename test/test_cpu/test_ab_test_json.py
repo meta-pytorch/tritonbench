@@ -1,6 +1,7 @@
 """Tests for the A/B mode ``--output-json`` report."""
 
 import json
+import os
 import random
 import sys
 import tempfile
@@ -9,6 +10,7 @@ from collections import OrderedDict
 from pathlib import Path
 from unittest.mock import patch
 
+import tritonbench.utils.run_utils as run_utils
 from tritonbench.components.do_bench.run import Latency
 from tritonbench.utils.ab_test import (
     AB_COMPARISON_KEY,
@@ -223,6 +225,33 @@ class AbTestJsonTest(unittest.TestCase):
             with open(path) as f:
                 loaded = json.load(f, parse_constant=_reject)
         self.assertEqual(loaded, report)
+
+
+class AbPowerDirTest(unittest.TestCase):
+    """The per-side, per-repeat directories a --power-chart A/B run writes to."""
+
+    def test_layout_is_side_then_repeat(self):
+        with tempfile.TemporaryDirectory() as root:
+            dirs = run_utils._ab_power_dirs(root, None, 1, has_side_b=True)
+            self.assertEqual(
+                dirs,
+                {
+                    "a": os.path.join(root, "side_a_repeat_1"),
+                    "b": os.path.join(root, "side_b_repeat_1"),
+                },
+            )
+            # The directories exist: the power manager and the per-op json dump
+            # both write into them without creating them first.
+            for path in dirs.values():
+                self.assertTrue(Path(path).is_dir())
+
+    def test_single_side_and_multi_mode(self):
+        with tempfile.TemporaryDirectory() as root:
+            dirs = run_utils._ab_power_dirs(root, "bwd", 7, has_side_b=False)
+            self.assertEqual(dirs, {"a": os.path.join(root, "bwd", "side_a_repeat_7")})
+
+    def test_no_power_chart_leaves_output_dir_alone(self):
+        self.assertIsNone(run_utils._ab_power_dirs(None, None, 1, has_side_b=True))
 
 
 if __name__ == "__main__":
