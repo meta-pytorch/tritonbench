@@ -232,6 +232,33 @@ def _split_params_by_comma(params: Optional[str]) -> List[str]:
     return [x.strip() for x in params.split(",")] if "," in params else [params]
 
 
+def _resolve_backend_selection(
+    op_name: str, only: List[str], tags: List[str]
+) -> List[str]:
+    """Expand --tags into backend names and union them with --only.
+
+    A backend matches if it carries any of the requested tags. Registration is
+    independent of the runtime device, so this deliberately returns backends
+    that are disabled here (e.g. an AMD-only backend on an NVIDIA host); the
+    caller's enabled-check drops them with a warning.
+    """
+    if not tags:
+        return only
+    backends = REGISTERED_BENCHMARKS.get(op_name, {})
+    tagged = [
+        name
+        for name, backend in backends.items()
+        if backend.tags and any(t in backend.tags for t in tags)
+    ]
+    if not tagged:
+        logger.warning(
+            f"No backend of operator {op_name} matches tag(s) {','.join(tags)}. "
+            f"Available tags: {sorted({t for b in backends.values() for t in (b.tags or [])})}"
+        )
+    # dict.fromkeys preserves order and removes duplicates across the two sources
+    return list(dict.fromkeys(only + tagged))
+
+
 def _find_op_name_from_module_path(module_path: str) -> str:
     PATH_PREFIX = "tritonbench.operators."
     # We have a separate operator loader for aten operator benchmark.
@@ -889,7 +916,11 @@ class BenchmarkOperator(metaclass=PostInitProcessor):
             BASELINE_BENCHMARKS[self.name] = _split_params_by_comma(
                 self.tb_args.baseline
             )
-        self._only = _split_params_by_comma(self.tb_args.only)
+        self._only = _resolve_backend_selection(
+            self.name,
+            _split_params_by_comma(self.tb_args.only),
+            _split_params_by_comma(getattr(self.tb_args, "tags", None)),
+        )
         self._skip = _split_params_by_comma(self.tb_args.skip)
         self._force = self.tb_args.force
         self._only_match_mode = self.tb_args.only_match_mode
@@ -2501,7 +2532,13 @@ class BenchmarkOperator(metaclass=PostInitProcessor):
         op_task_args.extend(copy.deepcopy(sys.argv))
         op_task_args = remove_cmd_parameter(op_task_args, "--op")
         op_task_args = add_cmd_parameter(op_task_args, "--op", self.name)
-        for override_option in ["--only", "--input-id", "--num-inputs", "--metrics"]:
+        for override_option in [
+            "--only",
+            "--tags",
+            "--input-id",
+            "--num-inputs",
+            "--metrics",
+        ]:
             op_task_args = remove_cmd_parameter(op_task_args, override_option)
         op_task_args.extend(
             [
@@ -2693,7 +2730,13 @@ class BenchmarkOperator(metaclass=PostInitProcessor):
         from tritonbench.operators.op_task import OpTask
 
         op_task_args = copy.deepcopy(self._raw_extra_args)
-        for override_option in ["--only", "--input-id", "--num-inputs", "--metrics"]:
+        for override_option in [
+            "--only",
+            "--tags",
+            "--input-id",
+            "--num-inputs",
+            "--metrics",
+        ]:
             op_task_args = remove_cmd_parameter(op_task_args, override_option)
         op_task_args.extend(
             [

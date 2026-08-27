@@ -21,7 +21,13 @@ if False:
         blackwell_matmul_tma_persistent,
         blackwell_matmul_tma_persistent_splitk,
     )
-from tritonbench.utils.triton_utils import has_tlx, has_torch_tlx
+from tritonbench.utils.triton_utils import (
+    has_tlx,
+    has_torch_tlx,
+    TORCH_TLX_TAG,
+    TORCH_TLX_TAGS,
+    torch_tlx_inductor_config,
+)
 
 if has_tlx():
     from triton.language.extra.tlx.tutorials.blackwell_gemm_2cta import (
@@ -404,7 +410,7 @@ class Operator(BenchmarkOperator):
         else:
             return lambda: hstu_triton_matmul_kernel(a, b)
 
-    @register_benchmark()
+    @register_benchmark(tags=["pt2", TORCH_TLX_TAG])
     def pt2_triton_matmul(self, a, b, bias) -> Callable:
         torch._dynamo.reset()
         inductor_config_patch = {
@@ -427,23 +433,16 @@ class Operator(BenchmarkOperator):
 
         return lambda: compiled(a, b)
 
-    @register_benchmark(enabled=IS_BLACKWELL and has_tlx() and has_torch_tlx())
+    @register_benchmark(
+        enabled=IS_BLACKWELL and has_tlx() and has_torch_tlx(),
+        tags=TORCH_TLX_TAGS + ["nvidia", "b200"],
+    )
     def torch_tlx_mm(self, a, b, bias) -> Callable:
-        # torch_tlx_<op> convention: PT2 (torch.compile max-autotune, TRITON
-        # backend) with TLX "allow" mode, so TLX templates compete against the
-        # standard Triton templates during autotuning. Identical to the
-        # pt2_triton_matmul baseline except for triton.tlx_mode, giving a clean
-        # PT2-vs-PT2+TLX comparison. force_disable_caches forces a real recompile
-        # so the TLX candidates aren't served from the baseline's autotune cache.
         torch._dynamo.reset()
-        inductor_config_patch = {
-            "max_autotune": True,
-            "max_autotune_gemm_backends": "TRITON",
-            "autotune_fallback_to_aten": False,
-            "autotune_num_choices_displayed": self.inductor_autotune_num_choices_displayed,
-            "force_disable_caches": True,
-            "triton.tlx_mode": "allow",
-        }
+        inductor_config_patch = torch_tlx_inductor_config(
+            max_autotune_gemm_backends="TRITON",
+            autotune_num_choices_displayed=self.inductor_autotune_num_choices_displayed,
+        )
         if self.template_filter_regex is not None:
             inductor_config_patch["test_configs.autotune_choice_name_regex"] = (
                 self.template_filter_regex
