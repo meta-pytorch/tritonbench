@@ -127,10 +127,12 @@ from tritonbench.utils.triton_utils import has_new_tma, has_tlx, has_warp_spec
 if has_tlx():
     try:
         from triton.language.extra.tlx.tutorials.amd_fa_cluster import (
+            _validate_cluster_inputs as _validate_tlx_amd_fa_cluster_inputs,
             attention as _tlx_amd_fa_cluster,
         )
     except (ImportError, ModuleNotFoundError):
         _tlx_amd_fa_cluster = None
+        _validate_tlx_amd_fa_cluster_inputs = None
 
     try:
         from triton.language.extra.tlx.tutorials.amd_fa_pipelined import (
@@ -140,6 +142,7 @@ if has_tlx():
         _tlx_amd_fa_pipelined = None
 else:
     _tlx_amd_fa_cluster = None
+    _validate_tlx_amd_fa_cluster_inputs = None
     _tlx_amd_fa_pipelined = None
 
 if has_tlx() and is_hip_mi350():
@@ -289,44 +292,6 @@ def preproc_noop(*args):
     return args
 
 
-def _validate_tlx_amd_fa_cluster_inputs(q, k, v):
-    if q.ndim != 4 or k.ndim != 4 or v.ndim != 4:
-        raise ValueError(
-            "AMD TLX Flash Attention cluster requires rank-4 Q, K, and V tensors"
-        )
-    if q.shape != k.shape or q.shape != v.shape:
-        raise ValueError(
-            "AMD TLX Flash Attention cluster requires Q, K, and V to have the same shape"
-        )
-    if q.dtype != k.dtype or q.dtype != v.dtype:
-        raise ValueError(
-            "AMD TLX Flash Attention cluster requires Q, K, and V to have matching dtypes"
-        )
-    if any(tensor.dtype not in (torch.float16, torch.bfloat16) for tensor in (q, k, v)):
-        raise ValueError(
-            "AMD TLX Flash Attention cluster requires float16 or bfloat16 inputs"
-        )
-    if q.device != k.device or q.device != v.device or not q.is_cuda:
-        raise ValueError(
-            "AMD TLX Flash Attention cluster requires Q, K, and V on the same GPU"
-        )
-    if any(size <= 0 for size in q.shape):
-        raise ValueError(
-            "AMD TLX Flash Attention cluster dimensions must be positive, "
-            f"got {tuple(q.shape)}"
-        )
-    if q.shape[-1] not in (64, 128):
-        raise ValueError(
-            "AMD TLX Flash Attention cluster requires head dimension 64 or 128"
-        )
-    for name, tensor in (("Q", q), ("K", k), ("V", v)):
-        if tensor.stride(2) <= 0 or tensor.stride(3) < 0:
-            raise ValueError(
-                "AMD TLX Flash Attention cluster requires nonnegative "
-                f"{name} feature and positive sequence strides"
-            )
-
-
 class Operator(BenchmarkOperator):
     DEFAULT_PRECISION = "bf16"
 
@@ -471,17 +436,23 @@ class Operator(BenchmarkOperator):
         return preproc_noop, fn
 
     @register_benchmark(
-        enabled=is_hip_mi350() and _tlx_amd_fa_cluster is not None,
+        enabled=(
+            is_hip_mi350()
+            and _tlx_amd_fa_cluster is not None
+            and _validate_tlx_amd_fa_cluster_inputs is not None
+        ),
         fwd_only=True,
         tags=["tlx", "amd", "gfx950"],
     )
     @multi_input_wrapper
     def tlx_amd_fa_cluster(self, *args) -> Tuple[Callable, Callable]:
         tlx_attention = _tlx_amd_fa_cluster
+        validate_inputs = _validate_tlx_amd_fa_cluster_inputs
         assert tlx_attention is not None
+        assert validate_inputs is not None
 
         def preproc(q, k, v):
-            _validate_tlx_amd_fa_cluster_inputs(q, k, v)
+            validate_inputs(q, k, v)
             return q, k, v
 
         def fn(q, k, v):
