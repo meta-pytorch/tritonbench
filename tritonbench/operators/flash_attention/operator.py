@@ -126,12 +126,23 @@ from tritonbench.utils.triton_utils import has_new_tma, has_tlx, has_warp_spec
 
 if has_tlx():
     try:
+        from triton.language.extra.tlx.tutorials.amd_fa_cluster import (
+            _validate_cluster_inputs as _validate_tlx_amd_fa_cluster_inputs,
+            attention as _tlx_amd_fa_cluster,
+        )
+    except (ImportError, ModuleNotFoundError):
+        _tlx_amd_fa_cluster = None
+        _validate_tlx_amd_fa_cluster_inputs = None
+
+    try:
         from triton.language.extra.tlx.tutorials.amd_fa_pipelined import (
             attention as _tlx_amd_fa_pipelined,
         )
     except (ImportError, ModuleNotFoundError):
         _tlx_amd_fa_pipelined = None
 else:
+    _tlx_amd_fa_cluster = None
+    _validate_tlx_amd_fa_cluster_inputs = None
     _tlx_amd_fa_pipelined = None
 
 if has_tlx() and is_hip_mi350():
@@ -423,6 +434,37 @@ class Operator(BenchmarkOperator):
             )
 
         return preproc_noop, fn
+
+    @register_benchmark(
+        enabled=(
+            is_hip_mi350()
+            and _tlx_amd_fa_cluster is not None
+            and _validate_tlx_amd_fa_cluster_inputs is not None
+        ),
+        fwd_only=True,
+        tags=["tlx", "amd", "gfx950"],
+    )
+    @multi_input_wrapper
+    def tlx_amd_fa_cluster(self, *args) -> Tuple[Callable, Callable]:
+        tlx_attention = _tlx_amd_fa_cluster
+        validate_inputs = _validate_tlx_amd_fa_cluster_inputs
+        assert tlx_attention is not None
+        assert validate_inputs is not None
+
+        def preproc(q, k, v):
+            validate_inputs(q, k, v)
+            return q, k, v
+
+        def fn(q, k, v):
+            return tlx_attention(
+                q,
+                k,
+                v,
+                self.sm_scale,
+                self.causal,
+            )
+
+        return preproc, fn
 
     @register_benchmark(enabled=HAS_CUDA_124 and has_new_tma())
     @multi_input_wrapper
