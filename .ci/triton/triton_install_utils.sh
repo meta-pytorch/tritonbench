@@ -35,7 +35,8 @@ clone_triton() {
     TRITON_INSTALL_DIRNAME=$(basename "${TRITON_INSTALL_DIR}")
     TRITON_INSTALL_BASEDIR=$(dirname "${TRITON_INSTALL_DIR}")
     cd "${TRITON_INSTALL_BASEDIR}"
-    git clone "https://github.com/${REPO}.git" "${TRITON_INSTALL_DIRNAME}"
+    # clone submodules (e.g., third_party/sleef required by the cpu backend)
+    git clone --recurse-submodules "https://github.com/${REPO}.git" "${TRITON_INSTALL_DIRNAME}"
 }
 
 update_triton() {
@@ -57,6 +58,8 @@ checkout_triton() {
         # truncate the branch to the earliest commit of the current day
         git checkout $(git rev-list --reverse --since=midnight HEAD | head -n 1)
     fi
+    # the checked-out commit may point to different submodule revisions
+    git submodule update --init --recursive
     cd -
 }
 
