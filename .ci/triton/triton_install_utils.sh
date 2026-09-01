@@ -63,6 +63,20 @@ checkout_triton() {
     cd -
 }
 
+# find_package(<pkg> CONFIG) probes many layouts under every prefix:
+#   <prefix>/, <prefix>/cmake/, <prefix>/<name>*/, <prefix>/<name>*/cmake/,
+#   <prefix>/(lib|lib64|share)/cmake/<name>*/, <prefix>/(lib|lib64|share)/<name>*/ ...
+# so a fixed pair of paths is not enough to tell whether a prefix ships an LLVM.
+# rocm-sdk for example puts CMAKE_PREFIX_PATH at .../_rocm_sdk_devel/lib/cmake, one
+# level below the install root, and its config lands in <prefix>/llvm/.
+prefix_provides_llvm() {
+    CMAKE_SEARCH_PREFIX=$1
+    [ -d "${CMAKE_SEARCH_PREFIX}" ] || return 1
+    [ -n "$(find "${CMAKE_SEARCH_PREFIX}" -maxdepth 5 \
+            \( -name 'LLVMConfig.cmake' -o -name 'MLIRConfig.cmake' -o -name 'LLDConfig.cmake' \) \
+            -print -quit 2>/dev/null)" ]
+}
+
 # Some base images (e.g. rocm/pytorch) export LLVM_DIR or put their own LLVM on
 # CMAKE_PREFIX_PATH. Both outrank the HINTS that MLIRConfig.cmake uses to find the
 # prebuilt LLVM Triton downloads, so cmake silently loads the system LLVM instead.
@@ -78,8 +92,7 @@ drop_system_llvm_from_cmake_env() {
     KEPT_PREFIX_PATH=""
     IFS=':' read -r -a CMAKE_PREFIXES <<< "${CMAKE_PREFIX_PATH}"
     for CMAKE_PREFIX in "${CMAKE_PREFIXES[@]}"; do
-        if [ -e "${CMAKE_PREFIX}/lib/cmake/llvm/LLVMConfig.cmake" ] || \
-           [ -e "${CMAKE_PREFIX}/LLVMConfig.cmake" ]; then
+        if prefix_provides_llvm "${CMAKE_PREFIX}"; then
             echo "Dropping ${CMAKE_PREFIX} from CMAKE_PREFIX_PATH: it would shadow Triton's LLVM"
             continue
         fi
