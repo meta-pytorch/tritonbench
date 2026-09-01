@@ -3,7 +3,7 @@ import os
 import torch
 import triton
 import triton.language as tl
-from tritonbench.utils.env_utils import is_tile_enabled
+from tritonbench.utils.env_utils import get_num_sms, is_tile_enabled
 
 from .triton_matmul_configs import get_full_amd_config_space, get_tileir_configs
 
@@ -190,7 +190,7 @@ def matmul_persistent(a, b):
     # Check constraints.
     assert a.shape[1] == b.shape[0], "Incompatible dimensions"
     assert a.dtype == b.dtype, "Incompatible dtypes"
-    NUM_SMS = torch.cuda.get_device_properties("cuda").multi_processor_count
+    NUM_SMS = get_num_sms(a.device)
     M, K = a.shape
     K, N = b.shape
     dtype = a.dtype

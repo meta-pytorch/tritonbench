@@ -378,7 +378,7 @@ class Operator(BenchmarkOperator):
         else:
             return lambda: torch.matmul(a, b)
 
-    @register_benchmark()
+    @register_benchmark(enabled=is_cuda())
     def aten_tunableop_matmul(self, a, b, bias) -> Callable:
         is_enabled = torch.cuda.tunable.is_enabled()
 

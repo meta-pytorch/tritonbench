@@ -8,6 +8,7 @@ import triton
 # @manual=//triton:triton
 import triton.language as tl
 from triton.tools.tensor_descriptor import TensorDescriptor
+from tritonbench.utils.env_utils import get_num_sms
 
 
 @triton.jit
@@ -451,7 +452,7 @@ def triton_autows_gdpa_persistent(
 
     n_tile_num = triton.cdiv(max_seq_len_q, block_m)
     n_kv_blocks = triton.cdiv(max_seq_len_kv, block_n)
-    num_sms = torch.cuda.get_device_properties(query.device).multi_processor_count
+    num_sms = get_num_sms(query.device)
 
     def grid(_meta):
         total_tiles = batch * heads * n_tile_num

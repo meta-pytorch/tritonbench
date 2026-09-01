@@ -7,6 +7,7 @@ from typing import Any, List, Optional
 
 import torch
 import triton  # @manual=//triton:triton
+from tritonbench.utils.env_utils import get_current_device, get_num_sms as _get_num_sms
 
 
 def generate_sparse_seq_len(
@@ -57,7 +58,7 @@ def generate_jagged_data(
     dff: int | None = None,
 ) -> dict[str, Any]:
     if device is None:
-        device = torch.device("cuda:0")
+        device = torch.device(get_current_device())
 
     if num_objects is None:
         num_objects = generate_sparse_seq_len(
@@ -135,7 +136,7 @@ def generate_jagged_data(
             B * dff,
             H,
             D,
-            device="cuda",
+            device=device,
             dtype=dtype,
             requires_grad=True,
         ).contiguous()
@@ -143,7 +144,7 @@ def generate_jagged_data(
             B * dff,
             H,
             D,
-            device="cuda",
+            device=device,
             dtype=dtype,
             requires_grad=True,
         ).contiguous()
@@ -151,7 +152,7 @@ def generate_jagged_data(
             torch.arange(
                 B + 1,
                 dtype=torch.int,
-                device="cuda",
+                device=device,
             )
             * dff
         )
@@ -261,5 +262,5 @@ def get_autotune_kernel(kernel, autotune_configs, **kwargs):
 
 @lru_cache
 def get_num_sms() -> Optional[int]:
-    if torch.cuda.is_available():
-        return torch.cuda.get_device_properties("cuda").multi_processor_count
+    if torch.accelerator.is_available():
+        return _get_num_sms()

@@ -152,7 +152,7 @@ You will specifically learn about:
 import torch
 import triton
 import triton.language as tl
-from tritonbench.utils.env_utils import is_cuda
+from tritonbench.utils.env_utils import is_cuda, is_xpu
 
 
 def get_cuda_autotune_config():
@@ -383,6 +383,8 @@ def get_hip_autotune_config():
 
 def get_autotune_config():
     if is_cuda():
+        return get_cuda_autotune_config()
+    elif is_xpu():
         return get_cuda_autotune_config()
     else:
         return get_hip_autotune_config()

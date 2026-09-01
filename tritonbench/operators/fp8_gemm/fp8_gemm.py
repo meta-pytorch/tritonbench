@@ -111,6 +111,8 @@ def get_fp8_dtype():
         if torch.cuda.get_device_capability() < (9, 5):
             return torch.float8_e4m3fnuz
         return torch.float8_e4m3fn
+    elif torch.xpu._is_compiled():
+        return torch.float8_e4m3fn
     return torch.float8_e4m3fnuz
 
 

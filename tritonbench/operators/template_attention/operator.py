@@ -55,19 +55,19 @@ class Operator(BenchmarkOperator):
             arg0_1 = rand_strided(
                 (16, 16, 4096, 64),
                 (4194304, 262144, 64, 1),
-                device="cuda:0",
+                device=self.device,
                 dtype=torch.float16,
             )
             arg1_1 = rand_strided(
                 (16, 16, 4096, 64),
                 (4194304, 262144, 64, 1),
-                device="cuda:0",
+                device=self.device,
                 dtype=torch.float16,
             )
             arg2_1 = rand_strided(
                 (16, 16, 4096, 64),
                 (4194304, 262144, 64, 1),
-                device="cuda:0",
+                device=self.device,
                 dtype=torch.float16,
             )
             yield arg0_1, arg1_1, arg2_1

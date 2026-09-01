@@ -3,6 +3,7 @@ import math
 import torch
 import triton
 import triton.language as tl
+from tritonbench.utils.env_utils import get_num_sms
 
 
 @triton.jit
@@ -139,8 +140,8 @@ class LayerNorm(torch.autograd.Function):
         # reshape input data into 2D tensor
         x_arg = x.reshape(-1, x.shape[-1])
         M, N = x_arg.shape
-        mean = torch.empty((M,), dtype=torch.float32, device="cuda")
-        rstd = torch.empty((M,), dtype=torch.float32, device="cuda")
+        mean = torch.empty((M,), dtype=torch.float32, device=x.device)
+        rstd = torch.empty((M,), dtype=torch.float32, device=x.device)
         # Less than 64KB per feature: enqueue fused kernel
         MAX_FUSED_SIZE = 65536 // x.element_size()
         BLOCK_SIZE = min(MAX_FUSED_SIZE, triton.next_power_of_2(N))
@@ -178,7 +179,7 @@ class LayerNorm(torch.autograd.Function):
         dx = torch.empty_like(dy)
 
         M, N = x_arg.shape
-        NUM_SMS = torch.cuda.get_device_properties("cuda").multi_processor_count
+        NUM_SMS = get_num_sms(x.device)
         BLOCK_SIZE_M = min(2048, triton.next_power_of_2(M // (8 * NUM_SMS)))
         PARTIAL_SIZE = math.ceil(M / BLOCK_SIZE_M)
 

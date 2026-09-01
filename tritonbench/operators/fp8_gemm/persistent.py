@@ -6,7 +6,7 @@ import triton
 import triton.language as tl
 from torch._inductor.kernel.mm import ScalingType
 from triton import knobs
-from tritonbench.utils.env_utils import is_cuda
+from tritonbench.utils.env_utils import get_num_sms, is_cuda
 from tritonbench.utils.triton_utils import has_experimental_descriptor
 
 if has_experimental_descriptor():
@@ -169,7 +169,7 @@ def matmul_persistent(a, b):
     # Check constraints.
     assert a.shape[1] == b.shape[0], "Incompatible dimensions"
     assert a.dtype == b.dtype, "Incompatible dtypes"
-    NUM_SMS = torch.cuda.get_device_properties("cuda").multi_processor_count
+    NUM_SMS = get_num_sms(a.device)
     M, K = a.shape
     K, N = b.shape
     dtype = a.dtype
@@ -386,7 +386,7 @@ def matmul_tma_persistent(a, b, c, desc_a, desc_b, desc_c):
     N, K = b.shape
     dtype = a.dtype
 
-    NUM_SMS = torch.cuda.get_device_properties("cuda").multi_processor_count
+    NUM_SMS = get_num_sms(a.device)
 
     grid = lambda META: (
         min(
@@ -434,9 +434,7 @@ def blackwell_persistent_tma(a, b, scale_a_ptr, scale_b_ptr, acc_dtype, scaling_
     N, K = b.shape
     shape_dtype = a.dtype  # low-precision dtype, e.g. fp8
 
-    NUM_SMS = torch.cuda.get_device_properties(
-        torch.cuda.current_device()
-    ).multi_processor_count
+    NUM_SMS = get_num_sms(a.device)
 
     c = torch.zeros((M, N), device=a.device, dtype=acc_dtype)
 

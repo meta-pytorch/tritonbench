@@ -113,7 +113,7 @@ def is_hip() -> bool:
 
 
 def is_xpu() -> bool:
-    return torch.version.xpu is not None
+    return torch.xpu._is_compiled()
 
 
 def get_current_device() -> str:

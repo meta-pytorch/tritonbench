@@ -33,6 +33,7 @@ import torch
 import triton
 import triton.language as tl
 from triton import knobs
+from tritonbench.utils.env_utils import get_current_device, get_num_sms
 
 try:
     # @manual=//triton:triton
@@ -48,7 +49,7 @@ def is_cuda():
 
 
 def num_sms():
-    return torch.cuda.get_device_properties("cuda").multi_processor_count
+    return get_num_sms()
 
 
 def is_hip_async_copy_enabled():
@@ -493,7 +494,7 @@ def tlx_group_gemm_fn(
 ):
     # TMA descriptors require a global memory allocation
     def alloc_fn(size: int, alignment: int, stream: Optional[int]):
-        return torch.empty(size, device="cuda", dtype=torch.int8)
+        return torch.empty(size, device=get_current_device(), dtype=torch.int8)
 
     triton.set_allocator(alloc_fn)
     grid = lambda META: (META["NUM_SMS"],)
