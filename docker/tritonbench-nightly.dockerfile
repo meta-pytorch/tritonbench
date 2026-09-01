@@ -34,7 +34,9 @@ RUN git clone --recurse-submodules -b "${TRITONBENCH_BRANCH}" --single-branch \
     https://github.com/meta-pytorch/tritonbench "${WORKSPACE_DIR}/tritonbench"
 
 # Install and setup env
-RUN cd ${WORKSPACE_DIR}/tritonbench && bash ./.ci/tritonbench/setup-env.sh --cuda --triton-main --meta-triton --test-nvidia-driver
+# cleanup-build.sh must run in this layer, otherwise the downloads are not reclaimed
+RUN cd ${WORKSPACE_DIR}/tritonbench && bash ./.ci/tritonbench/setup-env.sh --cuda --triton-main --meta-triton --test-nvidia-driver && \
+    bash ./.ci/tritonbench/cleanup-build.sh
 
 # Check the installed version of nightly if needed
 RUN cd ${WORKSPACE_DIR}/tritonbench && \
