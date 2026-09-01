@@ -35,7 +35,8 @@ clone_triton() {
     TRITON_INSTALL_DIRNAME=$(basename "${TRITON_INSTALL_DIR}")
     TRITON_INSTALL_BASEDIR=$(dirname "${TRITON_INSTALL_DIR}")
     cd "${TRITON_INSTALL_BASEDIR}"
-    git clone "https://github.com/${REPO}.git" "${TRITON_INSTALL_DIRNAME}"
+    # clone submodules (e.g., third_party/sleef required by the cpu backend)
+    git clone --recurse-submodules "https://github.com/${REPO}.git" "${TRITON_INSTALL_DIRNAME}"
 }
 
 update_triton() {
@@ -57,12 +58,57 @@ checkout_triton() {
         # truncate the branch to the earliest commit of the current day
         git checkout $(git rev-list --reverse --since=midnight HEAD | head -n 1)
     fi
+    # the checked-out commit may point to different submodule revisions
+    git submodule update --init --recursive
     cd -
+}
+
+# find_package(<pkg> CONFIG) probes many layouts under every prefix:
+#   <prefix>/, <prefix>/cmake/, <prefix>/<name>*/, <prefix>/<name>*/cmake/,
+#   <prefix>/(lib|lib64|share)/cmake/<name>*/, <prefix>/(lib|lib64|share)/<name>*/ ...
+# so a fixed pair of paths is not enough to tell whether a prefix ships an LLVM.
+# rocm-sdk for example puts CMAKE_PREFIX_PATH at .../_rocm_sdk_devel/lib/cmake, one
+# level below the install root, and its config lands in <prefix>/llvm/.
+prefix_provides_llvm() {
+    CMAKE_SEARCH_PREFIX=$1
+    [ -d "${CMAKE_SEARCH_PREFIX}" ] || return 1
+    [ -n "$(find "${CMAKE_SEARCH_PREFIX}" -maxdepth 5 \
+            \( -name 'LLVMConfig.cmake' -o -name 'MLIRConfig.cmake' -o -name 'LLDConfig.cmake' \) \
+            -print -quit 2>/dev/null)" ]
+}
+
+# Some base images (e.g. rocm/pytorch) export LLVM_DIR or put their own LLVM on
+# CMAKE_PREFIX_PATH. Both outrank the HINTS that MLIRConfig.cmake uses to find the
+# prebuilt LLVM Triton downloads, so cmake silently loads the system LLVM instead.
+# When that LLVM is built without the NVPTX target, find_package(MLIR) then fails with
+# "The following imported targets are referenced, but are missing: LLVMNVPTXCodeGen
+# LLVMNVPTXDesc LLVMNVPTXInfo".
+drop_system_llvm_from_cmake_env() {
+    unset LLVM_DIR
+    unset LLVM_ROOT
+    if [ -z "${CMAKE_PREFIX_PATH:-}" ]; then
+        return 0
+    fi
+    KEPT_PREFIX_PATH=""
+    IFS=':' read -r -a CMAKE_PREFIXES <<< "${CMAKE_PREFIX_PATH}"
+    for CMAKE_PREFIX in "${CMAKE_PREFIXES[@]}"; do
+        if prefix_provides_llvm "${CMAKE_PREFIX}"; then
+            echo "Dropping ${CMAKE_PREFIX} from CMAKE_PREFIX_PATH: it would shadow Triton's LLVM"
+            continue
+        fi
+        KEPT_PREFIX_PATH="${KEPT_PREFIX_PATH:+${KEPT_PREFIX_PATH}:}${CMAKE_PREFIX}"
+    done
+    if [ -z "${KEPT_PREFIX_PATH}" ]; then
+        unset CMAKE_PREFIX_PATH
+    else
+        export CMAKE_PREFIX_PATH="${KEPT_PREFIX_PATH}"
+    fi
 }
 
 install_triton() {
     TRITON_INSTALL_DIR=$1
     cd "${TRITON_INSTALL_DIR}"
+    drop_system_llvm_from_cmake_env
     # install main triton
     if [ -n "${UV_VENV_DIR:-}" ]; then
         uv pip install ninja cmake wheel pybind11; # build-time dependencies

@@ -24,7 +24,9 @@ RUN git clone --recurse-submodules -b "${TRITONBENCH_BRANCH}" --single-branch \
 # AMD will segfault on MI350 due to an LLVM bug: [llvm/llvm-project#193499](https://github.com/llvm/llvm-project/pull/193499)
 # commit 90cd5e2abb74c on llvm-head branch fixes the segfault
 # The bump was merged in https://github.com/triton-lang/triton/pull/10523
-RUN cd /workspace/tritonbench && bash ./.ci/tritonbench/setup-env.sh --hip --triton-main --meta-triton
+# cleanup-build.sh must run in this layer, otherwise the downloads are not reclaimed
+RUN cd /workspace/tritonbench && bash ./.ci/tritonbench/setup-env.sh --hip --triton-main --meta-triton && \
+    bash ./.ci/tritonbench/cleanup-build.sh
 
 # Output setup script for inspection
 RUN cat "${SETUP_SCRIPT}"
