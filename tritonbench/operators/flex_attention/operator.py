@@ -81,13 +81,6 @@ MOD_TYPES = [
 TANH_SOFTCAP = 20
 
 
-def _accel_device() -> str:
-    """Current accelerator device string ("cuda", "xpu", ...), defaulting to
-    "cuda". Used in place of hardcoded "cuda" so this operator's input/mask
-    construction runs on non-CUDA accelerators (e.g. Intel XPU)."""
-    return get_current_device()
-
-
 class FullShape(NamedTuple):
     B: int
     Hq: int
@@ -513,7 +506,7 @@ class Operator(BenchmarkOperator):
 
         if mod_type == "alibi":
             """
-            h = torch.arange(Hq, dtype=torch.float32, device=_accel_device())
+            h = torch.arange(Hq, dtype=torch.float32, device=get_current_device())
             alibi_slopes = torch.exp2(-((h + 1) * 8.0 / Hq))
             FA_kwargs["alibi_slopes"] = alibi_slopes
 
@@ -766,7 +759,9 @@ class Operator(BenchmarkOperator):
         if attn_type == "document_mask":
             random.seed(0)
             lengths = generate_random_lengths(N * B, B)
-            mask_mod_kwargs = dict(offsets=length_to_offsets(lengths, _accel_device()))
+            mask_mod_kwargs = dict(
+                offsets=length_to_offsets(lengths, get_current_device())
+            )
 
         mask_mod_dict = {
             "noop": None,
@@ -786,7 +781,7 @@ class Operator(BenchmarkOperator):
             mask_mod = mask_mod(**mask_mod_kwargs)
 
         if is_decoding and mask_mod:
-            cached_seq_len = torch.tensor(N // 2).to(_accel_device())
+            cached_seq_len = torch.tensor(N // 2).to(get_current_device())
 
             def decoding_w_cached_seq_len(b, h, m, n):
                 return mask_mod(b, h, m + cached_seq_len, n)
@@ -800,7 +795,7 @@ class Operator(BenchmarkOperator):
         )
         compiled_block_mask = torch.compile(create_block_mask)
         block_mask = (
-            compiled_block_mask(new_mask_mod, *mask_shape, _accel_device())
+            compiled_block_mask(new_mask_mod, *mask_shape, get_current_device())
             if new_mask_mod
             else None
         )
@@ -837,7 +832,7 @@ class Operator(BenchmarkOperator):
         score_mod = function_dict[attn_type]
         is_decoding = M == 1
         if is_decoding and score_mod:
-            offset = torch.tensor(N // 2).to(_accel_device())
+            offset = torch.tensor(N // 2).to(get_current_device())
 
             def score_mod_w_offset(score, b, h, m, n):
                 return score_mod(score, b, h, m + offset, n)
