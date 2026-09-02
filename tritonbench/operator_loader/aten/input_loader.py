@@ -67,16 +67,66 @@ class FuncCallWrapper:
 
 
 def serialize_sparse_tensor(e):
-    if isinstance(e, torch._subclasses.FakeTensor):
-        return FuncCallWrapper("ST", list(e.shape), e.dtype, e.layout, e.is_coalesced())
-    else:
-        return FuncCallWrapper(
-            "ST", list(e.shape), e.dtype, e.layout, e.is_coalesced(), e._nnz()
+    if e.layout != torch.sparse_coo:
+        raise ValueError(f"Unsupported sparse tensor layout: {e.layout}")
+    nnz = None if isinstance(e, torch._subclasses.FakeTensor) else e._nnz()
+    return FuncCallWrapper(
+        "ST",
+        list(e.shape),
+        e.dtype,
+        e.layout,
+        e.is_coalesced(),
+        nnz,
+        sparse_dim=e.sparse_dim(),
+    )
+
+
+def deserialize_sparse_tensor(
+    size, dtype, layout, is_coalesced, nnz=None, sparse_dim=None
+):
+    if layout != torch.sparse_coo:
+        raise ValueError(f"Unsupported sparse tensor layout: {layout}")
+
+    # Existing serialized DLRM inputs predate sparse_dim metadata and contain
+    # hybrid COO gradients with one sparse dimension.
+    if sparse_dim is None:
+        sparse_dim = 1
+    if not 1 <= sparse_dim <= len(size):
+        raise ValueError(
+            f"sparse_dim must be between 1 and {len(size)}, got {sparse_dim}"
         )
 
+    nnz = 0 if nnz is None else nnz
+    sparse_numel = math.prod(size[:sparse_dim])
+    if nnz < 0:
+        raise ValueError(f"nnz must be non-negative, got {nnz}")
+    if nnz > 0 and sparse_numel == 0:
+        raise ValueError(
+            "A sparse tensor with an empty sparse dimension cannot have nnz"
+        )
+    if is_coalesced and nnz > sparse_numel:
+        raise ValueError(
+            f"A coalesced tensor cannot have {nnz} entries in a sparse space "
+            f"of size {sparse_numel}"
+        )
 
-def deserialize_sparse_tensor(size, dtype, layout, is_coalesced, nnz=None):
-    raise NotImplementedError("Sparse Tensor generation is not implemented.")
+    linear_indices = torch.arange(nnz, dtype=torch.int64)
+    indices = []
+    for dim_size in reversed(size[:sparse_dim]):
+        indices.append(linear_indices.remainder(dim_size))
+        linear_indices = torch.div(linear_indices, dim_size, rounding_mode="floor")
+    indices = torch.stack(list(reversed(indices)))
+
+    values = deserialize_tensor([nnz, *size[sparse_dim:]], dtype)
+    out = torch.sparse_coo_tensor(
+        indices,
+        values,
+        size,
+        dtype=dtype,
+        is_coalesced=False,
+        check_invariants=False,
+    )
+    return out.coalesce() if is_coalesced else out
 
 
 def deserialize_tensor(size, dtype, stride=None):
@@ -174,13 +224,13 @@ class OperatorInputLoader:
                 inps = inputs["inputs"]
                 op_inps[inps] += cnt
             self.operator_db[operator] = op_inps
-            if "embedding" in str(operator):
-                raise RuntimeError(
-                    "Embedding inputs not yet implemented, input data cannot be randomized"
-                )
         if self.op_name not in self.operator_db:
             raise RuntimeError(
                 f"Could not find {self.op_name} in {list(input_config.keys())}."
+            )
+        if "embedding" in self.op_name:
+            raise RuntimeError(
+                "Embedding inputs not yet implemented, input data cannot be randomized"
             )
 
     def get_input_iter(
