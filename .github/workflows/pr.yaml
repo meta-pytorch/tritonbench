@@ -19,6 +19,11 @@ jobs:
     uses: ./.github/workflows/_linux-test-mi350.yml
     with:
       conda_env: "triton-main"
+  mi350-meta-triton-tlx-test:
+    uses: ./.github/workflows/_linux-test-mi350.yml
+    with:
+      conda_env: "meta-triton"
+      test_module: "test.test_gpu.test_flash_attention_tlx_regression"
 
 
 
