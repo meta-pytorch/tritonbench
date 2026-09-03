@@ -191,6 +191,9 @@ flash_attention:
     - tilelang
   tk:
     tags: []
+  tlx_fa:
+    tags:
+    - tlx
   triton_tutorial_flash_v2:
     kernels:
     - _attn_fwd_tma_ws_persistent
