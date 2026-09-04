@@ -27,6 +27,8 @@ from tritonbench.utils.env_utils import (
     is_fbcode,
     is_h100,
     is_hip,
+    is_hip_mi300,
+    is_hip_mi350,
     is_meta_triton,
     is_triton_beta,
     is_triton_main,
@@ -79,6 +81,8 @@ ENV_CHECK_MAP = {
         "b200": is_blackwell,
         "cuda": is_cuda,
         "hip": is_hip,
+        "mi300x": is_hip_mi300,
+        "mi350x": is_hip_mi350,
         "xpu": is_xpu,
     },
     "channels": {
@@ -971,6 +975,11 @@ def _run_config_entry(
         override_envs=override_envs,
         capture_output=capture_output,
         benchmark_group_name=benchmark_group_name,
+        **(
+            {"timeout_s": int(benchmark_config["timeout"])}
+            if "timeout" in benchmark_config
+            else {}
+        ),
     )
     return False
 
@@ -1120,8 +1129,12 @@ def run_in_task(
         )
         return 0
     except subprocess.TimeoutExpired:
-        logger.warning(
-            f"[{log_prefix}] Benchmark {benchmark_name} timed out after {timeout_s} seconds."
+        # Logged at ERROR, not WARNING: --simple-output drops the logger to
+        # ERROR above, and a timeout that is silently swallowed looks identical
+        # to a benchmark that produced no results.
+        logger.error(
+            f"[{log_prefix}] Benchmark {benchmark_name} timed out after {timeout_s} "
+            "seconds and produced no results. Raise it with `timeout:` in the run config."
         )
         return 0
     except subprocess.CalledProcessError as e:

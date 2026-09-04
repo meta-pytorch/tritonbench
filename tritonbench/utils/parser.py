@@ -201,6 +201,12 @@ def get_parser(args=None):
         help="Specify one or multiple kernel implementations to run.",
     )
     parser.add_argument(
+        "--tags",
+        default=None,
+        help="Select kernel implementations by tag (comma-separated, OR semantics). "
+        "Tags are declared via @register_benchmark(tags=[...]). Unions with --only.",
+    )
+    parser.add_argument(
         "--skip",
         default=None,
         help="Specify one or multiple kernel implementations to skip.",

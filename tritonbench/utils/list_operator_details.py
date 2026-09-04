@@ -48,6 +48,7 @@ def get_backends_for_operators(operators: List[str]) -> Dict[str, Dict[str, Dict
                 "enabled": backend_config.enabled,
                 "fwd_only": backend_config.fwd_only,
                 "ci": backend_config.ci,
+                "tags": backend_config.tags or [],
             }
 
     return result
@@ -92,10 +93,13 @@ def format_backend_entry(backend_name: str, backend_info: Dict[str, any]) -> str
 
     status_str = f" [{', '.join(status_indicators)}]" if status_indicators else ""
 
+    tags = backend_info.get("tags") or []
+    tags_str = f" tags={{{','.join(tags)}}}" if tags else ""
+
     if label != backend_name:
-        return f"{INDENT2}{backend_name} (label: {label}){status_str}"
+        return f"{INDENT2}{backend_name} (label: {label}){status_str}{tags_str}"
     else:
-        return f"{INDENT2}{backend_name}{status_str}"
+        return f"{INDENT2}{backend_name}{status_str}{tags_str}"
 
 
 def format_metrics_section(

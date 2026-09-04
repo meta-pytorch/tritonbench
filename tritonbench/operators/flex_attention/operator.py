@@ -47,7 +47,13 @@ from tritonbench.utils.triton_op import (
     register_metric,
     register_x_val,
 )
-from tritonbench.utils.triton_utils import has_tlx, has_torch_tlx
+from tritonbench.utils.triton_utils import (
+    has_tlx,
+    has_torch_tlx,
+    TORCH_TLX_TAG,
+    TORCH_TLX_TAGS,
+    torch_tlx_inductor_config,
+)
 
 from .mods import (
     causal_mask,
@@ -360,7 +366,7 @@ class Operator(BenchmarkOperator):
             kernel_options=kernel_options,
         )
 
-    @register_benchmark()
+    @register_benchmark(tags=["pt2", TORCH_TLX_TAG])
     def pt2_triton_flex_attention(
         self,
         q: torch.Tensor,
@@ -376,14 +382,23 @@ class Operator(BenchmarkOperator):
         across ops. Enabled by default so it's the standing comparison for
         `torch_tlx_flex_attention` (no `--force` needed). `compiled` remains the
         provider pinned by ci.yaml / accuracy tests / servicelab (they select it
-        via `--only compiled`), so this alias does not affect those runs."""
-        return self.compiled(q, k, v, score_mod, block_mask, mod_type, kernel_options)
+        via `--only compiled`), so this alias does not affect those runs.
+
+        Unlike `compiled`, the returned callable is warmed up here so that
+        torch.compile happens inside the provider body, matching
+        `torch_tlx_flex_attention`. Without this the baseline reports a ~0s
+        provider time and defers compilation into the measured region, which
+        makes any compile-time comparison against TLX meaningless."""
+        fn = self.compiled(q, k, v, score_mod, block_mask, mod_type, kernel_options)
+        fn()
+        return fn
 
     @register_benchmark(
         enabled=(is_nvidia_blackwell() or is_amd_gfx950())
         and has_tlx()
         and has_torch_tlx(),
         fwd_only=True,
+        tags=TORCH_TLX_TAGS + ["nvidia", "b200", "amd", "gfx950"],
     )
     def torch_tlx_flex_attention(
         self,
@@ -395,26 +410,13 @@ class Operator(BenchmarkOperator):
         mod_type: str,
         kernel_options: dict[str, Any],
     ) -> Optional[Callable]:
-        # torch_tlx_<op> convention: PT2 (torch.compile max-autotune) with TLX
-        # "allow" mode, so the TLX flex-attention template competes against the
-        # standard Triton flex template during autotuning. Identical to the
-        # `compiled` max-autotune baseline except for triton.tlx_mode, giving a
-        # clean PT2-vs-PT2+TLX comparison. force_disable_caches forces a real
-        # recompile so the TLX candidate isn't served from the baseline's
-        # autotune cache. Device-agnostic: gated to archs that ship a TLX flex
-        # template -- Nvidia Blackwell (B200) and AMD MI350x (gfx950) -- and
-        # Inductor picks the matching per-device template during autotuning. The
-        # compile is warmed inside the patch so the TLX candidate is selected
-        # while tlx_mode is active.
+        # Device-agnostic: gated to the archs that ship a TLX flex template --
+        # Nvidia Blackwell (B200) and AMD MI350x (gfx950) -- and Inductor picks
+        # the matching per-device template during autotuning. The compile is
+        # warmed inside the patch so the TLX candidate is selected while
+        # tlx_mode is active.
         torch._dynamo.reset()
-        with inductor_config.patch(
-            {
-                "max_autotune": True,
-                "autotune_fallback_to_aten": False,
-                "force_disable_caches": True,
-                "triton.tlx_mode": "allow",
-            }
-        ):
+        with inductor_config.patch(torch_tlx_inductor_config()):
             compiled_fn = torch.compile(
                 flex_attention, fullgraph=True, dynamic=self.dynamic
             )

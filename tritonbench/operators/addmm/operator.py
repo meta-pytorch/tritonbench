@@ -13,7 +13,13 @@ from tritonbench.utils.env_utils import (
     is_hip_mi350,
 )
 from tritonbench.utils.python_utils import try_import
-from tritonbench.utils.triton_utils import has_tlx, has_torch_tlx
+from tritonbench.utils.triton_utils import (
+    has_tlx,
+    has_torch_tlx,
+    TORCH_TLX_TAG,
+    TORCH_TLX_TAGS,
+    torch_tlx_inductor_config,
+)
 
 if has_tlx():
     try:
@@ -172,7 +178,7 @@ class Operator(BenchmarkOperator):
     def aten_addmm(self, a, mat1, mat2) -> Callable:
         return lambda: torch.addmm(a, mat1, mat2)
 
-    @register_benchmark()
+    @register_benchmark(tags=["pt2", TORCH_TLX_TAG])
     def pt2_triton_matmul(self, a, mat1, mat2) -> Callable:
         torch._dynamo.reset()
         with inductor_config.patch(
@@ -203,23 +209,17 @@ class Operator(BenchmarkOperator):
             return None
         return lambda: _tlx_addmm_gfx950(a, mat1_in, mat2_in)
 
-    @register_benchmark(enabled=is_hip_mi350() and has_tlx() and has_torch_tlx())
+    @register_benchmark(
+        enabled=is_hip_mi350() and has_tlx() and has_torch_tlx(),
+        tags=TORCH_TLX_TAGS + ["amd", "gfx950"],
+    )
     def torch_tlx_addmm(self, a, mat1, mat2) -> Callable:
-        # Force PT2 to select only TLX templates, excluding stock Triton choices.
-        # force_disable_caches prevents a prior allow-mode or stock-Triton choice
-        # from being reused through the autotune cache.
-        # Gated to AMD MI350x (gfx950), where the TLX addmm template exists.
+        # Gated to AMD MI350x (gfx950), where the TLX addmm templates exist.
         mat1_in = mat1 if mat1.is_contiguous() else mat1.contiguous()
         mat2_in = mat2 if mat2.stride(0) == 1 else mat2.T.contiguous().T
         torch._dynamo.reset()
         with inductor_config.patch(
-            {
-                "max_autotune": True,
-                "max_autotune_gemm_backends": "TRITON",
-                "autotune_fallback_to_aten": False,
-                "force_disable_caches": True,
-                "triton.tlx_mode": "force",
-            }
+            torch_tlx_inductor_config(max_autotune_gemm_backends="TRITON")
         ):
             f = lambda a, mat1, mat2: torch.addmm(a, mat1, mat2)
             compiled = torch.compile(f, dynamic=False)
