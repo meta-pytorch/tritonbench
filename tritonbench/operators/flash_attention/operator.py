@@ -51,7 +51,7 @@ from tritonbench.kernels.proton_fused_attention import (
 from tritonbench.kernels.triton_fused_attention import (
     attention_opt as triton_tutorial_FA2_opt,
 )
-from tritonbench.utils.env_utils import IS_BLACKWELL, is_hip, is_hip_mi350
+from tritonbench.utils.env_utils import IS_BLACKWELL, is_hip, is_hip_mi350, IS_HOPPER
 from tritonbench.utils.path_utils import add_ld_library_path
 from tritonbench.utils.python_utils import try_import
 from tritonbench.utils.triton_op import is_fbcode
@@ -135,6 +135,18 @@ if has_tlx():
         _validate_tlx_amd_fa_cluster_inputs = None
 
     try:
+        from triton.language.extra.tlx.tutorials.hopper_fa_ws_pipelined_pingpong import (
+            attention as _tlx_hopper_fa,
+        )
+
+        HAS_TLX_HOPPER_FA = True
+    except (ImportError, ModuleNotFoundError) as error:
+        if IS_HOPPER:
+            logger.warning("Hopper TLX Flash Attention is unavailable: %s", error)
+        HAS_TLX_HOPPER_FA = False
+        _tlx_hopper_fa = None
+
+    try:
         from triton.language.extra.tlx.tutorials.amd_fa_pipelined import (
             attention as _tlx_amd_fa_pipelined,
         )
@@ -143,6 +155,8 @@ if has_tlx():
 else:
     _tlx_amd_fa_cluster = None
     _validate_tlx_amd_fa_cluster_inputs = None
+    HAS_TLX_HOPPER_FA = False
+    _tlx_hopper_fa = None
     _tlx_amd_fa_pipelined = None
 
 if has_tlx() and is_hip_mi350():
@@ -398,14 +412,33 @@ class Operator(BenchmarkOperator):
 
     @register_benchmark(
         enabled=(
-            is_hip_mi350()
-            and _tlx_amd_fa_pipelined is not None
-            and _tlx_amd_fa_backward is not None
+            (IS_HOPPER and HAS_TLX_HOPPER_FA)
+            or (
+                is_hip_mi350()
+                and _tlx_amd_fa_pipelined is not None
+                and _tlx_amd_fa_backward is not None
+            )
         ),
-        tags=["tlx", "amd", "gfx950"],
+        tags=["tlx"] + (["amd", "gfx950"] if is_hip_mi350() else []),
     )
     @multi_input_wrapper
-    def tlx_amd_fa_pipelined(self, *args) -> Tuple[Callable, Callable]:
+    def tlx_fa(self, *args) -> Tuple[Callable, Callable]:
+        if IS_HOPPER:
+            if self.D_HEAD < 128:
+                raise NotImplementedError("Skip")
+            if self.causal:
+                raise NotImplementedError(
+                    "Hopper TLX FA does not support causal attention"
+                )
+
+            tlx_attention = _tlx_hopper_fa
+            assert tlx_attention is not None
+
+            def fn(q, k, v):
+                return tlx_attention(q, k, v, self.sm_scale)
+
+            return preproc_noop, fn
+
         tlx_attention = _tlx_amd_fa_pipelined
         assert tlx_attention is not None
         config = {
