@@ -23,4 +23,4 @@ export TORCHINDUCTOR_COMPILE_THREADS=1
 # best effort disable autotune to speedup test
 export TORCHINDUCTOR_MAX_AUTOTUNE=0
 
-python -m unittest test.test_gpu.main -v
+python -m unittest "${TEST_MODULE:-test.test_gpu.main}" -v
