@@ -900,7 +900,16 @@ class BenchmarkOperator(metaclass=PostInitProcessor):
             ]
         else:
             self._input_ids = [int(self.tb_args.input_id)]
-        self._num_inputs = self.tb_args.num_inputs
+        # Parse num_inputs: supports integer N or divisor /N (every Nth shape)
+        raw_num_inputs = self.tb_args.num_inputs
+        self._num_inputs_step = None
+        if raw_num_inputs is not None and raw_num_inputs.startswith("/"):
+            self._num_inputs_step = int(raw_num_inputs[1:])
+            self._num_inputs = None
+        elif raw_num_inputs is not None:
+            self._num_inputs = int(raw_num_inputs)
+        else:
+            self._num_inputs = None
         self._input_sample_mode = self.tb_args.input_sample_mode
         self.prod_shapes = self.tb_args.prod_shapes
         self.old_diode_topk = (
@@ -1014,9 +1023,14 @@ class BenchmarkOperator(metaclass=PostInitProcessor):
             # Expand single ID to sequential range
             self._input_ids = list(range(start_id, start_id + self._num_inputs))
 
+            # Apply step-based sampling if /N was specified
+            if self._num_inputs_step:
+                self._input_ids = self._input_ids[:: self._num_inputs_step]
+                self._num_inputs = len(self._input_ids)
+
             logger.warning(
                 f"First-k mode: Selected {len(self._input_ids)} sequential inputs starting from index {start_id} "
-                f"(total available: {self._available_num_inputs})",
+                f"(step={self._num_inputs_step or 1}, total available: {self._available_num_inputs})",
             )
 
         logger.warning(
