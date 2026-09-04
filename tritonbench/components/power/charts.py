@@ -1,8 +1,7 @@
 import csv
 import logging
 import os
-import signal
-import subprocess
+import statistics
 import time
 
 import matplotlib.pyplot as plt
@@ -105,7 +104,25 @@ def plot_latencies(output_dir, gpu_id, metrics: "BenchmarkOperatorResult") -> No
         plt.figure(figsize=(10, 6))
         for backend in result_dict[x_val]:
             latency_times = result_dict[x_val][backend].latency.times[1:]
-            plt.hist(latency_times, bins=50, alpha=0.5, label=backend)
+            _, _, patches = plt.hist(
+                latency_times, bins=50, alpha=0.5, label=backend
+            )
+            if latency_times:
+                color = patches[0].get_facecolor()
+                p50 = statistics.median(latency_times)
+                mean = statistics.fmean(latency_times)
+                plt.axvline(
+                    p50,
+                    color=color,
+                    linestyle="--",
+                    label=f"{backend} p50 ({p50:.3f} ms)",
+                )
+                plt.axvline(
+                    mean,
+                    color=color,
+                    linestyle=":",
+                    label=f"{backend} mean ({mean:.3f} ms)",
+                )
         plt.legend()
         plt.xlabel("Latency (ms)")
         plt.ylabel("Count")
