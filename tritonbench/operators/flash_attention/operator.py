@@ -419,7 +419,6 @@ class Operator(BenchmarkOperator):
                 and _tlx_amd_fa_backward is not None
             )
         ),
-        fwd_only=IS_HOPPER,
         tags=["tlx"] + (["amd", "gfx950"] if is_hip_mi350() else []),
     )
     @multi_input_wrapper
