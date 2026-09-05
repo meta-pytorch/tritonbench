@@ -1,6 +1,6 @@
 gemm_tlx_matmul_ws_nt:
   args:
-    --op gemm --only tlx_matmul_ws --metrics tflops --rep 3000 --sleep 1.0 --force --layout nt --shapes 1024x12800x1152 --simple-output --cudagraph
+    --op gemm --only tlx_matmul_ws --metrics tflops --rep 3000 --sleep 1.0 --force --layout nt --shapes 1024x12800x1152 --simple-output
   envs:
     TRITON_ALWAYS_COMPILE=1
 

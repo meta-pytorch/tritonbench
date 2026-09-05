@@ -93,6 +93,23 @@ def extract_performance_metric(output):
     return float(last_line.split()[-1])
 
 
+def save_verbose_logs(stdout, stderr, output_dir=REPO_WORK_DIR):
+    """Dump the full, untruncated tritonbench output to `output_dir`.
+
+    The timestamp carries microseconds because the search runs one benchmark per
+    GPU in parallel, and several of them can finish within the same second.
+    """
+    timestamp = datetime.now().strftime("%Y%m%d_%H%M%S_%f")
+    output_dir = Path(output_dir)
+    output_dir.mkdir(parents=True, exist_ok=True)
+    log_files = []
+    for stream_name, content in (("stdout", stdout), ("stderr", stderr)):
+        log_file = output_dir.joinpath(f"tritonbench_{stream_name}_{timestamp}.log")
+        log_file.write_text(content or "")
+        log_files.append(str(log_file))
+    return log_files
+
+
 def truncate_output(
     output, limit=int(os.environ.get("TRITONBENCH_COMPILEIQ_LOG_CHARS", "2048"))
 ):
@@ -174,9 +191,19 @@ def run_tritonbench(
             )
             truncated_output_stdout = truncate_output(output.stdout)
             truncated_output_stderr = truncate_output(output.stderr)
+            if verbose:
+                print(
+                    f"[GPU ID {GPU_ID}] Saved Tritonbench output to: "
+                    f"{save_verbose_logs(output.stdout, output.stderr)}"
+                )
         except subprocess.TimeoutExpired as e:
             truncated_output_stdout = truncate_output(e.stdout)
             truncated_output_stderr = truncate_output(e.stderr)
+            if verbose:
+                print(
+                    f"[GPU ID {GPU_ID}] Saved Tritonbench output to: "
+                    f"{save_verbose_logs(e.stdout, e.stderr)}"
+                )
             error_msg = f"[GPU ID {GPU_ID}] Timeout ({RUN_TIMEOUT_SEC}s) running Tritonbench. stdout: {truncated_output_stdout}, stderr: {truncated_output_stderr}"
             print(error_msg)
             raise RuntimeError(error_msg)

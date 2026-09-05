@@ -1,4 +1,5 @@
 import argparse
+import functools
 import logging
 import os
 import subprocess
@@ -146,6 +147,7 @@ def search(
     tritonbench_config,
     search_space,
     has_manifold=False,
+    verbose=False,
 ):
     # Remove the .yaml extension
     tritonbench_config_name = os.path.splitext(tritonbench_config)[0]
@@ -195,8 +197,13 @@ def search(
         problem_type=problem_type,
         num_objectives=1,
     )
+    # The RAY workers are separate processes, so the flag has to travel with the
+    # objective function itself rather than through module state.
+    objective = (
+        functools.partial(objective_func, verbose=True) if verbose else objective_func
+    )
     tuner = Search(
-        objective_function=objective_func,
+        objective_function=objective,
         search_space=search_space_bin,
         search_config=main_config,
         worker_type=WorkerTypes.RAY,
@@ -291,6 +298,11 @@ def get_parser():
         type=str,
         default=DEFAULT_SEARCH_SPACE,
         help="The CompileIQ ptxas search space. Either a local path or a manifold:// URI.",
+    )
+    parser.add_argument(
+        "--verbose",
+        action="store_true",
+        help=f"Save the full stdout/stderr of every Tritonbench run to {REPO_WORK_DIR}.",
     )
     return parser
 
@@ -388,6 +400,7 @@ def run(args: Optional[List[str]] = None):
             tritonbench_config=args.tritonbench_config,
             search_space=args.search_space,
             has_manifold=has_manifold,
+            verbose=args.verbose,
         )
 
 

@@ -52,6 +52,7 @@ def run_tritonbench_in_temp_dir(
             knobs_file=knobs_file,
             config_file=tritonbench_config,
             mock=False,
+            verbose=verbose,
         )
     return results
 
