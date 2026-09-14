@@ -1,17 +1,24 @@
 """Per-device default backend for ``torch.compile``.
 
 ``torch_tpu`` autoloads on ``import torch`` and monkeypatches ``torch.compile``
-to default to ``backend="tpu"`` process-globally. That breaks ``torch.compile``
-on cpu/cuda tensors whenever torch_tpu is merely installed
-(google-pytorch/torch_tpu#1912), and it never sets the ``dynamic=False`` that
-the TPU backend requires.
+to select ``backend="tpu"`` when no explicit ``backend=`` is given and the
+inputs contain a TPU tensor. It does not set the ``dynamic=False`` that the TPU
+backend requires, and that backend rejects the Inductor-only ``mode`` /
+``options`` kwargs many operators pass.
 
 ``set_compile_backend_for_device`` wraps ``torch.compile`` so that calls which
 do not pass an explicit ``backend=`` get a device-appropriate default:
 
-- ``tpu``    -> ``backend="tpu"``, ``dynamic=False`` (Inductor-only ``mode`` /
-  ``options`` kwargs are dropped, since the TPU backend rejects them)
-- otherwise  -> ``backend="inductor"`` (undo torch_tpu's global default)
+- ``tpu``          -> ``backend="tpu"``, ``dynamic=False`` (Inductor-only
+  ``mode`` / ``options`` kwargs are dropped, since the TPU backend rejects them)
+- ``cpu``/``cuda`` -> ``backend="inductor"``, and only when torch_tpu is
+  installed
+
+The cpu/cuda case exists for torch_tpu predating
+google-pytorch/torch_tpu#2639, where the patched default ignored input device
+and routed every default-backend call to the TPU compiler
+(google-pytorch/torch_tpu#1912). It pins Inductor outright rather than
+deferring to torch's own default selection.
 
 Calls that pass an explicit non-``None`` ``backend`` are left untouched (a
 missing backend, or an explicit ``backend=None``, takes the device default).
@@ -36,10 +43,11 @@ def _torch_tpu_installed() -> bool:
 def set_compile_backend_for_device(device: str) -> None:
     """Install a device-appropriate default backend for ``torch.compile``.
 
-    Only intervenes where torch_tpu's global default is actually wrong:
+    Only intervenes where torch_tpu's default needs correcting:
       - ``tpu``: force ``backend="tpu"`` (the whole point).
-      - ``cpu``/``cuda`` **and** torch_tpu installed: force ``backend="inductor"``
-        to undo torch_tpu's global override.
+      - ``cpu``/``cuda`` **and** torch_tpu installed: pin
+        ``backend="inductor"`` (see the module docstring for when that is
+        load-bearing).
     Any other device (e.g. ``mtia``, which registers its own dynamo backend) is
     left untouched, as is the case where torch_tpu isn't installed. Idempotent.
     """
