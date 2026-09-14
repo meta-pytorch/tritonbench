@@ -28,7 +28,11 @@ from .triton_autows import (
 )
 
 
-def _set_meta_ws(enabled: bool, smem_search: bool = False):
+def _set_meta_ws(
+    enabled: bool,
+    smem_search: bool = False,
+    tma_reduce_staging_copies: Optional[int] = None,
+):
     """Select compiler mode before constructing a benchmark callable."""
     triton.knobs.nvidia.use_meta_ws = enabled
     triton.knobs.nvidia.disable_wsbarrier_reorder = enabled
@@ -39,22 +43,38 @@ def _set_meta_ws(enabled: bool, smem_search: bool = False):
             os.environ["TRITON_WS_SMEM_PLAN_SEARCH"] = "1"
         else:
             os.environ.pop("TRITON_WS_SMEM_PLAN_SEARCH", None)
+        if tma_reduce_staging_copies is not None:
+            os.environ["TRITON_WS_TMA_REDUCE_STAGING_COPIES"] = str(
+                tma_reduce_staging_copies
+            )
+        else:
+            os.environ.pop("TRITON_WS_TMA_REDUCE_STAGING_COPIES", None)
     else:
         os.environ.pop("TRITON_USE_META_WS", None)
         os.environ.pop("TRITON_DISABLE_WSBARRIER_REORDER", None)
         os.environ.pop("TRITON_WS_SMEM_PLAN_SEARCH", None)
+        os.environ.pop("TRITON_WS_TMA_REDUCE_STAGING_COPIES", None)
 
 
 @contextlib.contextmanager
-def _compiler_mode(enabled: bool, smem_search: bool = False):
+def _compiler_mode(
+    enabled: bool,
+    smem_search: bool = False,
+    tma_reduce_staging_copies: Optional[int] = None,
+):
     env_names = (
         "TRITON_USE_META_WS",
         "TRITON_DISABLE_WSBARRIER_REORDER",
         "TRITON_WS_SMEM_PLAN_SEARCH",
+        "TRITON_WS_TMA_REDUCE_STAGING_COPIES",
     )
     previous_env = {name: os.environ.get(name) for name in env_names}
     with triton.knobs.nvidia.scope():
-        _set_meta_ws(enabled, smem_search=smem_search)
+        _set_meta_ws(
+            enabled,
+            smem_search=smem_search,
+            tma_reduce_staging_copies=tma_reduce_staging_copies,
+        )
         try:
             yield
         finally:
@@ -165,6 +185,12 @@ def parse_op_args(args: List[str]):
     parser.add_argument("--has-delta-q", type=bool, default=False)
     parser.add_argument("--delta-size", type=int, default=256)
     parser.add_argument("--target-size", type=int, default=20)
+    parser.add_argument(
+        "--hstu-self-dq-dtype",
+        choices=("bf16", "fp32"),
+        default="fp32",
+        help="dQ reduction/output precision for HSTU self-attention AutoWS CLC",
+    )
     parser.add_argument("--max-attn-len", type=int, default=0)
     # set to 0 to use hstu_mha
     parser.add_argument("--min-full-attn-seq-len", type=int, default=0)
@@ -242,6 +268,7 @@ class Operator(BenchmarkOperator):
             self.attn_mask_type = args.attn_mask_type
         self.causal = args.causal
         self.sampling_alpha = args.sampling_alpha
+        self.hstu_self_dq_fp32 = args.hstu_self_dq_dtype == "fp32"
         self.tlx_gfx950_bwd_variant = (
             args.tlx_gfx950_bwd_variant or HSTU_GFX950_DEFAULT_BWD_VARIANT
         )
@@ -428,6 +455,7 @@ class Operator(BenchmarkOperator):
         num_targets,
         max_seq_len,
         smem_search=False,
+        tma_reduce_staging_copies=None,
         sort_by_length=True,
     ):
         # Meta-autoWS self-attn. The structural config (autows/dp/manual_dp/...) is
@@ -435,7 +463,11 @@ class Operator(BenchmarkOperator):
         # configs. Select the compiler mode once before TritonBench constructs its
         # standard forward/backward wrapper; non-WS backends reset it in their
         # corresponding constructors.
-        _set_meta_ws(True, smem_search=smem_search)
+        _set_meta_ws(
+            True,
+            smem_search=smem_search,
+            tma_reduce_staging_copies=tma_reduce_staging_copies,
+        )
         hstu_self_configure(**cfg)
         attn_scale = torch.tensor(
             1.0 / max_seq_len, device=q.device, dtype=torch.float32
@@ -457,7 +489,11 @@ class Operator(BenchmarkOperator):
                 enable_tma=is_cuda(),
             )
 
-        _run._hstu_compiler_mode = (True, smem_search)
+        _run._hstu_compiler_mode = (
+            True,
+            smem_search,
+            tma_reduce_staging_copies,
+        )
         return _run
 
     def get_bwd_fn(self, fwd_fn: Callable) -> Callable:
@@ -570,22 +606,38 @@ class Operator(BenchmarkOperator):
         # Production CLC backward configuration matched to the TLX BM64/BN128
         # kernel. CLC consumes its persistent tile order directly, so it cannot
         # use the optional sequence-length sorting path.
+        dq_fp32 = self.hstu_self_dq_fp32
+        cfg = dict(
+            autows=True,
+            dq_reduce=True,
+            dq_fp32=dq_fp32,
+            dq_reuse=True,
+            clc=True,
+            clc_smem_algo=1,
+            dkdv_subtile=2,
+            dp=1,
+            bwd_bm=64,
+            bwd_bn=128,
+            # FP32 dQ benefits from a shallow compute pipeline plus a
+            # separately double-buffered reduction ring. BF16 dQ instead
+            # benefits from the deeper four-warp compute schedule.
+            bwd_stages=1 if dq_fp32 else 2,
+            warps=8 if dq_fp32 else 4,
+            dq_iters=4,
+            pin=True,
+        )
+        # D119878166 and later expose the topology/layout knobs. Preserve
+        # compatibility with older compiler revisions, where D119878165 performs
+        # this selection inside the kernel.
+        if hasattr(hstu_self_configure(), "dq_transposed"):
+            cfg.update(
+                split_causal_loops=False,
+                # Direct physical dQ subtiling wins only for target-aware FP32.
+                # Keep the parent transposed lowering for target-free and BF16.
+                dq_transposed=not (dq_fp32 and num_targets is not None),
+            )
         return self._hstu_self_autows(
-            dict(
-                autows=True,
-                dq_reduce=True,
-                dq_reuse=True,
-                clc=True,
-                clc_smem_algo=2,
-                dkdv_subtile=2,
-                dp=1,
-                bwd_bm=64,
-                bwd_bn=128,
-                bwd_stages=2,
-                warps=4,
-                dq_iters=4,
-                pin=True,
-            ),
+            cfg,
             q,
             k,
             v,
@@ -593,6 +645,7 @@ class Operator(BenchmarkOperator):
             num_targets,
             max_seq_len,
             smem_search=True,
+            tma_reduce_staging_copies=2 if dq_fp32 else None,
             sort_by_length=False,
         )
 
