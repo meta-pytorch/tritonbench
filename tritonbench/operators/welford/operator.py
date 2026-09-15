@@ -77,22 +77,9 @@ class Operator(BenchmarkOperator):
             # Flatten leading dimensions to run the reduction as a batch of rows.
             x_flat = x_fp32.reshape(-1, last_dim)
 
-            mean = torch.zeros(
-                x_flat.shape[0], dtype=torch.float32, device=x_fp32.device
-            )
-            m2 = torch.zeros_like(mean)
-
-            for idx in range(last_dim):
-                xi = x_flat[:, idx]
-                delta = xi - mean
-                mean = mean + delta / float(idx + 1)
-                delta2 = xi - mean
-                m2 = m2 + delta * delta2
-
-            var = m2 / float(last_dim)
-
-            mean = mean.unsqueeze(-1)
-            var = var.unsqueeze(-1)
+            # Keep Welford as a reduction instead of unrolling one Python
+            # iteration per column into a large compiler graph.
+            var, mean = torch.var_mean(x_flat, dim=-1, correction=0, keepdim=True)
 
             inv_std = torch.rsqrt(var + eps)
             normalized_flat = (x_flat - mean) * inv_std
