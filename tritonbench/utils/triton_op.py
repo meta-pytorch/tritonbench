@@ -1497,9 +1497,18 @@ class BenchmarkOperator(metaclass=PostInitProcessor):
         def run_and_capture(self, *args, **kwargs):
             nonlocal autotuner
             autotuner = self
-            original_run(self, *args, **kwargs)
+            return original_run(self, *args, **kwargs)
 
-        with mock.patch.object(Autotuner, "run", run_and_capture):
+        def python_dispatch(self, grid):
+            # Native cache hits bypass run(), which updates best_config for this input.
+            return lambda *args, **kwargs: self.run(
+                *args, grid=grid, warmup=False, **kwargs
+            )
+
+        with (
+            mock.patch.object(Autotuner, "__getitem__", python_dispatch),
+            mock.patch.object(Autotuner, "run", run_and_capture),
+        ):
             fn()
 
         if autotuner is not None:
