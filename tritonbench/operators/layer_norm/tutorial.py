@@ -188,6 +188,7 @@ def _layer_norm_bwd_dx_fused(
         partial_db += tl.load(DB, mask=mask)
     tl.store(DW, partial_dw, mask=mask)
     tl.store(DB, partial_db, mask=mask)
+    tl.debug_barrier()
     # Release the lock
     tl.atomic_xchg(Lock, 0)
 
