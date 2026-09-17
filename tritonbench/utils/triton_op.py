@@ -63,10 +63,11 @@ from tritonbench.utils.diode_utils import (
 from tritonbench.utils.env_utils import (
     apply_precision,
     get_device_module,
+    get_device_name,
+    get_graph_cls,
     is_fbcode,
     is_hip,
     is_mtia,
-    is_xpu,
     override_default_precision_for_input_loader,
     reset_allow_tf32,
     set_allow_tf32,
@@ -212,9 +213,7 @@ def do_bench_walltime(fn, warmup=None, rep=None):
 
 
 def _get_current_device_id() -> int:
-    if is_xpu():
-        return torch.xpu.current_device()
-    return torch.cuda.current_device()
+    return get_device_module().current_device()
 
 
 def gemm_shapes(prefill: bool = False):
@@ -2386,8 +2385,8 @@ class BenchmarkOperator(metaclass=PostInitProcessor):
                     )
             if self.tb_args.dump_ir:
                 self.dump_ir(input_id, fn, self.tb_args.dump_ir)
-        except torch.cuda.OutOfMemoryError:
-            metrics.error_msg = "CUDA OOM"
+        except torch.OutOfMemoryError:
+            metrics.error_msg = f"{self.device.upper()} OOM"
         except TritonOutOfResources as e:
             metrics.error_msg = f"Triton OOR: {e}"
         except NotImplementedError as e:
@@ -2407,7 +2406,9 @@ class BenchmarkOperator(metaclass=PostInitProcessor):
     def do_bench_cudagraph_mem(
         self, fn, n_repeat=2, grad_to_none=None, device_type="cuda"
     ):
-        with torch.cuda.stream(torch.cuda.Stream()):
+        device_module = get_device_module(device_type)
+        graph_cls = get_graph_cls(device_type)
+        with device_module.stream(device_module.Stream()):
             # warmup
             fn()
             if grad_to_none is not None:
@@ -2415,20 +2416,20 @@ class BenchmarkOperator(metaclass=PostInitProcessor):
                     x.detach_()
                     x.requires_grad_(True)
                     x.grad = None
-            g = torch.cuda.CUDAGraph()
-            with torch.cuda.graph(g):
+            g = graph_cls()
+            with device_module.graph(g):
                 fn()
-            torch.cuda.synchronize()
+            device_module.synchronize()
             g.replay()
-            torch.cuda.synchronize()
-            g = torch.cuda.CUDAGraph()
-            with torch.cuda.graph(g):
+            device_module.synchronize()
+            g = graph_cls()
+            with device_module.graph(g):
                 for _ in range(n_repeat):
                     if grad_to_none is not None:
                         for x in grad_to_none:
                             x.grad = None
                     fn()
-            torch.cuda.synchronize()
+            device_module.synchronize()
 
     def do_bench_mem(self, fn, n_repeat=2, grad_to_none=None, device_type="cuda"):
         if device_type == "tpu":
@@ -2469,19 +2470,25 @@ class BenchmarkOperator(metaclass=PostInitProcessor):
                 Defaults to None.
             use_cuda_graphs (bool, optional): Whether to use CUDA graphs for measurement.
                 Defaults to False.
-            device_type (str, optional): Device to measure memory for ("cuda" or "cpu").
-                Defaults to "cuda".
+            device_type (str, optional): Device to measure memory for (any accelerator
+                torch exposes a memory-stats API for, or "cpu"). Defaults to "cuda".
 
         Returns:
             Tuple[Optional[float], Optional[float]]: A tuple containing:
                 - Peak CPU memory usage in GB (None if not requested)
-                - Peak GPU memory usage in GB (None if not requested or not on CUDA)
+                - Peak GPU memory usage in GB (None if not requested or not on an accelerator)
         """
         gpu_peak_mem = None
         cpu_peak_mem = None
-        if device_type == "cuda":
-            torch.cuda.reset_peak_memory_stats()
-            torch.cuda.empty_cache()
+        # Any accelerator with a caching allocator exposes these; gating on
+        # device_type == "cuda" silently reported no gpu_peak_mem on XPU/MTIA.
+        # Resolve torch.<device_type> directly rather than via get_device_module,
+        # whose torch.cuda fallback would point a "tpu" run at CUDA's stats.
+        device_module = getattr(torch, device_type, None)
+        has_mem_stats = hasattr(device_module, "max_memory_allocated")
+        if has_mem_stats:
+            device_module.reset_peak_memory_stats()
+            device_module.empty_cache()
         if use_cuda_graphs:
             self.do_bench_cudagraph_mem(
                 fn, n_repeat=2, grad_to_none=grad_to_none, device_type=device_type
@@ -2490,10 +2497,10 @@ class BenchmarkOperator(metaclass=PostInitProcessor):
             self.do_bench_mem(
                 fn, n_repeat=2, grad_to_none=grad_to_none, device_type=device_type
             )
-        if device_type == "cuda" and (
+        if has_mem_stats and (
             {"gpu_peak_mem", "mem_footprint_compression_ratio"} & set(required_metrics)
         ):
-            gpu_peak_mem = torch.cuda.max_memory_allocated() / 10**9
+            gpu_peak_mem = device_module.max_memory_allocated() / 10**9
         if "cpu_peak_mem" in required_metrics:
             total = psutil.virtual_memory().total
             percentage = psutil.Process(os.getpid()).memory_percent()
@@ -2784,7 +2791,7 @@ class BenchmarkOperator(metaclass=PostInitProcessor):
             if torch.version.hip
             else _get_mtia_device_name()
             if is_mtia()
-            else torch.cuda.get_device_name()
+            else get_device_name(self.device)
         )
         assert device_name in rooflines, (
             f"{device_name} is not supported in HW roofline specs."

@@ -9,6 +9,12 @@ from torch._inductor.runtime.benchmarking import benchmarker
 from tritonbench.components.do_bench.entropy.entropy_criterion import EntropyCriterion
 from tritonbench.utils.constants import DEFAULT_N_REP, DEFAULT_N_WARMUP
 from tritonbench.utils.cudagraph_utils import CudaGraphConfig
+from tritonbench.utils.env_utils import (
+    get_device_module,
+    get_graph_cls,
+    get_profiler_activity,
+    get_profiler_device_type,
+)
 
 from .common import summarize_statistics
 from .utils import (
@@ -36,10 +42,19 @@ CACHE_CLEAR_KERNEL = "void at::native::vectorized_elementwise_kernel<4, at::nati
 def _is_cache_clear_kernel(name: str) -> bool:
     """Check if a kernel event is the L2 cache clearing kernel.
 
-    Matches both NVIDIA (FillFunctor<int>) and AMD/ROCm (FillFunctor<float>,
-    with [clone .kd] suffix) variants.
+    Matches NVIDIA (``vectorized_elementwise_kernel``, ``FillFunctor<int>``),
+    AMD/ROCm (same, ``FillFunctor<float>`` with a ``[clone .kd]`` suffix) and
+    Intel XPU (``at::native::xpu::VectorizedElementwiseKernel``,
+    ``at::native::xpu::FillFunctor<int>``) spellings. The XPU name is CamelCase,
+    so match case-insensitively: missing it silently folds the 256MB cache-clear
+    fill into every reported latency.
     """
-    return "vectorized_elementwise_kernel" in name and "FillFunctor" in name
+    lowered = name.lower()
+    return (
+        "vectorized" in lowered
+        and "elementwise" in lowered
+        and "fillfunctor" in lowered
+    )
 
 
 class Latency:
@@ -213,7 +228,10 @@ def _do_bench_cudagraph_with_cache_clear(
     )
     clear_cache_fn = cache.zero_ if not skip_cache_clearing else lambda *args: None
 
-    with torch.cuda.stream(torch.cuda.Stream()):
+    device_module = get_device_module()
+    graph_cls = get_graph_cls()
+
+    with device_module.stream(device_module.Stream()):
         clear_cache_fn()
         fn()
         if grad_to_none is not None:
@@ -222,55 +240,55 @@ def _do_bench_cudagraph_with_cache_clear(
                 x.requires_grad_(True)
                 x.grad = None
 
-        start_event = torch.cuda.Event(enable_timing=True)
-        end_event = torch.cuda.Event(enable_timing=True)
+        start_event = device_module.Event(enable_timing=True)
+        end_event = device_module.Event(enable_timing=True)
         start_event.record()
         for _ in range(5):
             clear_cache_fn()
             fn()
         end_event.record()
-        torch.cuda.synchronize()
+        device_module.synchronize()
         estimate_ms = start_event.elapsed_time(end_event) / 5
         _, rep = resolve_warmup_and_rep(None, rep, estimate_ms)
 
         n_repeat = 1000 if estimate_ms == 0 else max(1, int(rep / estimate_ms))
 
-        g = torch.cuda.CUDAGraph()
-        with torch.cuda.graph(g):
+        g = graph_cls()
+        with device_module.graph(g):
             for _ in range(n_repeat):
                 if grad_to_none is not None:
                     for x in grad_to_none:
                         x.grad = None
                 clear_cache_fn()
                 fn()
-        torch.cuda.synchronize()
+        device_module.synchronize()
 
-        cache_clear_graph = torch.cuda.CUDAGraph()
-        with torch.cuda.graph(cache_clear_graph):
+        cache_clear_graph = graph_cls()
+        with device_module.graph(cache_clear_graph):
             for _ in range(n_repeat):
                 clear_cache_fn()
-        torch.cuda.synchronize()
+        device_module.synchronize()
 
         n_retries = 10
         cache_clear_times = []
         total_times = []
         for _ in range(n_retries):
-            cache_clear_start_event = torch.cuda.Event(enable_timing=True)
-            cache_clear_end_event = torch.cuda.Event(enable_timing=True)
+            cache_clear_start_event = device_module.Event(enable_timing=True)
+            cache_clear_end_event = device_module.Event(enable_timing=True)
             cache_clear_start_event.record()
             cache_clear_graph.replay()
             cache_clear_end_event.record()
-            torch.cuda.synchronize()
+            device_module.synchronize()
             cache_clear_times.append(
                 cache_clear_start_event.elapsed_time(cache_clear_end_event) / n_repeat
             )
 
-            start_event = torch.cuda.Event(enable_timing=True)
-            end_event = torch.cuda.Event(enable_timing=True)
+            start_event = device_module.Event(enable_timing=True)
+            end_event = device_module.Event(enable_timing=True)
             start_event.record()
             g.replay()
             end_event.record()
-            torch.cuda.synchronize()
+            device_module.synchronize()
             total_times.append(start_event.elapsed_time(end_event) / n_repeat)
 
     all_kernel_times = []
@@ -333,31 +351,34 @@ def _do_bench_profiler(
         clear_cache_fn()
         fn()
 
+    device_module = get_device_module()
+
     if use_cudagraph:
-        # Create CUDA graph
-        g = torch.cuda.CUDAGraph()
-        with torch.cuda.graph(g):
+        # Create device graph
+        g = get_graph_cls()()
+        with device_module.graph(g):
             for _ in range(n_repeat):
                 run_iteration()
-        torch.cuda.synchronize()
+        device_module.synchronize()
     else:
         # Regular mode warmup
         n_warmup = (
             max(1, int(warmup / estimate_ms)) if estimate_ms > 0 else DEFAULT_N_WARMUP
         )
 
-        torch.cuda.synchronize()
+        device_module.synchronize()
         for _ in range(n_warmup):
             run_iteration()
-        torch.cuda.synchronize()
+        device_module.synchronize()
 
     iterations_per_profiler_run = n_repeat
 
     # Benchmark phase - collect kernel times for each iteration
     all_kernel_times = []
+    profiler_device_type = get_profiler_device_type()
     profiler_config = {
         "activities": [
-            torch.profiler.ProfilerActivity.CUDA,
+            get_profiler_activity(),
         ],
         "record_shapes": False,
         "profile_memory": False,
@@ -370,9 +391,9 @@ def _do_bench_profiler(
 
         # Get raw function events and collect time intervals
         for evt in prof.events():
-            # Check for CUDA kernel events, excluding cache clear kernel
+            # Check for device kernel events, excluding cache clear kernel
             if (
-                evt.device_type == torch.autograd.DeviceType.CUDA
+                evt.device_type == profiler_device_type
                 and hasattr(evt, "time_range")
                 and not _is_cache_clear_kernel(evt.name)
             ):
@@ -411,7 +432,7 @@ def _do_bench_profiler(
         else:
             # No kernel events found - this likely indicates an issue
             raise RuntimeError(
-                "No CUDA kernel events found in profiler trace. "
+                f"No {profiler_device_type} kernel events found in profiler trace. "
                 "This may indicate the function is not executing any GPU kernels, "
                 "or there's an issue with profiler event collection."
             )
@@ -432,7 +453,7 @@ def _do_bench_profiler(
             # Execute multiple iterations for regular mode
             for _ in range(iterations_per_profiler_run):
                 run_iteration()
-        torch.cuda.synchronize()
+        device_module.synchronize()
 
     times = torch.tensor(all_kernel_times, dtype=torch.float)
     return summarize_statistics(times, quantiles=None, return_mode=return_mode)
@@ -596,6 +617,7 @@ def _do_bench_entropy(
 
     cache = triton.runtime.driver.active.get_empty_cache_for_benchmark()
     clear_cache_fn = lambda: triton.runtime.driver.active.clear_cache(cache)
+    device_module = get_device_module()
 
     # Adaptive warmup loop with batched synchronization
     while True:
@@ -603,10 +625,10 @@ def _do_bench_entropy(
         batch_size = min(BATCH_SIZE, remaining) if remaining > 0 else BATCH_SIZE
 
         batch_start_events = [
-            torch.cuda.Event(enable_timing=True) for _ in range(batch_size)
+            device_module.Event(enable_timing=True) for _ in range(batch_size)
         ]
         batch_end_events = [
-            torch.cuda.Event(enable_timing=True) for _ in range(batch_size)
+            device_module.Event(enable_timing=True) for _ in range(batch_size)
         ]
 
         for i in range(batch_size):
@@ -680,8 +702,10 @@ def _do_bench_entropy(
             n_iterations = 100
 
     # BENCHMARK PHASE
-    start_events = [torch.cuda.Event(enable_timing=True) for _ in range(n_iterations)]
-    end_events = [torch.cuda.Event(enable_timing=True) for _ in range(n_iterations)]
+    start_events = [
+        device_module.Event(enable_timing=True) for _ in range(n_iterations)
+    ]
+    end_events = [device_module.Event(enable_timing=True) for _ in range(n_iterations)]
 
     for i in range(n_iterations):
         if grad_to_none is not None:
@@ -692,7 +716,7 @@ def _do_bench_entropy(
         fn()
         end_events[i].record()
 
-    torch.cuda.synchronize()
+    device_module.synchronize()
 
     benchmark_times = [s.elapsed_time(e) for s, e in zip(start_events, end_events)]
 
@@ -796,7 +820,8 @@ def do_bench_wrapper(
                 remove_outliers=remove_outliers,
             )
         elif use_cuda_graphs and latency_measure_mode != "gpu_events":
-            with torch.cuda.stream(torch.cuda.Stream()):
+            device_module = get_device_module(device)
+            with device_module.stream(device_module.Stream()):
                 if latency_measure_mode == "profiler":
                     bench_fn = partial(_do_bench_profiler, warmup=1, use_cudagraph=True)
                 else:
