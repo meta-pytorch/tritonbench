@@ -4,6 +4,7 @@ import os
 from typing import Any, Callable, List, Optional
 
 import torch
+import triton
 from tritonbench.utils.env_utils import (
     get_nvidia_gpu_model,
     IS_BLACKWELL,
@@ -27,26 +28,41 @@ from .triton_autows import (
 )
 
 
-@contextlib.contextmanager
-def _scoped_env(overrides: dict[str, str]):
-    """Apply env overrides for the duration of the block, then restore them.
+def _set_meta_ws(enabled: bool, smem_search: bool = False):
+    """Select compiler mode before constructing a benchmark callable."""
+    triton.knobs.nvidia.use_meta_ws = enabled
+    triton.knobs.nvidia.disable_wsbarrier_reorder = enabled
+    if enabled:
+        os.environ["TRITON_USE_META_WS"] = "1"
+        os.environ["TRITON_DISABLE_WSBARRIER_REORDER"] = "1"
+        if smem_search:
+            os.environ["TRITON_WS_SMEM_PLAN_SEARCH"] = "1"
+        else:
+            os.environ.pop("TRITON_WS_SMEM_PLAN_SEARCH", None)
+    else:
+        os.environ.pop("TRITON_USE_META_WS", None)
+        os.environ.pop("TRITON_DISABLE_WSBARRIER_REORDER", None)
+        os.environ.pop("TRITON_WS_SMEM_PLAN_SEARCH", None)
 
-    The meta-autoWS compiler toggles (TRITON_USE_META_WS etc.) are read at
-    compile time and are NOT part of the JIT cache key, so leaving them set leaks
-    into whichever backend recompiles next in the input sweep -- e.g. the non-WS
-    `hstu` baseline would silently recompile warp-specialized. Scoping them around
-    each autoWS kernel keeps every backend's config independent of run order.
-    """
-    prev = {k: os.environ.get(k) for k in overrides}
-    try:
-        os.environ.update(overrides)
-        yield
-    finally:
-        for k, old in prev.items():
-            if old is None:
-                os.environ.pop(k, None)
-            else:
-                os.environ[k] = old
+
+@contextlib.contextmanager
+def _compiler_mode(enabled: bool, smem_search: bool = False):
+    env_names = (
+        "TRITON_USE_META_WS",
+        "TRITON_DISABLE_WSBARRIER_REORDER",
+        "TRITON_WS_SMEM_PLAN_SEARCH",
+    )
+    previous_env = {name: os.environ.get(name) for name in env_names}
+    with triton.knobs.nvidia.scope():
+        _set_meta_ws(enabled, smem_search=smem_search)
+        try:
+            yield
+        finally:
+            for name, value in previous_env.items():
+                if value is None:
+                    os.environ.pop(name, None)
+                else:
+                    os.environ[name] = value
 
 
 HAS_CUDA = False
@@ -94,12 +110,13 @@ try:
     if _os.path.isdir(_hstu_self_dir):
         if _hstu_self_dir not in _sys.path:
             _sys.path.insert(0, _hstu_self_dir)
-        from tlx_bw_hstu_attention import tlx_bw_hstu_mha as hstu_self_tlx_mha
+        import tlx_bw_hstu_attention as _hstu_self_tlx
         from triton_hstu_attention import (
             configure_autows as hstu_self_configure,
             triton_hstu_mha as hstu_self_triton_mha,
         )
 
+        hstu_self_tlx_mha = _hstu_self_tlx.tlx_bw_hstu_mha
         HAS_HSTU_SELF_ATTN = True
 except Exception:
     HAS_HSTU_SELF_ATTN = False
@@ -232,6 +249,7 @@ class Operator(BenchmarkOperator):
 
     @register_benchmark(enabled=is_cuda(), baseline=True)
     def hstu(self, q, k, v, seq_offsets, num_targets, max_seq_len, sparsity):
+        _set_meta_ws(False)
         # TMA is NVIDIA Hopper+ only; on AMD the backward kernel crashes when
         # tensor-descriptor rewrite and tl.assume (buffer-ops) coexist.
         _enable_tma = is_cuda()
@@ -253,6 +271,7 @@ class Operator(BenchmarkOperator):
     def hstu_triton_hammer(
         self, q, k, v, seq_offsets, num_targets, max_seq_len, sparsity
     ):
+        _set_meta_ws(False)
         # Hammer-template Triton self-attn (MetaMain2 port). Needs an explicit
         # attn_scale tensor (the GR `hstu` baseline bakes 1/max_seq_len).
         # Reset to the plain (non-autoWS) config in case an autoWS backend below
@@ -278,25 +297,47 @@ class Operator(BenchmarkOperator):
 
     @register_benchmark(enabled=HAS_HSTU_SELF_ATTN and IS_BLACKWELL)
     def hstu_tlx(self, q, k, v, seq_offsets, num_targets, max_seq_len, sparsity):
+        _set_meta_ws(False)
+        fwd_config = _hstu_self_tlx.get_fwd_persistent_configs()[0]
+        bwd_config = next(
+            config
+            for config in _hstu_self_tlx.get_hstu_bwd_configs()
+            if config.kwargs["BLOCK_M1"] == 64
+            and config.kwargs["BLOCK_N1"] == 128
+            and config.kwargs["EARLY_RELEASE_SUBTILES"] == 1
+        )
+        _hstu_self_tlx._attn_fwd_ws.configs = [fwd_config]
+        _hstu_self_tlx._attn_fwd_ws.cache.clear()
+        for kernel in (
+            _hstu_self_tlx._hstu_attn_bwd_ws,
+            _hstu_self_tlx._hstu_attn_bwd_ws_non_persistent,
+        ):
+            kernel.configs = [bwd_config]
+            kernel.cache.clear()
         # Hammer-template TLX (Blackwell warp-specialized) self-attn. SiLU heads
         # only (num_softmax_heads=0); scalar attn_scale.
         attn_scale = torch.tensor(
             1.0 / max_seq_len, device=q.device, dtype=torch.float32
         )
-        return lambda: hstu_self_tlx_mha(
-            max_seq_len=max_seq_len,
-            alpha=self.alpha,
-            q=q,
-            k=k,
-            v=v,
-            seq_offsets=seq_offsets,
-            attn_scale=attn_scale,
-            num_softmax_heads=0,
-            num_targets=num_targets,
-            max_attn_len=self.max_attn_len,
-            contextual_seq_len=self.contextual_seq_len,
-            causal=True,
-        )
+
+        def _run():
+            return hstu_self_tlx_mha(
+                max_seq_len=max_seq_len,
+                alpha=self.alpha,
+                q=q,
+                k=k,
+                v=v,
+                seq_offsets=seq_offsets,
+                attn_scale=attn_scale,
+                num_softmax_heads=0,
+                num_targets=num_targets,
+                max_attn_len=self.max_attn_len,
+                contextual_seq_len=self.contextual_seq_len,
+                causal=True,
+            )
+
+        _run._hstu_compiler_mode = (False, False)
+        return _run
 
     def _hstu_tlx_gfx950(
         self, bwd_variant, q, k, v, seq_offsets, num_targets, max_seq_len
@@ -378,44 +419,58 @@ class Operator(BenchmarkOperator):
         )
 
     def _hstu_self_autows(
-        self, cfg, q, k, v, seq_offsets, num_targets, max_seq_len, smem_search=False
+        self,
+        cfg,
+        q,
+        k,
+        v,
+        seq_offsets,
+        num_targets,
+        max_seq_len,
+        smem_search=False,
+        sort_by_length=True,
     ):
         # Meta-autoWS self-attn. The structural config (autows/dp/manual_dp/...) is
-        # switched in-process via configure_autows() (rebuilds autotune configs +
-        # clears the JIT caches / used-global guard), so multiple autoWS variants
-        # can be benchmarked in one process. The compiler WS toggles are env vars
-        # scoped to the returned callable so they do not leak into other backends
-        # (e.g. the non-WS `hstu` baseline) that recompile later in the sweep.
-        ws_env = {
-            "TRITON_USE_META_WS": "1",
-            "TRITON_DISABLE_WSBARRIER_REORDER": "1",
-        }
-        if smem_search:
-            ws_env["TRITON_WS_SMEM_PLAN_SEARCH"] = "1"
-        with _scoped_env(ws_env):
-            hstu_self_configure(**cfg)
+        # switched in-process via configure_autows(), which rebuilds the autotune
+        # configs. Select the compiler mode once before TritonBench constructs its
+        # standard forward/backward wrapper; non-WS backends reset it in their
+        # corresponding constructors.
+        _set_meta_ws(True, smem_search=smem_search)
+        hstu_self_configure(**cfg)
         attn_scale = torch.tensor(
             1.0 / max_seq_len, device=q.device, dtype=torch.float32
         )
 
         def _run():
-            with _scoped_env(ws_env):
-                return hstu_self_triton_mha(
-                    max_seq_len=max_seq_len,
-                    alpha=self.alpha,
-                    q=q,
-                    k=k,
-                    v=v,
-                    seq_offsets=seq_offsets,
-                    attn_scale=attn_scale,
-                    num_targets=num_targets,
-                    max_attn_len=self.max_attn_len,
-                    contextual_seq_len=self.contextual_seq_len,
-                    sort_by_length=True,
-                    enable_tma=is_cuda(),
-                )
+            return hstu_self_triton_mha(
+                max_seq_len=max_seq_len,
+                alpha=self.alpha,
+                q=q,
+                k=k,
+                v=v,
+                seq_offsets=seq_offsets,
+                attn_scale=attn_scale,
+                num_targets=num_targets,
+                max_attn_len=self.max_attn_len,
+                contextual_seq_len=self.contextual_seq_len,
+                sort_by_length=sort_by_length,
+                enable_tma=is_cuda(),
+            )
 
+        _run._hstu_compiler_mode = (True, smem_search)
         return _run
+
+    def get_bwd_fn(self, fwd_fn: Callable) -> Callable:
+        bwd_fn = super().get_bwd_fn(fwd_fn)
+        compiler_mode = getattr(fwd_fn, "_hstu_compiler_mode", None)
+        if compiler_mode is None:
+            return bwd_fn
+
+        def _run_bwd():
+            with _compiler_mode(*compiler_mode):
+                return bwd_fn()
+
+        return _run_bwd
 
     # fwd_only: the fwd-data-partition variants share the same (RMW) WS backward,
     # and two different WS backward configs cannot be compiled/run in one process
@@ -506,6 +561,39 @@ class Operator(BenchmarkOperator):
             num_targets,
             max_seq_len,
             smem_search=True,
+        )
+
+    @register_benchmark(enabled=HAS_HSTU_SELF_ATTN and IS_BLACKWELL)
+    def hstu_triton_autows_clc(
+        self, q, k, v, seq_offsets, num_targets, max_seq_len, sparsity
+    ):
+        # Production CLC backward configuration matched to the TLX BM64/BN128
+        # kernel. CLC consumes its persistent tile order directly, so it cannot
+        # use the optional sequence-length sorting path.
+        return self._hstu_self_autows(
+            dict(
+                autows=True,
+                dq_reduce=True,
+                dq_reuse=True,
+                clc=True,
+                clc_smem_algo=2,
+                dkdv_subtile=2,
+                dp=1,
+                bwd_bm=64,
+                bwd_bn=128,
+                bwd_stages=2,
+                warps=4,
+                dq_iters=4,
+                pin=True,
+            ),
+            q,
+            k,
+            v,
+            seq_offsets,
+            num_targets,
+            max_seq_len,
+            smem_search=True,
+            sort_by_length=False,
         )
 
     @register_benchmark(enabled=HAS_HAMMER)
