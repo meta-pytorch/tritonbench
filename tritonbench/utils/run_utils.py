@@ -554,7 +554,7 @@ def tritonbench_run(args: Optional[List[str]] = None):
         return
 
     # Log the tool usage
-    usage_report_logger(benchmark_name="tritonbench")
+    usage_report_logger(benchmark_name="tritonbench", cmd_args=args)
     parser = get_parser()
     args, extra_args = parser.parse_known_args(args)
 
