@@ -134,6 +134,14 @@ class Operator(BenchmarkOperator):
         # Only use FB shapes when --only-fb-shapes is passed
         if self.only_fb_shapes and not is_fbcode():
             raise ValueError("--only-fb-shapes requires running in fbcode")
+        # The cooldown knobs above were tuned against NVIDIA clock-throttle
+        # recovery. Other backends may idle in the opposite direction: on XPU an
+        # idle gap drops the GPU into a low-power state, so the first sample of
+        # every replica pays a wake-up cost (~0.9ms vs ~0.29ms steady state on
+        # Arc Pro B70) and the sleep manufactures the very outlier it exists to
+        # avoid. Measure continuously there instead.
+        if self.device == "xpu":
+            self._LATENCY_COOLDOWN_S = 0.0
 
     def _measure_latency(self, fn, warmup, rep, repcnt):
         """Pool several short, cooled-down measurements for a robust, un-throttled p50.
