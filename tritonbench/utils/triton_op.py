@@ -63,10 +63,11 @@ from tritonbench.utils.diode_utils import (
 from tritonbench.utils.env_utils import (
     apply_precision,
     get_device_module,
+    get_device_name,
+    get_graph_cls,
     is_fbcode,
     is_hip,
     is_mtia,
-    is_xpu,
     override_default_precision_for_input_loader,
     reset_allow_tf32,
     set_allow_tf32,
@@ -212,9 +213,7 @@ def do_bench_walltime(fn, warmup=None, rep=None):
 
 
 def _get_current_device_id() -> int:
-    if is_xpu():
-        return torch.xpu.current_device()
-    return torch.cuda.current_device()
+    return get_device_module().current_device()
 
 
 def gemm_shapes(prefill: bool = False):
@@ -236,9 +235,9 @@ def _find_op_name_from_module_path(module_path: str) -> str:
     PATH_PREFIX = "tritonbench.operators."
     # We have a separate operator loader for aten operator benchmark.
     PATH_PREFIX_LOADER = "tritonbench.operator_loader."
-    assert PATH_PREFIX in module_path or PATH_PREFIX_LOADER in module_path, (
-        f"We rely on module path prefix to identify operator name. Expected {PATH_PREFIX}<operator_name>, get {module_path}."
-    )
+    assert (
+        PATH_PREFIX in module_path or PATH_PREFIX_LOADER in module_path
+    ), f"We rely on module path prefix to identify operator name. Expected {PATH_PREFIX}<operator_name>, get {module_path}."
     if PATH_PREFIX_LOADER in module_path:
         suffix = module_path.partition(PATH_PREFIX_LOADER)[2]
         suffix = suffix.partition(".")[2]
@@ -623,9 +622,9 @@ class BenchmarkOperatorResult:
             metrics_dict = asdict(y_vals)
         if metric_name in metrics_dict:
             return metrics_dict[metric_name]
-        assert metric_name in metrics_dict["extra_metrics"], (
-            f"Metric {metric_name} could not be found."
-        )
+        assert (
+            metric_name in metrics_dict["extra_metrics"]
+        ), f"Metric {metric_name} could not be found."
         return metrics_dict["extra_metrics"][metric_name]
 
     def _get_result_dict(self):
@@ -849,9 +848,9 @@ class BenchmarkOperator(metaclass=PostInitProcessor):
         elif self.tb_args.mode == "fwd_no_grad":
             self.mode = Mode.FWD_NO_GRAD
         else:
-            assert self.tb_args.mode == "bwd", (
-                "We only accept test modes: fwd, bwd, fwd_bwd, or fwd_no_grad."
-            )
+            assert (
+                self.tb_args.mode == "bwd"
+            ), "We only accept test modes: fwd, bwd, fwd_bwd, or fwd_no_grad."
             self.mode = Mode.BWD
         self.requires_grad = not (self.mode == Mode.FWD_NO_GRAD)
         self.device = tb_args.device
@@ -1051,16 +1050,16 @@ class BenchmarkOperator(metaclass=PostInitProcessor):
             setattr(fwd_fn, "_name", bm_func_name)
             return fwd_fn
         elif self.mode == Mode.BWD:
-            assert not backend.fwd_only, (
-                f"Backend {bm_func_name} does not support backward pass."
-            )
+            assert (
+                not backend.fwd_only
+            ), f"Backend {bm_func_name} does not support backward pass."
             bwd_fn = self.get_bwd_fn(fwd_fn)
             setattr(bwd_fn, "_name", bm_func_name)
             return bwd_fn
         elif self.mode == Mode.FWD_BWD:
-            assert not backend.fwd_only, (
-                f"Backend {bm_func_name} does not support backward pass."
-            )
+            assert (
+                not backend.fwd_only
+            ), f"Backend {bm_func_name} does not support backward pass."
             bwd_fn = self.get_bwd_fn(fwd_fn)
 
             # FWD_BWD returns (forward_output, grad_tensors_after_backward)
@@ -2091,9 +2090,9 @@ class BenchmarkOperator(metaclass=PostInitProcessor):
                 self.required_metrics
             )
             for metric_name in required_custom_metrics:
-                assert metric_name not in BUILTIN_METRICS, (
-                    "Metric name {metric_name} is built-in and should be OVERRIDDEN_METRICS. Please report a bug."
-                )
+                assert (
+                    metric_name not in BUILTIN_METRICS
+                ), "Metric name {metric_name} is built-in and should be OVERRIDDEN_METRICS. Please report a bug."
                 extra_metrics[metric_name] = None
             return extra_metrics
 
@@ -2386,8 +2385,8 @@ class BenchmarkOperator(metaclass=PostInitProcessor):
                     )
             if self.tb_args.dump_ir:
                 self.dump_ir(input_id, fn, self.tb_args.dump_ir)
-        except torch.cuda.OutOfMemoryError:
-            metrics.error_msg = "CUDA OOM"
+        except torch.OutOfMemoryError:
+            metrics.error_msg = f"{self.device.upper()} OOM"
         except TritonOutOfResources as e:
             metrics.error_msg = f"Triton OOR: {e}"
         except NotImplementedError as e:
@@ -2407,7 +2406,9 @@ class BenchmarkOperator(metaclass=PostInitProcessor):
     def do_bench_cudagraph_mem(
         self, fn, n_repeat=2, grad_to_none=None, device_type="cuda"
     ):
-        with torch.cuda.stream(torch.cuda.Stream()):
+        device_module = get_device_module(device_type)
+        graph_cls = get_graph_cls(device_type)
+        with device_module.stream(device_module.Stream()):
             # warmup
             fn()
             if grad_to_none is not None:
@@ -2415,20 +2416,20 @@ class BenchmarkOperator(metaclass=PostInitProcessor):
                     x.detach_()
                     x.requires_grad_(True)
                     x.grad = None
-            g = torch.cuda.CUDAGraph()
-            with torch.cuda.graph(g):
+            g = graph_cls()
+            with device_module.graph(g):
                 fn()
-            torch.cuda.synchronize()
+            device_module.synchronize()
             g.replay()
-            torch.cuda.synchronize()
-            g = torch.cuda.CUDAGraph()
-            with torch.cuda.graph(g):
+            device_module.synchronize()
+            g = graph_cls()
+            with device_module.graph(g):
                 for _ in range(n_repeat):
                     if grad_to_none is not None:
                         for x in grad_to_none:
                             x.grad = None
                     fn()
-            torch.cuda.synchronize()
+            device_module.synchronize()
 
     def do_bench_mem(self, fn, n_repeat=2, grad_to_none=None, device_type="cuda"):
         if device_type == "tpu":
@@ -2469,19 +2470,25 @@ class BenchmarkOperator(metaclass=PostInitProcessor):
                 Defaults to None.
             use_cuda_graphs (bool, optional): Whether to use CUDA graphs for measurement.
                 Defaults to False.
-            device_type (str, optional): Device to measure memory for ("cuda" or "cpu").
-                Defaults to "cuda".
+            device_type (str, optional): Device to measure memory for (any accelerator
+                torch exposes a memory-stats API for, or "cpu"). Defaults to "cuda".
 
         Returns:
             Tuple[Optional[float], Optional[float]]: A tuple containing:
                 - Peak CPU memory usage in GB (None if not requested)
-                - Peak GPU memory usage in GB (None if not requested or not on CUDA)
+                - Peak GPU memory usage in GB (None if not requested or not on an accelerator)
         """
         gpu_peak_mem = None
         cpu_peak_mem = None
-        if device_type == "cuda":
-            torch.cuda.reset_peak_memory_stats()
-            torch.cuda.empty_cache()
+        # Any accelerator with a caching allocator exposes these; gating on
+        # device_type == "cuda" silently reported no gpu_peak_mem on XPU/MTIA.
+        # Resolve torch.<device_type> directly rather than via get_device_module,
+        # whose torch.cuda fallback would point a "tpu" run at CUDA's stats.
+        device_module = getattr(torch, device_type, None)
+        has_mem_stats = hasattr(device_module, "max_memory_allocated")
+        if has_mem_stats:
+            device_module.reset_peak_memory_stats()
+            device_module.empty_cache()
         if use_cuda_graphs:
             self.do_bench_cudagraph_mem(
                 fn, n_repeat=2, grad_to_none=grad_to_none, device_type=device_type
@@ -2490,10 +2497,10 @@ class BenchmarkOperator(metaclass=PostInitProcessor):
             self.do_bench_mem(
                 fn, n_repeat=2, grad_to_none=grad_to_none, device_type=device_type
             )
-        if device_type == "cuda" and (
+        if has_mem_stats and (
             {"gpu_peak_mem", "mem_footprint_compression_ratio"} & set(required_metrics)
         ):
-            gpu_peak_mem = torch.cuda.max_memory_allocated() / 10**9
+            gpu_peak_mem = device_module.max_memory_allocated() / 10**9
         if "cpu_peak_mem" in required_metrics:
             total = psutil.virtual_memory().total
             percentage = psutil.Process(os.getpid()).memory_percent()
@@ -2784,16 +2791,16 @@ class BenchmarkOperator(metaclass=PostInitProcessor):
             if torch.version.hip
             else _get_mtia_device_name()
             if is_mtia()
-            else torch.cuda.get_device_name()
+            else get_device_name(self.device)
         )
-        assert device_name in rooflines, (
-            f"{device_name} is not supported in HW roofline specs."
-        )
+        assert (
+            device_name in rooflines
+        ), f"{device_name} is not supported in HW roofline specs."
         rooflines = rooflines[device_name]
         if self.is_compute_bound:
-            assert self.tb_args.precision in rooflines, (
-                f"{self.tb_args.precision} is not supported by {device_name}."
-            )
+            assert (
+                self.tb_args.precision in rooflines
+            ), f"{self.tb_args.precision} is not supported by {device_name}."
             return rooflines[self.tb_args.precision]
         return rooflines
 
