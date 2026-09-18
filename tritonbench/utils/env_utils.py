@@ -134,6 +134,47 @@ def get_device_module(device: Optional[str] = None):
     return getattr(torch, device or get_current_device(), torch.cuda)
 
 
+def get_device_name(device: Optional[str] = None) -> str:
+    """Marketing name of ``device`` (e.g. "NVIDIA H100", "Intel(R) Arc(TM) Pro B70")."""
+    return get_device_module(device).get_device_name()
+
+
+def get_graph_cls(device: Optional[str] = None):
+    """Graph-capture class for ``device``: ``CUDAGraph``/``XPUGraph``/...
+
+    ``torch.<device>.graph`` is spelled the same everywhere but the graph object
+    is not (``torch.cuda.CUDAGraph`` vs ``torch.xpu.XPUGraph``), so callers that
+    want a device-agnostic capture need this indirection. Raises when the
+    backend has no graph capture at all, which is a clearer failure than
+    ``AssertionError: Torch not compiled with CUDA enabled``.
+    """
+    device = device or get_current_device()
+    module = get_device_module(device)
+    for name in (f"{device.upper()}Graph", "CUDAGraph"):
+        cls = getattr(module, name, None)
+        if cls is not None:
+            return cls
+    raise NotImplementedError(f"Graph capture is not supported on device '{device}'")
+
+
+def get_profiler_activity(device: Optional[str] = None):
+    """``ProfilerActivity`` member that records kernels on ``device``."""
+    device = device or get_current_device()
+    activity = getattr(torch.profiler.ProfilerActivity, device.upper(), None)
+    if activity is None:
+        raise NotImplementedError(f"torch.profiler cannot trace device '{device}'")
+    return activity
+
+
+def get_profiler_device_type(device: Optional[str] = None):
+    """``autograd.DeviceType`` member that profiler events on ``device`` carry."""
+    device = device or get_current_device()
+    device_type = getattr(torch.autograd.DeviceType, device.upper(), None)
+    if device_type is None:
+        raise NotImplementedError(f"torch.profiler cannot trace device '{device}'")
+    return device_type
+
+
 def get_num_sms(device=None) -> int:
     """Number of independently schedulable compute units on ``device``.
 

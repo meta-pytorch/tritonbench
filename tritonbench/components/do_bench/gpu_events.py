@@ -1,4 +1,6 @@
 import threading
+import time
+from functools import lru_cache
 from typing import Any, Callable, Optional
 
 import torch
@@ -6,12 +8,19 @@ import triton
 import triton.language as tl
 from tritonbench.utils.constants import DEFAULT_N_REP, DEFAULT_N_WARMUP
 from tritonbench.utils.cudagraph_utils import CudaGraphConfig, CudaGraphError
-from tritonbench.utils.env_utils import is_hip
+from tritonbench.utils.env_utils import get_current_device, get_device_module, is_hip
 
 from .common import summarize_statistics
 from .utils import resolve_warmup_and_rep
 
 AMD_SLEEP_NS_PER_ITERATION = 3870
+
+# Poll-iteration budget for _block_stream_kernel before giving up.
+DEFAULT_BLOCK_STREAM_TIMEOUT_ITERS = 10000
+
+# Host delay in _supports_stream_blocking between launching the spinner and
+# releasing it. Long enough that the spinner is certainly already running.
+_STREAM_BLOCKING_PROBE_DELAY_S = 0.05
 
 _kernel_unblock_stream = None
 
@@ -51,7 +60,7 @@ def _get_unblocking_stream(device: torch.device):
     """
     global _kernel_unblock_stream
     if _kernel_unblock_stream is None:
-        _kernel_unblock_stream = torch.cuda.Stream(device=device)
+        _kernel_unblock_stream = get_device_module(device.type).Stream(device=device)
     return _kernel_unblock_stream
 
 
@@ -61,7 +70,8 @@ def _block_stream_kernel(
     timeout_ptr,
     sleep_ns: tl.constexpr = 1000000,
     signal: tl.constexpr = 1,
-    is_amd: tl.constexpr = False,
+    device_type: tl.constexpr = "cuda",
+    timeout: tl.constexpr = DEFAULT_BLOCK_STREAM_TIMEOUT_ITERS,
 ):
     """
     Sleep kernel that performs an iterative check on a single value
@@ -75,19 +85,22 @@ def _block_stream_kernel(
         buffer_ptr: Pointer to a single-element buffer in global memory.
         sleep_ns: Sleep duration in nanoseconds between checks (default: 1ms).
         signal: The value to unblock the stream.
-        is_amd: Whether to use AMD-specific sleep instruction.
+        device_type: Backend used to pick the in-kernel sleep instruction
+            ("hip" -> s_sleep, "cuda" -> NVIDIA nanosleep; anything else
+            busy-polls, e.g. Intel XPU has no sleep intrinsic exposed
+            through Triton).
+        timeout: Max poll iterations before giving up.
     """
     value = 0
-    timeout = 10000
     num_checks = 0
     while value != signal and num_checks <= timeout:
         # Read the value from global memory using volatile memory access
         value = tl.load(signal_ptr, volatile=True)
 
         # Sleep for a few milliseconds before checking again to reduce polling overhead
-        if is_amd:
+        if device_type == "hip":
             sleep_amd(sleep_ns)
-        else:
+        elif device_type == "cuda":
             # NVIDIA: CUDA PTX nanosleep instruction
             tl.inline_asm_elementwise(
                 "nanosleep.u32 $1;",
@@ -97,6 +110,11 @@ def _block_stream_kernel(
                 is_pure=False,
                 pack=1,
             )
+        # Other backends (e.g. Intel XPU) have no sleep intrinsic exposed
+        # through Triton, so they fall through to a plain busy-poll. Both
+        # inline-asm variants above are backend-specific and will not compile
+        # elsewhere; emitting them unconditionally is what made this mode
+        # NVIDIA/AMD-only.
         num_checks += 1
 
     if value == signal:
@@ -109,7 +127,7 @@ def _block_stream(
     timeout_buffer: torch.Tensor,
     sleep_ns: int = 1000000,
     signal: int = 1,
-    is_amd: bool = False,
+    device_type: str = "cuda",
 ):
     """
     Block stream function that calls the block_stream_kernel.
@@ -120,10 +138,17 @@ def _block_stream(
             timeout in global memory. It's intalized with a non-zero value.
         sleep_ns: Sleep duration in nanoseconds between checks (default: 1ms = 1,000,000 ns).
         signal: The value to unblock the stream.
-        is_amd: Whether to use AMD-specific sleep instruction.
+        device_type: Backend used to pick the in-kernel sleep instruction
+            ("hip", "cuda", or anything else to busy-poll).
     """
     _block_stream_kernel[(1,)](
-        signal_buffer, timeout_buffer, sleep_ns, signal, is_amd, num_warps=1
+        signal_buffer,
+        timeout_buffer,
+        sleep_ns,
+        signal,
+        device_type,
+        DEFAULT_BLOCK_STREAM_TIMEOUT_ITERS,
+        num_warps=1,
     )
 
 
@@ -157,13 +182,71 @@ def _unblock_stream(
     _unblock_stream_kernel[(1,)](signal_buffer, signal, num_warps=1)
 
 
-def _setup_stream_blocking(signal: int, is_amd: bool):
+@lru_cache(maxsize=None)
+def _supports_stream_blocking(device_type: str) -> bool:
+    """Can a spinning kernel observe a flag another stream writes mid-flight?
+
+    The whole gpu_events design rests on this: a kernel parks on the compute
+    stream polling a flag, the host enqueues the work behind it, then a kernel
+    on a second stream releases it. That needs concurrent cross-stream
+    execution *and* a device-side poll that actually re-reads memory each
+    iteration. Both hold on NVIDIA/AMD, so the mode never checked; on Intel XPU
+    ``tl.load(volatile=True)`` does not re-read, and the spinner exhausts its
+    budget without ever seeing the update.
+
+    Probed rather than hardcoded per backend, so this lights up on its own once
+    a backend gains the guarantee. Costs one warm kernel launch when it works.
+    """
+    device = get_current_device()
+    device_module = get_device_module(device)
+    signal_buffer = torch.zeros(1, dtype=torch.int32, device=device)
+    timeout_buffer = torch.ones(1, dtype=torch.int32, device=device)
+    unblocking_stream = _get_unblocking_stream(signal_buffer.device)
+
+    # Compile both kernels first so JIT time cannot be mistaken for a delay.
+    _unblock_stream(signal_buffer=signal_buffer, signal=1)
+    _block_stream(
+        signal_buffer=signal_buffer,
+        timeout_buffer=timeout_buffer,
+        signal=1,
+        device_type=device_type,
+    )
+    device_module.synchronize()
+
+    signal_buffer.fill_(0)
+    timeout_buffer.fill_(1)
+    device_module.synchronize()
+    _block_stream(
+        signal_buffer=signal_buffer,
+        timeout_buffer=timeout_buffer,
+        signal=1,
+        device_type=device_type,
+    )
+    # Signal only after the spinner is unambiguously already running, so a
+    # backend that reads the flag once at entry cannot pass by accident.
+    time.sleep(_STREAM_BLOCKING_PROBE_DELAY_S)
+    with device_module.stream(unblocking_stream):
+        _unblock_stream(signal_buffer=signal_buffer, signal=1)
+    device_module.synchronize()
+    return timeout_buffer.item() == 0
+
+
+def _setup_stream_blocking(signal: int, device_type: str):
     """
     Allocate buffers and streams for stream blocking and warmup the
     blocking/unblocking stream kernels.
     """
-    signal_buffer = torch.zeros(1, dtype=torch.int32, device="cuda")
-    timeout_buffer = torch.ones(1, dtype=torch.int32, device="cuda")
+    if not _supports_stream_blocking(device_type):
+        raise NotImplementedError(
+            f"latency_measure_mode='gpu_events' is not supported on device "
+            f"'{get_current_device()}': a kernel spinning on the compute stream "
+            f"never observes the release flag written from another stream, so "
+            f"every measurement would time out. Use 'triton_do_bench', "
+            f"'profiler', or --repcnt instead."
+        )
+    device = get_current_device()
+    signal_buffer = torch.zeros(1, dtype=torch.int32, device=device)
+    timeout_buffer = torch.ones(1, dtype=torch.int32, device=device)
     unblocking_stream = _get_unblocking_stream(signal_buffer.device)
 
     # Warm up block and unblock streams
@@ -172,9 +255,9 @@ def _setup_stream_blocking(signal: int, is_amd: bool):
         signal_buffer=signal_buffer,
         timeout_buffer=timeout_buffer,
         signal=signal,
-        is_amd=is_amd,
+        device_type=device_type,
     )
-    torch.cuda.synchronize()
+    get_device_module(device).synchronize()
     return signal_buffer, timeout_buffer, unblocking_stream
 
 
@@ -191,39 +274,40 @@ def _reset_stream_blocking_flags(
 
 def _bench_with_stream_blocking(
     fn: Callable,
-    compute_stream: torch.cuda.Stream,
-    unblocking_stream: torch.cuda.Stream,
+    compute_stream: torch.Stream,
+    unblocking_stream: torch.Stream,
     signal_buffer: torch.Tensor,
     timeout_buffer: torch.Tensor,
     signal: int,
     n_repeat: int,
-    is_amd: bool,
+    device_type: str,
 ) -> Any:
+    device_module = get_device_module(signal_buffer.device.type)
     to_bench = True
     while to_bench:
         # Reset the signal and timeout buffers
         _reset_stream_blocking_flags(signal_buffer, timeout_buffer)
-        torch.cuda.synchronize()
+        device_module.synchronize()
 
-        with torch.cuda.stream(compute_stream):
+        with device_module.stream(compute_stream):
             # Start benchmarking
             # Block the stream until the kernel dispatching is complete
             _block_stream(
                 signal_buffer=signal_buffer,
                 timeout_buffer=timeout_buffer,
                 signal=signal,
-                is_amd=is_amd,
+                device_type=device_type,
             )
 
             # Benchmark
             fn(n_repeat)
 
         # Unblock the stream to allow the benchmark to run
-        with torch.cuda.stream(unblocking_stream):
+        with device_module.stream(unblocking_stream):
             _unblock_stream(signal_buffer=signal_buffer, signal=signal)
 
         # Wait for the events to complete
-        torch.cuda.synchronize()
+        device_module.synchronize()
 
         # Stop benchmarking even when fail when n_repeat is 1 since we cannot
         # futher reduce the number of iterations
@@ -269,17 +353,20 @@ def do_bench_events(
         List of measured kernel times in milliseconds (if return_mode="all") or single value.
     """
     fn_only_bench = grad_to_none is None and skip_cache_clearing
+    device = get_current_device()
+    device_module = get_device_module(device)
     if use_cudagraph:
-        assert fn_only_bench, (
-            "CUDA graphs only support grad_to_none=None and skip_cache_clearing=True"
-        )
+        assert (
+            fn_only_bench
+        ), "CUDA graphs only support grad_to_none=None and skip_cache_clearing=True"
         assert cudagraph_config is not None
         compute_stream = cudagraph_config.get_stream()
     else:
-        compute_stream = torch.cuda.current_stream()
+        compute_stream = device_module.current_stream()
 
-    # Detect AMD for GPU sleep
-    amd_device = is_hip()
+    # Backend used to pick the in-kernel sleep instruction while the stream is
+    # blocked ("hip", "cuda", or anything else to busy-poll).
+    device_type = "hip" if is_hip() else device
 
     # Get cache for L2 cache clearing
     cache = (
@@ -300,11 +387,11 @@ def do_bench_events(
     # Setup buffer, and stream for blocking/unblocking the stream
     signal = 1
     signal_buffer, timeout_buffer, unblocking_stream = _setup_stream_blocking(
-        signal, is_amd=amd_device
+        signal, device_type=device_type
     )
 
     # Initial time events
-    time_events = [torch.cuda.Event(enable_timing=True) for _ in range(2)]
+    time_events = [device_module.Event(enable_timing=True) for _ in range(2)]
 
     # Estimate number of iterations based on target rep time
     if fn_only_bench:
@@ -331,9 +418,9 @@ def do_bench_events(
         timeout_buffer,
         signal,
         n_repeat=10,
-        is_amd=amd_device,
+        device_type=device_type,
     )
-    torch.cuda.synchronize()
+    device_module.synchronize()
 
     estimate_ms = time_events[0].elapsed_time(time_events[1]) / n_repeat
     warmup, rep = resolve_warmup_and_rep(warmup, rep, estimate_ms)
@@ -360,7 +447,8 @@ def do_bench_events(
     if not fn_only_bench:
         additional_num_events = n_repeat * 2 - len(time_events)
         time_events += [
-            torch.cuda.Event(enable_timing=True) for _ in range(additional_num_events)
+            device_module.Event(enable_timing=True)
+            for _ in range(additional_num_events)
         ]
 
     # Run the benchmark
@@ -373,20 +461,20 @@ def do_bench_events(
         n_cudagraph_repeat = min(max(max_num_kernels // num_kernels, 1), n_repeat)
 
         n_replay = max(n_repeat // n_cudagraph_repeat, 1)
-        torch.cuda.synchronize()
+        device_module.synchronize()
 
         # Capture cudagraph
         fn_graph = cudagraph_config.get_graph()
-        with torch.cuda.graph(fn_graph, stream=cudagraph_config.get_stream()):
+        with device_module.graph(fn_graph, stream=cudagraph_config.get_stream()):
             for _ in range(n_cudagraph_repeat):
                 fn()
-        torch.cuda.synchronize()
+        device_module.synchronize()
 
         def run_replay(event):
             try:
-                with torch.cuda.stream(cudagraph_config.get_stream()):
+                with device_module.stream(cudagraph_config.get_stream()):
                     fn_graph.replay()
-                torch.cuda.synchronize()
+                device_module.synchronize()
                 event.set()
             except Exception as e:
                 print(f"An error occurred during CudaGraph replay: {e}", flush=True)
@@ -406,7 +494,7 @@ def do_bench_events(
                 print("CudaGraph replay failed. Destroying graph", flush=True)
                 cudagraph_config.reset_graph()
                 thread.join()
-                torch.cuda.synchronize()
+                device_module.synchronize()
                 print("CudaGraph replay thread cleanly terminated", flush=True)
             except Exception as e:
                 # Raise
@@ -445,7 +533,7 @@ def do_bench_events(
         timeout_buffer,
         signal,
         n_repeat if not use_cudagraph else n_replay,
-        is_amd=amd_device,
+        device_type=device_type,
     )
 
     if use_cudagraph:
