@@ -164,14 +164,19 @@ except ImportError:
     HAS_TLX = False
 
 if HAS_TLX:
-    from triton.language.extra.tlx.tutorials.blackwell_fa_ws_pipelined_persistent import (
-        attention as tlx_blackwell,
+    from triton.language.extra.tlx.tutorials import (
+        blackwell_fa_ws_pipelined_persistent as tlx_blackwell_module,
     )
+
+    tlx_blackwell = tlx_blackwell_module.attention
+    _tlx_default_select_forward_plan = tlx_blackwell_module._select_forward_plan
 try:
     HAS_TRITON_AUTOWS_FA = True
-    from triton.language.extra.tlx.tutorials.fused_attention_ws_device_tma import (
-        attention as autows_blackwell,
+    from triton.language.extra.tlx.tutorials import (
+        fused_attention_ws_device_tma as autows_blackwell_module,
     )
+
+    autows_blackwell = autows_blackwell_module.attention
 except Exception:
     HAS_TRITON_AUTOWS_FA = False
 
@@ -234,6 +239,13 @@ def parse_op_args(args: List[str]):
     )
     parser.add_argument(
         "--d-head", type=int, default=128, help="specify head dimension"
+    )
+    parser.add_argument(
+        "--fa-bwd-num-ctas",
+        type=int,
+        choices=(1, 2),
+        default=None,
+        help="Restrict AutoWS and TLX Flash Attention backward to 1CTA or 2CTA configs",
     )
     parser.add_argument(
         "--causal",
@@ -359,6 +371,44 @@ def preproc_noop(*args):
     return args
 
 
+def _pin_autows_fa_bwd_num_ctas(num_ctas: int) -> None:
+    configs = [
+        config
+        for config in autows_blackwell_module.configs_bwd_persist
+        if config.kwargs.get("NUM_CTAS", 1) == num_ctas
+    ]
+    if not configs:
+        raise ValueError(f"No AutoWS FA backward {num_ctas}CTA configs are available")
+    autows_blackwell_module._attn_bwd_persist.configs = configs
+    autows_blackwell_module._attn_bwd_persist.cache = {}
+
+
+def _pin_tlx_fa_bwd_num_ctas(num_ctas: int) -> None:
+    configs = [
+        config
+        for config in tlx_blackwell_module.BWD_CONFIGS
+        if config.kwargs.get("NUM_CTAS", 1) == num_ctas
+    ]
+    if not configs:
+        raise ValueError(f"No TLX FA backward {num_ctas}CTA configs are available")
+
+    # The long-sequence direct-dQ policy normally forces 2CTA independently of
+    # TritonBench's forward config. Move that policy boundary so pruning keeps
+    # only the requested backward CTA count.
+    tlx_blackwell_module.BWD_2CTA_MIN_N_CTX = 1 << 62 if num_ctas == 1 else 0
+    tlx_blackwell_module._attn_bwd_ws.configs = configs
+    tlx_blackwell_module._attn_bwd_ws.cache = {}
+
+    # A BF16 2CTA forward saves an inverse normalizer consumed only by the
+    # direct-dQ 2CTA backward. Keep the setup forward on the requested CTA path
+    # so a forced 1CTA backward receives compatible saved state.
+    def select_forward_plan(q, k, v, causal):
+        plan = _tlx_default_select_forward_plan(q, k, v, causal)
+        return plan._replace(num_ctas=num_ctas)
+
+    tlx_blackwell_module._select_forward_plan = select_forward_plan
+
+
 def preproc_permute(q, k, v, varlen=False):
     q, k, v = [t.contiguous() for t in permute_qkv(q, k, v, perm=(0, 2, 1, 3))]
     if not varlen:
@@ -433,6 +483,12 @@ class Operator(BenchmarkOperator):
         self.N_HEADS_Q_PER_KV = args.n_heads_q_per_kv
         self.H = args.n_heads
         self.D_HEAD = args.d_head
+        self.fa_bwd_num_ctas = args.fa_bwd_num_ctas
+        if self.fa_bwd_num_ctas is not None and self.mode not in (
+            BenchmarkMode.BWD,
+            BenchmarkMode.FWD_BWD,
+        ):
+            raise ValueError("--fa-bwd-num-ctas requires --mode bwd or fwd_bwd")
         self.causal = args.causal
         self.window_size = args.window_size
         self.local = self.window_size != (-1, -1)
@@ -757,6 +813,9 @@ class Operator(BenchmarkOperator):
     def triton_autows_flash_persistent_blackwell(
         self, *args
     ) -> Tuple[Callable, Callable]:
+        if self.fa_bwd_num_ctas is not None:
+            _pin_autows_fa_bwd_num_ctas(self.fa_bwd_num_ctas)
+
         def fn(q, k, v):
             return autows_blackwell(
                 q,
@@ -825,6 +884,9 @@ class Operator(BenchmarkOperator):
     @register_benchmark(enabled=HAS_TLX)
     @multi_input_wrapper
     def tlx_blackwell_ws_pipelined_persistent(self, *args) -> Tuple[Callable, Callable]:
+        if self.fa_bwd_num_ctas is not None:
+            _pin_tlx_fa_bwd_num_ctas(self.fa_bwd_num_ctas)
+
         def fn(q, k, v):
             return tlx_blackwell(
                 q,
@@ -836,7 +898,9 @@ class Operator(BenchmarkOperator):
 
         return preproc_noop, fn
 
-    @register_benchmark(enabled=HAS_TLX and is_triton_beta(), label="tlx-1cta")
+    @register_benchmark(
+        enabled=HAS_TLX and is_triton_beta(), fwd_only=True, label="tlx-1cta"
+    )
     @multi_input_wrapper
     def tlx_blackwell_1cta(self, *args) -> Tuple[Callable, Callable]:
         cfg = {
@@ -858,7 +922,9 @@ class Operator(BenchmarkOperator):
 
         return preproc_noop, fn
 
-    @register_benchmark(enabled=HAS_TLX and is_triton_beta(), label="tlx-2cta")
+    @register_benchmark(
+        enabled=HAS_TLX and is_triton_beta(), fwd_only=True, label="tlx-2cta"
+    )
     @multi_input_wrapper
     def tlx_blackwell_2cta(self, *args) -> Tuple[Callable, Callable]:
         cfg = {
