@@ -20,6 +20,10 @@ production-like jagged GQA/shared-KV workload. Run the backward with, e.g.::
 
     python run.py --op hstu_cross_attention_bwd --mode bwd
     python run.py --op hstu_cross_attention_bwd --mode bwd --prod-shapes
+    python run.py --op hstu_cross_attention_bwd --mode bwd --prod-shapes \
+        --only autows_2kv_host_tma \
+        --metrics accuracy,tlx_max_abs,tlx_rel_l2 \
+        --accuracy-reference tlx_2kv
 
 The 2-KV variants require shared-KV (V aliases K); they are enabled by default
 and skipped under ``--separate-kv``.
@@ -114,6 +118,12 @@ def parse_op_args(args: List[str]) -> argparse.Namespace:
         default=192,
         help="maximum registers per thread for AutoWS computation partitions",
     )
+    parser.add_argument(
+        "--accuracy-reference",
+        choices=("redq", "tlx_2kv"),
+        default="redq",
+        help="Reference for AutoWS 2-KV accuracy and error metrics",
+    )
     parser.add_argument("--block-m", type=int, default=64, help="bwd BLOCK_M")
     parser.add_argument(
         "--block-n",
@@ -189,6 +199,8 @@ class Operator(BenchmarkOperator):
         self.autows_qdo_buffer_depth = args.autows_qdo_buffer_depth
         self.autows_min_reg = args.autows_min_reg
         self.autows_max_reg = args.autows_max_reg
+        self.accuracy_reference = args.accuracy_reference
+        self._tlx_comparison_cache = {}
         self.block_m = args.block_m
         self.block_n = (
             args.block_n
@@ -261,8 +273,8 @@ class Operator(BenchmarkOperator):
     def _bench(self, variant, ws: str, q, k, v, so_kv, so_q, asc, limits) -> Callable:
         """Return a forward callable for the given bwd variant.
 
-        The forward records the selected bwd variant into the autograd graph, so
-        the later ``get_bwd_fn`` backward dispatches to that kernel.
+        The returned callable records the selected backward variant so
+        ``get_bwd_fn`` can restore it immediately before autograd dispatch.
         """
         max_q_len, max_kv_len = limits
         self._pin_configs(max_q_len)
@@ -292,12 +304,17 @@ class Operator(BenchmarkOperator):
             )
 
         # Deduplicate by identity: under shared-KV, v IS k (grad accumulates dk+dv).
-        seen, grad_inputs = set(), []
-        for t in (q, k, v):
+        seen, grad_inputs, grad_names = set(), [], []
+        named_inputs = (("dq", q), ("dk+dv" if v is k else "dk", k), ("dv", v))
+        for name, t in named_inputs:
             if t.requires_grad and id(t) not in seen:
                 seen.add(id(t))
                 grad_inputs.append(t)
+                grad_names.append(name)
         fn._grad_inputs = grad_inputs
+        fn._grad_names = grad_names
+        fn._bwd_variant = variant
+        fn._meta_ws = ws
         return fn
 
     # ---- benchmark variants ----------------------------------------------
@@ -371,12 +388,70 @@ class Operator(BenchmarkOperator):
         do = (0.1 * torch.randn_like(o)).detach()
 
         def fn():
+            xa.set_bwd_variant(fwd_fn._bwd_variant)
+            os.environ["TRITON_USE_META_WS"] = fwd_fn._meta_ws
             for t in grad_inputs:
                 t.grad = None
             o.backward(do, retain_graph=True)
             return grad_inputs
 
+        fn._grad_names = fwd_fn._grad_names
         return fn
+
+    def _compare_with_tlx_2kv(self, fn: Callable):
+        """Run a direct gradient comparison against the TLX 2-KV kernel."""
+        fn_name = getattr(fn, "_name", "")
+        if fn_name not in ("autows_2kv", "autows_2kv_host_tma"):
+            return None
+        if not self.shared:
+            raise NotImplementedError("TLX 2-KV accuracy requires shared K/V")
+
+        cached = self._tlx_comparison_cache.get(fn)
+        if cached is not None:
+            return cached
+
+        impl_tensors = fn()
+        impl_grads = self._clone_gradients(impl_tensors, mode="AutoWS 2-KV")
+
+        tlx_fwd = self.tlx_2kv(*self.example_inputs)
+        tlx_bwd = self.get_bwd_fn(tlx_fwd)
+        tlx_tensors = tlx_bwd()
+        tlx_grads = self._clone_gradients(tlx_tensors, mode="TLX 2-KV")
+
+        names = getattr(fn, "_grad_names", [f"grad{i}" for i in range(len(impl_grads))])
+        if len(impl_grads) != len(tlx_grads):
+            raise AssertionError(
+                f"TLX comparison gradient count mismatch: {len(impl_grads)} vs {len(tlx_grads)}"
+            )
+
+        max_abs = {}
+        rel_l2 = {}
+        for name, actual, expected in zip(names, impl_grads, tlx_grads):
+            if actual is None or expected is None:
+                if actual is not expected:
+                    raise AssertionError(f"TLX comparison missing gradient for {name}")
+                continue
+            diff = actual.float() - expected.float()
+            max_abs[name] = diff.abs().max().item()
+            rel_l2[name] = (
+                torch.linalg.vector_norm(diff)
+                / (torch.linalg.vector_norm(expected.float()) + 1e-12)
+            ).item()
+
+        try:
+            passed = self._check_gradients(impl_grads, tlx_grads, "AutoWS vs TLX 2-KV")
+        except AssertionError:
+            passed = False
+        cached = {"max_abs": max_abs, "rel_l2": rel_l2, "passed": passed}
+        self._tlx_comparison_cache[fn] = cached
+        return cached
+
+    def accuracy(self, fn: Callable, baseline_fn: Callable) -> bool:
+        if self.accuracy_reference == "tlx_2kv":
+            comparison = self._compare_with_tlx_2kv(fn)
+            if comparison is not None:
+                return comparison["passed"]
+        return super().accuracy(fn, baseline_fn)
 
     # ---- inputs -----------------------------------------------------------
     def _make_inputs(self, Lkv):
@@ -494,3 +569,25 @@ class Operator(BenchmarkOperator):
         elif self.mode == BenchmarkMode.FWD_BWD:
             flops *= 3.5  # 1.0(fwd) + 2.0(bwd) + 0.5(recompute)
         return flops
+
+    @staticmethod
+    def _format_error_metric(values) -> str:
+        return ",".join(f"{name}={value:.8g}" for name, value in values.items())
+
+    @register_metric(skip_baseline=True)
+    def tlx_max_abs(
+        self, fn: Callable, example_inputs: Any, metrics: BenchmarkOperatorMetrics
+    ) -> Optional[str]:
+        comparison = self._compare_with_tlx_2kv(fn)
+        if comparison is None:
+            return None
+        return self._format_error_metric(comparison["max_abs"])
+
+    @register_metric(skip_baseline=True)
+    def tlx_rel_l2(
+        self, fn: Callable, example_inputs: Any, metrics: BenchmarkOperatorMetrics
+    ) -> Optional[str]:
+        comparison = self._compare_with_tlx_2kv(fn)
+        if comparison is None:
+            return None
+        return self._format_error_metric(comparison["rel_l2"])
