@@ -94,6 +94,26 @@ def parse_op_args(args: List[str]) -> argparse.Namespace:
         default=None,
         help="bwd num_stages (default: 2, or 1 with --prod-shapes)",
     )
+    parser.add_argument(
+        "--autows-qdo-buffer-depth",
+        choices=("auto", "1", "2"),
+        default="auto",
+        help="AutoWS two-KV Q/dO SMEM ring depth; auto uses 1 through target 160 and 2 above it",
+    )
+    parser.add_argument(
+        "--autows-min-reg",
+        type=int,
+        choices=(24, 32, 40, 48),
+        default=40,
+        help="minimum registers per thread for AutoWS auxiliary partitions (default: 40)",
+    )
+    parser.add_argument(
+        "--autows-max-reg",
+        type=int,
+        choices=(168, 176, 184, 192, 200, 208),
+        default=192,
+        help="maximum registers per thread for AutoWS computation partitions",
+    )
     parser.add_argument("--block-m", type=int, default=64, help="bwd BLOCK_M")
     parser.add_argument(
         "--block-n",
@@ -166,6 +186,9 @@ class Operator(BenchmarkOperator):
             if args.num_stages is not None
             else (1 if self.prod_shapes else 2)
         )
+        self.autows_qdo_buffer_depth = args.autows_qdo_buffer_depth
+        self.autows_min_reg = args.autows_min_reg
+        self.autows_max_reg = args.autows_max_reg
         self.block_m = args.block_m
         self.block_n = (
             args.block_n
@@ -194,7 +217,7 @@ class Operator(BenchmarkOperator):
             )
 
     # ---- config pinning ---------------------------------------------------
-    def _pin_configs(self) -> None:
+    def _pin_configs(self, max_q_len: int) -> None:
         """Pin bwd num_stages / block sizes on the kernel autotune configs.
 
         Mirrors the standalone bench_bwd.force: keep one config per distinct
@@ -202,6 +225,12 @@ class Operator(BenchmarkOperator):
         the inner-loop schedule when TRITON_USE_LIST_SCHEDULE=1.
         """
         ns, bm, bn = self.num_stages, self.block_m, self.block_n
+        if self.autows_qdo_buffer_depth == "auto":
+            # The production sweep's crossover is between targets 160 and 192:
+            # depth 1 wins through 160 while depth 2 wins at 192 and 256.
+            qdo_depth = 1 if max_q_len <= 160 else 2
+        else:
+            qdo_depth = int(self.autows_qdo_buffer_depth)
         fwd = getattr(xa, "_attn_fwd_triton", None)
         if fwd is not None and hasattr(fwd, "configs"):
             c = fwd.configs[0]
@@ -218,6 +247,9 @@ class Operator(BenchmarkOperator):
                 c2.num_stages = ns
                 c2.kwargs["BLOCK_M"] = bm
                 c2.kwargs["BLOCK_N"] = bn
+                c2.kwargs["QDO_BUFFER_DEPTH"] = qdo_depth
+                c2.minRegAutoWS = self.autows_min_reg
+                c2.maxRegAutoWS = self.autows_max_reg
                 pk = c2.kwargs.get("INNER_PICK", 0)
                 if pk in seen:
                     continue
@@ -232,11 +264,11 @@ class Operator(BenchmarkOperator):
         The forward records the selected bwd variant into the autograd graph, so
         the later ``get_bwd_fn`` backward dispatches to that kernel.
         """
-        self._pin_configs()
+        max_q_len, max_kv_len = limits
+        self._pin_configs(max_q_len)
         xa.set_bwd_variant(variant)
         os.environ["TRITON_USE_META_WS"] = ws
         os.environ.pop("HSTU_BWD_VARIANT", None)  # let set_bwd_variant win
-        max_q_len, max_kv_len = limits
         H, D = q.shape[1], q.shape[2]
         # First `num_softmax_heads` of the H heads take the softmax path, the rest
         # take SiLU; -1 resolves to all-softmax (H). attn_scale is applied only on
@@ -303,6 +335,24 @@ class Operator(BenchmarkOperator):
             )
         return self._bench(
             xa.BwdVariant.TRITON_AUTOWS_2KV,
+            "1",
+            q,
+            k,
+            v,
+            so_kv,
+            so_q,
+            asc,
+            limits,
+        )
+
+    @register_benchmark(enabled=HAS_HSTU_CROSS_ATTN)
+    def autows_2kv_host_tma(self, q, k, v, so_kv, so_q, asc, limits) -> Callable:
+        if not self.shared:
+            raise NotImplementedError(
+                "autows_2kv_host_tma requires shared-KV (run without --separate-kv)"
+            )
+        return self._bench(
+            xa.BwdVariant.TRITON_AUTOWS_2KV_HOST_TMA,
             "1",
             q,
             k,
