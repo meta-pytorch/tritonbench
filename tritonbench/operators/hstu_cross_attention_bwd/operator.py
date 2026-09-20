@@ -14,10 +14,12 @@ Benchmarks the HSTU cross-attention backward pass across its reduce_dq variants:
   * tlx_2kv     - TLX 2-KV-block data-partitioned reduce_dq (shared-KV only)
   * autows_2kv  - manual 2-KV-block data-partition + autoWS (shared-KV only)
 
-Ragged (variable-length) cross attention: Q has length Lq per sequence, K/V have
-length Lkv, packed across ``batch`` sequences. Run the backward with, e.g.::
+Cross attention packs Q and K/V independently across ``batch`` sequences. The
+default input sweep uses uniform lengths; ``--prod-shapes`` switches to the
+production-like jagged GQA/shared-KV workload. Run the backward with, e.g.::
 
     python run.py --op hstu_cross_attention_bwd --mode bwd
+    python run.py --op hstu_cross_attention_bwd --mode bwd --prod-shapes
 
 The 2-KV variants require shared-KV (V aliases K); they are enabled by default
 and skipped under ``--separate-kv``.
@@ -37,13 +39,32 @@ from tritonbench.utils.triton_op import (
     register_x_val,
 )
 
+from tritonbench.operators.ragged_attention.input_utils import (
+    generate_sparse_seq_len,
+)
+
 from .kernels import HAS_HSTU_CROSS_ATTN, IMPORT_ERROR, xa
+
+
+def _positive_int_list(value: str) -> List[int]:
+    try:
+        values = [int(item) for item in value.split(",")]
+    except ValueError as error:
+        raise argparse.ArgumentTypeError(
+            "expected a comma-separated list of integers"
+        ) from error
+    if not values or any(value <= 0 for value in values):
+        raise argparse.ArgumentTypeError("all values must be positive")
+    return values
 
 
 def parse_op_args(args: List[str]) -> argparse.Namespace:
     parser = argparse.ArgumentParser()
     parser.add_argument(
-        "--batch", type=int, default=4, help="Number of ragged sequences (Z)"
+        "--batch",
+        type=int,
+        default=None,
+        help="Number of sequences (default: 4, or 1024 with --prod-shapes)",
     )
     parser.add_argument(
         "--seq-len", type=int, default=256, help="Q sequence length per sequence (Lq)"
@@ -56,19 +77,29 @@ def parse_op_args(args: List[str]) -> argparse.Namespace:
     )
     parser.add_argument("--n-heads", type=int, default=2, help="Number of heads")
     parser.add_argument(
+        "--n-kv-heads",
+        type=int,
+        default=None,
+        help="Number of KV heads (default: n-heads, or 1 with --prod-shapes)",
+    )
+    parser.add_argument(
         "--d-head",
         type=int,
         default=128,
         help="Head dimension (kernel is tuned for 128)",
     )
-    parser.add_argument("--num-stages", type=int, default=2, help="bwd num_stages")
+    parser.add_argument(
+        "--num-stages",
+        type=int,
+        default=None,
+        help="bwd num_stages (default: 2, or 1 with --prod-shapes)",
+    )
     parser.add_argument("--block-m", type=int, default=64, help="bwd BLOCK_M")
     parser.add_argument(
         "--block-n",
         type=int,
-        default=64,
-        help="bwd BLOCK_N (64 fits every variant; the single-block redq/autows "
-        "OOR on SMEM at 128 while the data-partitioned 2-KV variants fit)",
+        default=None,
+        help="bwd BLOCK_N (default: 64, or TLX-aligned 128 with --prod-shapes)",
     )
     parser.add_argument(
         "--separate-kv",
@@ -84,6 +115,30 @@ def parse_op_args(args: List[str]) -> argparse.Namespace:
         "-1 (default) => all heads softmax (the GQA-on-B200 recipe); 0 => all SiLU. "
         "The TLX variants require 0 or n_heads.",
     )
+    parser.add_argument(
+        "--max-kv",
+        type=int,
+        default=4096,
+        help="Maximum KV length for --prod-shapes",
+    )
+    parser.add_argument(
+        "--max-targets",
+        type=_positive_int_list,
+        default=[32, 128, 160, 256],
+        help="Comma-separated maximum Q/target lengths for --prod-shapes",
+    )
+    parser.add_argument(
+        "--seq-sparsity",
+        type=float,
+        default=0.95,
+        help="Mean KV-length fraction for --prod-shapes",
+    )
+    parser.add_argument(
+        "--input-seed",
+        type=int,
+        default=1001,
+        help="Random seed for --prod-shapes",
+    )
     return parser.parse_args(args)
 
 
@@ -96,16 +151,43 @@ class Operator(BenchmarkOperator):
     ):
         super().__init__(tb_args, extra_args)
         args = parse_op_args(self.extra_args)
-        self.batch = args.batch
+        self.batch = (
+            args.batch if args.batch is not None else (1024 if self.prod_shapes else 4)
+        )
         self.seq_len = args.seq_len
         self.seq_len_kv = args.seq_len_kv
         self.n_heads = args.n_heads
+        self.n_kv_heads = args.n_kv_heads
+        if self.n_kv_heads is None:
+            self.n_kv_heads = 1 if self.prod_shapes else self.n_heads
         self.d_head = args.d_head
-        self.num_stages = args.num_stages
+        self.num_stages = (
+            args.num_stages
+            if args.num_stages is not None
+            else (1 if self.prod_shapes else 2)
+        )
         self.block_m = args.block_m
-        self.block_n = args.block_n
+        self.block_n = (
+            args.block_n
+            if args.block_n is not None
+            else (128 if self.prod_shapes else 64)
+        )
         self.shared = not args.separate_kv
         self.num_softmax_heads = args.num_softmax_heads
+        self.max_kv = args.max_kv
+        self.max_targets = args.max_targets
+        self.seq_sparsity = args.seq_sparsity
+        self.input_seed = args.input_seed
+        if self.batch <= 0 or self.n_heads <= 0 or self.n_kv_heads <= 0:
+            raise ValueError("batch, n-heads, and n-kv-heads must be positive")
+        if self.max_kv <= 1:
+            raise ValueError("max-kv must be greater than 1")
+        if self.n_heads % self.n_kv_heads != 0:
+            raise ValueError("n-heads must be divisible by n-kv-heads")
+        if not 0.0 <= self.seq_sparsity <= 1.0:
+            raise ValueError("seq-sparsity must be between 0 and 1")
+        if self.prod_shapes and not self.shared:
+            raise ValueError("--prod-shapes requires shared K/V")
         if not HAS_HSTU_CROSS_ATTN:
             raise RuntimeError(
                 f"HSTU cross-attention kernel is unavailable: {IMPORT_ERROR!r}"
@@ -144,7 +226,7 @@ class Operator(BenchmarkOperator):
             xa._hstu_attn_bwd_redq_2kv.configs = kept
         xa.set_fwd_variant(xa.FwdVariant.TRITON)
 
-    def _bench(self, variant, ws: str, q, k, v, so_kv, so_q, asc) -> Callable:
+    def _bench(self, variant, ws: str, q, k, v, so_kv, so_q, asc, limits) -> Callable:
         """Return a forward callable for the given bwd variant.
 
         The forward records the selected bwd variant into the autograd graph, so
@@ -154,8 +236,7 @@ class Operator(BenchmarkOperator):
         xa.set_bwd_variant(variant)
         os.environ["TRITON_USE_META_WS"] = ws
         os.environ.pop("HSTU_BWD_VARIANT", None)  # let set_bwd_variant win
-        Lq = int(so_q[1] - so_q[0])
-        Lkv = int(so_kv[1] - so_kv[0])
+        max_q_len, max_kv_len = limits
         H, D = q.shape[1], q.shape[2]
         # First `num_softmax_heads` of the H heads take the softmax path, the rest
         # take SiLU; -1 resolves to all-softmax (H). attn_scale is applied only on
@@ -164,14 +245,14 @@ class Operator(BenchmarkOperator):
 
         def fn():
             return xa.triton_bw_hstu_mha_wrapper(
-                max_seq_len=Lkv,
+                max_seq_len=max_kv_len,
                 alpha=1.0 / D,
                 q=q,
                 k=k,
                 v=v,
                 seq_offsets=so_kv,
                 attn_scale=asc,
-                max_q_len=Lq,
+                max_q_len=max_q_len,
                 seq_offsets_q=so_q,
                 num_softmax_heads=num_softmax_heads,
                 shared_kv=self.shared,
@@ -189,33 +270,47 @@ class Operator(BenchmarkOperator):
 
     # ---- benchmark variants ----------------------------------------------
     @register_benchmark(enabled=HAS_HSTU_CROSS_ATTN, baseline=True)
-    def redq(self, q, k, v, so_kv, so_q, asc) -> Callable:
-        return self._bench(xa.BwdVariant.TRITON_REDQ, "0", q, k, v, so_kv, so_q, asc)
+    def redq(self, q, k, v, so_kv, so_q, asc, limits) -> Callable:
+        return self._bench(
+            xa.BwdVariant.TRITON_REDQ, "0", q, k, v, so_kv, so_q, asc, limits
+        )
 
     @register_benchmark(enabled=HAS_HSTU_CROSS_ATTN)
-    def autows(self, q, k, v, so_kv, so_q, asc) -> Callable:
-        return self._bench(xa.BwdVariant.TRITON_AUTOWS, "1", q, k, v, so_kv, so_q, asc)
+    def autows(self, q, k, v, so_kv, so_q, asc, limits) -> Callable:
+        return self._bench(
+            xa.BwdVariant.TRITON_AUTOWS, "1", q, k, v, so_kv, so_q, asc, limits
+        )
 
     @register_benchmark(enabled=HAS_HSTU_CROSS_ATTN)
-    def tlx(self, q, k, v, so_kv, so_q, asc) -> Callable:
-        return self._bench(xa.BwdVariant.TLX, "0", q, k, v, so_kv, so_q, asc)
+    def tlx(self, q, k, v, so_kv, so_q, asc, limits) -> Callable:
+        return self._bench(xa.BwdVariant.TLX, "0", q, k, v, so_kv, so_q, asc, limits)
 
     @register_benchmark(enabled=HAS_HSTU_CROSS_ATTN)
-    def tlx_2kv(self, q, k, v, so_kv, so_q, asc) -> Callable:
+    def tlx_2kv(self, q, k, v, so_kv, so_q, asc, limits) -> Callable:
         if not self.shared:
             raise NotImplementedError(
                 "tlx_2kv requires shared-KV (run without --separate-kv)"
             )
-        return self._bench(xa.BwdVariant.TLX_2KV, "0", q, k, v, so_kv, so_q, asc)
+        return self._bench(
+            xa.BwdVariant.TLX_2KV, "0", q, k, v, so_kv, so_q, asc, limits
+        )
 
     @register_benchmark(enabled=HAS_HSTU_CROSS_ATTN)
-    def autows_2kv(self, q, k, v, so_kv, so_q, asc) -> Callable:
+    def autows_2kv(self, q, k, v, so_kv, so_q, asc, limits) -> Callable:
         if not self.shared:
             raise NotImplementedError(
                 "autows_2kv requires shared-KV (run without --separate-kv)"
             )
         return self._bench(
-            xa.BwdVariant.TRITON_AUTOWS_2KV, "1", q, k, v, so_kv, so_q, asc
+            xa.BwdVariant.TRITON_AUTOWS_2KV,
+            "1",
+            q,
+            k,
+            v,
+            so_kv,
+            so_q,
+            asc,
+            limits,
         )
 
     # ---- backward driver --------------------------------------------------
@@ -237,7 +332,10 @@ class Operator(BenchmarkOperator):
     def _make_inputs(self, Lkv):
         Z, H, D, Lq = self.batch, self.n_heads, self.d_head, self.seq_len
         tq, tk = Z * Lq, Z * Lkv
-        g = lambda n: torch.randn(n, H, D, device=self.device, dtype=self.dtype)
+
+        def g(n):
+            return torch.randn(n, H, D, device=self.device, dtype=self.dtype)
+
         q = g(tq).requires_grad_(True)
         k = g(tk).requires_grad_(True)
         # shared-KV: V aliases K (one leaf), so k.grad accumulates dk + dv.
@@ -245,9 +343,55 @@ class Operator(BenchmarkOperator):
         so_kv = torch.arange(0, tk + 1, Lkv, device=self.device, dtype=torch.int64)
         so_q = torch.arange(0, tq + 1, Lq, device=self.device, dtype=torch.int64)
         asc = torch.tensor(1.0 / Lkv, device=self.device, dtype=torch.float32)
-        return (q, k, v, so_kv, so_q, asc)
+        return (q, k, v, so_kv, so_q, asc, (Lq, Lkv))
+
+    def _make_production_inputs(self, max_targets):
+        Z, Hq, Hkv, D = self.batch, self.n_heads, self.n_kv_heads, self.d_head
+        max_kv = self.max_kv
+        device = self.device
+        generator = torch.Generator(device=device).manual_seed(self.input_seed)
+
+        lengths_kv = generate_sparse_seq_len(
+            size=Z,
+            max_seq_len=max_kv,
+            sparsity=self.seq_sparsity,
+            device=device,
+            generator=generator,
+        ).to(torch.int64)
+
+        min_targets = 1 if max_targets < 400 else max_targets // 2
+        lengths_q = torch.randint(
+            min_targets,
+            max_targets + 1,
+            (Z,),
+            device=device,
+            dtype=torch.int64,
+            generator=generator,
+        )
+        so_kv = torch.zeros(Z + 1, device=device, dtype=torch.int64)
+        so_q = torch.zeros(Z + 1, device=device, dtype=torch.int64)
+        torch.cumsum(lengths_kv, 0, out=so_kv[1:])
+        torch.cumsum(lengths_q, 0, out=so_q[1:])
+        total_q, total_kv = int(so_q[-1]), int(so_kv[-1])
+
+        def tensor(tokens, heads):
+            return torch.empty(
+                tokens, heads, D, device=device, dtype=self.dtype
+            ).uniform_(-0.1, 0.1, generator=generator)
+
+        q = tensor(total_q, Hq).requires_grad_(True)
+        k = tensor(total_kv, Hkv).requires_grad_(True)
+        v = k
+        asc = torch.tensor(
+            1.0 / (max_kv + max_targets), device=device, dtype=torch.float32
+        )
+        return (q, k, v, so_kv, so_q, asc, (max_targets, max_kv))
 
     def get_input_iter(self) -> Generator:
+        if self.prod_shapes:
+            for max_targets in self.max_targets:
+                yield self._make_production_inputs(max_targets)
+            return
         if self.seq_len_kv is not None:
             kv_lens = [self.seq_len_kv]
         elif self.shared:
@@ -259,27 +403,42 @@ class Operator(BenchmarkOperator):
         for Lkv in kv_lens:
             yield self._make_inputs(Lkv)
 
+    def get_available_num_inputs(self) -> int:
+        if self.prod_shapes:
+            return len(self.max_targets)
+        if self.seq_len_kv is not None:
+            return 1
+        return 4 if self.shared else 3
+
     # ---- metrics ----------------------------------------------------------
-    @register_x_val(label="(Z, H, Lq, Lkv, D)")
+    @register_x_val(label="(Z, Hq, Hkv, maxLq, maxLkv, D, qTokens, kvTokens)")
     def get_x_val(self, example_inputs) -> tuple:
-        q, k, v, so_kv, so_q, asc = example_inputs
+        q, k, v, so_kv, so_q, asc, limits = example_inputs
+        max_q_len, max_kv_len = limits
         Z = so_kv.numel() - 1
-        Lq = int(so_q[1] - so_q[0])
-        Lkv = int(so_kv[1] - so_kv[0])
-        return (Z, q.shape[1], Lq, Lkv, q.shape[2])
+        return (
+            Z,
+            q.shape[1],
+            k.shape[1],
+            max_q_len,
+            max_kv_len,
+            q.shape[2],
+            q.shape[0],
+            k.shape[0],
+        )
 
     @register_metric(x_only=True)
     def flops(
         self, fn_name: str, example_inputs: Any, metrics: BenchmarkOperatorMetrics
     ) -> float:
-        q, k, v, so_kv, so_q, asc = example_inputs
-        Z = so_kv.numel() - 1
+        q, k, v, so_kv, so_q, asc, limits = example_inputs
         H, D = q.shape[1], q.shape[2]
-        Lq = int(so_q[1] - so_q[0])
-        Lkv = int(so_kv[1] - so_kv[0])
+        lengths_q = so_q[1:] - so_q[:-1]
+        lengths_kv = so_kv[1:] - so_kv[:-1]
         # non-causal cross attention: two matmuls (QK^T, PV) per head per sequence.
-        flops_per_matmul = 2.0 * Lq * Lkv * D
-        flops = 2 * flops_per_matmul * Z * H
+        qk_pairs = int(torch.sum(lengths_q * lengths_kv).item())
+        flops_per_matmul = 2.0 * qk_pairs * D * H
+        flops = 2 * flops_per_matmul
         if self.mode == BenchmarkMode.BWD:
             flops *= 2.5  # 2.0(bwd) + 0.5(recompute)
         elif self.mode == BenchmarkMode.FWD_BWD:
