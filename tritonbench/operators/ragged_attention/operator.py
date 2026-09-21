@@ -113,6 +113,7 @@ try:
         import tlx_bw_hstu_attention as _hstu_self_tlx
         from triton_hstu_attention import (
             configure_autows as hstu_self_configure,
+            HSTUAutoWSConfig,
             triton_hstu_mha as hstu_self_triton_mha,
         )
 
@@ -276,7 +277,7 @@ class Operator(BenchmarkOperator):
         # attn_scale tensor (the GR `hstu` baseline bakes 1/max_seq_len).
         # Reset to the plain (non-autoWS) config in case an autoWS backend below
         # switched it earlier in this process.
-        hstu_self_configure(autows=False)
+        hstu_self_configure(HSTUAutoWSConfig())
         attn_scale = torch.tensor(
             1.0 / max_seq_len, device=q.device, dtype=torch.float32
         )
@@ -436,7 +437,7 @@ class Operator(BenchmarkOperator):
         # standard forward/backward wrapper; non-WS backends reset it in their
         # corresponding constructors.
         _set_meta_ws(True, smem_search=smem_search)
-        hstu_self_configure(**cfg)
+        hstu_self_configure(HSTUAutoWSConfig(**cfg))
         attn_scale = torch.tensor(
             1.0 / max_seq_len, device=q.device, dtype=torch.float32
         )
