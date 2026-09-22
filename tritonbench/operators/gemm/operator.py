@@ -44,15 +44,13 @@ if has_tlx():
     except (ImportError, ModuleNotFoundError):
         _hopper_tlx_matmul_ws = None
 
-    # gfx950 (MI350X / CDNA4) GEMM. Guarded separately from the NVIDIA
-    # tutorials above: it lives under a package path that only exists in Triton
-    # builds carrying the gfx9 tutorials.
+    # This provider is gfx950-gated below; tlx.ops resolves the matching catalog
+    # entry from the current target when mm is called.
     try:
-        from triton.language.extra.tlx.tutorials.gfx9_gemm.a16w16_matmul import (
-            matmul as _tlx_matmul_gfx950,
-        )
+        from triton.tlx.ops import InvalidInput as _TLXInvalidInput, mm as _tlx_mm
     except (ImportError, ModuleNotFoundError):
-        _tlx_matmul_gfx950 = None
+        _TLXInvalidInput = ValueError
+        _tlx_mm = None
 else:
 
     def _tlx_matmul_2cta(*args, **kwargs):
@@ -67,7 +65,8 @@ else:
     def _tlx_matmul_ws(*args, **kwargs):
         raise RuntimeError("TLX not available in this Triton version")
 
-    _tlx_matmul_gfx950 = None
+    _TLXInvalidInput = ValueError
+    _tlx_mm = None
 
 
 from tritonbench.utils.path_utils import ensure_build_subdir_on_sys_path
@@ -641,29 +640,25 @@ class Operator(BenchmarkOperator):
     def tlx_matmul_gfx950(self, a, b, bias) -> Callable:
         """TLX FP16/BF16 GEMM for gfx950 (MI350X).
 
-        The public a16w16 entry selects a persistent specialization or the
-        general inter-wave fallback. B must be column-major, handled outside
-        the timed region.
+        The public ops entry selects the production shape-specific path. B must
+        be column-major, handled outside the timed region.
         """
-        if _tlx_matmul_gfx950 is None:
+        if _tlx_mm is None:
             return None
 
         a_in = a if a.is_contiguous() else a.contiguous()
         # b is (K, N); column-major means stride(0) == 1.
         b_in = b if b.stride(0) == 1 else b.T.contiguous().T
 
-        # Probe rather than restate the kernel's shape constraints. It states
-        # them as plain asserts covering more than a minimum K -- K must also
-        # divide by BLOCK_K after the split -- and a partial copy here turns an
-        # unsupported shape into a failed benchmark run instead of a skip.
+        # Probe rather than duplicate the production entry's shape policy.
         try:
-            _tlx_matmul_gfx950(a_in, b_in)
-        except AssertionError:
+            _tlx_mm(a_in, b_in)
+        except _TLXInvalidInput:
             return None
 
         if bias is not None:
-            return lambda: _tlx_matmul_gfx950(a_in, b_in) + bias
-        return lambda: _tlx_matmul_gfx950(a_in, b_in)
+            return lambda: _tlx_mm(a_in, b_in) + bias
+        return lambda: _tlx_mm(a_in, b_in)
 
     @register_benchmark(
         enabled=has_tlx() and (IS_HOPPER or IS_BLACKWELL), fwd_only=True
