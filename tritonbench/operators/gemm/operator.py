@@ -649,16 +649,18 @@ class Operator(BenchmarkOperator):
         a_in = a if a.is_contiguous() else a.contiguous()
         # b is (K, N); column-major means stride(0) == 1.
         b_in = b if b.stride(0) == 1 else b.T.contiguous().T
+        a_tlx = a_in.detach()
+        b_tlx = b_in.detach()
 
         # Probe rather than duplicate the production entry's shape policy.
         try:
-            _tlx_mm(a_in, b_in)
+            _tlx_mm(a_tlx, b_tlx)
         except _TLXInvalidInput:
             return None
 
         if bias is not None:
-            return lambda: _tlx_mm(a_in, b_in) + bias
-        return lambda: _tlx_mm(a_in, b_in)
+            return lambda: _tlx_mm(a_tlx, b_tlx) + bias
+        return lambda: _tlx_mm(a_tlx, b_tlx)
 
     @register_benchmark(
         enabled=has_tlx() and (IS_HOPPER or IS_BLACKWELL), fwd_only=True
