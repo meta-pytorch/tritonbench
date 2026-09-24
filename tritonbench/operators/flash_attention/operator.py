@@ -135,9 +135,7 @@ if has_tlx():
         _validate_tlx_amd_fa_cluster_inputs = None
 
     try:
-        from triton.language.extra.tlx.tutorials.hopper_fa_ws_pipelined_pingpong import (
-            attention as _tlx_hopper_fa,
-        )
+        from triton.tlx.ops import flash_attn as _tlx_hopper_fa
 
         HAS_TLX_HOPPER_FA = True
     except (ImportError, ModuleNotFoundError) as error:
@@ -424,14 +422,21 @@ class Operator(BenchmarkOperator):
     @multi_input_wrapper
     def tlx_fa(self, *args) -> Tuple[Callable, Callable]:
         if IS_HOPPER:
-            if self.D_HEAD < 128:
+            if self.D_HEAD not in (64, 128):
                 raise NotImplementedError("Skip")
 
             tlx_attention = _tlx_hopper_fa
             assert tlx_attention is not None
 
             def fn(q, k, v):
-                return tlx_attention(q, k, v, self.sm_scale, self.causal)
+                return tlx_attention(
+                    q,
+                    k,
+                    v,
+                    causal=self.causal,
+                    sm_scale=self.sm_scale,
+                    space="smoke",
+                )
 
             return preproc_noop, fn
 
