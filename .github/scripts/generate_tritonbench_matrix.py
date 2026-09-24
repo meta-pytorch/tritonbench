@@ -9,12 +9,12 @@ import sys
 BENCHMARK_CONFIG = {
     "nightly": {
         "triton_channels": ["meta-triton", "triton-main"],
-        "runners": ["h100", "mi350"],
+        "runners": ["h100"],
         "manual_only": False,
     },
     "compile_time": {
         "triton_channels": ["triton-main"],
-        "runners": ["h100", "mi350"],
+        "runners": ["h100"],
         "manual_only": False,
     },
     "tlx": {
@@ -29,7 +29,7 @@ BENCHMARK_CONFIG = {
     },
     "pt2": {
         "triton_channels": ["triton-main"],
-        "runners": ["h100", "mi350"],
+        "runners": ["h100"],
         "manual_only": False,
     },
 }
@@ -44,7 +44,7 @@ INFRA_TRIGGER_PATHS = {
     ".github/workflows/benchmark.yml",
     ".github/workflows/_linux-benchmark.yml",
 }
-SUPPORTED_RUNNERS = {"h100", "mi350", "all"}
+SUPPORTED_RUNNERS = {"h100", "all"}
 SUPPORTED_TRITON_CHANNELS = {"meta-triton", "triton-main"}
 
 
