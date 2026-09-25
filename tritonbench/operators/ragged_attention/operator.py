@@ -327,12 +327,13 @@ class Operator(BenchmarkOperator):
     def hstu_tlx(self, q, k, v, seq_offsets, num_targets, max_seq_len, sparsity):
         _set_meta_ws(False)
         fwd_config = _hstu_self_tlx.get_fwd_persistent_configs()[0]
+        early_release_subtiles = 2 if num_targets is None else 1
         bwd_config = next(
             config
             for config in _hstu_self_tlx.get_hstu_bwd_configs()
             if config.kwargs["BLOCK_M1"] == 64
             and config.kwargs["BLOCK_N1"] == 128
-            and config.kwargs["EARLY_RELEASE_SUBTILES"] == 1
+            and config.kwargs["EARLY_RELEASE_SUBTILES"] == early_release_subtiles
         )
         _hstu_self_tlx._attn_fwd_ws.configs = [fwd_config]
         _hstu_self_tlx._attn_fwd_ws.cache.clear()
@@ -627,16 +628,12 @@ class Operator(BenchmarkOperator):
             dq_iters=4,
             pin=True,
         )
-        # D119878166 and later expose the topology/layout knobs. Preserve
-        # compatibility with older compiler revisions, where D119878165 performs
-        # the workload selection inside the kernel.
-        if hasattr(hstu_self_configure(), "dq_transposed"):
-            cfg.update(
-                split_causal_loops=False,
-                # Direct physical dQ subtiling wins only for target-aware FP32.
-                # Keep the parent transposed lowering for target-free and BF16.
-                dq_transposed=not (dq_fp32 and num_targets is not None),
-            )
+        # Keep one source loop and transposed dQ for every precision/target mode;
+        # post-partition peeling avoids duplicated channels and buffers.
+        cfg.update(
+            split_causal_loops=False,
+            dq_transposed=True,
+        )
         return self._hstu_self_autows(
             cfg,
             q,
