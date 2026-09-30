@@ -34,15 +34,24 @@ if has_tlx():
         matmul as _tlx_matmul_pipelined,
     )
     from triton.language.extra.tlx.tutorials.blackwell_gemm_ws import (
-        matmul as _tlx_matmul_ws,
+        matmul as _blackwell_tlx_matmul,
     )
 
     try:
+        from triton.tlx.ops import mm as _tlx_ops_mm
+        from triton.tlx.ops._catalog import has_impl as _tlx_ops_has_impl
+
+        if not _tlx_ops_has_impl("mm", "sm90"):
+            _tlx_ops_mm = None
+    except (ImportError, ModuleNotFoundError):
+        _tlx_ops_mm = None
+
+    try:
         from triton.language.extra.tlx.tutorials.hopper_gemm_ws import (
-            matmul as _hopper_tlx_matmul_ws,
+            matmul as _hopper_tutorial_matmul,
         )
     except (ImportError, ModuleNotFoundError):
-        _hopper_tlx_matmul_ws = None
+        _hopper_tutorial_matmul = None
 
     # This provider is gfx950-gated below; tlx.ops resolves the matching catalog
     # entry from the current target when mm is called.
@@ -62,11 +71,13 @@ else:
     def _tlx_matmul_pipelined(*args, **kwargs):
         raise RuntimeError("TLX not available in this Triton version")
 
-    def _tlx_matmul_ws(*args, **kwargs):
+    def _blackwell_tlx_matmul(*args, **kwargs):
         raise RuntimeError("TLX not available in this Triton version")
 
     _TLXInvalidInput = ValueError
     _tlx_mm = None
+    _tlx_ops_mm = None
+    _hopper_tutorial_matmul = None
 
 
 from tritonbench.utils.path_utils import ensure_build_subdir_on_sys_path
@@ -663,9 +674,17 @@ class Operator(BenchmarkOperator):
         return lambda: _tlx_mm(a_tlx, b_tlx)
 
     @register_benchmark(
-        enabled=has_tlx() and (IS_HOPPER or IS_BLACKWELL), fwd_only=True
+        enabled=has_tlx()
+        and (
+            (
+                IS_HOPPER
+                and (_tlx_ops_mm is not None or _hopper_tutorial_matmul is not None)
+            )
+            or IS_BLACKWELL
+        ),
+        fwd_only=True,
     )
-    def tlx_matmul_ws(self, a, b, bias) -> Callable:
+    def tlx_matmul(self, a, b, bias) -> Callable:
         target_dtype = a.dtype
 
         # TLX kernel requires inputs that are either row-major contiguous or
@@ -695,23 +714,22 @@ class Operator(BenchmarkOperator):
                     import warnings
 
                     warnings.warn(
-                        f"tlx_matmul_ws: skipping input with non-16-byte-aligned "
+                        f"tlx_matmul: skipping input with non-16-byte-aligned "
                         f"stride ({name}.stride()={t.stride()}, "
                         f"stride {s} * {elem_bytes} = {s * elem_bytes} "
                         f"is not divisible by 16)"
                     )
                     return None
 
-        # Choose the appropriate implementation based on architecture
-        if IS_HOPPER:
-            matmul_func = _hopper_tlx_matmul_ws
-        else:  # IS_BLACKWELL
-            matmul_func = _tlx_matmul_ws
+        if IS_HOPPER and _tlx_ops_mm is not None:
+            if bias is not None:
+                return lambda: _tlx_ops_mm(a, b, space="full").to(target_dtype) + bias
+            return lambda: _tlx_ops_mm(a, b, space="full").to(target_dtype)
 
+        matmul_func = _hopper_tutorial_matmul if IS_HOPPER else _blackwell_tlx_matmul
         if bias is not None:
             return lambda: matmul_func(a, b).to(target_dtype) + bias
-        else:
-            return lambda: matmul_func(a, b).to(target_dtype)
+        return lambda: matmul_func(a, b).to(target_dtype)
 
     @register_benchmark(enabled=has_tlx() and IS_BLACKWELL)
     def tlx_matmul_clc(self, a, b, bias) -> Callable:
