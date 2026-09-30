@@ -13,6 +13,8 @@ Benchmarks the HSTU cross-attention backward pass across its reduce_dq variants:
   * tlx         - hand-written TLX warp-specialized reduce_dq (attn_bwd_ws)
   * tlx_2kv     - TLX 2-KV-block data-partitioned reduce_dq (shared-KV only)
   * autows_2kv  - manual 2-KV-block data-partition + autoWS (shared-KV only)
+  * tlx_gfx950  - Hammer D120435766 gfx950 family, selected with
+                  --tlx-gfx950-bwd-variant
 
 Ragged (variable-length) cross attention: Q has length Lq per sequence, K/V have
 length Lkv, packed across ``batch`` sequences. Run the backward with, e.g.::
@@ -28,6 +30,7 @@ import os
 from typing import Any, Callable, Generator, List, Optional
 
 import torch
+from tritonbench.utils.env_utils import is_hip_mi350
 from tritonbench.utils.triton_op import (
     BenchmarkOperator,
     BenchmarkOperatorMetrics,
@@ -37,7 +40,29 @@ from tritonbench.utils.triton_op import (
     register_x_val,
 )
 
-from .kernels import HAS_HSTU_CROSS_ATTN, IMPORT_ERROR, xa
+from .kernels import (
+    gfx950,
+    GFX950_IMPORT_ERROR,
+    HAS_GFX950_CROSS_ATTN,
+    HAS_HSTU_CROSS_ATTN,
+    IMPORT_ERROR,
+    xa,
+)
+
+
+GFX950_BWD_VARIANTS = (
+    "auto",
+    "split_softmax",
+    "v3_ttgir",
+    "v3_ttgir_direct_dq",
+    "v3_ttgir_atomic_dq",
+    "v3_ttgir_bf16_dq",
+    "v3_ttgir_bf16_prefetch_dq",
+    "v3_ttgir_bf16_stage_qdo",
+    "v3_ttgir_fp32_stage_qdo",
+    "v3_ttgir_fp32_stage_qdo_prefetch_dq",
+    "v3_ttgir_fp32_pipeline_qdo",
+)
 
 
 def parse_op_args(args: List[str]) -> argparse.Namespace:
@@ -55,6 +80,12 @@ def parse_op_args(args: List[str]) -> argparse.Namespace:
         help="KV sequence length (Lkv); default sweeps a few values",
     )
     parser.add_argument("--n-heads", type=int, default=2, help="Number of heads")
+    parser.add_argument(
+        "--n-heads-kv",
+        type=int,
+        default=None,
+        help="Number of K/V heads; defaults to --n-heads",
+    )
     parser.add_argument(
         "--d-head",
         type=int,
@@ -84,6 +115,18 @@ def parse_op_args(args: List[str]) -> argparse.Namespace:
         "-1 (default) => all heads softmax (the GQA-on-B200 recipe); 0 => all SiLU. "
         "The TLX variants require 0 or n_heads.",
     )
+    parser.add_argument(
+        "--sparsity",
+        type=float,
+        default=1.0,
+        help="Average KV length as a fraction of --seq-len-kv (0.5 to 1.0)",
+    )
+    parser.add_argument(
+        "--tlx-gfx950-bwd-variant",
+        choices=GFX950_BWD_VARIANTS,
+        default="auto",
+        help="Select the Hammer D120435766 gfx950 TLX backward variant",
+    )
     return parser.parse_args(args)
 
 
@@ -100,12 +143,19 @@ class Operator(BenchmarkOperator):
         self.seq_len = args.seq_len
         self.seq_len_kv = args.seq_len_kv
         self.n_heads = args.n_heads
+        self.n_heads_kv = args.n_heads_kv or args.n_heads
         self.d_head = args.d_head
         self.num_stages = args.num_stages
         self.block_m = args.block_m
         self.block_n = args.block_n
         self.shared = not args.separate_kv
         self.num_softmax_heads = args.num_softmax_heads
+        self.sparsity = args.sparsity
+        self.tlx_gfx950_bwd_variant = args.tlx_gfx950_bwd_variant
+        if self.n_heads % self.n_heads_kv != 0:
+            raise ValueError("--n-heads must be divisible by --n-heads-kv")
+        if not 0.5 <= self.sparsity <= 1.0:
+            raise ValueError("--sparsity must be between 0.5 and 1.0")
         if not HAS_HSTU_CROSS_ATTN:
             raise RuntimeError(
                 f"HSTU cross-attention kernel is unavailable: {IMPORT_ERROR!r}"
@@ -154,8 +204,8 @@ class Operator(BenchmarkOperator):
         xa.set_bwd_variant(variant)
         os.environ["TRITON_USE_META_WS"] = ws
         os.environ.pop("HSTU_BWD_VARIANT", None)  # let set_bwd_variant win
-        Lq = int(so_q[1] - so_q[0])
-        Lkv = int(so_kv[1] - so_kv[0])
+        Lq = int((so_q[1:] - so_q[:-1]).max())
+        Lkv = round(1.0 / float(asc))
         H, D = q.shape[1], q.shape[2]
         # First `num_softmax_heads` of the H heads take the softmax path, the rest
         # take SiLU; -1 resolves to all-softmax (H). attn_scale is applied only on
@@ -184,6 +234,64 @@ class Operator(BenchmarkOperator):
             if t.requires_grad and id(t) not in seen:
                 seen.add(id(t))
                 grad_inputs.append(t)
+        fn._grad_inputs = grad_inputs
+        return fn
+
+    def _bench_gfx950(self, q, k, v, so_kv, so_q, asc) -> Callable:
+        if not HAS_GFX950_CROSS_ATTN:
+            raise RuntimeError(
+                f"gfx950 TLX cross-attention kernel is unavailable: "
+                f"{GFX950_IMPORT_ERROR!r}"
+            )
+        H, D = q.shape[1], q.shape[2]
+        H_kv = k.shape[1]
+        num_softmax_heads = H if self.num_softmax_heads < 0 else self.num_softmax_heads
+        variant = self.tlx_gfx950_bwd_variant
+        if variant != "auto":
+            if not self.shared or H != 1 or H_kv != 1 or D != 128:
+                raise NotImplementedError(
+                    "explicit D120435766 variants require shared K/V, "
+                    "H=H_kv=1, and D=128"
+                )
+            if num_softmax_heads != 1:
+                raise NotImplementedError(
+                    "explicit D120435766 variants require one softmax head"
+                )
+            if variant.startswith("v3_ttgir") and (
+                q.dtype != torch.bfloat16 or int((so_q[1:] - so_q[:-1]).max()) != 256
+            ):
+                raise NotImplementedError(
+                    "V3 TTGIR variants require BF16 and maximum Q length 256"
+                )
+
+        max_q_len = int((so_q[1:] - so_q[:-1]).max())
+        max_seq_len = round(1.0 / float(asc))
+        num_targets = so_q[1:] - so_q[:-1]
+
+        def fn():
+            return gfx950.tlx_gfx950_cross_attn_mha_wrapper(
+                max_seq_len=max_seq_len,
+                alpha=1.0 / D,
+                q=q,
+                k=k,
+                v=v,
+                seq_offsets=so_kv,
+                attn_scale=asc,
+                max_q_len=max_q_len,
+                seq_offsets_q=so_q,
+                num_softmax_heads=num_softmax_heads,
+                num_targets=num_targets,
+                causal=False,
+                shared_kv=self.shared,
+                enable_tma=False,
+                v3_ttgir_variant=None if variant == "auto" else variant,
+            )
+
+        seen, grad_inputs = set(), []
+        for tensor in (q, k, v):
+            if tensor.requires_grad and id(tensor) not in seen:
+                seen.add(id(tensor))
+                grad_inputs.append(tensor)
         fn._grad_inputs = grad_inputs
         return fn
 
@@ -218,6 +326,13 @@ class Operator(BenchmarkOperator):
             xa.BwdVariant.TRITON_AUTOWS_2KV, "1", q, k, v, so_kv, so_q, asc
         )
 
+    @register_benchmark(
+        enabled=HAS_GFX950_CROSS_ATTN and is_hip_mi350(),
+        tags=["tlx", "amd", "gfx950"],
+    )
+    def tlx_gfx950(self, q, k, v, so_kv, so_q, asc) -> Callable:
+        return self._bench_gfx950(q, k, v, so_kv, so_q, asc)
+
     # ---- backward driver --------------------------------------------------
     def get_bwd_fn(self, fwd_fn: Callable) -> Callable:
         o = fwd_fn()
@@ -235,15 +350,47 @@ class Operator(BenchmarkOperator):
 
     # ---- inputs -----------------------------------------------------------
     def _make_inputs(self, Lkv):
-        Z, H, D, Lq = self.batch, self.n_heads, self.d_head, self.seq_len
-        tq, tk = Z * Lq, Z * Lkv
-        g = lambda n: torch.randn(n, H, D, device=self.device, dtype=self.dtype)
-        q = g(tq).requires_grad_(True)
-        k = g(tk).requires_grad_(True)
+        Z, H, H_kv, D, Lq = (
+            self.batch,
+            self.n_heads,
+            self.n_heads_kv,
+            self.d_head,
+            self.seq_len,
+        )
+        generator = torch.Generator(device=self.device).manual_seed(0)
+        if self.sparsity == 1.0:
+            lengths_kv = torch.full((Z,), Lkv, device=self.device, dtype=torch.int64)
+        else:
+            min_kv = max(1, int((2 * self.sparsity - 1) * Lkv))
+            lengths_kv = torch.randint(
+                min_kv,
+                Lkv + 1,
+                (Z,),
+                device=self.device,
+                dtype=torch.int64,
+                generator=generator,
+            )
+        lengths_q = torch.full((Z,), Lq, device=self.device, dtype=torch.int64)
+        so_kv = torch.zeros(Z + 1, device=self.device, dtype=torch.int64)
+        so_q = torch.zeros(Z + 1, device=self.device, dtype=torch.int64)
+        torch.cumsum(lengths_kv, 0, out=so_kv[1:])
+        torch.cumsum(lengths_q, 0, out=so_q[1:])
+        tq, tk = int(so_q[-1]), int(so_kv[-1])
+
+        def g(n, heads):
+            return torch.randn(
+                n,
+                heads,
+                D,
+                device=self.device,
+                dtype=self.dtype,
+                generator=generator,
+            )
+
+        q = g(tq, H).requires_grad_(True)
+        k = g(tk, H_kv).requires_grad_(True)
         # shared-KV: V aliases K (one leaf), so k.grad accumulates dk + dv.
-        v = k if self.shared else g(tk).requires_grad_(True)
-        so_kv = torch.arange(0, tk + 1, Lkv, device=self.device, dtype=torch.int64)
-        so_q = torch.arange(0, tq + 1, Lq, device=self.device, dtype=torch.int64)
+        v = k if self.shared else g(tk, H_kv).requires_grad_(True)
         asc = torch.tensor(1.0 / Lkv, device=self.device, dtype=torch.float32)
         return (q, k, v, so_kv, so_q, asc)
 
@@ -260,26 +407,34 @@ class Operator(BenchmarkOperator):
             yield self._make_inputs(Lkv)
 
     # ---- metrics ----------------------------------------------------------
-    @register_x_val(label="(Z, H, Lq, Lkv, D)")
+    @register_x_val(label="(Z, H, Hkv, Lq, max_Lkv, D, sparsity)")
     def get_x_val(self, example_inputs) -> tuple:
         q, k, v, so_kv, so_q, asc = example_inputs
         Z = so_kv.numel() - 1
-        Lq = int(so_q[1] - so_q[0])
-        Lkv = int(so_kv[1] - so_kv[0])
-        return (Z, q.shape[1], Lq, Lkv, q.shape[2])
+        Lq = int((so_q[1:] - so_q[:-1]).max())
+        Lkv = round(1.0 / float(asc))
+        return (
+            Z,
+            q.shape[1],
+            k.shape[1],
+            Lq,
+            Lkv,
+            q.shape[2],
+            self.sparsity,
+        )
 
     @register_metric(x_only=True)
     def flops(
         self, fn_name: str, example_inputs: Any, metrics: BenchmarkOperatorMetrics
     ) -> float:
         q, k, v, so_kv, so_q, asc = example_inputs
-        Z = so_kv.numel() - 1
         H, D = q.shape[1], q.shape[2]
-        Lq = int(so_q[1] - so_q[0])
-        Lkv = int(so_kv[1] - so_kv[0])
-        # non-causal cross attention: two matmuls (QK^T, PV) per head per sequence.
-        flops_per_matmul = 2.0 * Lq * Lkv * D
-        flops = 2 * flops_per_matmul * Z * H
+        lengths_q = so_q[1:] - so_q[:-1]
+        lengths_kv = so_kv[1:] - so_kv[:-1]
+        # Non-causal cross attention: two matmuls (QK^T, PV) per head and
+        # sequence. Sum the real ragged work instead of charging every sequence
+        # for the maximum length.
+        flops = 4.0 * D * H * torch.sum(lengths_q * lengths_kv).item()
         if self.mode == BenchmarkMode.BWD:
             flops *= 2.5  # 2.0(bwd) + 0.5(recompute)
         elif self.mode == BenchmarkMode.FWD_BWD:
