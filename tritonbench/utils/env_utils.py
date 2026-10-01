@@ -445,8 +445,12 @@ def override_default_precision_for_input_loader(
     args: argparse.Namespace,
     override_value: str = "bypass",
 ):
-    # If loading shapes via input_loader, respect override value
-    args.precision = override_value if args.input_loader else args.precision
+    # Shape sources carry their own dtype, so do not apply the operator default.
+    args.precision = (
+        override_value
+        if args.input_loader or getattr(args, "suite", None)
+        else args.precision
+    )
 
 
 def set_allow_tf32(allow_tf32: bool) -> bool:

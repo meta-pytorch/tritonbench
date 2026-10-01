@@ -54,7 +54,7 @@ from tritonbench.components.do_bench.utils import (
 )
 from tritonbench.components.export import export_data
 from tritonbench.components.power import PowerManagerTask
-from tritonbench.data import get_input_loader
+from tritonbench.data import get_input_loader, get_tlx_suite_loader
 from tritonbench.utils.constants import (
     DEFAULT_N_REP,
     DEFAULT_N_WARMUP,
@@ -919,9 +919,14 @@ class BenchmarkOperator(metaclass=PostInitProcessor):
 
     # Run the post initialization
     def __post__init__(self):
+        if self.tb_args.input_loader and self.tb_args.suite:
+            raise ValueError("--input-loader and --suite are mutually exclusive")
         if self.tb_args.input_loader:
             override_default_precision_for_input_loader(self.tb_args)
             self.get_input_iter = get_input_loader(self, self.tb_args.input_loader)
+        elif self.tb_args.suite:
+            override_default_precision_for_input_loader(self.tb_args)
+            self.get_input_iter = get_tlx_suite_loader(self, self.tb_args.suite)
         # Count total available inputs directly
         self._available_num_inputs = self.get_available_num_inputs()
 

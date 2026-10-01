@@ -190,3 +190,37 @@ def get_input_loader(
         return input_loader.get_input_iter()
     else:
         raise ValueError(f"Unsupported input loader name: {loader}")
+
+
+def get_tlx_suite_loader(tritonbench_op: Any, suite: str):
+    """Load a named TLX production-shape suite through an existing input loader."""
+    op_name = tritonbench_op.name
+    tlx_op = {"gemm": "mm", "tlx_matmul": "mm"}.get(op_name)
+    if tlx_op is None:
+        raise ValueError(f"--suite is not supported for TritonBench op {op_name!r}")
+
+    shapes_module = importlib.import_module(f"triton.tlx.ops.kernels.{tlx_op}._shapes")
+    shapes = shapes_module.FOCUS.resolved_shapes(suite)
+    input_config = {
+        op_name: [
+            {
+                "inputs": repr(
+                    (
+                        None,
+                        {
+                            "M": shape.m,
+                            "N": shape.n,
+                            "K": shape.k,
+                            "strides": repr([shape.a_strides, shape.b_strides]),
+                            "dtype": shape.dtype,
+                        },
+                    )
+                )
+            }
+            for shape in shapes
+        ]
+    }
+
+    op_module = ".".join(tritonbench_op.__module__.split(".")[:-1])
+    input_loader_cls = importlib.import_module(op_module).InputLoader
+    return input_loader_cls(tritonbench_op, input_config).get_input_iter()
