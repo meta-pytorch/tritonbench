@@ -393,6 +393,11 @@ def get_parser(args=None):
         help="Load input file from Tritonbench data JSON.",
     )
     parser.add_argument(
+        "--suite",
+        type=str,
+        help="Load a named shape suite from triton.tlx.ops.kernels.<op>._shapes.",
+    )
+    parser.add_argument(
         "--logging-group",
         type=str,
         default=None,
