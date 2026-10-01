@@ -1,5 +1,6 @@
 import argparse
 import contextlib
+import dataclasses
 import os
 from typing import Any, Callable, List, Optional
 
@@ -120,6 +121,7 @@ else:
 #   hstu_self_triton_mha - hammer-template Triton self-attn (fwd+bwd)
 #   hstu_self_tlx_mha     - hammer-template TLX Blackwell self-attn (fwd+bwd)
 HAS_HSTU_SELF_ATTN = False
+HAS_HSTU_SELF_CLC = False
 try:
     import os as _os
     import sys as _sys
@@ -139,8 +141,17 @@ try:
 
         hstu_self_tlx_mha = _hstu_self_tlx.tlx_bw_hstu_mha
         HAS_HSTU_SELF_ATTN = True
+        # Older Triton snapshots ship this tutorial without the CLC backward
+        # configuration fields used by hstu_triton_autows_clc.
+        HAS_HSTU_SELF_CLC = {
+            "clc",
+            "clc_smem_algo",
+            "dq_fp32",
+            "dkdv_subtile",
+        }.issubset(field.name for field in dataclasses.fields(HSTUAutoWSConfig))
 except Exception:
     HAS_HSTU_SELF_ATTN = False
+    HAS_HSTU_SELF_CLC = False
 
 # gfx950 (MI350X) TLX HSTU self-attention, from the same tutorials directory.
 # Separate try block from the Blackwell import above so neither disables the
@@ -600,7 +611,7 @@ class Operator(BenchmarkOperator):
             smem_search=True,
         )
 
-    @register_benchmark(enabled=HAS_HSTU_SELF_ATTN and IS_BLACKWELL)
+    @register_benchmark(enabled=HAS_HSTU_SELF_CLC and IS_BLACKWELL)
     def hstu_triton_autows_clc(
         self, q, k, v, seq_offsets, num_targets, max_seq_len, sparsity
     ):
