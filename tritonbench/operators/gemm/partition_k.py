@@ -156,7 +156,8 @@ def _matmul_partition_k(
         offs_k = pid_pk * PK_SIZE + k * BLOCK_SIZE_K + tl.arange(0, BLOCK_SIZE_K)
         a_ptrs = a_ptr + (offs_am[:, None] * stride_am + offs_k[None, :] * stride_ak)
         b_ptrs = b_ptr + (offs_k[:, None] * stride_bk + offs_bn[None, :] * stride_bn)
-        k_mask = offs_k < K
+        # The final tile must not read values belonging to the next partition.
+        k_mask = (offs_k < K) & (offs_k < (pid_pk + 1) * PK_SIZE)
         a_mask = (offs_am[:, None] < M) & k_mask[None, :]
         b_mask = k_mask[:, None] & (offs_bn[None, :] < N)
         a = tl.load(a_ptrs, mask=a_mask, other=0.0)
@@ -168,12 +169,12 @@ def _matmul_partition_k(
     offs_ck = pid_pk
     c_buf_ptrs = (
         c_buf_ptr
-        + stride_cb_m * offs_cm[:, None, None]
-        + stride_cb_n * offs_cn[None, :, None]
-        + stride_cb_k * offs_ck[None, None, :]
+        + stride_cb_m * offs_cm[:, None]
+        + stride_cb_n * offs_cn[None, :]
+        + stride_cb_k * offs_ck
     )
     c_mask = (offs_cm[:, None] < M) & (offs_cn[None, :] < N)
-    tl.store(c_buf_ptrs, accumulator[:, :, None], mask=c_mask[:, :, None])
+    tl.store(c_buf_ptrs, accumulator, mask=c_mask)
 
 
 @triton.jit
@@ -198,14 +199,18 @@ def _reduce(
 
     offs_m = pid_m * BLOCK_SIZE_M + tl.arange(0, BLOCK_SIZE_M)
     offs_n = pid_n * BLOCK_SIZE_N + tl.arange(0, BLOCK_SIZE_N)
-    offs_k = tl.arange(0, PK)
+    offs_k = tl.arange(0, triton.next_power_of_2(PK))
     c_buf_ptrs = c_buf_ptr + (
         offs_m[:, None, None] * stride_cb_m
         + offs_n[None, :, None] * stride_cb_n
         + offs_k[None, None, :] * stride_cb_k
     )
     c_mask = (offs_m[:, None] < M) & (offs_n[None, :] < N)
-    c_buf = tl.load(c_buf_ptrs, mask=c_mask[:, :, None], other=0.0)
+    c_buf = tl.load(
+        c_buf_ptrs,
+        mask=c_mask[:, :, None] & (offs_k[None, None, :] < PK),
+        other=0.0,
+    )
     reduced_k = tl.sum(c_buf, axis=2)
 
     c_ptrs = c_ptr + (offs_m[:, None] * stride_cm + offs_n[None, :] * stride_cn)
