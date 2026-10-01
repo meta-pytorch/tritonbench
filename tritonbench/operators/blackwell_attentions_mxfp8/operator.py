@@ -9,8 +9,8 @@
 This is a thin operator that reuses everything from `blackwell_attentions`
 (input generation, CLI args, the `flops` metric, the bf16 baselines such as
 `cudnn_sdpa`/`cutedsl_blackwell`/`tlx_blackwell_ws_pipelined_persistent`) and
-adds a single `tlx_blackwell_mxfp8` backend that benchmarks the MXFP8 Blackwell
-flash-attention tutorial kernels.
+adds one prequantized MXFP8 backend for kernel-only Blackwell flash-attention
+forward and backward benchmarks.
 
 Benchmark registration keys on the defining module path, so subclassing the
 parent operator does not by itself expose the parent's backends/metrics under
@@ -18,16 +18,20 @@ this op's name. We therefore clone the parent registry buckets into this op's
 name at import time (see the bottom of this file).
 """
 
+import argparse
 from collections import OrderedDict
-from typing import Callable
+from dataclasses import dataclass
+from typing import Callable, Optional
 
 import torch
 import triton
 from tritonbench.operators.blackwell_attentions.operator import (
+    multi_input_wrapper,
     Operator as BlackwellAttentionsOperator,
 )
 from tritonbench.utils.triton_op import (
     BASELINE_BENCHMARKS,
+    Mode as BenchmarkMode,
     OVERRIDDEN_METRICS,
     register_benchmark,
     REGISTERED_BENCHMARKS,
@@ -46,14 +50,23 @@ try:
     from triton.language.extra.tlx.tutorials.blackwell_fa_ws_pipelined_persistent_mxfp8 import (
         _attn_fwd_mxf8_ws as _tlx_mxfp8_attn_fwd,
         _mxf8_host_descriptor_pre_hook as _tlx_mxfp8_fwd_pre_hook,
-        attention_bwd as _tlx_mxfp8_attention_bwd,
         swizzled_to_tma_preshuffled as _tlx_swizzled_to_tma_preshuffled,
     )
+    from triton.tlx.ops.kernels.flash_attn_mxfp8 import sm100 as _tlx_ops_mxfp8_sm100
     from triton.tools.tensor_descriptor import TensorDescriptor as _TensorDescriptor
 
     HAS_TLX_MXFP8 = True
 except (ImportError, IOError, AttributeError, TypeError):
     HAS_TLX_MXFP8 = False
+
+_HAS_TLX_MXFP8_2CTA = HAS_TLX_MXFP8 and all(
+    hasattr(_tlx_ops_mxfp8_sm100, name)
+    for name in (
+        "_MXFP8_BWD_2CTA_HEAD_DIM",
+        "_MXFP8_BWD_2CTA_N_CTXS",
+        "_MXFP8_BWD_2CTA_PIPELINE_READY",
+    )
+)
 
 
 # Forward config for the MXFP8 Blackwell FA kernel, matching the config the
@@ -142,9 +155,8 @@ def _mxfp8_forward_with_lse(q, k, v, q_scale, k_scale, v_scale, sm_scale, causal
 
     triton.set_allocator(alloc_fn)
 
-    num_sms = torch.cuda.get_device_properties("cuda").multi_processor_count
     grid = (
-        min(num_sms, triton.cdiv(N_CTX, _MXFP8_FWD_CONFIG["BLOCK_M"]) * Z * H),
+        triton.cdiv(N_CTX, _MXFP8_FWD_CONFIG["BLOCK_M"]) * Z * H,
         1,
         1,
     )
@@ -170,100 +182,200 @@ def _mxfp8_forward_with_lse(q, k, v, q_scale, k_scale, v_scale, sm_scale, causal
     return o, M
 
 
-class _TLXBlackwellMXFP8Attention(torch.autograd.Function):
-    """Wraps the MXFP8 Blackwell FA tutorial kernels in an autograd Function so
-    tritonbench can benchmark forward and backward through its standard
-    o.backward(dO) path. q/k/v are plain bf16 leaves; the MXFP8 quantization the
-    kernels require is done here.
+@dataclass
+class _MXFP8PreparedState:
+    q_fp8: torch.Tensor
+    k_fp8: torch.Tensor
+    v_fwd: torch.Tensor
+    q_scale: torch.Tensor
+    q_scale_dk: torch.Tensor
+    k_scale: torch.Tensor
+    k_scale_dq: torch.Tensor
+    v_fwd_scale: torch.Tensor
+    v_bwd: torch.Tensor
+    v_bwd_scale: torch.Tensor
 
-    Forward does only forward work (so --mode fwd is not penalized). All backward
-    operands are quantized lazily on the first backward call and cached: the
-    dO-independent operands once, and the dO-derived operands keyed on dO. Since
-    tritonbench reuses one dO and warms up before timing, the timed backward only
-    runs attention_bwd.
-    """
+
+class _TLXBlackwellMXFP8Attention(torch.autograd.Function):
+    """Connect prequantized MXFP8 kernels to TritonBench's autograd harness."""
 
     @staticmethod
-    def forward(ctx, q, k, v, sm_scale, causal):
-        dtype = torch.float8_e4m3fn
-        # Forward quantization: Q/K block scales along HEAD_DIM, V along N_CTX.
-        q_fp8, q_scale = _mxfp8_quantize_operand(q, dtype)
-        k_fp8, k_scale = _mxfp8_quantize_operand(k, dtype)
-        v_fp8, v_scale = _mxfp8_quantize_operand(v, dtype, transpose_for_reduction=True)
+    def forward(ctx, q, k, v, prepared, sm_scale, causal):
+        del k, v
         o, M = _mxfp8_forward_with_lse(
-            q_fp8, k_fp8, v_fp8, q_scale, k_scale, v_scale, sm_scale, causal
+            prepared.q_fp8,
+            prepared.k_fp8,
+            prepared.v_fwd,
+            prepared.q_scale,
+            prepared.k_scale,
+            prepared.v_fwd_scale,
+            sm_scale,
+            causal,
         )
-
-        ctx.save_for_backward(q, k, v)
+        ctx.save_for_backward(o, M)
+        ctx.prepared = prepared
+        ctx.input_dtype = q.dtype
         ctx.sm_scale = sm_scale
         ctx.causal = causal
-        ctx.dtype = dtype
-        ctx.fwd = (q_fp8, k_fp8, o, M, q_scale, k_scale)
-        ctx.bwd_static = None
         ctx.do_cache = {}
         return o
 
     @staticmethod
     def backward(ctx, do):
-        dtype = ctx.dtype
-        # dO-independent backward operands: reduction-axis-swapped Q/K and an
-        # N_CTX-blocked V. Computed once, then reused across timed iterations.
-        if ctx.bwd_static is None:
-            q, k, v = ctx.saved_tensors
-            q_dk, q_scale_dk = _mxfp8_quantize_operand(
-                q, dtype, transpose_for_reduction=True
-            )
-            k_dq, k_scale_dq = _mxfp8_quantize_operand(
-                k, dtype, transpose_for_reduction=True
-            )
-            v_bwd, v_scale_bwd = _mxfp8_quantize_operand(v, dtype)
-            ctx.bwd_static = (q_dk, q_scale_dk, k_dq, k_scale_dq, v_bwd, v_scale_bwd)
-
-        do_bf16 = do.to(torch.bfloat16).contiguous()
-        # tritonbench reuses one dO across timed iterations, so quantize it once
-        # (during warmup) and reuse, keeping quantization out of the timed region.
-        key = do_bf16.data_ptr()
+        key = do.data_ptr()
         if key not in ctx.do_cache:
-            do_fp8, do_scale = _mxfp8_quantize_operand(do_bf16, dtype)
-            do_fp8_dv, do_scale_dv = _mxfp8_quantize_operand(
-                do_bf16, dtype, transpose_for_reduction=True
-            )
-            ctx.do_cache = {key: (do_fp8, do_scale, do_fp8_dv, do_scale_dv)}
-        do_fp8, do_scale, do_fp8_dv, do_scale_dv = ctx.do_cache[key]
+            do_bf16 = do.to(torch.bfloat16).contiguous()
+            ctx.do_cache = {
+                key: (
+                    do_bf16,
+                    *_tlx_ops_mxfp8_sm100._quantize_mxfp8_32x32_operand(do_bf16),
+                )
+            }
+        do_bf16, do_fp8, do_scale, do_scale_dv = ctx.do_cache[key]
+        o, M = ctx.saved_tensors
+        prepared = ctx.prepared
 
-        q_fp8, k_fp8, o, M, q_scale, k_scale = ctx.fwd
-        q_dk, q_scale_dk, k_dq, k_scale_dq, v_bwd, v_scale_bwd = ctx.bwd_static
-
-        dq, dk, dv = _tlx_mxfp8_attention_bwd(
+        dq, dk, dv = _tlx_ops_mxfp8_sm100.attention_bwd(
             do_fp8,
-            do_fp8_dv,
-            q_fp8,
-            q_dk,
-            k_fp8,
-            k_dq,
-            v_bwd,
+            prepared.q_fp8,
+            prepared.k_fp8,
+            prepared.v_bwd,
             o,
             M,
-            q_scale,
-            q_scale_dk,
-            k_scale,
-            k_scale_dq,
-            v_scale_bwd,
+            prepared.q_scale,
+            prepared.q_scale_dk,
+            prepared.k_scale,
+            prepared.k_scale_dq,
+            prepared.v_bwd_scale,
             do_scale,
             do_scale_dv,
             ctx.sm_scale,
             do_bf16=do_bf16,
             causal=ctx.causal,
         )
-        # dq comes back FP32; cast to match the bf16 leaf.
-        return dq.to(torch.bfloat16), dk, dv, None, None
+        return (
+            dq.to(ctx.input_dtype),
+            dk.to(ctx.input_dtype),
+            dv.to(ctx.input_dtype),
+            None,
+            None,
+            None,
+        )
 
 
 class Operator(BlackwellAttentionsOperator):
+    def __init__(
+        self, tb_args: argparse.Namespace, extra_args: Optional[list[str]] = None
+    ) -> None:
+        parser = argparse.ArgumentParser(add_help=False)
+        parser.add_argument(
+            "--mxfp8-bwd-num-ctas",
+            type=int,
+            choices=(1, 2),
+            default=1,
+            help="Select the CTA count for the MXFP8 backward kernel.",
+        )
+        mxfp8_args, parent_args = parser.parse_known_args(extra_args or [])
+        super().__init__(tb_args, parent_args)
+        self.mxfp8_bwd_num_ctas = mxfp8_args.mxfp8_bwd_num_ctas
+
+        if self.mxfp8_bwd_num_ctas == 2:
+            if not _HAS_TLX_MXFP8_2CTA:
+                raise ValueError(
+                    "the installed TLX MXFP8 backward kernel does not support two CTAs"
+                )
+            if self.mode not in (BenchmarkMode.BWD, BenchmarkMode.FWD_BWD):
+                raise ValueError("two-CTA MXFP8 routing is supported only for backward")
+            if self.causal:
+                raise ValueError(
+                    "two-CTA MXFP8 backward does not support causal attention"
+                )
+            if self.D_HEAD != _tlx_ops_mxfp8_sm100._MXFP8_BWD_2CTA_HEAD_DIM:
+                raise ValueError(
+                    "two-CTA MXFP8 backward requires head dimension "
+                    f"{_tlx_ops_mxfp8_sm100._MXFP8_BWD_2CTA_HEAD_DIM}"
+                )
+
+        if _HAS_TLX_MXFP8_2CTA:
+            _tlx_ops_mxfp8_sm100._MXFP8_BWD_2CTA_PIPELINE_READY = (
+                self.mxfp8_bwd_num_ctas == 2
+            )
+
+    @multi_input_wrapper
+    def _tlx_blackwell_mxfp8_with_backward(self, *args):
+        if self.varlen or self.local:
+            raise NotImplementedError(
+                "MXFP8 attention supports only dense, non-local inputs"
+            )
+
+        def preproc(q, k, v):
+            if q.shape != k.shape or q.shape != v.shape:
+                raise ValueError("MXFP8 backward requires self-attention shapes")
+            if q.dtype != torch.bfloat16:
+                raise ValueError("MXFP8 backward requires BF16 inputs")
+            if q.shape[3] != 128 or q.shape[2] % 256 != 0:
+                raise ValueError(
+                    "MXFP8 backward requires head dimension 128 and a sequence "
+                    "length divisible by 256"
+                )
+            if (
+                self.mxfp8_bwd_num_ctas == 2
+                and q.shape[2] not in _tlx_ops_mxfp8_sm100._MXFP8_BWD_2CTA_N_CTXS
+            ):
+                supported_n_ctxs = _tlx_ops_mxfp8_sm100._MXFP8_BWD_2CTA_N_CTXS
+                raise ValueError(
+                    "unsupported two-CTA MXFP8 backward sequence length "
+                    f"{q.shape[2]}; expected one of {supported_n_ctxs}"
+                )
+
+            q_fp8, q_scale, q_scale_dk = (
+                _tlx_ops_mxfp8_sm100._quantize_mxfp8_32x32_operand(q)
+            )
+            k_fp8, k_scale, k_scale_dq = (
+                _tlx_ops_mxfp8_sm100._quantize_mxfp8_32x32_operand(k)
+            )
+            v_fwd, v_fwd_scale = _mxfp8_quantize_operand(
+                v, torch.float8_e4m3fn, transpose_for_reduction=True
+            )
+            if self.mxfp8_bwd_num_ctas == 2:
+                v_bwd, v_bwd_scale, _ = (
+                    _tlx_ops_mxfp8_sm100._quantize_mxfp8_32x32_operand(v)
+                )
+            else:
+                v_bwd, v_bwd_scale = _mxfp8_quantize_operand(v, torch.float8_e4m3fn)
+
+            return (
+                q,
+                k,
+                v,
+                _MXFP8PreparedState(
+                    q_fp8=q_fp8,
+                    k_fp8=k_fp8,
+                    v_fwd=v_fwd,
+                    q_scale=q_scale,
+                    q_scale_dk=q_scale_dk,
+                    k_scale=k_scale,
+                    k_scale_dq=k_scale_dq,
+                    v_fwd_scale=v_fwd_scale,
+                    v_bwd=v_bwd,
+                    v_bwd_scale=v_bwd_scale,
+                ),
+            )
+
+        def fn(q, k, v, prepared):
+            return _TLXBlackwellMXFP8Attention.apply(
+                q, k, v, prepared, self.sm_scale, self.causal
+            )
+
+        return preproc, fn
+
     # Only works with triton beta. Quantization happens during benchmark setup;
-    # timed iterations measure only the MXFP8 Blackwell FA forward kernel.
-    @register_benchmark(enabled=HAS_TLX_MXFP8, label="tlx-mxfp8", fwd_only=True)
+    # timed iterations measure only the MXFP8 Blackwell FA kernels.
+    @register_benchmark(enabled=HAS_TLX_MXFP8, label="tlx-mxfp8")
     def tlx_blackwell_mxfp8(self, *args) -> Callable:
+        if self.mode in (BenchmarkMode.BWD, BenchmarkMode.FWD_BWD):
+            return self._tlx_blackwell_mxfp8_with_backward(*args)
+
         self.optims.clear()
         assert len(args) % 3 == 0
         dtype = torch.float8_e4m3fn
