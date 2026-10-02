@@ -53,6 +53,20 @@ def has_torch_tlx():
         return False
 
 
+@functools.lru_cache
+def has_tlx_op(op: str) -> bool:
+    """Return whether the TLX catalog has ``op`` for the current GPU."""
+    if not has_tlx():
+        return False
+    try:
+        from triton.language.extra.tlx.hw.target import current_target
+        from triton.tlx.ops._catalog import has_impl
+
+        return has_impl(op, current_target().key)
+    except (ImportError, AttributeError, RuntimeError):
+        return False
+
+
 def has_experimental_descriptor():
     import triton.language as tl
 

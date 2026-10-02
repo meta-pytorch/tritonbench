@@ -4,8 +4,8 @@ common_args: --latency-measure-mode=profiler --warmup 3000 --rep 3000
 
 bf16_gemm_fwd:
   op: gemm
-  args: --op gemm --only tlx_matmul,tlx_matmul_clc,tlx_matmul_2cta,tlx_matmul_pipelined,aten_matmul --precision bf16
+  args: --op gemm --only tlx_ops_mm,torch_tlx_mm,aten_matmul --precision bf16
 
 fp16_gemm_fwd:
   op: gemm
-  args: --op gemm --only tlx_matmul,tlx_matmul_clc,tlx_matmul_2cta,tlx_matmul_pipelined,aten_matmul --precision fp16
+  args: --op gemm --only tlx_ops_mm,torch_tlx_mm,aten_matmul --precision fp16
