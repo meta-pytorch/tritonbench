@@ -6,24 +6,19 @@ from typing import Any, Callable, Generator, List, Optional, Tuple
 import torch
 import torch._inductor.config as inductor_config
 import triton
-from tritonbench.utils.env_utils import (
-    get_logger,
-    IS_BLACKWELL,
-    is_fbcode,
-    is_hip_mi350,
-)
+from tritonbench.utils.env_utils import get_logger, is_fbcode
 from tritonbench.utils.python_utils import try_import
-from tritonbench.utils.triton_utils import has_tlx, has_torch_tlx
+from tritonbench.utils.triton_utils import has_tlx, has_tlx_op, has_torch_tlx
 
 if has_tlx():
     try:
-        from triton.language.extra.tlx.tutorials.amd_addmm_gfx950 import (
-            addmm as _tlx_addmm_gfx950,
-        )
+        from triton.tlx.ops import addmm as _tlx_addmm, InvalidInput as _TLXInvalidInput
     except (ImportError, ModuleNotFoundError):
-        _tlx_addmm_gfx950 = None
+        _TLXInvalidInput = ValueError
+        _tlx_addmm = None
 else:
-    _tlx_addmm_gfx950 = None
+    _TLXInvalidInput = ValueError
+    _tlx_addmm = None
 
 with try_import("HAS_HSTU"):
     try:
@@ -186,24 +181,25 @@ class Operator(BenchmarkOperator):
         return lambda: compiled(a, mat1, mat2)
 
     @register_benchmark(
-        enabled=is_hip_mi350() and has_tlx(),
+        enabled=has_tlx_op("addmm"),
         fwd_only=True,
-        tags=["tlx", "amd", "gfx950"],
+        tags=["tlx"],
     )
-    def tlx_addmm_gfx950(self, a, mat1, mat2) -> Callable:
-        """Standalone fused TLX addmm for gfx950 (MI350X)."""
-        if _tlx_addmm_gfx950 is None:
+    def tlx_ops_addmm(self, a, mat1, mat2) -> Callable:
+        """Run the public TLX addmm selected for the current architecture."""
+        if _tlx_addmm is None:
             return None
 
-        mat1_in = mat1 if mat1.is_contiguous() else mat1.contiguous()
-        mat2_in = mat2 if mat2.stride(0) == 1 else mat2.T.contiguous().T
+        bias_tlx = a.detach()
+        mat1_tlx = mat1.detach()
+        mat2_tlx = mat2.detach()
         try:
-            _tlx_addmm_gfx950(a, mat1_in, mat2_in)
-        except (AssertionError, ValueError):
+            _tlx_addmm(bias_tlx, mat1_tlx, mat2_tlx)
+        except _TLXInvalidInput:
             return None
-        return lambda: _tlx_addmm_gfx950(a, mat1_in, mat2_in)
+        return lambda: _tlx_addmm(bias_tlx, mat1_tlx, mat2_tlx)
 
-    @register_benchmark(enabled=is_hip_mi350() and has_tlx() and has_torch_tlx())
+    @register_benchmark(enabled=has_tlx_op("addmm_torchtlx") and has_torch_tlx())
     def torch_tlx_addmm(self, a, mat1, mat2) -> Callable:
         # Force PT2 to select only TLX templates, excluding stock Triton choices.
         # force_disable_caches prevents a prior allow-mode or stock-Triton choice

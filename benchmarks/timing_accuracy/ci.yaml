@@ -4,6 +4,6 @@ bf16_gemm_aten_matmul_fwd:
   op: gemm
   args: --op gemm --only aten_matmul --precision bf16
 
-bf16_gemm_tlx_matmul_fwd:
+bf16_gemm_tlx_ops_mm_fwd:
   op: gemm
-  args: --op gemm --only tlx_matmul --precision bf16
+  args: --op gemm --only tlx_ops_mm --precision bf16

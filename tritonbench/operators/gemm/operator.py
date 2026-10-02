@@ -21,59 +21,15 @@ if False:
         blackwell_matmul_tma_persistent,
         blackwell_matmul_tma_persistent_splitk,
     )
-from tritonbench.utils.triton_utils import has_tlx, has_torch_tlx
+from tritonbench.utils.triton_utils import has_tlx, has_tlx_op, has_torch_tlx
 
 if has_tlx():
-    from triton.language.extra.tlx.tutorials.blackwell_gemm_2cta import (
-        matmul as _tlx_matmul_2cta,
-    )
-    from triton.language.extra.tlx.tutorials.blackwell_gemm_clc import (
-        matmul as _tlx_matmul_clc,
-    )
-    from triton.language.extra.tlx.tutorials.blackwell_gemm_pipelined import (
-        matmul as _tlx_matmul_pipelined,
-    )
-    from triton.language.extra.tlx.tutorials.blackwell_gemm_ws import (
-        matmul as _blackwell_tlx_matmul,
-    )
-
-    try:
-        from triton.tlx.ops import mm as _tlx_ops_mm
-        from triton.tlx.ops._catalog import has_impl as _tlx_ops_has_impl
-
-        if not _tlx_ops_has_impl("mm", "sm90"):
-            _tlx_ops_mm = None
-    except (ImportError, ModuleNotFoundError):
-        _tlx_ops_mm = None
-
-    try:
-        from triton.language.extra.tlx.tutorials.hopper_gemm_ws import (
-            matmul as _hopper_tutorial_matmul,
-        )
-    except (ImportError, ModuleNotFoundError):
-        _hopper_tutorial_matmul = None
-
-    # This provider is gfx950-gated below; tlx.ops resolves the matching catalog
-    # entry from the current target when mm is called.
     try:
         from triton.tlx.ops import InvalidInput as _TLXInvalidInput, mm as _tlx_mm
     except (ImportError, ModuleNotFoundError):
         _TLXInvalidInput = ValueError
         _tlx_mm = None
 else:
-
-    def _tlx_matmul_2cta(*args, **kwargs):
-        raise RuntimeError("TLX not available in this Triton version")
-
-    def _tlx_matmul_clc(*args, **kwargs):
-        raise RuntimeError("TLX not available in this Triton version")
-
-    def _tlx_matmul_pipelined(*args, **kwargs):
-        raise RuntimeError("TLX not available in this Triton version")
-
-    def _blackwell_tlx_matmul(*args, **kwargs):
-        raise RuntimeError("TLX not available in this Triton version")
-
     _TLXInvalidInput = ValueError
     _tlx_mm = None
     _tlx_ops_mm = None
@@ -100,8 +56,6 @@ from tritonbench.utils.env_utils import (
     is_cu130,
     is_cuda,
     is_fbcode,
-    is_hip_mi350,
-    IS_HOPPER,
     supports_tma,
 )
 from tritonbench.utils.path_utils import REPO_PATH
@@ -437,7 +391,7 @@ class Operator(BenchmarkOperator):
 
         return lambda: compiled(a, b)
 
-    @register_benchmark(enabled=IS_BLACKWELL and has_tlx() and has_torch_tlx())
+    @register_benchmark(enabled=has_tlx_op("mm_torchtlx") and has_torch_tlx())
     def torch_tlx_mm(self, a, b, bias) -> Callable:
         # torch_tlx_<op> convention: PT2 (torch.compile max-autotune, TRITON
         # backend) with TLX "allow" mode, so TLX templates compete against the
@@ -644,24 +598,17 @@ class Operator(BenchmarkOperator):
             return lambda: compiled_decompose_k(a, b)
 
     @register_benchmark(
-        enabled=has_tlx() and is_hip_mi350(),
+        enabled=has_tlx_op("mm"),
         fwd_only=True,
-        tags=["tlx", "amd", "gfx950"],
+        tags=["tlx"],
     )
-    def tlx_matmul_gfx950(self, a, b, bias) -> Callable:
-        """TLX FP16/BF16 GEMM for gfx950 (MI350X).
-
-        The public ops entry selects the production shape-specific path. B must
-        be column-major, handled outside the timed region.
-        """
+    def tlx_ops_mm(self, a, b, bias) -> Callable:
+        """Run the public TLX GEMM selected for the current architecture."""
         if _tlx_mm is None:
             return None
 
-        a_in = a if a.is_contiguous() else a.contiguous()
-        # b is (K, N); column-major means stride(0) == 1.
-        b_in = b if b.stride(0) == 1 else b.T.contiguous().T
-        a_tlx = a_in.detach()
-        b_tlx = b_in.detach()
+        a_tlx = a.detach()
+        b_tlx = b.detach()
 
         # Probe rather than duplicate the production entry's shape policy.
         try:
@@ -672,107 +619,6 @@ class Operator(BenchmarkOperator):
         if bias is not None:
             return lambda: _tlx_mm(a_tlx, b_tlx) + bias
         return lambda: _tlx_mm(a_tlx, b_tlx)
-
-    @register_benchmark(
-        enabled=has_tlx()
-        and (
-            (
-                IS_HOPPER
-                and (_tlx_ops_mm is not None or _hopper_tutorial_matmul is not None)
-            )
-            or IS_BLACKWELL
-        ),
-        fwd_only=True,
-    )
-    def tlx_matmul(self, a, b, bias) -> Callable:
-        target_dtype = a.dtype
-
-        # TLX kernel requires inputs that are either row-major contiguous or
-        # column-major (stride-1 on the first dim). Non-contiguous inputs
-        # (e.g. sliced from a larger tensor with stride gaps) must be made
-        # contiguous to satisfy TMA's 16-byte stride alignment.
-        def _ensure_valid_layout(t):
-            if t.is_contiguous():
-                return t  # row-major, fine
-            # Check if it's column-major: .T should be contiguous
-            if t.T.is_contiguous():
-                return t  # column-major, kernel handles via .T
-            # Neither row-major nor column-major — make contiguous
-            return t.contiguous()
-
-        a = _ensure_valid_layout(a)
-        b = _ensure_valid_layout(b)
-
-        # Reject unaligned strides: TMA TensorDescriptor requires 16-byte alignment.
-        # The loop checks non-unit input strides, which depend on layout:
-        #   row-major a → checks K,  column-major a → checks M
-        #   row-major b → checks N,  column-major b → checks K
-        elem_bytes = a.element_size()
-        for name, t in [("a", a), ("b", b)]:
-            for s in t.stride():
-                if s > 1 and (s * elem_bytes) % 16 != 0:
-                    import warnings
-
-                    warnings.warn(
-                        f"tlx_matmul: skipping input with non-16-byte-aligned "
-                        f"stride ({name}.stride()={t.stride()}, "
-                        f"stride {s} * {elem_bytes} = {s * elem_bytes} "
-                        f"is not divisible by 16)"
-                    )
-                    return None
-
-        if IS_HOPPER and _tlx_ops_mm is not None:
-            # tlx.ops.mm is forward-only on sm90 and raises UnsupportedBackward
-            # for inputs with requires_grad=True.
-            a_tlx = a.detach()
-            b_tlx = b.detach()
-            if bias is not None:
-                return (
-                    lambda: _tlx_ops_mm(a_tlx, b_tlx, space="full").to(target_dtype)
-                    + bias
-                )
-            return lambda: _tlx_ops_mm(a_tlx, b_tlx, space="full").to(target_dtype)
-
-        matmul_func = _hopper_tutorial_matmul if IS_HOPPER else _blackwell_tlx_matmul
-        if bias is not None:
-            return lambda: matmul_func(a, b).to(target_dtype) + bias
-        return lambda: matmul_func(a, b).to(target_dtype)
-
-    @register_benchmark(enabled=has_tlx() and IS_BLACKWELL)
-    def tlx_matmul_clc(self, a, b, bias) -> Callable:
-        # TLX matmul requires contiguous inputs with 16-byte aligned strides
-        a_contig = a.contiguous()
-        b_contig = b.contiguous()
-        target_dtype = a.dtype
-        if bias is not None:
-            return lambda: _tlx_matmul_clc(a_contig, b_contig).to(target_dtype) + bias
-        else:
-            return lambda: _tlx_matmul_clc(a_contig, b_contig).to(target_dtype)
-
-    @register_benchmark(enabled=has_tlx() and IS_BLACKWELL)
-    def tlx_matmul_pipelined(self, a, b, bias) -> Callable:
-        # TLX matmul requires contiguous inputs with 16-byte aligned strides
-        a_contig = a.contiguous()
-        b_contig = b.contiguous()
-        target_dtype = a.dtype
-        if bias is not None:
-            return (
-                lambda: _tlx_matmul_pipelined(a_contig, b_contig).to(target_dtype)
-                + bias
-            )
-        else:
-            return lambda: _tlx_matmul_pipelined(a_contig, b_contig).to(target_dtype)
-
-    @register_benchmark(enabled=has_tlx() and IS_BLACKWELL)
-    def tlx_matmul_2cta(self, a, b, bias) -> Callable:
-        # TLX matmul requires contiguous inputs with 16-byte aligned strides
-        a_contig = a.contiguous()
-        b_contig = b.contiguous()
-        target_dtype = a.dtype
-        if bias is not None:
-            return lambda: _tlx_matmul_2cta(a_contig, b_contig).to(target_dtype) + bias
-        else:
-            return lambda: _tlx_matmul_2cta(a_contig, b_contig).to(target_dtype)
 
     @register_benchmark(enabled=IS_BLACKWELL)
     def triton_warpspec_tma_persistent_matmul(self, a, b, bias) -> Callable:

@@ -28,14 +28,16 @@ class InputLoader(OperatorInputLoader):
             K = int(entry["K"])
             strides = eval(entry["strides"])
             dtype = entry["dtype"]
-            if len(strides) != 3:
+            bias_shape = eval(entry["bias"]) if "bias" in entry else None
+            if len(strides) not in (2, 3):
                 logger.warning(
-                    "Skipping input with %d strides (expected 3): %s",
+                    "Skipping input with %d strides (expected 2 or 3): %s",
                     len(strides),
                     strides,
                 )
                 continue
-            if len(strides[0]) != 2 or len(strides[1]) != 2 or len(strides[2]) != 2:
+            matrix_strides = strides[-2:]
+            if any(len(matrix_stride) != 2 for matrix_stride in matrix_strides):
                 logger.warning(
                     "Skipping input with non-2D strides: %s",
                     strides,
@@ -45,7 +47,9 @@ class InputLoader(OperatorInputLoader):
                 {
                     "shapes": (M, K, N),
                     "dtype": dtype,
-                    "strides": strides,
+                    "strides": matrix_strides,
+                    "bias_shape": bias_shape,
+                    "bias_strides": strides[0] if len(strides) == 3 else None,
                 }
             )
 
@@ -56,26 +60,33 @@ class InputLoader(OperatorInputLoader):
                 shapes = obj["shapes"]
                 dtype = PRECISION_DTYPE_MAPPING[obj["dtype"]]
                 strides = obj["strides"]
+                bias_shape = obj["bias_shape"]
+                bias_strides = obj["bias_strides"]
                 m, k, n = shapes
-                original_a_rows = max(m, strides[0][1])
-                original_a_cols = max(n, strides[0][0])
-                original_m = max(m, strides[1][1])
-                original_k = max(k, strides[1][0], strides[2][1])
-                original_n = max(n, strides[2][0])
-                a = torch.randn(
-                    (original_a_rows, original_a_cols),
-                    device=device,
-                    dtype=dtype,
-                ).requires_grad_(requires_grad)
+                original_m = max(m, strides[0][1])
+                original_k = max(k, strides[0][0], strides[1][1])
+                original_n = max(n, strides[1][0])
+                if bias_shape is not None:
+                    a = torch.randn(
+                        bias_shape, device=device, dtype=dtype
+                    ).requires_grad_(requires_grad)
+                else:
+                    original_a_rows = max(m, bias_strides[1])
+                    original_a_cols = max(n, bias_strides[0])
+                    a = torch.randn(
+                        (original_a_rows, original_a_cols),
+                        device=device,
+                        dtype=dtype,
+                    ).requires_grad_(requires_grad)
+                    a = a.as_strided((m, n), bias_strides)
                 mat1 = torch.randn(
                     (original_m, original_k), device=device, dtype=dtype
                 ).requires_grad_(requires_grad)
                 mat2 = torch.randn(
                     (original_k, original_n), device=device, dtype=dtype
                 ).requires_grad_(requires_grad)
-                a = a.as_strided((m, n), strides[0])
-                mat1 = mat1.as_strided((m, k), strides[1])
-                mat2 = mat2.as_strided((k, n), strides[2])
+                mat1 = mat1.as_strided((m, k), strides[0])
+                mat2 = mat2.as_strided((k, n), strides[1])
                 if self.op.col_major:
                     mat2 = mat2.T.contiguous().T
                 yield a, mat1, mat2

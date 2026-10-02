@@ -23,7 +23,7 @@ fp8_gemm:
 
 bf16_gemm:
   args: --op gemm --metrics latency,tflops,hw_roofline,compile_time --mode fwd
-    --precision bf16 --logging-group bf16_gemm --only aten_matmul,triton_tutorial_matmul,tlx_matmul
+    --precision bf16 --logging-group bf16_gemm --only aten_matmul,triton_tutorial_matmul,tlx_ops_mm,torch_tlx_mm
 
 fp32_gemm:
   args: --op gemm --metrics latency,tflops,hw_roofline,compile_time --mode fwd
