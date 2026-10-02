@@ -722,9 +722,16 @@ class Operator(BenchmarkOperator):
                     return None
 
         if IS_HOPPER and _tlx_ops_mm is not None:
+            # tlx.ops.mm is forward-only on sm90 and raises UnsupportedBackward
+            # for inputs with requires_grad=True.
+            a_tlx = a.detach()
+            b_tlx = b.detach()
             if bias is not None:
-                return lambda: _tlx_ops_mm(a, b, space="full").to(target_dtype) + bias
-            return lambda: _tlx_ops_mm(a, b, space="full").to(target_dtype)
+                return (
+                    lambda: _tlx_ops_mm(a_tlx, b_tlx, space="full").to(target_dtype)
+                    + bias
+                )
+            return lambda: _tlx_ops_mm(a_tlx, b_tlx, space="full").to(target_dtype)
 
         matmul_func = _hopper_tutorial_matmul if IS_HOPPER else _blackwell_tlx_matmul
         if bias is not None:
