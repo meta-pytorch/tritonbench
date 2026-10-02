@@ -1,7 +1,7 @@
 from typing import List
 
-import torch
 import triton
+from tritonbench.utils.env_utils import get_device_module, get_graph_cls
 
 
 def do_bench_power(
@@ -28,16 +28,17 @@ def do_bench_power(
         cache_clear = triton.runtime.driver.active.clear_cache
 
     if use_cuda_graphs:
-        # Create CUDA graph
-        with torch.cuda.stream(torch.cuda.Stream()):
-            g = torch.cuda.CUDAGraph()
-            with torch.cuda.graph(g):
+        # Create device graph
+        device_module = get_device_module()
+        with device_module.stream(device_module.Stream()):
+            g = get_graph_cls()()
+            with device_module.graph(g):
                 if grad_to_none is not None:
                     for x in grad_to_none:
                         x.grad = None
                 cache_clear(cache)
                 fn()
-            torch.cuda.synchronize()
+            device_module.synchronize()
             # record cache clear graph
             if not skip_cache_clearing:
                 cache_start_event = [
@@ -46,10 +47,10 @@ def do_bench_power(
                 cache_end_event = [
                     di.Event(enable_timing=True) for i in range(n_repeat)
                 ]
-                cache_clear_graph = torch.cuda.CUDAGraph()
-                with torch.cuda.graph(cache_clear_graph):
+                cache_clear_graph = get_graph_cls()()
+                with device_module.graph(cache_clear_graph):
                     cache_clear(cache)
-                torch.cuda.synchronize()
+                device_module.synchronize()
             for i in range(n_repeat):
                 if not skip_cache_clearing:
                     cache_start_event[i].record()
@@ -58,7 +59,7 @@ def do_bench_power(
                 start_event[i].record()
                 g.replay()
                 end_event[i].record()
-            torch.cuda.synchronize()
+            device_module.synchronize()
         times = []
         for i in range(n_repeat):
             cache_clear_time = (
