@@ -9,8 +9,8 @@ from .python_utils import get_pip_cmd, USE_UV
 from .torch_utils import install_pytorch_nightly, install_pytorch_wheel
 
 # defines the default CUDA version to compile against
-DEFAULT_CUDA_VERSION = "13.0"
-DEFAULT_HIP_VERSION = "7.2"
+DEFAULT_CUDA_VERSION = "13.4"
+DEFAULT_HIP_VERSION = "10.0"
 
 # the key is the value of `torch.version.cuda`
 CUDA_VERSION_MAP = {
@@ -22,13 +22,20 @@ CUDA_VERSION_MAP = {
         "pytorch_url": "cu130",
         "jax": "jax[cuda13]",
     },
+    "13.4": {
+        "pytorch_url": "cu134",
+        "jax": "jax[cuda13]",
+    },
 }
 
 # the key is the value of `torch.version.hip`
 HIP_VERSION_MAP = {
     "7.2": {
         "pytorch_url": "rocm7.2",
-    }
+    },
+    "10.0": {
+        "pytorch_url": "rocm10.0",
+    },
 }
 
 IS_CUDA = bool(shutil.which("nvidia-smi") is not None) or bool(
