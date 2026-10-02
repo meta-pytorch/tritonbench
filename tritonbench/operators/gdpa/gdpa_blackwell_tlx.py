@@ -350,17 +350,41 @@ def gdpa_kernel_tma_ws_blackwell(
 
     # allocate tmem for outputs of 4 dots (after partitioning)
     # qk0 = q0 dot k, qk1 = q1 dot k, acc0 = p0 dot v, acc1 = p1 dot v
+    qk0_p0_storage_alias = tlx.storage_alias_spec(storage=tlx.storage_kind.tmem)
+    qk1_p1_storage_alias = tlx.storage_alias_spec(storage=tlx.storage_kind.tmem)
     qk0_buf = tlx.local_alloc(
-        (BLOCK_M // 2, HEAD_DIM), tl.float32, 1, tlx.storage_kind.tmem
+        (BLOCK_M // 2, HEAD_DIM),
+        tl.float32,
+        1,
+        tlx.storage_kind.tmem,
+        reuse=qk0_p0_storage_alias,
     )
     qk1_buf = tlx.local_alloc(
-        (BLOCK_M // 2, HEAD_DIM), tl.float32, 1, tlx.storage_kind.tmem
+        (BLOCK_M // 2, HEAD_DIM),
+        tl.float32,
+        1,
+        tlx.storage_kind.tmem,
+        reuse=qk1_p1_storage_alias,
     )
     p0_buf = tlx.local_alloc(
-        (BLOCK_M // 2, HEAD_DIM), dtype, 1, tlx.storage_kind.tmem, reuse=qk0_buf
+        (BLOCK_M // 2, HEAD_DIM),
+        dtype,
+        1,
+        tlx.storage_kind.tmem,
+        reuse=qk0_p0_storage_alias,
+    )
+    qk0_p0_storage_alias.set_buffer_overlap(
+        tlx.reuse_group(qk0_buf, p0_buf, group_type=tlx.reuse_group_type.shared)
     )
     p1_buf = tlx.local_alloc(
-        (BLOCK_M // 2, HEAD_DIM), dtype, 1, tlx.storage_kind.tmem, reuse=qk1_buf
+        (BLOCK_M // 2, HEAD_DIM),
+        dtype,
+        1,
+        tlx.storage_kind.tmem,
+        reuse=qk1_p1_storage_alias,
+    )
+    qk1_p1_storage_alias.set_buffer_overlap(
+        tlx.reuse_group(qk1_buf, p1_buf, group_type=tlx.reuse_group_type.shared)
     )
     o0_buf = tlx.local_alloc(
         (BLOCK_M // 2, HEAD_DIM), tl.float32, 1, tlx.storage_kind.tmem
@@ -1836,22 +1860,35 @@ def gdpa_backward_tlx(
     dsT_empties = tlx.alloc_barriers(num_barriers=NUM_BUFFERS_DS)
 
     # allocate tmem buffers
+    qk_ppT_dpT_storage_alias = tlx.storage_alias_spec(storage=tlx.storage_kind.tmem)
     qk_tiles = tlx.local_alloc(
-        (BLOCK_N1, BLOCK_D), tl.float32, NUM_BUFFERS_TMEM, tlx.storage_kind.tmem
+        (BLOCK_N1, BLOCK_D),
+        tl.float32,
+        NUM_BUFFERS_TMEM,
+        tlx.storage_kind.tmem,
+        reuse=qk_ppT_dpT_storage_alias,
     )
     ppT_tiles = tlx.local_alloc(
         (BLOCK_N1, BLOCK_D),
         tlx.dtype_of(desc_do),
         NUM_BUFFERS_TMEM,
         tlx.storage_kind.tmem,
-        reuse=qk_tiles,
+        reuse=qk_ppT_dpT_storage_alias,
     )
     dpT_tiles = tlx.local_alloc(
         (BLOCK_N1, BLOCK_D),
         tl.float32,
         NUM_BUFFERS_TMEM,
         tlx.storage_kind.tmem,
-        reuse=qk_tiles,
+        reuse=qk_ppT_dpT_storage_alias,
+    )
+    qk_ppT_dpT_storage_alias.set_buffer_overlap(
+        tlx.reuse_group(
+            qk_tiles,
+            ppT_tiles,
+            dpT_tiles,
+            group_type=tlx.reuse_group_type.shared,
+        )
     )
     dv_tiles = tlx.local_alloc(
         (BLOCK_N1, BLOCK_D), tl.float32, NUM_BUFFERS_TMEM, tlx.storage_kind.tmem
