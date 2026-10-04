@@ -3,7 +3,8 @@ from typing import Any, Callable, Generator, List, Optional, Tuple
 
 import torch
 import triton
-from tritonbench.utils.env_utils import IS_BLACKWELL, is_cuda, is_fbcode
+from tritonbench.utils.env_utils import IS_BLACKWELL, IS_HOPPER, is_cuda, is_fbcode
+from tritonbench.utils.python_utils import try_import
 from tritonbench.utils.triton_op import (
     BenchmarkOperator,
     BenchmarkOperatorMetrics,
@@ -50,6 +51,9 @@ if is_cuda():
             HAS_CUTLASS = True
         except:
             HAS_CUTLASS = False
+
+with try_import("HAS_TILELANG"):
+    from .tilelang import tilelang_deepgemm_fp8_func
 
 
 BUILDIN_SHAPES = [
@@ -145,6 +149,10 @@ class Operator(BenchmarkOperator):
     )
     def _cutlass(self, xq, wq, x_scale, w_scale) -> Callable:
         return lambda: cutlass_fp8_block(xq, wq, x_scale, w_scale)
+
+    @register_benchmark(enabled=HAS_TILELANG and IS_HOPPER)
+    def _tilelang_deepgemm(self, xq, wq, x_scale, w_scale) -> Callable:
+        return tilelang_deepgemm_fp8_func(xq, wq, x_scale, w_scale)
 
     @register_metric()
     def flops(
