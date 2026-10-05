@@ -6,7 +6,7 @@ from typing import Any, Callable, Generator, List, Optional, Tuple
 import torch
 import torch._inductor.config as inductor_config
 import triton
-from tritonbench.utils.env_utils import get_logger, is_fbcode
+from tritonbench.utils.env_utils import get_logger, IS_BLACKWELL, is_fbcode
 from tritonbench.utils.python_utils import try_import
 from tritonbench.utils.triton_utils import has_tlx, has_tlx_op, has_torch_tlx
 
