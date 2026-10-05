@@ -3,7 +3,7 @@ from typing import Any, Callable, Generator, List, Optional, Tuple
 
 import torch
 import triton
-from tritonbench.utils.env_utils import IS_BLACKWELL, IS_HOPPER, is_cuda, is_fbcode
+from tritonbench.utils.env_utils import IS_BLACKWELL, is_cuda, is_fbcode, IS_HOPPER
 from tritonbench.utils.python_utils import try_import
 from tritonbench.utils.triton_op import (
     BenchmarkOperator,
