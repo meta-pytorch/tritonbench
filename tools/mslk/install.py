@@ -24,10 +24,18 @@ def install_mslk(prebuilt=True):
 
 def install_prebuilt_mslk():
     toolkit_version = get_toolkit_version_from_torch()
+    package = "mslk"
+    if toolkit_version == "cu134":
+        # The cu134 wheels target sm_100 instead of sm_100a, so Blackwell
+        # FMHA aborts on its architecture guard. Use the verified CUDA 13.0
+        # build until the cu134 wheels include architecture-specific kernels.
+        # Pin the local version too so an installed +cu134 wheel is replaced.
+        toolkit_version = "cu130"
+        package = "mslk==2026.9.9+cu130"
     cmd = get_pip_cmd() + [
         "install",
         "--pre",
-        "mslk",
+        package,
         "-i",
         f"https://download.pytorch.org/whl/nightly/{toolkit_version}",
     ]
@@ -56,7 +64,7 @@ def install_build_mslk():
         checkout_mslk()
     pip_install_requirements("requirements.txt", current_dir=str(mslk_repo_path))
 
-    # Build target H100(9.0, 9.0a) and blackwell (10.0, 12.0)
+    # Blackwell FMHA requires the architecture-specific 10.0a target.
     extra_envs = os.environ.copy()
     if not is_hip():
         cmd = [
@@ -64,7 +72,7 @@ def install_build_mslk():
             "setup.py",
             "install",
             "--build-target=default",
-            "-DTORCH_CUDA_ARCH_LIST=9.0;9.0a;10.0;12.0",
+            "-DTORCH_CUDA_ARCH_LIST=9.0;9.0a;10.0;10.0a;12.0",
         ]
     elif is_hip():
         # build for MI300(gfx942) and MI350(gfx950)
