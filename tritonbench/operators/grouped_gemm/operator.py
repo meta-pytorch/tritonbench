@@ -1,15 +1,13 @@
 import logging
-import time
 from importlib.metadata import PackageNotFoundError, version
 from itertools import accumulate
-from typing import Any, Generator, List, Tuple
+from typing import Any, Callable, Generator, List, Tuple
 
 import torch
 
 logger = logging.getLogger(__name__)
 from torch._inductor import config as inductor_config
 from torch._inductor.utils import ensure_cute_available
-from tritonbench.components.do_bench.run import Latency
 from tritonbench.utils.env_utils import IS_BLACKWELL, is_cuda, is_fbcode, is_hip_mi350
 from tritonbench.utils.path_utils import add_path, REPO_PATH
 from tritonbench.utils.triton_op import (
@@ -59,18 +57,15 @@ except PackageNotFoundError:
 from .kernels import triton_group_gemm_fn
 
 try:
-    # @manual=//triton:triton
-    import triton.language.extra.tlx as tlx  # type: ignore
-
-    HAS_TLX = True
-except ImportError:
-    # suppress type checking errors
-    tlx = None
-
-    HAS_TLX = False
-
-if HAS_TLX:
-    from .kernels import tlx_group_gemm_fn
+    from triton.tlx.ops import (
+        grouped_gemm as _tlx_ops_grouped_gemm,
+        InvalidInput as _TLXOpsInvalidInput,
+        UnsupportedOp as _TLXOpsUnsupportedOp,
+    )
+except (ImportError, ModuleNotFoundError):
+    _TLXOpsInvalidInput = ValueError
+    _TLXOpsUnsupportedOp = RuntimeError
+    _tlx_ops_grouped_gemm = None
 
 
 def get_default_shapes():
@@ -118,13 +113,6 @@ class Operator(BenchmarkOperator):
     DEFAULT_METRICS = ["latency", "speedup", "accuracy", "tflops"]
     FWD_ONLY = True
 
-    # Latency knobs for _measure_latency (see its docstring for the rationale).
-    # _LATENCY_COOLDOWN_S tuned on aten_grouped_mm: clock recovery saturates by
-    # ~0.5-1s, so 1.0s keeps full fidelity at a third of the 3.0s downtime.
-    _LATENCY_REPLICAS = 5
-    _LATENCY_COOLDOWN_S = 1.0
-    _LATENCY_REPCNT = 10
-
     def __init__(self, tb_args, extra_args: List[str] | None = None):
         super().__init__(tb_args, extra_args)
         self.only_fb_shapes = False
@@ -134,31 +122,18 @@ class Operator(BenchmarkOperator):
         # Only use FB shapes when --only-fb-shapes is passed
         if self.only_fb_shapes and not is_fbcode():
             raise ValueError("--only-fb-shapes requires running in fbcode")
-        # The cooldown knobs above were tuned against NVIDIA clock-throttle
-        # recovery. Other backends may idle in the opposite direction: on XPU an
-        # idle gap drops the GPU into a low-power state, so the first sample of
-        # every replica pays a wake-up cost (~0.9ms vs ~0.29ms steady state on
-        # Arc Pro B70) and the sleep manufactures the very outlier it exists to
-        # avoid. Measure continuously there instead.
-        if self.device == "xpu":
-            self._LATENCY_COOLDOWN_S = 0.0
 
-    def _measure_latency(self, fn, warmup, rep, repcnt):
-        """Pool several short, cooled-down measurements for a robust, un-throttled p50.
+    def accuracy(self, fn: Callable, baseline_fn: Callable) -> bool:
+        def pack_output(output_fn: Callable) -> Callable:
+            def packed_output():
+                output = output_fn()
+                if isinstance(output, (list, tuple)):
+                    return torch.cat(output, dim=0)
+                return output
 
-        Prolonged run throttle performance by ~15-20% on compute-bound GEMMs,
-        while a single short measurement is noisy. Instead, alternate short bursts
-        of GEMMs with long sleeps to allow clocks to recover.
-        """
-        per_replica = repcnt if repcnt is not None else self._LATENCY_REPCNT
-        pooled: List[float] = []
-        _ = super()._measure_latency(fn, warmup, rep, per_replica)  # Warmup
-        for i in range(self._LATENCY_REPLICAS):
-            time.sleep(self._LATENCY_COOLDOWN_S)
-            lat = super()._measure_latency(fn, warmup, rep, per_replica)
-            if lat is not None:
-                pooled.extend(lat.times)
-        return Latency(times=pooled) if pooled else None
+            return packed_output
+
+        return super().accuracy(pack_output(fn), pack_output(baseline_fn))
 
     @staticmethod
     def parse_op_args(extra_args: List[str]):
@@ -313,25 +288,30 @@ class Operator(BenchmarkOperator):
 
         return _inner
 
-    @register_benchmark(enabled=HAS_TLX and IS_BLACKWELL)
+    @register_benchmark(enabled=_tlx_ops_grouped_gemm is not None and IS_BLACKWELL)
     def tlx_grouped_gemm(self, group_A, group_B, w=None, split=None):
-        def _inner():
-            (d_a_ptrs, d_b_ptrs, d_c_ptrs, d_g_sizes, d_g_lds, group_C) = (
-                self.list_input_to_triton_input(group_A, group_B)
-            )
-            outs = tlx_group_gemm_fn(
-                d_a_ptrs,
-                d_b_ptrs,
-                d_c_ptrs,
-                d_g_sizes,
-                d_g_lds,
-                group_C,
-                len(group_A),
-                group_A[0].dtype,
-            )
-            return torch.cat(outs, dim=0)
+        if _tlx_ops_grouped_gemm is None:
+            return None
 
-        return _inner
+        group_a_tlx = [
+            (a if a.is_contiguous() else a.contiguous()).detach() for a in group_A
+        ]
+        b_shared = group_B[0]
+        # The public op requires logical (K, N) B tensors with column-major layout.
+        b_tlx = (
+            b_shared
+            if b_shared.stride() == (1, b_shared.shape[0])
+            else b_shared.T.contiguous().T
+        ).detach()
+        group_b_tlx = [b_tlx] * len(group_a_tlx)
+
+        # Let the production entry point own dtype, shape, and layout policy.
+        try:
+            _tlx_ops_grouped_gemm(group_a_tlx, group_b_tlx)
+        except (_TLXOpsInvalidInput, _TLXOpsUnsupportedOp):
+            return None
+
+        return lambda: _tlx_ops_grouped_gemm(group_a_tlx, group_b_tlx)
 
     # NOTE(nikhilap): These CuteDSL kernels are highly experimental, and certain design decisions may affect the accuracy of their measurements.
     # In the kernel below, it was decided to NOT include the time it takes to convert from Torch to Cute tensors and construct the tensors of
