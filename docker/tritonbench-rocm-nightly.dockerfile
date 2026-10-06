@@ -1,6 +1,6 @@
 # Build ROCM base docker file
-# Base image is rocm/pytorch:latest (on top of ubuntu 24.04)
-ARG BASE_IMAGE=rocm/pytorch:latest
+# Base image is ubuntu 24.04
+ARG BASE_IMAGE=ubuntu:24.04
 
 FROM ${BASE_IMAGE}
 
@@ -14,6 +14,11 @@ ARG TRITONBENCH_BRANCH=${TRITONBENCH_BRANCH:-main}
 ARG FORCE_DATE=${FORCE_DATE}
 
 # Create workspace and permission check
+RUN sudo apt-get -y update && sudo apt -y update
+RUN sudo apt-get install -y git jq gcc g++ \
+                            vim wget curl ninja-build cmake \
+                            libsndfile1-dev kmod libxml2-dev libxslt1-dev \
+                            zlib1g-dev patch patchelf
 RUN sudo mkdir -p /workspace; sudo chown $(whoami):$(id -gn) /workspace; touch "${SETUP_SCRIPT}"
 
 # Checkout TritonBench and submodules
