@@ -6,9 +6,11 @@
 
 """Import shim for the HSTU cross-attention backward kernel.
 
-The kernel lives in the Triton tree at
-``third_party/tlx/tutorials/hstu_cross_attn/triton_bw_cross_attention.py`` and is
-exposed through the installed Triton package as
+The kernels live in the Triton tree under
+``third_party/tlx/tutorials/hstu_cross_attn`` and include the generic
+``triton_bw_cross_attention.py`` implementation plus the D120435766 gfx950 TLX
+family in ``tlx_gfx950_cross_attention.py``. They are exposed through the
+installed Triton package as
 ``triton.language.extra.tlx.tutorials.hstu_cross_attn`` -- in an OSS checkout via
 a symlink, in a buck build via
 ``fbsource//third-party/triton/beta/triton:tlx-hstu-cross-attn-tutorial``.
@@ -73,6 +75,17 @@ def _load():
     return _xa
 
 
+def _load_gfx950():
+    kernel_dir = _kernel_dir()
+    if kernel_dir is None or not os.path.isdir(kernel_dir):
+        raise ImportError(f"HSTU cross-attention kernels not found: {_KERNEL_PACKAGE}")
+    if kernel_dir not in sys.path:
+        sys.path.insert(0, kernel_dir)
+    import tlx_gfx950_cross_attention as _gfx950
+
+    return _gfx950
+
+
 try:
     xa = _load()
     BwdVariant = xa.BwdVariant
@@ -83,3 +96,12 @@ except Exception as e:  # noqa: BLE001 - report the reason, keep the op discover
     BwdVariant = None
     HAS_HSTU_CROSS_ATTN = False
     IMPORT_ERROR = e
+
+try:
+    gfx950 = _load_gfx950()
+    HAS_GFX950_CROSS_ATTN = True
+    GFX950_IMPORT_ERROR = None
+except ImportError as e:
+    gfx950 = None
+    HAS_GFX950_CROSS_ATTN = False
+    GFX950_IMPORT_ERROR = e
