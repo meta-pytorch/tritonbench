@@ -18,7 +18,7 @@ RUN apt-get -y update && apt -y update
 RUN apt-get install -y git jq gcc g++ \
                             vim wget curl ninja-build cmake \
                             libsndfile1-dev kmod libxml2-dev libxslt1-dev \
-                            zlib1g-dev patch patchelf
+                            zlib1g-dev patch patchelf python3
 RUN mkdir -p /workspace; chown $(whoami):$(id -gn) /workspace; touch "${SETUP_SCRIPT}"
 
 # Checkout TritonBench and submodules
