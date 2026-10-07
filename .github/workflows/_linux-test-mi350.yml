@@ -44,6 +44,7 @@ jobs:
           container_name=$(docker run \
             ${GPU_FLAG:-} \
             --env-file /etc/podinfo/gha-gpu-isolation-settings \
+            --env HIP_DEVICE_LIB_PATH= \
             -e CONDA_ENV \
             -e TEST_MODULE \
             -e TRITON_HIP_USE_ASYNC_COPY \
