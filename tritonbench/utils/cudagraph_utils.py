@@ -4,6 +4,7 @@ from typing import Callable, Optional
 
 import torch
 from torch.profiler import profile, ProfilerActivity
+from tritonbench.utils.env_utils import get_device_module, get_graph_cls
 
 
 class CudaGraphConfig:
@@ -20,9 +21,9 @@ class CudaGraphConfig:
 
     def __init__(self):
         if CudaGraphConfig.stream is None:
-            CudaGraphConfig.stream = torch.cuda.Stream()
+            CudaGraphConfig.stream = get_device_module().Stream()
         if CudaGraphConfig.graph is None:
-            CudaGraphConfig.graph = torch.cuda.CUDAGraph()
+            CudaGraphConfig.graph = get_graph_cls()()
 
     def get_stream(self):
         """
