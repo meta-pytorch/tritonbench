@@ -225,8 +225,9 @@ def get_parser(args=None):
     )
     parser.add_argument(
         "--num-inputs",
-        type=int,
-        help="Number of example inputs.",
+        type=str,
+        default=None,
+        help="Number of example inputs. Use /N to sample every Nth input (e.g., /2 for every other shape).",
     )
     parser.add_argument(
         "--keep-going",
