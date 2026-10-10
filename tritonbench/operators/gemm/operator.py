@@ -455,9 +455,12 @@ class Operator(BenchmarkOperator):
 
         try:
             with inductor_config.patch(
-                max_autotune=True,
-                max_autotune_gemm_backends="TRITON",
-                autotune_num_choices_displayed=self.inductor_autotune_num_choices_displayed,
+                {
+                    "max_autotune": True,
+                    "max_autotune_gemm_backends": "TRITON",
+                    "autotune_num_choices_displayed": self.inductor_autotune_num_choices_displayed,
+                    "triton.enable_persistent_tma_matmul": True,
+                }
             ):
                 if bias is not None:
                     f = lambda a, b: a.matmul(b) + bias
