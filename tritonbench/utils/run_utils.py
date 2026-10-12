@@ -332,10 +332,13 @@ def run_multi_device(
             f"num_inputs={shard_size}"
         )
 
-    base_argv = [] if is_fbcode() else [sys.executable]
-    base_argv.extend(copy.deepcopy(sys.argv))
-    if not is_fbcode() and len(base_argv) > 1 and base_argv[1] != "run.py":
-        base_argv.insert(1, "run.py")
+    if is_fbcode():
+        base_argv = copy.deepcopy(sys.argv)
+    else:
+        # The children run run.py from REPO_PATH. sys.argv[0] is however this
+        # process was launched (e.g. /path/to/run.py), so drop it rather than
+        # passing it on as a stray positional argument.
+        base_argv = [sys.executable, "run.py"] + sys.argv[1:]
 
     top_level_output_dir = tempfile.mkdtemp(prefix="tritonbench_multi_device_")
     user_output = args.output
@@ -1063,6 +1066,10 @@ def run_in_task(
         copy_sys_argv = remove_cmd_parameter(copy_sys_argv, "--isolate")
         copy_sys_argv = remove_cmd_parameter(copy_sys_argv, "--op-collection")
         add_cmd_parameter(copy_sys_argv, "--op", op)
+        if not is_fbcode():
+            # The runner script is inserted below. Drop sys.argv[0] (e.g.
+            # /path/to/run.py) so it does not reach the child as an argument.
+            copy_sys_argv = copy_sys_argv[1:]
         op_task_cmd.extend(copy_sys_argv)
     else:
         if is_fbcode():
