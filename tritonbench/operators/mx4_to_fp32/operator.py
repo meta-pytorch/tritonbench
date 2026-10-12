@@ -46,6 +46,23 @@ class Operator(BenchmarkOperator):
                 mbits,
             )
             yield _input, group_size, ebits, mbits
+        # Decode side of the large MX4 comm (quantize_comm / All2All_Pooled) production
+        # cases in fp32_to_mx4: the input is the packed MX4 tensor produced by encoding
+        # the same message, so its numel is M / 2 + M / group_size, not M.
+        for numel, group_size in [
+            (1_409_400_832, 16),  # backward
+            (1_409_286_144, 8),  # forward
+            (2_421_580_288, 8),  # forward
+        ]:
+            ebits = 2
+            mbits = 1
+            _input = fp32_to_mx4(
+                torch.randn((numel,), device=self.device, dtype=torch.float32),
+                group_size,
+                ebits,
+                mbits,
+            )
+            yield _input, group_size, ebits, mbits
 
     @register_benchmark(baseline=True, fwd_only=True, enabled=HAS_FBGEMM)
     def fbgemm_mx4_to_fp32(
