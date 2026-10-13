@@ -104,7 +104,7 @@ def run_benchmark_config_ci(
     benchmark_config_file: str,
     extra_args: List[str] | None = None,
     transform_func: Callable | None = None,
-    output_dir: str | None = None,
+    output_dir: str | Path | None = None,
     op: str | None = None,
     ci: bool = False,
     log_scuba: bool = False,
@@ -195,10 +195,14 @@ def run_benchmark_config_ci(
     return output_dir
 
 
-def setup_output_dir(bm_name: str, ci: bool = False, output_dir: str | None = None):
+def setup_output_dir(
+    bm_name: str, ci: bool = False, output_dir: str | Path | None = None
+):
     current_timestamp = datetime.fromtimestamp(time.time()).strftime("%Y%m%d%H%M%S")
     if output_dir:
-        return current_timestamp, output_dir
+        output_dir = Path(output_dir)
+        output_dir.mkdir(parents=True, exist_ok=True)
+        return current_timestamp, output_dir.absolute()
     if is_fbcode():
         base_dir = Path(tempfile.mkdtemp(prefix="tritonbench_benchmarks_"))
     else:
