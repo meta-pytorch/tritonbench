@@ -242,6 +242,11 @@ def parse_op_args(args: List[str]):
         "--pt2-sdpa", action="store_true", help="Compile SDPA with PT2."
     )
     parser.add_argument(
+        "--shared-kv",
+        action="store_true",
+        help="Pass one tensor as both K and V (e.g. models whose K and V alias).",
+    )
+    parser.add_argument(
         "--input-types",
         type=str,
         default="STANDARD_SHAPES",
@@ -323,6 +328,7 @@ class Operator(BenchmarkOperator):
         self.causal = args.causal
         self.native_sdpa = args.native_sdpa
         self.pt2_sdpa = args.pt2_sdpa
+        self.shared_kv = args.shared_kv
         # Use standard scale factor: 1/sqrt(head_dim)
         self.sm_scale = 1.0 / (self.D_HEAD**0.5)
         self.input_types = args.input_types
@@ -382,6 +388,13 @@ class Operator(BenchmarkOperator):
                 )
 
         return preproc_noop, sdpa_flash_attention
+
+    @register_benchmark(enabled=has_tlx(), tags=["tlx"])
+    @multi_input_wrapper
+    def torch_tlx_flex(self, *args) -> Tuple[Callable, Callable]:
+        import triton.language.extra.tlx.inductor.registry  # noqa: F401
+
+        return self._flex_attention(args, "allow")
 
     @register_benchmark(enabled=HAS_FLASH_V2)  # noqa
     @multi_input_wrapper
@@ -737,17 +750,28 @@ class Operator(BenchmarkOperator):
     @register_benchmark()
     @multi_input_wrapper
     def flex_attention(self, *args):
+        return self._flex_attention(args, None)
+
+    def _flex_attention(self, args, tlx_mode):
         from torch.nn.attention.flex_attention import create_block_mask, flex_attention
 
         def causal_mask(b, h, q_idx, kv_idx):
             return q_idx >= kv_idx
 
-        flex_attention = torch.compile(flex_attention, dynamic=False)
+        flex_attention = torch.compile(
+            flex_attention,
+            dynamic=False,
+            options={"max_autotune": True, "triton.tlx_mode": tlx_mode},
+        )
 
         if self.causal:
-            B, H, S, D = args[0].shape
             block_mask = create_block_mask(
-                causal_mask, B=None, H=None, Q_LEN=S, KV_LEN=S
+                causal_mask,
+                B=None,
+                H=None,
+                Q_LEN=args[0].shape[-2],
+                KV_LEN=args[1].shape[-2],
+                device=args[0].device,
             )
         else:
             block_mask = None
@@ -755,6 +779,7 @@ class Operator(BenchmarkOperator):
         fn = partial(
             flex_attention,
             block_mask=block_mask,
+            scale=self.sm_scale,
         )
         return preproc_noop, fn
 
@@ -826,6 +851,12 @@ class Operator(BenchmarkOperator):
         return fn
 
     def get_input_iter(self) -> Generator:
+        inputs = self._get_input_iter()
+        if not self.shared_kv:
+            return inputs
+        return ((q, k, k, *rest) for q, k, _, *rest in inputs)
+
+    def _get_input_iter(self) -> Generator:
         if self.input_types == "RAGGED_SHAPES":
             return ragged_inputs(
                 self.dtype,
