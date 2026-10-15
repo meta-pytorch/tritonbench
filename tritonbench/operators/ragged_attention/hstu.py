@@ -5,7 +5,6 @@ from tritonbench.utils.path_utils import add_path, SUBMODULE_PATH
 if is_fbcode():
     from generative_recommenders.common import (
         apply_sampling,
-        generate_sparse_seq_len,
         set_use_runtime_max_seq_len,
     )
     from generative_recommenders.ops.triton.triton_hstu_attention import triton_hstu_mha
@@ -16,7 +15,6 @@ else:
     with add_path(str(SUBMODULE_PATH.joinpath("generative-recommenders"))):
         from generative_recommenders.common import (
             apply_sampling,
-            generate_sparse_seq_len,
             set_use_runtime_max_seq_len,
         )
         from generative_recommenders.ops.triton.triton_hstu_attention import (
@@ -27,6 +25,8 @@ else:
         triton_ragged_hstu_mha = None
 
 from typing import Tuple
+
+from .input_utils import generate_sparse_seq_len
 
 triton_hstu_mha = triton_hstu_mha
 triton_ragged_hstu_mha = triton_ragged_hstu_mha
