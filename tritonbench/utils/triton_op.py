@@ -47,6 +47,14 @@ except ImportError:
         """Placeholder when tlx.ops.UnsupportedBackward is unavailable."""
 
 
+try:
+    from triton.tlx.ops import UnsupportedOp as TLXUnsupportedOp
+except ImportError:
+
+    class TLXUnsupportedOp(Exception):
+        """Placeholder when triton.tlx.ops.UnsupportedOp is unavailable."""
+
+
 from tritonbench.components.do_bench import do_bench_wrapper, Latency
 from tritonbench.components.do_bench.utils import (
     estimate_gpu_runtime_ms,
@@ -2402,7 +2410,7 @@ class BenchmarkOperator(metaclass=PostInitProcessor):
             metrics.error_msg = f"{self.device.upper()} OOM"
         except TritonOutOfResources as e:
             metrics.error_msg = f"Triton OOR: {e}"
-        except (NotImplementedError, TLXUnsupportedBackward) as e:
+        except (NotImplementedError, TLXUnsupportedBackward, TLXUnsupportedOp) as e:
             metrics.error_msg = str(e)
         except CudaGraphError:
             metrics.error_msg = "CudaGraph error"
