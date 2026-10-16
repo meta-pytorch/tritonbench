@@ -46,6 +46,27 @@ class Operator(BenchmarkOperator):
                 mbits,
             )
             yield _input, group_size, ebits, mbits
+        # Decode side of the large MX4 comm (quantize_comm / All2All_Pooled) production
+        # cases in fp32_to_mx4. The input is a random packed MX4 tensor of numel
+        # M / 2 + M / group_size: each group is group_size // 2 e2m1 bytes plus a
+        # shared exponent byte, pinned to 2^0 to avoid inf/NaN. It is built directly
+        # to avoid materializing the fp32 message and encoding it.
+        for numel, group_size in [
+            (1_409_400_832, 16),  # backward
+            (1_409_286_144, 8),  # forward
+            (2_421_580_288, 8),  # forward
+        ]:
+            ebits = 2
+            mbits = 1
+            _input = torch.randint(
+                0,
+                256,
+                (numel // group_size, group_size // 2 + 1),
+                dtype=torch.uint8,
+                device=self.device,
+            )
+            _input[:, -1] = 127
+            yield _input.view(-1), group_size, ebits, mbits
 
     @register_benchmark(baseline=True, fwd_only=True, enabled=HAS_FBGEMM)
     def fbgemm_mx4_to_fp32(
