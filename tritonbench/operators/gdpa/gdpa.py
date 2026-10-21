@@ -521,7 +521,8 @@ def _gdpa_fwd(
     BROADCAST_Q: tl.constexpr,
     IS_DENSE_KV: tl.constexpr,
     activation_enum_int: tl.constexpr,
-):
+
+    PID_SWIZZLE_SIZE: tl.constexpr,):
     pid = tl.program_id(0)
     off_hz = tl.program_id(1)
     if PID_SWIZZLE_SIZE is not None:
@@ -1576,7 +1577,8 @@ def _gdpa_bwd(
     NUM_CONSUMER_GROUPS: tl.constexpr,
     IS_DENSE_KV: tl.constexpr,
     activation_enum_int: tl.constexpr,
-):
+
+    PID_SWIZZLE_SIZE: tl.constexpr,):
     pid0 = tl.program_id(0)
     pid2 = tl.program_id(2)
     if PID_SWIZZLE_SIZE is not None:
@@ -1984,6 +1986,10 @@ def generalized_dot_product_attention(
     else:
         kernel_fn = _gdpa_fwd
         grid = grid_tma
+    if not enable_persistent:
+        # Only _gdpa_fwd takes PID_SWIZZLE_SIZE; the persistent kernel has no
+        # swizzleable pid grid.
+        extra_kern_args["PID_SWIZZLE_SIZE"] = PID_SWIZZLE_SIZE
 
     kernel_fn = get_autotune_fwd_kernel(kernel_fn, enable_ws)
     is_predict = True
@@ -2325,6 +2331,13 @@ def generalized_dot_product_attention_backward(
     is_dense_kv = bs * N_CTX_KV == L
     kernel_fn = get_autotune_bwd_kernel(kernel_fn, restore_value, enable_ws, use_tlx)
 
+    # Only _gdpa_bwd takes PID_SWIZZLE_SIZE; the persistent/TLX kernels do not.
+    swizzle_kwarg = (
+        {"PID_SWIZZLE_SIZE": PID_SWIZZLE_SIZE}
+        if not use_tlx and not enable_persistent
+        else {}
+    )
+
     kernel_info = capture_triton(kernel_fn)[kernel_grid](
         desc_q,
         q_offsets,
@@ -2362,6 +2375,7 @@ def generalized_dot_product_attention_backward(
         enable_tma=enable_tma,
         IS_DENSE_KV=is_dense_kv,
         activation_enum_int=activation_enum_int,
+        **swizzle_kwarg,
     )
 
     if (
