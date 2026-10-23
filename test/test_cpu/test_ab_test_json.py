@@ -226,6 +226,30 @@ class AbTestJsonTest(unittest.TestCase):
                 loaded = json.load(f, parse_constant=_reject)
         self.assertEqual(loaded, report)
 
+    def test_compares_custom_metrics_and_skips_non_numeric(self):
+        def _with_extra_metrics(result, gbps):
+            result.metrics = ["latency", "gbps", "kernel_source_hash"]
+            for _, backend_metrics in result.result:
+                for metrics in backend_metrics.values():
+                    # Custom metrics live in extra_metrics; gbps is a
+                    # (p50, low, high) triple for some operators.
+                    metrics.extra_metrics["gbps"] = (gbps, gbps - 1, gbps + 1)
+                    metrics.kernel_source_hash = "abc123"
+            return result
+
+        report = compare_ab_results(
+            _with_extra_metrics(_make_result(0, 1.0), 100.0),
+            _with_extra_metrics(_make_result(100, 1.2), 80.0),
+            [],
+            [],
+        )
+        comparison = report[AB_COMPARISON_KEY]
+        gbps = comparison["performance_summary"]["triton"]["gbps"]
+        self.assertAlmostEqual(gbps["avg_improvement"], -20.0)
+        self.assertEqual(gbps["count"], len(X_VALS))
+        compared = {row["metric"] for row in comparison["detailed_comparison"]}
+        self.assertEqual(compared, {"latency", "gbps"})
+
 
 class AbPowerDirTest(unittest.TestCase):
     """The per-side, per-repeat directories a --power-chart A/B run writes to."""

@@ -260,6 +260,29 @@ def _analyze_config_differences(
     return differences
 
 
+def _comparable_value(metrics_obj, metric: str) -> Optional[float]:
+    """The number one side's metric is compared by, or None if it has none.
+
+    Custom metrics live in ``extra_metrics``. A ``Latency`` compares by its p50
+    and a numeric sequence (e.g. the ``(p50, low, high)`` gbps triple) by its
+    median, as in :func:`_cell_metrics`. Values without a percent change, such
+    as a kernel hash, a trace path or a config, are skipped.
+    """
+    extra = getattr(metrics_obj, "extra_metrics", None) or {}
+    value = extra[metric] if metric in extra else getattr(metrics_obj, metric, None)
+    if hasattr(value, "p50"):
+        return value.p50
+    if (
+        isinstance(value, (list, tuple))
+        and value
+        and all(isinstance(v, (int, float)) for v in value)
+    ):
+        return statistics.median(value)
+    if isinstance(value, (int, float)):
+        return value
+    return None
+
+
 def _calculate_performance_summary(
     result_a: BenchmarkOperatorResult,
     result_b: BenchmarkOperatorResult,
@@ -284,21 +307,10 @@ def _calculate_performance_summary(
                     metrics_a = result_dict_a[x_val][backend]
                     metrics_b = result_dict_b[x_val][backend]
 
-                    val_a = getattr(metrics_a, metric, None)
-                    val_b = getattr(metrics_b, metric, None)
+                    val_a_num = _comparable_value(metrics_a, metric)
+                    val_b_num = _comparable_value(metrics_b, metric)
 
-                    if val_a is not None and val_b is not None:
-                        # Handle different metric types
-                        if hasattr(val_a, "p50"):
-                            val_a_num = val_a.p50
-                        else:
-                            val_a_num = val_a
-
-                        if hasattr(val_b, "p50"):
-                            val_b_num = val_b.p50
-                        else:
-                            val_b_num = val_b
-
+                    if val_a_num is not None and val_b_num is not None:
                         if val_a_num != 0:
                             improvement = ((val_b_num - val_a_num) / val_a_num) * 100
                             improvements.append(improvement)
@@ -731,18 +743,10 @@ def compare_ab_results(
                 metrics_a = result_dict_a[x_val][backend]
                 metrics_b = result_dict_b[x_val][backend]
 
-                val_a = getattr(metrics_a, metric, None)
-                val_b = getattr(metrics_b, metric, None)
+                val_a_num = _comparable_value(metrics_a, metric)
+                val_b_num = _comparable_value(metrics_b, metric)
 
-                if val_a is not None and val_b is not None:
-                    # Handle different data types
-                    if hasattr(val_a, "p50"):
-                        val_a_num = val_a.p50
-                        val_b_num = val_b.p50
-                    else:
-                        val_a_num = val_a
-                        val_b_num = val_b
-
+                if val_a_num is not None and val_b_num is not None:
                     if val_a_num != 0:
                         diff_pct = ((val_b_num - val_a_num) / val_a_num) * 100
                     else:
