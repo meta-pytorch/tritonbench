@@ -591,13 +591,17 @@ def scaled_mm_autows_kernel(
     # tl.dot path uses it (compiler splits B per CTA + inserts cross-CTA sync).
     # _prune_configs offers it as a tuning option for TensorWise/RowWise on
     # Blackwell + Meta-WS, BM>=128.
-    TWO_CTAS: tl.constexpr = False,
-):
+    TWO_CTAS: tl.constexpr = False,):
     """
     Persistent TMA matmul kernel for FP8 scaled_mm with warp specialization.
     Computes: C = (A @ B^T) * scale_a * scale_b
     """
     # Compile-time algorithm selection from the per-operand recipe pair.
+    BLOCKWISE_128x128 = tl.constexpr(5)
+    BLOCKWISE_1x128 = tl.constexpr(4)
+    MXFP8 = tl.constexpr(3)
+    ROWWISE = tl.constexpr(1)
+    TENSORWISE = tl.constexpr(0)
     IS_TENSORWISE: tl.constexpr = (SCALE_A_MODE == TENSORWISE) and (
         SCALE_B_MODE == TENSORWISE
     )
