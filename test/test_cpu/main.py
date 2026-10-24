@@ -68,6 +68,27 @@ class TestTritonbenchCpu(unittest.TestCase):
             any(["test_op-" in header for header in headers])
         )  # default benchmark label should not be present in headers
 
+    def test_cpu_benchmark_name_keeps_operator_backends(self):
+        test_op = self._get_test_op(
+            extra_args=[
+                "--benchmark-name",
+                "custom_run",
+                "--metrics",
+                "test_metric_per_benchmark",
+            ]
+        )
+        test_op.run()
+        benchmark_result = test_op.output
+        self.assertEqual(len(benchmark_result.result), 3)
+        for _, backend_metrics in benchmark_result.result:
+            self.assertEqual(list(backend_metrics), ["test_op"])
+            metrics = backend_metrics["test_op"]
+            self.assertIn("test_metric_per_benchmark", metrics.extra_metrics)
+        # The benchmark name still names the output metrics.
+        self.assertIn(
+            "tritonbench_custom_run-pass", benchmark_result.userbenchmark_dict
+        )
+
     def test_ci_aggregate_metrics_are_all_or_nothing(self):
         test_op = self._get_test_op(
             extra_args=[
