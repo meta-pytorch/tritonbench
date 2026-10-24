@@ -247,6 +247,13 @@ def _split_params_by_comma(params: Optional[str]) -> List[str]:
     return [x.strip() for x in params.split(",")] if "," in params else [params]
 
 
+def _is_operator_module_path(module_path: str) -> bool:
+    return (
+        "tritonbench.operators." in module_path
+        or "tritonbench.operator_loader." in module_path
+    )
+
+
 def _find_op_name_from_module_path(module_path: str) -> str:
     PATH_PREFIX = "tritonbench.operators."
     # We have a separate operator loader for aten operator benchmark.
@@ -844,10 +851,15 @@ class BenchmarkOperator(metaclass=PostInitProcessor):
                 "no args selected. Either pass in argparse namespace or give list override"
             )
 
-        if tb_args.benchmark_name:
+        module_path = self.__class__.__module__
+        if tb_args.benchmark_name and not _is_operator_module_path(module_path):
+            # Operators built at runtime (e.g. dynamic_run) register their
+            # backends under the benchmark name.
             self.name = tb_args.benchmark_name
         else:
-            self.name = _find_op_name_from_module_path(self.__class__.__module__)
+            # Backends and metrics are registered under the operator name, so
+            # --benchmark-name only renames the output, not the registry key.
+            self.name = _find_op_name_from_module_path(module_path)
         self._raw_extra_args = copy.deepcopy(extra_args)
         self.tb_args = tb_args
         self.add_production_shapes = (
