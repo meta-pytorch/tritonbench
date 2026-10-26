@@ -8,7 +8,36 @@ benchmark results and generates bar charts comparing performance metrics.
 
 import csv
 import os
+import subprocess
+import sys
 from typing import Any, Callable, List, Optional, Tuple
+
+from tritonbench.utils.env_utils import is_fbcode
+
+
+def _upload_plot(plot_file: str) -> None:
+    try:
+        result = subprocess.run(
+            [
+                "meta",
+                "pixelcloud.image",
+                "upload",
+                "--file",
+                f"file://{os.path.abspath(plot_file)}",
+                "--no-truncate",
+            ],
+            check=True,
+            capture_output=True,
+            text=True,
+            timeout=120,
+        )
+    except (OSError, subprocess.SubprocessError) as exc:
+        detail = (
+            exc.stderr if isinstance(exc, subprocess.CalledProcessError) else str(exc)
+        )
+        print(f"Pixelcloud upload failed: {detail}", file=sys.stderr)
+        return
+    print(result.stdout.strip())
 
 
 def plot_benchmark_results(
@@ -149,6 +178,9 @@ def plot_benchmark_results(
             row = [str(x_val)] + [data[p][i] for p in providers]
             writer.writerow(row)
     print(f"Data saved to {csv_path}")
+
+    if is_fbcode():
+        _upload_plot(plot_file)
 
     if show_plot:
         plt.show()
