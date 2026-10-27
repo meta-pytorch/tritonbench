@@ -83,28 +83,33 @@ def plot_benchmark_results(
     import matplotlib.pyplot as plt
     import numpy as np
 
-    result_dict = output._get_result_dict()
-    if not result_dict:
+    # Use the ordered result list: inputs sharing an x_val (same shape, other
+    # dtype/strides) would collapse in the x_val-keyed result dict.
+    rows = list(output.result)
+    if not rows:
         print("No benchmark results to plot.")
         return None
 
-    first_x_val = next(iter(result_dict.keys()))
-    providers = list(result_dict[first_x_val].keys())
+    providers = list(rows[0][1].keys())
 
     if not providers:
         print("No providers found in benchmark results.")
         return None
 
-    x_vals = output.x_vals
+    # None marks a missing or failed result; it is drawn as "n/a", not as 0.
+    x_vals, seen = [], {}
     data = {provider: [] for provider in providers}
 
-    for x_val in x_vals:
+    for x_val, by_provider in rows:
+        seen[x_val] = seen.get(x_val, 0) + 1
+        x_vals.append(x_val if seen[x_val] == 1 else f"{x_val} #{seen[x_val]}")
         for provider in providers:
-            try:
-                metric_val = output.get_y_vals(x_val, provider, y_metric)
-                data[provider].append(metric_val if metric_val is not None else 0)
-            except (KeyError, TypeError):
-                data[provider].append(0)
+            m = by_provider.get(provider)
+            if m is not None and not hasattr(m, y_metric):
+                m = m.extra_metrics
+            data[provider].append(
+                m.get(y_metric) if isinstance(m, dict) else getattr(m, y_metric, None)
+            )
 
     plot_name = f"{op_name}-performance"
     default_title = f"{op_name.upper()} Performance Comparison"
@@ -114,6 +119,9 @@ def plot_benchmark_results(
         base_name = os.path.basename(input_loader_path).replace(".json", "")
         plot_name = base_name
         default_title = f"{op_name.upper()} Performance: {base_name}"
+    elif getattr(tb_args, "suite", None):
+        plot_name = f"{op_name}-{tb_args.suite}-performance"
+        default_title = f"{op_name.upper()} Performance: {tb_args.suite}"
 
     final_title = plot_title if plot_title else default_title
 
@@ -137,13 +145,27 @@ def plot_benchmark_results(
 
     for i, provider in enumerate(providers):
         offset = (i - len(providers) / 2 + 0.5) * width
+        color = bar_colors[i % len(bar_colors)]
+        vals = data[provider]
         ax.bar(
             x + offset,
-            data[provider],
+            [np.nan if v is None else v for v in vals],
             width,
             label=provider,
-            color=bar_colors[i % len(bar_colors)],
+            color=color,
         )
+        for j, v in enumerate(vals):
+            if v is None:
+                ax.text(
+                    x[j] + offset,
+                    0,
+                    "n/a",
+                    rotation=90,
+                    ha="center",
+                    va="bottom",
+                    fontsize=6,
+                    color=color,
+                )
 
     if x_val_formatter:
         x_labels = [x_val_formatter(x_val) for x_val in x_vals]
@@ -175,7 +197,9 @@ def plot_benchmark_results(
         writer = csv.writer(f)
         writer.writerow(["x_val"] + providers)
         for i, x_val in enumerate(x_vals):
-            row = [str(x_val)] + [data[p][i] for p in providers]
+            row = [str(x_val)] + [
+                "" if data[p][i] is None else data[p][i] for p in providers
+            ]
             writer.writerow(row)
     print(f"Data saved to {csv_path}")
 

@@ -286,6 +286,11 @@ class BenchmarkOperatorMetrics:
     walltime_kineto_trace: Optional[str] = None
     # compile time
     compile_time: Optional[float] = None
+    # synchronized wall time (ms) to build the benchmark callable, including any
+    # compile, autotune, or validation call the provider runs in setup
+    setup_time: Optional[float] = None
+    # synchronized wall time (ms) of the callable's first call, before warmup
+    first_call_time: Optional[float] = None
     # stage breakdown of compile times
     compile_time_by_stage: Optional[Dict[str, float]] = None
     # compile time with kineto trace
@@ -1052,11 +1057,15 @@ class BenchmarkOperator(metaclass=PostInitProcessor):
             f"Could not find benchmark {bm_func_name} registered in {self.name}. type is {type(getattr(self, bm_func_name, None))} "
             f"Available benchmarks: {REGISTERED_BENCHMARKS[self.name].keys()}. "
         )
-        with TimerContext(enabled=logger.level <= logging.INFO) as timer:
+        setup = "setup_time" in self.required_metrics
+        with TimerContext(enabled=setup or logger.level <= logging.INFO) as timer:
             if isinstance(self.example_inputs, dict):
                 fwd_fn = fwd_fn_lambda(**self.example_inputs)
             else:
                 fwd_fn = fwd_fn_lambda(*self.example_inputs)
+            if setup:
+                get_device_module().synchronize()
+        self._bm_func_setup_ms = timer.elapsed_ms
         logger.info(
             "Took %.02fms to get benchmark function for %s",
             timer.elapsed_ms,
@@ -2125,6 +2134,14 @@ class BenchmarkOperator(metaclass=PostInitProcessor):
         )
         try:
             fn = self._get_bm_func(fn_name)
+            if "setup_time" in self.required_metrics:
+                metrics.setup_time = self._bm_func_setup_ms
+            if "first_call_time" in self.required_metrics:
+                get_device_module().synchronize()
+                with TimerContext() as first_call_timer:
+                    fn()
+                    get_device_module().synchronize()
+                metrics.first_call_time = first_call_timer.elapsed_ms
             if baseline:
                 self.baseline_fns[fn_name] = fn
                 if self.baseline_fn is None:

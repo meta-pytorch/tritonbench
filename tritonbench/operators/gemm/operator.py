@@ -215,6 +215,18 @@ def parse_args(args: List[str]) -> argparse.Namespace:
         action="store_true",
         help="Being verbose with autotuning results",
     )
+    parser.add_argument(
+        "--torch-tlx-mode",
+        choices=["allow", "force"],
+        default="allow",
+        help="triton.tlx_mode for the torch_tlx_* provider",
+    )
+    parser.add_argument(
+        "--tlx-space",
+        type=str,
+        default=None,
+        help="space= for the tlx_ops_* provider (default: implementation default)",
+    )
     args = parser.parse_args(args)
     return args
 
@@ -281,6 +293,8 @@ class Operator(BenchmarkOperator):
 
         self.use_buffer_ops = gemm_args.buffer_ops
         self.template_filter_regex = gemm_args.template_filter_regex
+        self.torch_tlx_mode = gemm_args.torch_tlx_mode
+        self.tlx_space = gemm_args.tlx_space
 
         if self.use_buffer_ops and torch.version.hip is None:
             raise ValueError("Buffer ops are only supported on AMD GPUs.")
@@ -393,20 +407,15 @@ class Operator(BenchmarkOperator):
 
     @register_benchmark(enabled=has_tlx_op("mm_torchtlx") and has_torch_tlx())
     def torch_tlx_mm(self, a, b, bias) -> Callable:
-        # torch_tlx_<op> convention: PT2 (torch.compile max-autotune, TRITON
-        # backend) with TLX "allow" mode, so TLX templates compete against the
-        # standard Triton templates during autotuning. Identical to the
-        # pt2_triton_matmul baseline except for triton.tlx_mode, giving a clean
-        # PT2-vs-PT2+TLX comparison. force_disable_caches forces a real recompile
-        # so the TLX candidates aren't served from the baseline's autotune cache.
+        # No max-autotune: the TLX template uses its single heuristic config.
+        # force_disable_caches forces a real recompile.
         torch._dynamo.reset()
         inductor_config_patch = {
-            "max_autotune": True,
-            "max_autotune_gemm_backends": "TRITON",
-            "autotune_fallback_to_aten": False,
+            "max_autotune": False,
+            "max_autotune_gemm": False,
             "autotune_num_choices_displayed": self.inductor_autotune_num_choices_displayed,
             "force_disable_caches": True,
-            "triton.tlx_mode": "allow",
+            "triton.tlx_mode": self.torch_tlx_mode,
         }
         if self.template_filter_regex is not None:
             inductor_config_patch["test_configs.autotune_choice_name_regex"] = (
@@ -613,15 +622,17 @@ class Operator(BenchmarkOperator):
         a_tlx = a.detach()
         b_tlx = b.detach()
 
+        kwargs = {} if self.tlx_space is None else {"space": self.tlx_space}
+
         # Probe rather than duplicate the production entry's shape policy.
         try:
-            _tlx_mm(a_tlx, b_tlx)
+            _tlx_mm(a_tlx, b_tlx, **kwargs)
         except _TLXInvalidInput:
             return None
 
         if bias is not None:
-            return lambda: _tlx_mm(a_tlx, b_tlx) + bias
-        return lambda: _tlx_mm(a_tlx, b_tlx)
+            return lambda: _tlx_mm(a_tlx, b_tlx, **kwargs) + bias
+        return lambda: _tlx_mm(a_tlx, b_tlx, **kwargs)
 
     @register_benchmark(enabled=IS_BLACKWELL)
     def triton_warpspec_tma_persistent_matmul(self, a, b, bias) -> Callable:
