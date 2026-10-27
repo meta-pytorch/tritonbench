@@ -396,6 +396,27 @@ class Operator(BenchmarkOperator):
 
         return self._flex_attention(args, "allow")
 
+    @register_benchmark(enabled=IS_HOPPER and has_tlx(), tags=["tlx"])
+    @multi_input_wrapper
+    def torch_tlx_sdpa(self, *args) -> Tuple[Callable, Callable]:
+        """PT2 SDPA with torchTLX sdpa_to_flex: eligible calls lower through flex."""
+        import triton.language.extra.tlx.inductor.registry  # noqa: F401
+        from triton.language.extra.tlx.inductor import tlx_config
+
+        # Process-wide: the lazy backward compile reads both again, so both stay set for
+        # providers that run after this one. Routed calls autotune their own flex kernels.
+        # Inductor creates its choices handler per thread on the first compile, so list
+        # this provider before other compiled ones or TLX is not offered in the backward.
+        tlx_config.sdpa_to_flex = True
+        torch._inductor.config.triton.tlx_mode = "allow"
+        compiled = torch.compile(sdpa, fullgraph=True, backend="inductor")
+
+        def fn(q, k, v):
+            with sdpa_kernel([SDPBackend.FLASH_ATTENTION]):
+                return compiled(q, k, v, is_causal=self.causal, scale=self.sm_scale)
+
+        return preproc_noop, fn
+
     @register_benchmark(enabled=HAS_FLASH_V2)  # noqa
     @multi_input_wrapper
     def flash_v2(self, *args) -> Tuple[Callable, Callable]:
