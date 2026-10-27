@@ -5,7 +5,6 @@ from typing import Any, Callable, Generator, List, Optional, Tuple
 
 import torch
 import torch._inductor.config as inductor_config
-import triton
 from tritonbench.utils.env_utils import get_logger, IS_BLACKWELL, is_fbcode
 from tritonbench.utils.python_utils import try_import
 from tritonbench.utils.triton_utils import has_tlx, has_tlx_op, has_torch_tlx
@@ -143,6 +142,8 @@ class Operator(BenchmarkOperator):
         if addmm_args.bias_1D_y:
             self.shapes = [(m, k, n, True) for m, k, n, _ in self.shapes]
         self.col_major = addmm_args.col_major
+        self.torch_tlx_mode = addmm_args.torch_tlx_mode
+        self.tlx_space = addmm_args.tlx_space
         self.add_in_bias_dtype = addmm_args.add_in_bias_dtype
 
     @register_benchmark(enabled=HAS_HSTU)  # type: ignore # noqa: F821
@@ -193,34 +194,30 @@ class Operator(BenchmarkOperator):
         bias_tlx = a.detach()
         mat1_tlx = mat1.detach()
         mat2_tlx = mat2.detach()
+        kwargs = {} if self.tlx_space is None else {"space": self.tlx_space}
         try:
-            _tlx_addmm(bias_tlx, mat1_tlx, mat2_tlx)
+            _tlx_addmm(bias_tlx, mat1_tlx, mat2_tlx, **kwargs)
         except _TLXInvalidInput:
             return None
-        return lambda: _tlx_addmm(bias_tlx, mat1_tlx, mat2_tlx)
+        return lambda: _tlx_addmm(bias_tlx, mat1_tlx, mat2_tlx, **kwargs)
 
     @register_benchmark(enabled=has_tlx_op("addmm_torchtlx") and has_torch_tlx())
     def torch_tlx_addmm(self, a, mat1, mat2) -> Callable:
-        # Force PT2 to select only TLX templates, excluding stock Triton choices.
-        # force_disable_caches prevents a prior allow-mode or stock-Triton choice
-        # from being reused through the autotune cache.
-        # Gated to AMD MI350x (gfx950), where the TLX addmm template exists.
-        mat1_in = mat1 if mat1.is_contiguous() else mat1.contiguous()
-        mat2_in = mat2 if mat2.stride(0) == 1 else mat2.T.contiguous().T
+        # No max-autotune: the TLX template uses its single heuristic config.
+        # Inputs keep the baselines' layouts.
         torch._dynamo.reset()
         with inductor_config.patch(
             {
-                "max_autotune": True,
-                "max_autotune_gemm_backends": "TRITON",
-                "autotune_fallback_to_aten": False,
+                "max_autotune": False,
+                "max_autotune_gemm": False,
                 "force_disable_caches": True,
-                "triton.tlx_mode": "force",
+                "triton.tlx_mode": self.torch_tlx_mode,
             }
         ):
             f = lambda a, mat1, mat2: torch.addmm(a, mat1, mat2)
             compiled = torch.compile(f, dynamic=False)
-            compiled(a, mat1_in, mat2_in)
-        return lambda: compiled(a, mat1_in, mat2_in)
+            compiled(a, mat1, mat2)
+        return lambda: compiled(a, mat1, mat2)
 
     @register_benchmark(enabled=False)
     def pt2_addmm_maxautotune(self, a, mat1, mat2) -> Callable:
@@ -312,29 +309,3 @@ class Operator(BenchmarkOperator):
             accuracy = False
         finally:
             return accuracy
-
-    def plot(self):
-        @triton.testing.perf_report(
-            triton.testing.Benchmark(
-                x_names=["density"],  # argument names to use as an x-axis for the plot
-                x_vals=self.output.x_vals,  # different possible values for `x_name`
-                line_arg="provider",  # argument name whose value corresponds to a different line in the plot
-                line_vals=[
-                    "aten_addmm",
-                    "triton_addmm",
-                ],  # possible values for `line_arg``
-                line_names=[
-                    "ATen AddMM",
-                    "Triton AddMM",
-                ],  # label name for the lines
-                styles=[("blue", "-"), ("green", "-")],  # line styles
-                ylabel="tflops",  # label name for the y-axis
-                plot_name="gemm-performance",  # name for the plot. Used also as a file name for saving the plot.
-                args={},  # values for function arguments not in `x_names` and `y_name`
-            )
-        )
-        def _plot(density, provider):
-            tflops = self.output.get_y_vals(density, provider, "tflops")
-            return tflops
-
-        _plot.run(show_plots=True, print_data=True, save_path="/tmp/test_addmm")
