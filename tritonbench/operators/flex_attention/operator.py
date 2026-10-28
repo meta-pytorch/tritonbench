@@ -47,7 +47,12 @@ from tritonbench.utils.triton_op import (
     register_metric,
     register_x_val,
 )
-from tritonbench.utils.triton_utils import has_tlx, has_torch_tlx
+from tritonbench.utils.triton_utils import (
+    has_tlx,
+    has_torch_tlx,
+    install_torch_tlx,
+    torch_tlx_choice_filter,
+)
 
 from .mods import (
     causal_mask,
@@ -376,14 +381,40 @@ class Operator(BenchmarkOperator):
         across ops. Enabled by default so it's the standing comparison for
         `torch_tlx_flex_attention` (no `--force` needed). `compiled` remains the
         provider pinned by ci.yaml / accuracy tests / servicelab (they select it
-        via `--only compiled`), so this alias does not affect those runs."""
-        return self.compiled(q, k, v, score_mod, block_mask, mod_type, kernel_options)
+        via `--only compiled`), so this alias does not affect those runs.
+        TLX is off through compile options, so the lazily compiled backward is
+        stock Triton too, whatever the process-wide tlx_mode default is. Caches
+        are disabled because cached artifacts do not key on tlx_mode, so a TLX
+        run's backward could otherwise be reused here."""
+        mode = "default" if not self.max_autotune else "max-autotune-no-cudagraphs"
+        compiled_fn = torch.compile(
+            flex_attention,
+            fullgraph=True,
+            dynamic=self.dynamic,
+            options={
+                **torch._inductor.list_mode_options(mode),
+                "triton.tlx_mode": None,
+                "force_disable_caches": True,
+            },
+        )
+
+        def fn():
+            return compiled_fn(
+                q,
+                k,
+                v,
+                score_mod=score_mod,
+                block_mask=block_mask,
+                kernel_options=kernel_options,
+            )
+
+        fn()
+        return fn
 
     @register_benchmark(
         enabled=(is_nvidia_blackwell() or is_amd_gfx950())
         and has_tlx()
         and has_torch_tlx(),
-        fwd_only=True,
     )
     def torch_tlx_flex_attention(
         self,
@@ -395,37 +426,35 @@ class Operator(BenchmarkOperator):
         mod_type: str,
         kernel_options: dict[str, Any],
     ) -> Optional[Callable]:
-        # torch_tlx_<op> convention: PT2 (torch.compile max-autotune) with TLX
-        # "allow" mode, so the TLX flex-attention template competes against the
-        # standard Triton flex template during autotuning. Identical to the
-        # `compiled` max-autotune baseline except for triton.tlx_mode, giving a
-        # clean PT2-vs-PT2+TLX comparison. force_disable_caches forces a real
-        # recompile so the TLX candidate isn't served from the baseline's
-        # autotune cache. Device-agnostic: gated to archs that ship a TLX flex
-        # template -- Nvidia Blackwell (B200) and AMD MI350x (gfx950) -- and
-        # Inductor picks the matching per-device template during autotuning. The
-        # compile is warmed inside the patch so the TLX candidate is selected
-        # while tlx_mode is active.
+        # torch_tlx_<op> convention: torch.compile with TLX "allow" mode (or
+        # --torch-tlx-mode). torchTLX is independent of max_autotune, so it is
+        # explicitly off. The settings are compile options rather than a
+        # config.patch so the lazily compiled backward gets them too.
+        # force_disable_caches forces a real recompile so the TLX candidate isn't
+        # served from another provider's cache. Gated to archs that ship a TLX
+        # flex template -- Nvidia Blackwell (B200) and AMD MI350x (gfx950).
+        install_torch_tlx()
         torch._dynamo.reset()
-        with inductor_config.patch(
-            {
-                "max_autotune": True,
+        compiled_fn = torch.compile(
+            flex_attention,
+            fullgraph=True,
+            dynamic=self.dynamic,
+            options={
+                "max_autotune": False,
                 "autotune_fallback_to_aten": False,
                 "force_disable_caches": True,
-                "triton.tlx_mode": "allow",
-            }
-        ):
-            compiled_fn = torch.compile(
-                flex_attention, fullgraph=True, dynamic=self.dynamic
-            )
-            compiled_fn(
-                q,
-                k,
-                v,
-                score_mod=score_mod,
-                block_mask=block_mask,
-                kernel_options=kernel_options,
-            )
+                "triton.tlx_mode": self.tb_args.torch_tlx_mode or "allow",
+                **torch_tlx_choice_filter(self.tb_args),
+            },
+        )
+        compiled_fn(
+            q,
+            k,
+            v,
+            score_mod=score_mod,
+            block_mask=block_mask,
+            kernel_options=kernel_options,
+        )
         return lambda: compiled_fn(
             q,
             k,

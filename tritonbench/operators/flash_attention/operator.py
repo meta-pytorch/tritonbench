@@ -122,7 +122,12 @@ from tritonbench.utils.triton_op import (
     register_metric,
     register_x_val,
 )
-from tritonbench.utils.triton_utils import has_new_tma, has_tlx, has_warp_spec
+from tritonbench.utils.triton_utils import (
+    has_new_tma,
+    has_tlx,
+    has_tlx_op,
+    has_warp_spec,
+)
 
 if has_tlx():
     try:
@@ -389,12 +394,18 @@ class Operator(BenchmarkOperator):
 
         return preproc_noop, sdpa_flash_attention
 
-    @register_benchmark(enabled=has_tlx(), tags=["tlx"])
+    @register_benchmark(enabled=has_tlx_op("flash_attn"), tags=["tlx"])
     @multi_input_wrapper
-    def torch_tlx_flex(self, *args) -> Tuple[Callable, Callable]:
-        import triton.language.extra.tlx.inductor.registry  # noqa: F401
+    def tlx_ops_flash_attn(self, *args) -> Tuple[Callable, Callable]:
+        """Run the public tlx.ops.flash_attn; --tlx-space sets its space=."""
+        kwargs = {"space": self.tb_args.tlx_space} if self.tb_args.tlx_space else {}
 
-        return self._flex_attention(args, "allow")
+        def fn(q, k, v):
+            return _tlx_hopper_fa(
+                q, k, v, causal=self.causal, sm_scale=self.sm_scale, **kwargs
+            )
+
+        return preproc_noop, fn
 
     @register_benchmark(enabled=IS_HOPPER and has_tlx(), tags=["tlx"])
     @multi_input_wrapper
@@ -806,6 +817,9 @@ class Operator(BenchmarkOperator):
 
     def accuracy(self, fn, baseline_fn):
         """Override accuracy to use relaxed tolerance for bfloat16."""
+        if self.mode in (BenchmarkMode.BWD, BenchmarkMode.FWD_BWD):
+            # Backward callables return gradients, not output lists.
+            return super().accuracy(fn, baseline_fn)
         output_list = fn()
         baseline_output_list = baseline_fn()
 
@@ -857,7 +871,17 @@ class Operator(BenchmarkOperator):
     def get_bwd_fn(self, fwd_fn: Callable) -> Callable:
         o = fwd_fn()
         outputs = [input_filter(lambda x: isinstance(x, torch.Tensor), o_) for o_ in o]
-        dOs = [torch.rand_like(o_).detach() for o_ in outputs]
+        # Seeded so every implementation of an input gets the same upstream gradient.
+        generator = torch.Generator(device=self.device).manual_seed(0)
+        dOs = [
+            torch.rand(o_.shape, generator=generator, device=o_.device, dtype=o_.dtype)
+            for o_ in outputs
+        ]
+        grad_tensors = [
+            x
+            for x in self.example_inputs
+            if isinstance(x, torch.Tensor) and x.requires_grad
+        ]
         zero_grad = (
             self.optims[fwd_fn].zero_grad
             if fwd_fn in self.optims
@@ -866,8 +890,11 @@ class Operator(BenchmarkOperator):
 
         def fn():
             zero_grad(set_to_none=True)
+            for t in grad_tensors:
+                t.grad = None
             for o_tensor, do in zip(outputs, dOs):
                 o_tensor.backward(do, retain_graph=True)
+            return grad_tensors
 
         return fn
 
@@ -918,52 +945,6 @@ class Operator(BenchmarkOperator):
         B, H, S, D = q.shape
         _, _, S_KV, _ = k.shape
         return (B, H, S, S_KV, D)
-
-    def plot(self):
-        y_metric_name = "tflops"
-
-        @triton.testing.perf_report(
-            triton.testing.Benchmark(
-                x_names=["N_CTX"],  # argument names to use as an x-axis for the plot
-                x_vals=self.output.x_vals,  # different possible values for `x_name`
-                line_arg="provider",  # argument name whose value corresponds to a different line in the plot
-                line_vals=[
-                    "aten",
-                    "sdpa",
-                    "flash_v2",
-                    "triton_tutorial_flash_v2",
-                    "xformers",
-                    "hw_roofline",
-                ],  # possible values for `line_arg``
-                line_names=[
-                    "ATen",
-                    "SDPA",
-                    "Flash V2",
-                    "Triton Tutorial Flash V2",
-                    "XFormers",
-                    "Hardware Roofline",
-                ],  # label name for the lines
-                styles=[
-                    ("blue", "-"),
-                    ("yellow", "-"),
-                    ("green", "-"),
-                    ("red", "-"),
-                    ("brown", "-"),
-                    ("purple", "-"),
-                    ("black", "dashed"),
-                ],  # line styles
-                ylabel=y_metric_name,  # label name for the y-axis
-                plot_name="flashattention-tflops",  # name for the plot. Used also as a file name for saving the plot.
-                args={},  # values for function arguments not in `x_names` and `y_name`
-            )
-        )
-        def _plot(N_CTX, N_CTX_KV, provider):
-            tflops = self.output.get_y_vals(N_CTX, N_CTX_KV, provider, y_metric_name)
-            return tflops
-
-        _plot.run(
-            show_plots=True, print_data=False, save_path="/tmp/test_flashattention"
-        )
 
     def get_latency_scale(self, example_inputs):
         assert len(example_inputs) % 3 == 0

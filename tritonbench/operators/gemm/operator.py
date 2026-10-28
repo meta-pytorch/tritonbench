@@ -21,7 +21,13 @@ if False:
         blackwell_matmul_tma_persistent,
         blackwell_matmul_tma_persistent_splitk,
     )
-from tritonbench.utils.triton_utils import has_tlx, has_tlx_op, has_torch_tlx
+from tritonbench.utils.triton_utils import (
+    has_tlx,
+    has_tlx_op,
+    has_torch_tlx,
+    install_torch_tlx,
+    torch_tlx_choice_filter,
+)
 
 if has_tlx():
     try:
@@ -215,18 +221,6 @@ def parse_args(args: List[str]) -> argparse.Namespace:
         action="store_true",
         help="Being verbose with autotuning results",
     )
-    parser.add_argument(
-        "--torch-tlx-mode",
-        choices=["allow", "force"],
-        default="allow",
-        help="triton.tlx_mode for the torch_tlx_* provider",
-    )
-    parser.add_argument(
-        "--tlx-space",
-        type=str,
-        default=None,
-        help="space= for the tlx_ops_* provider (default: implementation default)",
-    )
     args = parser.parse_args(args)
     return args
 
@@ -244,6 +238,32 @@ def read_shapes_from_csv(csv_path: str) -> List[List[int]]:
             ]
             shapes.append(shape)
     return shapes
+
+
+def _log_gfx950_mm_selection(a: torch.Tensor, b: torch.Tensor) -> None:
+    """Log the gfx950 full-space search size and tuned winner (evidence only).
+
+    The search covers the heuristic plan plus these range candidates; no tuned
+    winner means the heuristic plan was the only candidate.
+    """
+    try:
+        from triton.tlx.ops.kernels.mm import gfx950 as impl
+    except ImportError:
+        return
+    m, k = a.shape
+    n = b.shape[1]
+    candidates = impl._range_dispatch_candidates(
+        m, n, k, a.dtype, a.element_size(), a.stride(), b.stride()
+    )
+    out = torch.empty((m, n), device=a.device, dtype=a.dtype)
+    selected = impl._RANGE_TUNED_PLAN_CACHE.get(
+        impl._range_tuned_plan_cache_key(a, b, out)
+    )
+    logger.info(
+        "tlx_ops_mm space=full range_candidates=%d selected=%s",
+        len(candidates),
+        selected,
+    )
 
 
 class Operator(BenchmarkOperator):
@@ -293,8 +313,6 @@ class Operator(BenchmarkOperator):
 
         self.use_buffer_ops = gemm_args.buffer_ops
         self.template_filter_regex = gemm_args.template_filter_regex
-        self.torch_tlx_mode = gemm_args.torch_tlx_mode
-        self.tlx_space = gemm_args.tlx_space
 
         if self.use_buffer_ops and torch.version.hip is None:
             raise ValueError("Buffer ops are only supported on AMD GPUs.")
@@ -407,28 +425,34 @@ class Operator(BenchmarkOperator):
 
     @register_benchmark(enabled=has_tlx_op("mm_torchtlx") and has_torch_tlx())
     def torch_tlx_mm(self, a, b, bias) -> Callable:
-        # No max-autotune: the TLX template uses its single heuristic config.
-        # force_disable_caches forces a real recompile.
+        # torch_tlx_<op> convention: torch.compile with TLX "allow" mode (or
+        # --torch-tlx-mode). torchTLX is independent of max_autotune, so it is
+        # explicitly off: TLX templates come from their own heuristics.
+        # force_disable_caches forces a real recompile so TLX candidates aren't
+        # served from another provider's cache.
+        install_torch_tlx()
         torch._dynamo.reset()
         inductor_config_patch = {
             "max_autotune": False,
             "max_autotune_gemm": False,
             "autotune_num_choices_displayed": self.inductor_autotune_num_choices_displayed,
             "force_disable_caches": True,
-            "triton.tlx_mode": self.torch_tlx_mode,
+            "triton.tlx_mode": self.tb_args.torch_tlx_mode or "allow",
+            **torch_tlx_choice_filter(self.tb_args),
         }
         if self.template_filter_regex is not None:
             inductor_config_patch["test_configs.autotune_choice_name_regex"] = (
                 self.template_filter_regex
             )
 
-        with inductor_config.patch(inductor_config_patch):
-            if bias is not None:
-                f = lambda a, b: a.matmul(b) + bias
-            else:
-                f = lambda a, b: a.matmul(b)
-            compiled = torch.compile(f, dynamic=False)
-            compiled(a, b)
+        # Compile options rather than config.patch: they also apply to
+        # recompiles, e.g. on the grad-mode change of --mode fwd_no_grad.
+        if bias is not None:
+            f = lambda a, b: a.matmul(b) + bias
+        else:
+            f = lambda a, b: a.matmul(b)
+        compiled = torch.compile(f, dynamic=False, options=inductor_config_patch)
+        compiled(a, b)
 
         return lambda: compiled(a, b)
 
@@ -436,9 +460,12 @@ class Operator(BenchmarkOperator):
     def pt2_matmul_maxautotune(self, a, b, bias) -> Callable:
         torch._dynamo.reset()
         with inductor_config.patch(
-            max_autotune=True,
-            max_autotune_gemm_backends="ATEN,TRITON",
-            autotune_num_choices_displayed=self.inductor_autotune_num_choices_displayed,
+            {
+                "max_autotune": True,
+                "max_autotune_gemm_backends": "ATEN,TRITON",
+                "autotune_num_choices_displayed": self.inductor_autotune_num_choices_displayed,
+                "triton.tlx_mode": None,
+            }
         ):
             if bias is not None:
                 f = lambda a, b: a.matmul(b) + bias
@@ -621,18 +648,20 @@ class Operator(BenchmarkOperator):
 
         a_tlx = a.detach()
         b_tlx = b.detach()
+        space = self.tb_args.tlx_space
 
-        kwargs = {} if self.tlx_space is None else {"space": self.tlx_space}
-
-        # Probe rather than duplicate the production entry's shape policy.
+        # Probe rather than duplicate the production entry's shape policy. With
+        # an autotuned space this first call also runs the search.
         try:
-            _tlx_mm(a_tlx, b_tlx, **kwargs)
+            _tlx_mm(a_tlx, b_tlx, space=space)
         except _TLXInvalidInput:
             return None
+        if space == "full" and torch.version.hip:
+            _log_gfx950_mm_selection(a_tlx, b_tlx)
 
         if bias is not None:
-            return lambda: _tlx_mm(a_tlx, b_tlx, **kwargs) + bias
-        return lambda: _tlx_mm(a_tlx, b_tlx, **kwargs)
+            return lambda: _tlx_mm(a_tlx, b_tlx, space=space) + bias
+        return lambda: _tlx_mm(a_tlx, b_tlx, space=space)
 
     @register_benchmark(enabled=IS_BLACKWELL)
     def triton_warpspec_tma_persistent_matmul(self, a, b, bias) -> Callable:

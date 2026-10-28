@@ -7,7 +7,13 @@ import torch
 import torch._inductor.config as inductor_config
 from tritonbench.utils.env_utils import get_logger, IS_BLACKWELL, is_fbcode
 from tritonbench.utils.python_utils import try_import
-from tritonbench.utils.triton_utils import has_tlx, has_tlx_op, has_torch_tlx
+from tritonbench.utils.triton_utils import (
+    has_tlx,
+    has_tlx_op,
+    has_torch_tlx,
+    install_torch_tlx,
+    torch_tlx_choice_filter,
+)
 
 if has_tlx():
     try:
@@ -160,11 +166,10 @@ class Operator(BenchmarkOperator):
         if addmm_args.bias_1D_y:
             self.shapes = [(m, k, n, True) for m, k, n, _ in self.shapes]
         self.col_major = addmm_args.col_major
-        self.torch_tlx_mode = addmm_args.torch_tlx_mode
         # --test-only disables autotuning; without it, an implementation whose
         # default space autotunes (sm90 tlx.ops.addmm defaults to "full") would
         # still tune every shape.
-        self.tlx_space = addmm_args.tlx_space or (
+        self.tlx_space = self.tb_args.tlx_space or (
             "heuristic" if self.tb_args.test_only else None
         )
         self.add_in_bias_dtype = addmm_args.add_in_bias_dtype
@@ -226,34 +231,45 @@ class Operator(BenchmarkOperator):
 
     @register_benchmark(enabled=has_tlx_op("addmm_torchtlx") and has_torch_tlx())
     def torch_tlx_addmm(self, a, mat1, mat2) -> Callable:
-        # No max-autotune: the TLX template uses its single heuristic config.
-        # Inputs keep the baselines' layouts.
+        # Force PT2 to select only TLX templates, excluding stock Triton choices.
+        # torchTLX is independent of max_autotune, so it is explicitly off.
+        # force_disable_caches prevents a prior allow-mode or stock-Triton choice
+        # from being reused through the autotune cache.
+        # Gated to AMD MI350x (gfx950), where the TLX addmm template exists.
+        install_torch_tlx()
         torch._dynamo.reset()
-        with inductor_config.patch(
-            {
+        # Compile options rather than config.patch: they also apply to
+        # recompiles, e.g. on the grad-mode change of --mode fwd_no_grad.
+        compiled = torch.compile(
+            lambda a, mat1, mat2: torch.addmm(a, mat1, mat2),
+            dynamic=False,
+            options={
                 "max_autotune": False,
                 "max_autotune_gemm": False,
+                "autotune_fallback_to_aten": False,
                 "force_disable_caches": True,
-                "triton.tlx_mode": self.torch_tlx_mode,
-            }
-        ):
-            f = lambda a, mat1, mat2: torch.addmm(a, mat1, mat2)
-            compiled = torch.compile(f, dynamic=False)
-            try:
-                compiled(a, mat1, mat2)
-            except Exception as e:
-                if _no_valid_choices(e):
-                    return None
-                raise
+                "triton.tlx_mode": self.tb_args.torch_tlx_mode or "force",
+                **torch_tlx_choice_filter(self.tb_args),
+            },
+        )
+        try:
+            compiled(a, mat1, mat2)
+        except Exception as e:
+            if _no_valid_choices(e):
+                return None
+            raise
         return lambda: compiled(a, mat1, mat2)
 
     @register_benchmark(enabled=False)
     def pt2_addmm_maxautotune(self, a, mat1, mat2) -> Callable:
         torch._dynamo.reset()
         with inductor_config.patch(
-            max_autotune=True,
-            max_autotune_gemm_backends="ATEN,TRITON",
-            autotune_num_choices_displayed=None,
+            {
+                "max_autotune": True,
+                "max_autotune_gemm_backends": "ATEN,TRITON",
+                "autotune_num_choices_displayed": None,
+                "triton.tlx_mode": None,
+            }
         ):
             f = lambda a, mat1, mat2: torch.addmm(a, mat1, mat2)
             compiled = torch.compile(f, dynamic=False)

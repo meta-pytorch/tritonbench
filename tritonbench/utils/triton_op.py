@@ -287,7 +287,8 @@ class BenchmarkOperatorMetrics:
     # compile time
     compile_time: Optional[float] = None
     # synchronized wall time (ms) to build the benchmark callable, including any
-    # compile, autotune, or validation call the provider runs in setup
+    # compile, autotune, or validation call the provider runs in setup and the
+    # forward run that builds a bwd/fwd_bwd callable
     setup_time: Optional[float] = None
     # synchronized wall time (ms) of the callable's first call, before warmup
     first_call_time: Optional[float] = None
@@ -910,6 +911,23 @@ class BenchmarkOperator(metaclass=PostInitProcessor):
                 self.tb_args.baseline
             )
         self._only = _split_params_by_comma(self.tb_args.only)
+        if self._only and any(name.startswith("torch_tlx") for name in self._only):
+            from tritonbench.utils.triton_utils import (
+                has_tlx,
+                has_torch_tlx,
+                install_torch_tlx,
+            )
+
+            # Before any compile: Inductor's choices handler is thread-local and
+            # backward compiles run on the autograd thread.
+            if has_tlx() and has_torch_tlx():
+                install_torch_tlx()
+                # TLX off by default (the fleet default may turn it on), so only
+                # torch_tlx_* providers, which set their own mode, get TLX; this
+                # also covers lazily compiled backwards of the other providers.
+                import torch._inductor.config as inductor_config
+
+                inductor_config.triton.tlx_mode = None
         self._skip = _split_params_by_comma(self.tb_args.skip)
         self._force = self.tb_args.force
         self._only_match_mode = self.tb_args.only_match_mode
@@ -1057,15 +1075,11 @@ class BenchmarkOperator(metaclass=PostInitProcessor):
             f"Could not find benchmark {bm_func_name} registered in {self.name}. type is {type(getattr(self, bm_func_name, None))} "
             f"Available benchmarks: {REGISTERED_BENCHMARKS[self.name].keys()}. "
         )
-        setup = "setup_time" in self.required_metrics
-        with TimerContext(enabled=setup or logger.level <= logging.INFO) as timer:
+        with TimerContext(enabled=logger.level <= logging.INFO) as timer:
             if isinstance(self.example_inputs, dict):
                 fwd_fn = fwd_fn_lambda(**self.example_inputs)
             else:
                 fwd_fn = fwd_fn_lambda(*self.example_inputs)
-            if setup:
-                get_device_module().synchronize()
-        self._bm_func_setup_ms = timer.elapsed_ms
         logger.info(
             "Took %.02fms to get benchmark function for %s",
             timer.elapsed_ms,
@@ -1514,6 +1528,20 @@ class BenchmarkOperator(metaclass=PostInitProcessor):
             tb_args=self.tb_args,
             op_name=self.name,
         )
+        timing_labels = {
+            "setup_time": "Setup time (ms): compile + autotune + warmup",
+            "first_call_time": "First call after setup (ms)",
+        }
+        for metric, label in timing_labels.items():
+            if metric in self.required_metrics:
+                plot_benchmark_results(
+                    output=self.output,
+                    tb_args=self.tb_args,
+                    op_name=self.name,
+                    y_metric=metric,
+                    y_label=label,
+                    log_y=True,
+                )
 
     def best_config(self, fn):
         from unittest import mock
@@ -2133,9 +2161,12 @@ class BenchmarkOperator(metaclass=PostInitProcessor):
             extra_metrics=_init_extra_metrics(),
         )
         try:
-            fn = self._get_bm_func(fn_name)
+            with TimerContext() as setup_timer:
+                fn = self._get_bm_func(fn_name)
+                if "setup_time" in self.required_metrics:
+                    get_device_module().synchronize()
             if "setup_time" in self.required_metrics:
-                metrics.setup_time = self._bm_func_setup_ms
+                metrics.setup_time = setup_timer.elapsed_ms
             if "first_call_time" in self.required_metrics:
                 get_device_module().synchronize()
                 with TimerContext() as first_call_timer:

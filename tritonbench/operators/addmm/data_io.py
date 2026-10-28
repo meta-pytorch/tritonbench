@@ -23,17 +23,5 @@ def parse_args(args: List[str]) -> argparse.Namespace:
         default=None,
         help="config to use. Multiple can be passed in comma separated",
     )
-    parser.add_argument(
-        "--torch-tlx-mode",
-        choices=["allow", "force"],
-        default="force",
-        help="triton.tlx_mode for the torch_tlx_* provider",
-    )
-    parser.add_argument(
-        "--tlx-space",
-        type=str,
-        default=None,
-        help="space= for the tlx_ops_* provider (default: implementation default)",
-    )
     args = parser.parse_args(args)
     return args
