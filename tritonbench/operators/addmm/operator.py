@@ -47,6 +47,24 @@ if is_fbcode():
 else:
     get_prod_shapes = lambda x: None
 
+
+def _no_valid_choices(exc: BaseException) -> bool:
+    """Whether a torch.compile failure is Inductor finding no candidate kernel.
+
+    Inductor raises it wrapped (InductorError -> LoweringException), keeping
+    the original on `inner_exception` or the exception chain.
+    """
+    from torch._inductor.select_algorithm import NoValidChoicesError
+
+    seen = set()
+    while exc is not None and id(exc) not in seen:
+        if isinstance(exc, NoValidChoicesError) or "NoValidChoicesError" in str(exc):
+            return True
+        seen.add(id(exc))
+        exc = getattr(exc, "inner_exception", None) or exc.__cause__ or exc.__context__
+    return False
+
+
 # Shape encoding information: (M, K, N, BIAS_1D_Y)
 BUILDIN_SHAPES = [
     (20120, 1536, 512, False),
@@ -221,7 +239,12 @@ class Operator(BenchmarkOperator):
         ):
             f = lambda a, mat1, mat2: torch.addmm(a, mat1, mat2)
             compiled = torch.compile(f, dynamic=False)
-            compiled(a, mat1, mat2)
+            try:
+                compiled(a, mat1, mat2)
+            except Exception as e:
+                if _no_valid_choices(e):
+                    return None
+                raise
         return lambda: compiled(a, mat1, mat2)
 
     @register_benchmark(enabled=False)
