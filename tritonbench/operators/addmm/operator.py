@@ -143,7 +143,12 @@ class Operator(BenchmarkOperator):
             self.shapes = [(m, k, n, True) for m, k, n, _ in self.shapes]
         self.col_major = addmm_args.col_major
         self.torch_tlx_mode = addmm_args.torch_tlx_mode
-        self.tlx_space = addmm_args.tlx_space
+        # --test-only disables autotuning; without it, an implementation whose
+        # default space autotunes (sm90 tlx.ops.addmm defaults to "full") would
+        # still tune every shape.
+        self.tlx_space = addmm_args.tlx_space or (
+            "heuristic" if self.tb_args.test_only else None
+        )
         self.add_in_bias_dtype = addmm_args.add_in_bias_dtype
 
     @register_benchmark(enabled=HAS_HSTU)  # type: ignore # noqa: F821
