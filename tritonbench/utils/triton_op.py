@@ -928,6 +928,18 @@ class BenchmarkOperator(metaclass=PostInitProcessor):
                 import torch._inductor.config as inductor_config
 
                 inductor_config.triton.tlx_mode = None
+        self._tlx_l2 = (
+            bool(getattr(tb_args, "suite", None))
+            and tb_args.suite.startswith("sm90")
+            and any(
+                name.startswith(("torch_tlx_", "tlx_ops_"))
+                for name in (self._only or [])
+            )
+        )
+        if self._tlx_l2:
+            from tritonbench.utils.tlx_benchmark import prepare_run
+
+            prepare_run(self)
         self._skip = _split_params_by_comma(self.tb_args.skip)
         self._force = self.tb_args.force
         self._only_match_mode = self.tb_args.only_match_mode
@@ -1070,6 +1082,16 @@ class BenchmarkOperator(metaclass=PostInitProcessor):
         return REGISTERED_BENCHMARKS[self.name][bm_func_name]
 
     def _get_bm_func(self, bm_func_name: str):
+        if "setup_time" not in self.required_metrics:
+            return self._build_bm_func(bm_func_name)
+        get_device_module().synchronize()
+        with TimerContext() as timer:
+            result = self._build_bm_func(bm_func_name)
+            get_device_module().synchronize()
+        self._bm_func_setup_ms = timer.elapsed_ms
+        return result
+
+    def _build_bm_func(self, bm_func_name: str):
         fwd_fn_lambda = getattr(self, bm_func_name, None)
         assert callable(fwd_fn_lambda), (
             f"Could not find benchmark {bm_func_name} registered in {self.name}. type is {type(getattr(self, bm_func_name, None))} "
@@ -1382,6 +1404,8 @@ class BenchmarkOperator(metaclass=PostInitProcessor):
                 # grad_output so it does not persist across inputs. The next input
                 # rebuilds it lazily on the first backward call (see get_bwd_fn).
                 self._shared_bwd_grad = None
+                if hasattr(self, "_flash_upstream_grad"):
+                    del self._flash_upstream_grad
                 metrics.append((x_val, y_vals))
                 logger.warning(
                     f"Completed input ID {input_id}:\n{table}",
@@ -1521,13 +1545,15 @@ class BenchmarkOperator(metaclass=PostInitProcessor):
             )
             return
 
-        from tritonbench.utils.plot_utils import plot_benchmark_results
+        if self._tlx_l2:
+            from tritonbench.utils.tlx_benchmark import plot_results
 
-        plot_benchmark_results(
-            output=self.output,
-            tb_args=self.tb_args,
-            op_name=self.name,
-        )
+            plot_results(self)
+            return
+        else:
+            from tritonbench.utils.plot_utils import plot_benchmark_results
+
+            plot_benchmark_results(self.output, self.tb_args, self.name)
         timing_labels = {
             "setup_time": "Setup time (ms): compile + autotune + warmup",
             "first_call_time": "First call after setup (ms)",
@@ -1912,6 +1938,10 @@ class BenchmarkOperator(metaclass=PostInitProcessor):
 
         tree_map(_poison, _probe)
         del _probe
+        if self._tlx_l2:
+            from tritonbench.utils.tlx_benchmark import check_accuracy
+
+            return check_accuracy(self, fn, baseline_fn)
         try:
             if self.mode == Mode.FWD:
                 output = fn()

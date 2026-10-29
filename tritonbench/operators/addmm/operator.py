@@ -225,8 +225,8 @@ class Operator(BenchmarkOperator):
         kwargs = {} if self.tlx_space is None else {"space": self.tlx_space}
         try:
             _tlx_addmm(bias_tlx, mat1_tlx, mat2_tlx, **kwargs)
-        except _TLXInvalidInput:
-            return None
+        except _TLXInvalidInput as error:
+            raise NotImplementedError(str(error)) from error
         return lambda: _tlx_addmm(bias_tlx, mat1_tlx, mat2_tlx, **kwargs)
 
     @register_benchmark(enabled=has_tlx_op("addmm_torchtlx") and has_torch_tlx())

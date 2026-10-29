@@ -171,8 +171,14 @@ def plot_benchmark_results(
     width = 0.8 / len(providers)
 
     x = np.arange(len(rows))
-    fig_width = max(figsize[0], 0.25 * len(providers) * len(x) + 3)
-    fig, ax = plt.subplots(figsize=(fig_width, figsize[1]))
+    horizontal = bool(getattr(tb_args, "suite", None)) and tb_args.suite.startswith(
+        "sm90"
+    )
+    if horizontal:
+        figsize = (18, max(6, len(rows) * 0.32))
+    else:
+        figsize = (max(figsize[0], 0.25 * len(providers) * len(x) + 3), figsize[1])
+    fig, ax = plt.subplots(figsize=figsize)
 
     for i, provider in enumerate(providers):
         color = bar_colors[i % len(bar_colors)]
@@ -180,18 +186,21 @@ def plot_benchmark_results(
         values = data[provider]
         heights = [np.nan if v is None else v for v in values]
         hatches = ["//" if bad else "" for bad in inaccurate[provider]]
-        bars = ax.bar(offset, heights, width, label=provider, color=color)
+        bar = ax.barh if horizontal else ax.bar
+        bars = bar(offset, heights, width, label=provider, color=color)
         for bar, hatch in zip(bars, hatches):
             bar.set_hatch(hatch)
         missing = [o for o, v in zip(offset, values) if v is None]
-        # Axes-relative y keeps the marker visible on log axes, where 0 is not drawable.
+        # Axes-relative coordinates keep missing markers visible on log axes.
         ax.plot(
-            missing,
-            [0.01] * len(missing),
+            [0.01] * len(missing) if horizontal else missing,
+            missing if horizontal else [0.01] * len(missing),
             "x",
             color=color,
             markersize=6,
-            transform=ax.get_xaxis_transform(),
+            transform=(
+                ax.get_yaxis_transform() if horizontal else ax.get_xaxis_transform()
+            ),
         )
 
     handles, _ = ax.get_legend_handles_labels()
@@ -199,14 +208,20 @@ def plot_benchmark_results(
     labels = providers + ["inaccurate (hatched); x = missing/failed"]
     ax.legend(handles, labels, loc="upper right", fontsize=9)
 
-    ax.set_xlabel(x_label if x_label else "x_val", fontsize=11)
-    ax.set_ylabel(y_label, fontsize=11)
+    final_x_label = x_label if x_label else "x_val"
+    ax.set_xlabel(y_label if horizontal else final_x_label, fontsize=11)
+    ax.set_ylabel(final_x_label if horizontal else y_label, fontsize=11)
     ax.set_title(final_title, fontsize=13, fontweight="bold")
-    ax.set_xticks(x)
-    ax.set_xticklabels(x_labels, rotation=45, ha="right", fontsize=8)
-    ax.grid(axis="y", alpha=0.3)
+    if horizontal:
+        ax.set_yticks(x)
+        ax.set_yticklabels(x_labels, fontsize=8)
+        ax.invert_yaxis()
+    else:
+        ax.set_xticks(x)
+        ax.set_xticklabels(x_labels, rotation=45, ha="right", fontsize=8)
+    ax.grid(axis="x" if horizontal else "y", alpha=0.3)
     if log_y:
-        ax.set_yscale("log")
+        (ax.set_xscale if horizontal else ax.set_yscale)("log")
     fig.tight_layout()
 
     plot_file = os.path.join(save_path, f"{plot_name}.png")

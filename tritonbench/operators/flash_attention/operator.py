@@ -229,6 +229,7 @@ class _TlxAmdFlashAttention(torch.autograd.Function):
 def parse_op_args(args: List[str]):
     parser = argparse.ArgumentParser()
     parser.add_argument("--batch", type=int, default=4, help="Batch size")
+    parser.add_argument("--tlx-space", default=None)
     parser.add_argument("--seq-len", type=int, default=None, help="Sequence length q")
     parser.add_argument(
         "--seq-len-kv", type=int, default=None, help="Sequence length kv"
@@ -292,7 +293,10 @@ def multi_input_wrapper(fn):
         for i in range(0, arg_len, 3):
             q, k, v = args[i : i + 3]
             inp = preproc_fn(q, k, v)
-            all_inputs += [*unpack_inputs(*inp)]
+            for tensor in dict.fromkeys((q, k, v)):
+                if tensor.requires_grad and not tensor.is_leaf:
+                    tensor.retain_grad()
+                all_inputs.append(tensor)
             inputs.append(inp)
 
         def multi_input_fn():
@@ -302,7 +306,9 @@ def multi_input_wrapper(fn):
             return outputs
 
         # Citrine C2: use the multi-tensor optimizer implementation.
-        self.optims[multi_input_fn] = torch.optim.SGD(all_inputs, foreach=True)
+        self.optims[multi_input_fn] = torch.optim.SGD(
+            list(dict.fromkeys(all_inputs)), foreach=True
+        )
 
         return multi_input_fn
 
@@ -323,6 +329,7 @@ class Operator(BenchmarkOperator):
         super().__init__(tb_args, extra_args)
         args = parse_op_args(self.extra_args)
         self.BATCH = args.batch
+        self.tlx_space = args.tlx_space
         self.SEQ_LEN = args.seq_len
         self.SEQ_LEN_KV = (
             args.seq_len_kv if args.seq_len_kv is not None else args.seq_len
@@ -871,17 +878,24 @@ class Operator(BenchmarkOperator):
     def get_bwd_fn(self, fwd_fn: Callable) -> Callable:
         o = fwd_fn()
         outputs = [input_filter(lambda x: isinstance(x, torch.Tensor), o_) for o_ in o]
-        # Seeded so every implementation of an input gets the same upstream gradient.
-        generator = torch.Generator(device=self.device).manual_seed(0)
-        dOs = [
-            torch.rand(o_.shape, generator=generator, device=o_.device, dtype=o_.dtype)
-            for o_ in outputs
-        ]
-        grad_tensors = [
-            x
-            for x in self.example_inputs
-            if isinstance(x, torch.Tensor) and x.requires_grad
-        ]
+        if not hasattr(self, "_flash_upstream_grad"):
+            generator = torch.Generator(self.device).manual_seed(0)
+            self._flash_upstream_grad = [
+                torch.randn(
+                    out.shape, dtype=out.dtype, device=out.device, generator=generator
+                )
+                for out in outputs
+            ]
+        dOs = self._flash_upstream_grad
+        grad_tensors = (
+            list(self.optims[fwd_fn].param_groups[0]["params"])
+            if fwd_fn in self.optims
+            else [
+                x
+                for x in self.example_inputs
+                if isinstance(x, torch.Tensor) and x.requires_grad
+            ]
+        )
         zero_grad = (
             self.optims[fwd_fn].zero_grad
             if fwd_fn in self.optims
