@@ -398,6 +398,24 @@ def get_parser(args=None):
         help="Load a named shape suite from triton.tlx.ops.kernels.<op>._shapes.",
     )
     parser.add_argument(
+        "--torch-tlx-mode",
+        choices=["allow", "force"],
+        default=None,
+        help="Inductor triton.tlx_mode for torch_tlx_* providers (default: each provider's own mode).",
+    )
+    parser.add_argument(
+        "--torch-tlx-template-regex",
+        type=str,
+        default=None,
+        help="Autotune choice-name regex applied only inside torch_tlx_* providers, e.g. to force one TLX template variant.",
+    )
+    parser.add_argument(
+        "--tlx-space",
+        type=str,
+        default=None,
+        help="space= passed to public triton.tlx.ops calls in tlx_ops_* providers (default: the op's default).",
+    )
+    parser.add_argument(
         "--logging-group",
         type=str,
         default=None,

@@ -53,6 +53,30 @@ def has_torch_tlx():
         return False
 
 
+def torch_tlx_choice_filter(tb_args) -> dict:
+    """Inductor patch restricting torch_tlx_* autotune choices to --torch-tlx-template-regex."""
+    regex = getattr(tb_args, "torch_tlx_template_regex", None)
+    return {"test_configs.autotune_choice_name_regex": regex} if regex else {}
+
+
+def install_torch_tlx() -> None:
+    """
+    Install the torchTLX Inductor integration in this process. Inductor installs
+    it only when its first choices handler is created with `triton.tlx_mode`
+    set, so a run whose first compile is a TLX-off baseline would never offer
+    TLX templates to torch_tlx_* providers. TLX choices re-check `tlx_mode` on
+    every call, so TLX-off compiles stay stock after this.
+    """
+    import torch._inductor.config as inductor_config
+    import triton.language.extra.tlx.inductor.registry  # noqa: F401
+    from torch._inductor.choices import create_inductor_choices
+    from torch._inductor.virtualized import V
+
+    V.set_choices_handler(
+        create_inductor_choices(inductor_config.inductor_choices_class)
+    )
+
+
 @functools.lru_cache
 def has_tlx_op(op: str) -> bool:
     """Return whether the TLX catalog has ``op`` for the current GPU."""
