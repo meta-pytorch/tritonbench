@@ -5,7 +5,6 @@ from itertools import product
 from typing import Any, Callable, Generator, List, NamedTuple, Optional, Tuple, Union
 
 import torch
-import torch._inductor.config as inductor_config
 from torch.nn.attention import sdpa_kernel, SDPBackend
 
 # from attn_gym.masks.document_mask import length_to_offsets
@@ -36,9 +35,9 @@ from tritonbench.utils.env_utils import (
     get_num_sms,
     is_amd_gfx950,
     is_hip,
+    IS_HOPPER,
     is_nvidia_blackwell,
 )
-from tritonbench.utils.input import input_filter
 from tritonbench.utils.triton_op import (
     BenchmarkOperator,
     BenchmarkOperatorMetrics,
@@ -141,6 +140,10 @@ def parse_op_args(args: List[str]):
     parser.add_argument(
         "--dynamic", action="store_true", help="Enable dynamic shapes compilation"
     )
+    parser.add_argument("--torch-tlx-mode", choices=["allow", "force"], default="allow")
+    parser.add_argument(
+        "--torch-tlx-config", choices=["64,2", "64,3", "128,2"], default=None
+    )
     return parser.parse_args(args)
 
 
@@ -167,6 +170,12 @@ class Operator(BenchmarkOperator):
         self.prefix_length = args.prefix_length
         self.decoding = args.decoding
         self.dynamic = args.dynamic
+        self.torch_tlx_mode = self.tb_args.torch_tlx_mode or args.torch_tlx_mode
+        self.torch_tlx_config = args.torch_tlx_config
+        if IS_HOPPER and self.torch_tlx_config is not None:
+            from tritonbench.utils.tlx_benchmark import configure_flex_bwd
+
+            configure_flex_bwd(self, self.torch_tlx_config)
 
     def get_input_iter(self) -> Generator:
         """Generate a single input configuration for benchmarking."""
@@ -278,6 +287,52 @@ class Operator(BenchmarkOperator):
         kernel_options = self.get_kernel_options(mod_type, full_shape)
         return (q, k, v, score_mod, block_mask, mod_type, kernel_options)
 
+    def _build_sm90_input(self, shape):
+        import triton
+
+        q = torch.randn(
+            (shape.batch, shape.heads, shape.q_len, shape.head_dim),
+            device=self.device,
+            dtype=torch.bfloat16,
+            requires_grad=self.requires_grad,
+        )
+        k = torch.randn(
+            (shape.batch, shape.heads, shape.kv_len, shape.head_dim),
+            device=self.device,
+            dtype=q.dtype,
+            requires_grad=self.requires_grad,
+        )
+        v = (
+            k
+            if shape.shared_kv
+            else torch.randn_like(k, requires_grad=self.requires_grad)
+        )
+
+        def mask(b, h, m, n):
+            return n <= 150 + m
+
+        def score(s, b, h, m, n):
+            return s + (m - n).to(s.dtype) * 0.01
+
+        block_mask = create_block_mask(
+            mask if shape.mod == "score_mask" else lambda b, h, m, n: m >= 0,
+            B=shape.batch,
+            H=shape.heads,
+            Q_LEN=shape.q_len,
+            KV_LEN=shape.kv_len,
+            device=self.device,
+            BLOCK_SIZE=(128, triton.next_power_of_2(shape.kv_len)),
+        )
+        return (
+            q,
+            k,
+            v,
+            score if shape.mod == "score_mask" else None,
+            block_mask,
+            shape.mod,
+            {},
+        )
+
     @register_x_val(label="(B, Hq, M, Hkv, N, D) | Mask Type")
     def get_x_val(self, example_inputs) -> str:
         """Return a detailed string representation of the input configuration."""
@@ -352,9 +407,22 @@ class Operator(BenchmarkOperator):
     ) -> Optional[Callable]:
         """Compiled implementation using torch.compile."""
         mode = "default" if not self.max_autotune else "max-autotune-no-cudagraphs"
-        compiled_fn = torch.compile(
-            flex_attention, fullgraph=True, mode=mode, dynamic=self.dynamic
-        )
+        if self._tlx_l2:
+            compiled_fn = torch.compile(
+                flex_attention,
+                fullgraph=True,
+                dynamic=self.dynamic,
+                options={
+                    "triton.tlx_mode": None,
+                    "max_autotune": False,
+                    "max_autotune_gemm": False,
+                    "force_disable_caches": True,
+                },
+            )
+        else:
+            compiled_fn = torch.compile(
+                flex_attention, fullgraph=True, mode=mode, dynamic=self.dynamic
+            )
 
         return lambda: compiled_fn(
             q,
@@ -412,7 +480,7 @@ class Operator(BenchmarkOperator):
         return fn
 
     @register_benchmark(
-        enabled=(is_nvidia_blackwell() or is_amd_gfx950())
+        enabled=(IS_HOPPER or is_nvidia_blackwell() or is_amd_gfx950())
         and has_tlx()
         and has_torch_tlx(),
     )
@@ -426,14 +494,35 @@ class Operator(BenchmarkOperator):
         mod_type: str,
         kernel_options: dict[str, Any],
     ) -> Optional[Callable]:
-        # torch_tlx_<op> convention: torch.compile with TLX "allow" mode (or
-        # --torch-tlx-mode). torchTLX is independent of max_autotune, so it is
-        # explicitly off. The settings are compile options rather than a
-        # config.patch so the lazily compiled backward gets them too.
-        # force_disable_caches forces a real recompile so the TLX candidate isn't
-        # served from another provider's cache. Gated to archs that ship a TLX
-        # flex template -- Nvidia Blackwell (B200) and AMD MI350x (gfx950).
         install_torch_tlx()
+        if IS_HOPPER:
+            if self.mode != BenchmarkMode.BWD:
+                raise NotImplementedError("H100 torchTLX flex supports backward only")
+            if self.torch_tlx_config is None or self.torch_tlx_mode != "force":
+                raise NotImplementedError(
+                    "H100 flex backward requires --torch-tlx-mode force and "
+                    "--torch-tlx-config selecting one existing config"
+                )
+            compiled_fn = torch.compile(
+                flex_attention,
+                fullgraph=True,
+                dynamic=self.dynamic,
+                options={
+                    "triton.tlx_mode": "force",
+                    "max_autotune": False,
+                    "max_autotune_gemm": False,
+                    "force_disable_caches": True,
+                },
+            )
+            return partial(
+                compiled_fn,
+                q,
+                k,
+                v,
+                score_mod=score_mod,
+                block_mask=block_mask,
+                kernel_options=kernel_options,
+            )
         torch._dynamo.reset()
         compiled_fn = torch.compile(
             flex_attention,
@@ -619,6 +708,8 @@ class Operator(BenchmarkOperator):
         full_shape = self.get_full_shape(q, v)
         flops_per_matmul = 2.0 * BATCH * H * N_CTX * N_CTX * D_HEAD
         flops = 2 * flops_per_matmul
+        if self._tlx_l2:
+            flops = 4.0 * BATCH * H * N_CTX * v.shape[2] * D_HEAD
         if fn_name == "sdpa_cudnn":
             flops *= 0.5 if mod_type == "causal" else 1.0
         if self.mode in (BenchmarkMode.FWD, BenchmarkMode.FWD_NO_GRAD):
@@ -810,7 +901,8 @@ class Operator(BenchmarkOperator):
             mask_mod = mask_mod(**mask_mod_kwargs)
 
         if is_decoding and mask_mod:
-            cached_seq_len = torch.tensor(N // 2).to(get_current_device())
+            # Citrine C3.
+            cached_seq_len = torch.tensor(N // 2, device=get_current_device())
 
             def decoding_w_cached_seq_len(b, h, m, n):
                 return mask_mod(b, h, m + cached_seq_len, n)
@@ -861,7 +953,8 @@ class Operator(BenchmarkOperator):
         score_mod = function_dict[attn_type]
         is_decoding = M == 1
         if is_decoding and score_mod:
-            offset = torch.tensor(N // 2).to(get_current_device())
+            # Citrine C3.
+            offset = torch.tensor(N // 2, device=get_current_device())
 
             def score_mod_w_offset(score, b, h, m, n):
                 return score_mod(score, b, h, m + offset, n)

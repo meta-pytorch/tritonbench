@@ -17,6 +17,8 @@ SUPPORTED_INPUT_OPS = [
     "fp8_gemm",
     "tlx_matmul",
     "flex_attention",
+    "flash_attention",
+    "tlx_flash_attention_varlen",
 ]
 
 INPUT_CONFIG_DIR = Path(__file__).parent.joinpath("input_configs")
@@ -200,12 +202,63 @@ def get_tlx_suite_loader(tritonbench_op: Any, suite: str):
         "bmm": "bmm",
         "gemm": "mm",
         "tlx_matmul": "mm",
+        "flash_attention": "flash_attn",
+        "tlx_flash_attention_varlen": "flash_attn_varlen",
+        "flex_attention": "flex_attention",
     }.get(op_name)
     if tlx_op is None:
         raise ValueError(f"--suite is not supported for TritonBench op {op_name!r}")
 
     shapes_module = importlib.import_module(f"triton.tlx.ops.kernels.{tlx_op}._shapes")
     shapes = shapes_module.FOCUS.resolved_shapes(suite)
+    tritonbench_op._tlx_contracts = [shape._asdict() for shape in shapes]
+    if op_name == "flex_attention":
+        return lambda: (tritonbench_op._build_sm90_input(shape) for shape in shapes)
+    if op_name == "tlx_flash_attention_varlen":
+
+        def varlen_inputs():
+            import torch
+
+            for shape in shapes:
+                lens_q, lens_k = shapes_module.lengths(shape)
+                dtype = {"fp16": torch.float16, "bf16": torch.bfloat16}[shape.dtype]
+                tensors = shapes_module.cross_inputs(
+                    lens_q,
+                    lens_k,
+                    shape.heads,
+                    shape.head_dim,
+                    dtype,
+                    device=tritonbench_op.device,
+                )
+                yield (*tensors, lens_q, lens_k, shape.causal)
+
+        return varlen_inputs
+    if op_name in ("gemm", "addmm"):
+
+        def canonical_inputs():
+            import torch
+            from triton.tlx.ops.kernels.mm._shapes import operand
+
+            for shape in shapes:
+                dtype = {"fp16": torch.float16, "bf16": torch.bfloat16}[shape.dtype]
+                if op_name == "addmm":
+                    yield shapes_module.inputs(
+                        shape, dtype, device=tritonbench_op.device
+                    )
+                else:
+                    a = operand(
+                        shape.m, shape.k, shape.a_strides, dtype, tritonbench_op.device
+                    )
+                    b = operand(
+                        shape.k, shape.n, shape.b_strides, dtype, tritonbench_op.device
+                    )
+                    yield (
+                        a.requires_grad_(tritonbench_op.requires_grad),
+                        b.requires_grad_(tritonbench_op.requires_grad),
+                        None,
+                    )
+
+        return canonical_inputs
     input_config = {
         op_name: [{"inputs": shapes_module.label(*shape)} for shape in shapes]
     }

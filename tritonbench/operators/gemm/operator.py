@@ -654,8 +654,8 @@ class Operator(BenchmarkOperator):
         # an autotuned space this first call also runs the search.
         try:
             _tlx_mm(a_tlx, b_tlx, space=space)
-        except _TLXInvalidInput:
-            return None
+        except _TLXInvalidInput as error:
+            raise NotImplementedError(str(error)) from error
         if space == "full" and torch.version.hip:
             _log_gfx950_mm_selection(a_tlx, b_tlx)
 
