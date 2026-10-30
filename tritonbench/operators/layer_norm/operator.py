@@ -123,8 +123,14 @@ class Operator(BenchmarkOperator):
         (x, w_shape, weight, bias, eps) = args
         return lambda: LigerLayerNormFunction.apply(x, weight, bias, eps)
 
-    @register_benchmark(enabled=multi_cta_triton.HAS_MULTI_CTA and not is_hip())
+    @register_benchmark(
+        enabled=multi_cta_triton.HAS_MULTI_CTA
+        and (is_h100() or is_b200())
+        and not is_hip()
+    )
     def triton_multi_cta_layer_norm(self, *args):
+        if not multi_cta_triton.is_supported():
+            return None
         x = args[0]
         M, N = x.reshape(-1, x.shape[-1]).shape
         if (M - 1) * N > 2**31 - 1:

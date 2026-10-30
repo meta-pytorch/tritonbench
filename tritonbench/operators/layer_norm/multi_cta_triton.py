@@ -1,14 +1,8 @@
-"""
-Layer Normalization with multi_cta=True annotation.
+"""Layer normalization with reduce-marked multi-CTA collectives.
 
-Uses tl.range(..., multi_cta=True) for loop partitioning across CTAs.
-The C++ MultiCTAReduction pass handles the DSM exchange automatically.
-
-When ctas_per_cga > (1,1,1), the compiler partitions loop iterations across
-CTAs in the cluster. The cross-CTA reduction (to combine partial sums) is
-handled by the compiler pass via DSM exchange + barrier synchronization.
-
-For correctness testing with num_ctas=1, the pass is a no-op.
+The kernel explicitly assigns rank-strided column tiles to each physical CTA.
+Only the CTA-local sums are marked ``multi_cta=True``; the compiler combines
+those partials across the cluster and leaves loop partitioning to the kernel.
 """
 
 import inspect
@@ -17,12 +11,24 @@ import torch
 import triton
 import triton.language as tl
 
+SUPPORTED_CAPABILITIES: tuple[int, ...] = (90, 100)
+
 try:
-    # ctas_per_cga and multi_cta are meta-triton features not available in OSS triton
+    # ctas_per_cga and reduce-marked multi_cta are Meta Triton extensions.
     triton.Config({}, ctas_per_cga=(1, 1, 1))
-    HAS_MULTI_CTA = "multi_cta" in inspect.signature(tl.range).parameters
+    HAS_MULTI_CTA = "multi_cta" in inspect.signature(tl.reduce).parameters
 except Exception:
     HAS_MULTI_CTA = False
+
+
+def is_supported() -> bool:
+    if not HAS_MULTI_CTA or not torch.cuda.is_available():
+        return False
+    try:
+        target = triton.runtime.driver.active.get_current_target()
+    except Exception:
+        return False
+    return target.backend == "cuda" and target.arch in SUPPORTED_CAPABILITIES
 
 
 if HAS_MULTI_CTA:
@@ -34,7 +40,7 @@ if HAS_MULTI_CTA:
             num_warps=nw,
             ctas_per_cga=(1, nc, 1),
         )
-        for nc in [1, 2, 4, 8]
+        for nc in [1, 2, 4]
         for nw in [4, 8, 16]
         for bs in [128, 256, 512, 1024, 2048, 4096, 8192, 16384]
     ]
@@ -89,37 +95,51 @@ if HAS_MULTI_CTA:
         NUM_CTAS: tl.constexpr,
     ):
         row = tl.program_id(0)
+        local_rank = tl.program_id(1) % NUM_CTAS
         Y += row * stride
         X += row * stride
 
         _mean = tl.zeros([BLOCK_SIZE], dtype=tl.float32)
-        for off in tl.range(0, N, BLOCK_SIZE, multi_cta=True):
+        for off in tl.range(
+            local_rank * BLOCK_SIZE,
+            N,
+            NUM_CTAS * BLOCK_SIZE,
+        ):
             cols = off + tl.arange(0, BLOCK_SIZE)
-            a = tl.load(X + cols, mask=cols < N, other=0.0).to(tl.float32)
-            _mean += a
-        mean = tl.sum(_mean, axis=0) / N
+            values = tl.load(X + cols, mask=cols < N, other=0.0).to(tl.float32)
+            _mean += values
+        mean = tl.sum(_mean, axis=0, multi_cta=True) / N
 
         _var = tl.zeros([BLOCK_SIZE], dtype=tl.float32)
-        for off in tl.range(0, N, BLOCK_SIZE, multi_cta=True):
+        for off in tl.range(
+            local_rank * BLOCK_SIZE,
+            N,
+            NUM_CTAS * BLOCK_SIZE,
+        ):
             cols = off + tl.arange(0, BLOCK_SIZE)
-            x = tl.load(X + cols, mask=cols < N, other=0.0).to(tl.float32)
-            x = tl.where(cols < N, x - mean, 0.0)
-            _var += x * x
-        var = tl.sum(_var, axis=0) / N
+            mask = cols < N
+            values = tl.load(X + cols, mask=mask, other=0.0).to(tl.float32)
+            centered = tl.where(mask, values - mean, 0.0)
+            _var += centered * centered
+        var = tl.sum(_var, axis=0, multi_cta=True) / N
         rstd = 1 / tl.sqrt(var + eps)
 
-        tl.store(Mean + row, mean)
-        tl.store(Rstd + row, rstd)
+        is_leader = local_rank == 0
+        tl.store(Mean + row, mean, mask=is_leader)
+        tl.store(Rstd + row, rstd, mask=is_leader)
 
-        for off in tl.range(0, N, BLOCK_SIZE, multi_cta=True):
+        for off in tl.range(
+            local_rank * BLOCK_SIZE,
+            N,
+            NUM_CTAS * BLOCK_SIZE,
+        ):
             cols = off + tl.arange(0, BLOCK_SIZE)
             mask = cols < N
             w = tl.load(W + cols, mask=mask)
             b = tl.load(B + cols, mask=mask)
-            x = tl.load(X + cols, mask=mask, other=0.0).to(tl.float32)
-            x_hat = (x - mean) * rstd
-            y = x_hat * w + b
-            tl.store(Y + cols, y, mask=mask)
+            values = tl.load(X + cols, mask=mask, other=0.0).to(tl.float32)
+            output = (values - mean) * rstd * w + b
+            tl.store(Y + cols, output, mask=mask)
 
     class LayerNormMultiCTA(torch.autograd.Function):
         @staticmethod
