@@ -54,6 +54,7 @@ def parse_op_args(args: List[str]):
         type=int,
         help="[Optional] Hidden size dimension (integer)",
     )
+    parser.add_argument("--eps", type=float, default=1e-6, help="Normalization epsilon")
     return parser.parse_args(args)
 
 
@@ -86,7 +87,7 @@ class Operator(BenchmarkOperator):
         args = parse_op_args(self.extra_args)
         self.M = args.M
         self.H = args.H
-        self.eps = 1e-6
+        self.eps = args.eps
         # they are generated later
         self.llama_rms_op = None
         self.liger_rms_op = None

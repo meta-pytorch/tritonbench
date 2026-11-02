@@ -1,3 +1,4 @@
+import argparse
 from typing import Callable, Generator, Tuple
 
 import torch
@@ -35,6 +36,20 @@ class Operator(BenchmarkOperator):
     DEFAULT_PRECISION = "bf16"
     FWD_ONLY = True
 
+    def __init__(self, tb_args, extra_args=None):
+        super().__init__(tb_args, extra_args)
+        parser = argparse.ArgumentParser()
+        parser.add_argument("--tokens", type=int, help="Fixed token count")
+        parser.add_argument("--top-k", type=int, help="Experts selected per token")
+        parser.add_argument("--hidden-size", type=int, help="Expert output width")
+        parser.add_argument(
+            "--num-experts",
+            type=int,
+            default=64,
+            help="Expert ID and mapping table size",
+        )
+        self.input_args = parser.parse_args(self.extra_args or [])
+
     @register_benchmark(baseline=True)
     def eager(
         self,
@@ -71,8 +86,17 @@ class Operator(BenchmarkOperator):
             (256, 8, 4096),
             (1024, 8, 4096),
         ]
-        num_experts = 64
+        args = self.input_args
+        # Preserve the original sweep, including top_k=2 for one token.
+        # Explicit dimensions also apply when the token count is not fixed.
+        if args.tokens is not None:
+            shapes = [(args.tokens, 8, 4096)]
+        num_experts = args.num_experts
         for num_tokens, top_k, hidden_size in shapes:
+            top_k = args.top_k if args.top_k is not None else top_k
+            hidden_size = (
+                args.hidden_size if args.hidden_size is not None else hidden_size
+            )
             inputs = torch.randn(
                 num_tokens,
                 top_k,
