@@ -1,11 +1,17 @@
 import logging
+import math
 import os
 import unittest
 from typing import List
+from unittest.mock import patch
 
+import torch
 import yaml
 from tritonbench.operators import (  # @manual=//pytorch/tritonbench:tritonbench
     load_opbench_by_name,
+)
+from tritonbench.operators.flex_attention.operator import (
+    Operator as FlexAttentionOperator,
 )
 from tritonbench.operators.op_task import (  # @manual=//pytorch/tritonbench:tritonbench
     OpTask,
@@ -41,6 +47,7 @@ def _load_skip_file(skip_file) -> dict:
     with open(skip_file, "r") as f:
         return yaml.safe_load(f) or {}
 
+
 # Run the suite on whatever accelerator this host exposes (cuda, xpu, ...).
 TEST_DEVICE = get_current_device()
 
@@ -61,6 +68,65 @@ else:
 logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger(__name__)
 logger.setLevel(logging.INFO)
+
+
+class TestFlexAttentionGQA(unittest.TestCase):
+    def test_head_mapping_and_equal_head_defaults(self):
+        from torch.nn.attention.flex_attention import flex_attention
+
+        op = object.__new__(FlexAttentionOperator)
+        op.max_autotune = False
+        op.dynamic = False
+        op._tlx_l2 = False
+        for kv_heads in (2, 8):
+            with (
+                self.subTest(kv_heads=kv_heads),
+                patch("torch.compile", side_effect=lambda fn, **kwargs: fn),
+            ):
+                generator = torch.Generator().manual_seed(7)
+                q = torch.randn(1, 8, 7, 32, generator=generator)
+                k = torch.randn(1, kv_heads, 7, 32, generator=generator)
+                v = torch.randn(1, kv_heads, 7, 32, generator=generator)
+                repeats = q.shape[1] // kv_heads
+                expected = flex_attention(
+                    q, k.repeat_interleave(repeats, 1), v.repeat_interleave(repeats, 1)
+                )
+                inputs = (q, k, v, None, None, "noop", {})
+                for provider in (op.eager, op.compiled, op.pt2_triton_flex_attention):
+                    torch.testing.assert_close(provider(*inputs)(), expected)
+
+    @unittest.skipUnless(torch.cuda.is_available(), "CUDA is required")
+    def test_compiled_forward_and_backward_match_repeated_kv_reference(self):
+        torch.manual_seed(7)
+        q = torch.randn(
+            1, 4, 17, 32, device="cuda", dtype=torch.bfloat16, requires_grad=True
+        )
+        k = torch.randn(
+            1, 2, 17, 32, device="cuda", dtype=torch.bfloat16, requires_grad=True
+        )
+        v = torch.randn(
+            1, 2, 17, 32, device="cuda", dtype=torch.bfloat16, requires_grad=True
+        )
+        keys = k.float().repeat_interleave(2, dim=1)
+        values = v.float().repeat_interleave(2, dim=1)
+        scores = q.float() @ keys.transpose(-2, -1) / math.sqrt(q.shape[-1])
+        reference = (scores.softmax(-1) @ values).to(q.dtype)
+        grad_output = torch.randn_like(reference)
+        reference_grads = torch.autograd.grad(reference, (q, k, v), grad_output)
+
+        op = object.__new__(FlexAttentionOperator)
+        op.max_autotune = False
+        op.dynamic = False
+        op._tlx_l2 = False
+        inputs = (q, k, v, None, None, "noop", {})
+        for provider in (op.eager, op.compiled):
+            with self.subTest(provider=provider.__name__):
+                result = provider(*inputs)()
+                torch.testing.assert_close(result, reference, rtol=2e-2, atol=2e-2)
+                gradients = torch.autograd.grad(result, (q, k, v), grad_output)
+                for actual, expected in zip(gradients, reference_grads):
+                    torch.testing.assert_close(actual, expected, rtol=2e-2, atol=2e-2)
+
 
 TEST_OPERATORS = (
     set(list_operators_by_collection(op_collection="buck"))
