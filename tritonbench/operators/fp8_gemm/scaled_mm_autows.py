@@ -598,6 +598,11 @@ def scaled_mm_autows_kernel(
     Computes: C = (A @ B^T) * scale_a * scale_b
     """
     # Compile-time algorithm selection from the per-operand recipe pair.
+    BLOCKWISE_128x128 = tl.constexpr(5)
+    BLOCKWISE_1x128 = tl.constexpr(4)
+    MXFP8 = tl.constexpr(3)
+    ROWWISE = tl.constexpr(1)
+    TENSORWISE = tl.constexpr(0)
     IS_TENSORWISE: tl.constexpr = (SCALE_A_MODE == TENSORWISE) and (
         SCALE_B_MODE == TENSORWISE
     )
