@@ -595,7 +595,12 @@ def tritonbench_run(args: Optional[List[str]] = None):
         # loud and hardware init happens here rather than mid-benchmark.
         import torch_tpu  # noqa: F401
 
-        assert torch.tpu.is_available(), "No TPU device available for --device tpu"
+        # torch_tpu rejects torch.tpu.is_available() outside torch/torch_tpu;
+        # the device-generic accelerator API is the supported check.
+        assert (
+            torch.accelerator.is_available()
+            and torch.accelerator.current_accelerator().type == "tpu"
+        ), "No TPU device available for --device tpu"
 
     if args.op:
         ops = [op for op in args.op.split(",") if op]
