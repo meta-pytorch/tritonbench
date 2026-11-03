@@ -152,20 +152,10 @@ except (ImportError, IOError, AttributeError, TypeError):
     HAS_CUTLASS_BLACKWELL = False
 
 
-try:
-    # @manual=//triton:triton
-    import triton.language.extra.tlx as tlx  # type: ignore
-
-    HAS_TLX = True
-except ImportError:
-    # suppress type checking errors
-    tlx = None
-
-    HAS_TLX = False
-
-if HAS_TLX:
-    from triton.language.extra.tlx.tutorials.blackwell_fa_ws_pipelined_persistent import (
-        attention as tlx_blackwell,
+with try_import("HAS_TLX_OPS_FA"):
+    from triton.tlx.ops import flash_attn as tlx_ops_flash_attn
+    from triton.tlx.ops.kernels.flash_attn.sm100 import (
+        attention as tlx_ops_flash_attn_with_config,
     )
 try:
     HAS_TRITON_AUTOWS_FA = True
@@ -822,21 +812,20 @@ class Operator(BenchmarkOperator):
         return preproc_noop, fn
 
     # Only works with triton beta.
-    @register_benchmark(enabled=HAS_TLX)
+    @register_benchmark(enabled=IS_BLACKWELL and HAS_TLX_OPS_FA)
     @multi_input_wrapper
     def tlx_blackwell_ws_pipelined_persistent(self, *args) -> Tuple[Callable, Callable]:
         def fn(q, k, v):
-            return tlx_blackwell(
-                q,
-                k,
-                v,
-                self.sm_scale,
-                self.causal,
+            return tlx_ops_flash_attn(
+                q, k, v, causal=self.causal, sm_scale=self.sm_scale
             )
 
         return preproc_noop, fn
 
-    @register_benchmark(enabled=HAS_TLX and is_triton_beta(), label="tlx-1cta")
+    # The explicit-config path launches the forward kernel directly, without autograd.
+    @register_benchmark(
+        enabled=IS_BLACKWELL and HAS_TLX_OPS_FA, fwd_only=True, label="tlx-1cta"
+    )
     @multi_input_wrapper
     def tlx_blackwell_1cta(self, *args) -> Tuple[Callable, Callable]:
         cfg = {
@@ -854,11 +843,15 @@ class Operator(BenchmarkOperator):
         }
 
         def fn(q, k, v):
-            return tlx_blackwell(q, k, v, self.sm_scale, self.causal, config=cfg)
+            return tlx_ops_flash_attn_with_config(
+                q, k, v, self.sm_scale, self.causal, config=cfg
+            )
 
         return preproc_noop, fn
 
-    @register_benchmark(enabled=HAS_TLX and is_triton_beta(), label="tlx-2cta")
+    @register_benchmark(
+        enabled=IS_BLACKWELL and HAS_TLX_OPS_FA, fwd_only=True, label="tlx-2cta"
+    )
     @multi_input_wrapper
     def tlx_blackwell_2cta(self, *args) -> Tuple[Callable, Callable]:
         cfg = {
@@ -877,7 +870,9 @@ class Operator(BenchmarkOperator):
         }
 
         def fn(q, k, v):
-            return tlx_blackwell(q, k, v, self.sm_scale, self.causal, config=cfg)
+            return tlx_ops_flash_attn_with_config(
+                q, k, v, self.sm_scale, self.causal, config=cfg
+            )
 
         return preproc_noop, fn
 
