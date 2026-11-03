@@ -11,7 +11,7 @@ import torch
 import triton
 import triton.language as tl
 
-SUPPORTED_CAPABILITIES: tuple[int, ...] = (90, 100)
+SUPPORTED_CAPABILITIES: tuple[int, ...] = (90, 100, 103)
 
 try:
     # ctas_per_cga and reduce-marked multi_cta are Meta Triton extensions.

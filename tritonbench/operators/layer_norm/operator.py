@@ -4,7 +4,7 @@ from typing import Callable, List, Optional
 import torch
 import torch.nn.functional as F
 import triton
-from tritonbench.utils.env_utils import is_b200, is_h100, is_hip
+from tritonbench.utils.env_utils import IS_BLACKWELL, is_hip, IS_HOPPER
 from tritonbench.utils.triton_op import (
     BenchmarkOperator,
     BenchmarkOperatorMetrics,
@@ -125,7 +125,7 @@ class Operator(BenchmarkOperator):
 
     @register_benchmark(
         enabled=multi_cta_triton.HAS_MULTI_CTA
-        and (is_h100() or is_b200())
+        and (IS_HOPPER or IS_BLACKWELL)
         and not is_hip()
     )
     def triton_multi_cta_layer_norm(self, *args):
@@ -138,7 +138,7 @@ class Operator(BenchmarkOperator):
         return lambda: multi_cta_triton.layer_norm_multi_cta(*args)
 
     @register_benchmark(
-        enabled=tlx_layernorm.HAS_TLX and (is_b200() or is_h100()) and not is_hip(),
+        enabled=tlx_layernorm.HAS_TLX and (IS_BLACKWELL or IS_HOPPER) and not is_hip(),
         fwd_only=True,
     )
     def tlx_multi_cta_layer_norm(self, *args):
