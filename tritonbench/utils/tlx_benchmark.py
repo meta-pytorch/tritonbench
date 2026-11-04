@@ -1,7 +1,9 @@
 import importlib
 import json
 import logging
+import math
 import os
+import re
 import tempfile
 from dataclasses import asdict, is_dataclass, replace
 from functools import partial
@@ -11,6 +13,22 @@ import torch
 import torch._inductor.config as inductor_config
 
 logger: logging.Logger = logging.getLogger(__name__)
+
+# Every Inductor output module imports tlx; only TLX kernels call into it.
+_TLX_CALL = re.compile(r"\btlx\.\w+\(")
+
+
+class _TLXKernelRecorder(logging.Handler):
+    """Records inputs whose torch_tlx_* provider emitted a TLX kernel."""
+
+    def __init__(self, op):
+        super().__init__()
+        self.op = op
+
+    def emit(self, record):
+        backend = self.op._cur_backend_name or ""
+        if backend.startswith("torch_tlx_") and _TLX_CALL.search(record.getMessage()):
+            self.op._tlx_kernel_inputs.add(self.op._cur_input_id)
 
 
 def check_accuracy(op, fn, baseline_fn):
@@ -220,6 +238,10 @@ def prepare_run(op):
         importlib.import_module("triton.language.extra.tlx.inductor.registry")
         torch._logging.set_logs(output_code=True)
         _monitor_template_choices(op, config)
+        op._tlx_kernel_inputs = set()
+        logging.getLogger("torch._inductor.codecache.__output_code").addHandler(
+            _TLXKernelRecorder(op)
+        )
     logger.warning(
         "TLX L2 cache policy: %s",
         json.dumps(
@@ -241,15 +263,43 @@ def _contract_label(i, contract):
     return f"{i}: {tuple(contract.values())}"
 
 
+def _tlx_summary(op, fallback):
+    """Geomean torch_tlx_* speedup over accurate inputs that ran a TLX kernel."""
+    speedups = [
+        m.speedup
+        for i, (_, values) in enumerate(op.output.result)
+        if not fallback[i]
+        for p, m in values.items()
+        if p.startswith("torch_tlx_") and m.speedup and m.accuracy is not False
+    ]
+    used = fallback.count(False)
+    if not speedups:
+        return f"no TLX kernel speedup on any of {len(fallback)} inputs"
+    geomean = math.exp(sum(map(math.log, speedups)) / len(speedups))
+    return (
+        f"torchTLX geomean {geomean:.3f}x over {used}/{len(fallback)} inputs "
+        "with a TLX kernel"
+    )
+
+
 def plot_results(op):
-    from tritonbench.utils.plot_utils import plot_benchmark_results
+    from tritonbench.utils.plot_utils import _plot_name, plot_benchmark_results
 
     output_dir = Path(op.tb_args.output_dir)
     output_dir.mkdir(parents=True, exist_ok=True)
+    input_ids = op._input_ids[: len(op.output.result)]
+    tlx_inputs = getattr(op, "_tlx_kernel_inputs", None)
+    fallback = (
+        None
+        if tlx_inputs is None
+        else [input_id not in tlx_inputs for input_id in input_ids]
+    )
     rows = [
         {
+            "input_id": input_ids[i],
             "x_val": str(x),
-            "input_contract": op._tlx_contracts[i],
+            "input_contract": op._tlx_contracts[input_ids[i]],
+            "tlx_kernel": None if fallback is None else not fallback[i],
             "providers": {p: asdict(m) for p, m in values.items()},
         }
         for i, (x, values) in enumerate(op.output.result)
@@ -266,17 +316,31 @@ def plot_results(op):
     output = replace(
         op.output,
         result=[
-            (_contract_label(i, op._tlx_contracts[i]), values)
+            (
+                _contract_label(input_ids[i], op._tlx_contracts[input_ids[i]]),
+                values,
+            )
             for i, (_, values) in enumerate(op.output.result)
         ],
     )
-    plot_kwargs = {}
+    plot_kwargs = {"tlx_fallback": fallback}
     if op.name == "flex_attention" and op.torch_tlx_config is not None:
         plot_kwargs["plot_title"] = (
             f"H100 flex backward ({op.torch_tlx_config}): "
             "stock compiled flex vs forced torchTLX"
         )
-    plot_benchmark_results(output, op.tb_args, op.name, show_plot=False, **plot_kwargs)
+    title = plot_kwargs.get("plot_title") or _plot_name(op.name, op.tb_args)[1]
+    if fallback is not None:
+        summary = _tlx_summary(op, fallback)
+        logger.warning("TLX kernel coverage: %s", summary)
+        title = f"{title}\n{summary}"
+    plot_benchmark_results(
+        output,
+        op.tb_args,
+        op.name,
+        show_plot=False,
+        **(plot_kwargs | {"plot_title": title}),
+    )
     for metric in ("setup_time", "first_call_time"):
         plot_benchmark_results(
             output,
