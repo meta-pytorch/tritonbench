@@ -42,14 +42,15 @@ jobs:
           username: meta-pytorch
           password: ${{ secrets.GITHUB_TOKEN }}
       - name: Build TritonBench nightly docker
+        env:
+          TRITONBENCH_REPOSITORY: ${{ github.event.pull_request.head.repo.clone_url || format('{0}/{1}.git', github.server_url, github.repository) }}
+          TRITONBENCH_BRANCH: ${{ github.head_ref || github.ref_name }}
         run: |
           set -x
           export NIGHTLY_DATE="${{ github.event.inputs.nightly_date }}"
           cd tritonbench/docker
-          # branch name is github.head_ref when triggered by pull_request
-          # and it is github.ref_name when triggered by workflow_dispatch
-          branch_name=${{ github.head_ref || github.ref_name }}
-          docker build . --build-arg TRITONBENCH_BRANCH="${branch_name}" --build-arg FORCE_DATE="${NIGHTLY_DATE}" \
+          docker build . --build-arg TRITONBENCH_REPOSITORY="${TRITONBENCH_REPOSITORY}" \
+              --build-arg TRITONBENCH_BRANCH="${TRITONBENCH_BRANCH}" --build-arg FORCE_DATE="${NIGHTLY_DATE}" \
               -f tritonbench-nightly.dockerfile -t ghcr.io/meta-pytorch/tritonbench:latest          
       - name: Push docker to remote
         if: github.event_name != 'pull_request'
