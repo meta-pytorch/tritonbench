@@ -13,6 +13,7 @@ ENV UV_VENV_DIR=${WORKSPACE_DIR}/uv_venvs
 
 # ARG OVERRIDE_GENCODE="-gencode arch=compute_80,code=sm_80 -gencode arch=compute_86,code=sm_86 -gencode arch=compute_90,code=sm_90 -gencode arch=compute_90a,code=sm_90a"
 # ARG OVERRIDE_GENCODE_CUDNN="-gencode arch=compute_80,code=sm_80 -gencode arch=compute_86,code=sm_86 -gencode arch=compute_90,code=sm_90 -gencode arch=compute_90a,code=sm_90a"
+ARG TRITONBENCH_REPOSITORY=https://github.com/meta-pytorch/tritonbench.git
 ARG TRITONBENCH_BRANCH=${TRITONBENCH_BRANCH:-main}
 ARG FORCE_DATE=${FORCE_DATE}
 
@@ -31,7 +32,7 @@ export PATH=/home/runner/bin:/home/runner/.local/bin\${PATH:+:\${PATH}}\n" >> "$
 
 # Checkout TritonBench and submodules
 RUN git clone --recurse-submodules -b "${TRITONBENCH_BRANCH}" --single-branch \
-    https://github.com/meta-pytorch/tritonbench "${WORKSPACE_DIR}/tritonbench"
+    "${TRITONBENCH_REPOSITORY}" "${WORKSPACE_DIR}/tritonbench"
 
 # Install and setup env
 # cleanup-build.sh must run in this layer, otherwise the downloads are not reclaimed

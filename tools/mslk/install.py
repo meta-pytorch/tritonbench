@@ -64,7 +64,11 @@ def install_build_mslk():
         checkout_mslk()
     pip_install_requirements("requirements.txt", current_dir=str(mslk_repo_path))
 
-    # Blackwell FMHA requires the architecture-specific 10.0a target.
+    # Blackwell FMHA requires an architecture-specific target. Allow source
+    # builds to select targets such as 10.3a while preserving the defaults.
+    cuda_arch_list = (
+        os.environ.get("TORCH_CUDA_ARCH_LIST") or "9.0;9.0a;10.0;10.0a;12.0"
+    )
     extra_envs = os.environ.copy()
     if not is_hip():
         cmd = [
@@ -72,7 +76,7 @@ def install_build_mslk():
             "setup.py",
             "install",
             "--build-target=default",
-            "-DTORCH_CUDA_ARCH_LIST=9.0;9.0a;10.0;10.0a;12.0",
+            f"-DTORCH_CUDA_ARCH_LIST={cuda_arch_list}",
         ]
     elif is_hip():
         # build for MI300(gfx942) and MI350(gfx950)
