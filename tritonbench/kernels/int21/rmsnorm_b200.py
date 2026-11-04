@@ -8,6 +8,7 @@
 
 import hashlib
 import os
+import re
 import site
 from pathlib import Path
 from typing import Optional, Tuple
@@ -59,16 +60,19 @@ def load_ext():
         source_key = hashlib.sha256(
             str(here).encode() + source.read_bytes()
         ).hexdigest()[:12]
-        build_dir = build_root / f"cuda_ext_{source_key}"
+        if "TORCH_CUDA_ARCH_LIST" not in os.environ:
+            major, minor = torch.cuda.get_device_capability()
+            os.environ["TORCH_CUDA_ARCH_LIST"] = f"{major}.{minor}a"
+        arch_key = re.sub(r"[^0-9A-Za-z]+", "_", os.environ["TORCH_CUDA_ARCH_LIST"])
+        build_dir = build_root / f"cuda_ext_{source_key}_{arch_key}"
         build_dir.mkdir(parents=True, exist_ok=True)
         user_bin = str(Path(site.USER_BASE) / "bin")
         if user_bin not in os.environ.get("PATH", "").split(os.pathsep):
             os.environ["PATH"] = user_bin + os.pathsep + os.environ.get("PATH", "")
-        os.environ.setdefault("TORCH_CUDA_ARCH_LIST", "10.0a")
         cuda_lib64 = _cuda_lib64()
         extra_ldflags = [f"-Wl,-rpath,{cuda_lib64}"] if cuda_lib64 is not None else []
         _EXT = load(
-            name=f"int21_rmsnorm_b200_ext_{source_key}",
+            name=f"int21_rmsnorm_b200_ext_{source_key}_{arch_key}",
             sources=[str(source)],
             build_directory=str(build_dir),
             extra_cflags=["-O3"],
