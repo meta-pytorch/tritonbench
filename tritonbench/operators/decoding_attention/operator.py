@@ -83,7 +83,8 @@ try:
     )
 
     # Disable FA3 for Blackwell as it doesn't work properly
-    HAS_FLASH_V3 = False
+    if IS_BLACKWELL:
+        HAS_FLASH_V3 = False
     # Note: We keep FA2 and triton enabled alongside Blackwell for comparison
 except (ImportError, IOError, AttributeError):
     HAS_CUTLASS_BLACKWELL = False
