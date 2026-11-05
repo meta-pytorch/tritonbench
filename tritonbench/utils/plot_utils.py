@@ -83,6 +83,7 @@ def plot_benchmark_results(
     colors: Optional[List[str]] = None,
     show_plot: bool = True,
     log_y: bool = False,
+    tlx_fallback: Optional[List[bool]] = None,
 ) -> Optional[str]:
     """
     Generic function to plot benchmark results for any tritonbench operator.
@@ -113,6 +114,8 @@ def plot_benchmark_results(
         colors: List of colors for bars. If None, uses default color palette.
         show_plot: Whether to display the plot interactively (default: True).
         log_y: Use a log-scale y-axis.
+        tlx_fallback: Per-input flags for inputs where no TLX kernel ran; the
+                      torch_tlx_* bars for those inputs are dotted.
 
     Returns:
         The path to the saved plot file, or None if no results to plot.
@@ -185,7 +188,15 @@ def plot_benchmark_results(
         offset = x + (i - len(providers) / 2 + 0.5) * width
         values = data[provider]
         heights = [np.nan if v is None else v for v in values]
-        hatches = ["//" if bad else "" for bad in inaccurate[provider]]
+        fallback = (
+            tlx_fallback
+            if tlx_fallback and provider.startswith("torch_tlx_")
+            else [False] * len(rows)
+        )
+        hatches = [
+            ("//" if bad else "") + (".." if fell_back else "")
+            for bad, fell_back in zip(inaccurate[provider], fallback)
+        ]
         bar = ax.barh if horizontal else ax.bar
         bars = bar(offset, heights, width, label=provider, color=color)
         for bar, hatch in zip(bars, hatches):
@@ -203,9 +214,15 @@ def plot_benchmark_results(
             ),
         )
 
-    handles, _ = ax.get_legend_handles_labels()
+    # Explicit swatches: the default handles copy the first bar's hatch.
+    handles = [
+        Patch(facecolor=bar_colors[i % len(bar_colors)]) for i in range(len(providers))
+    ]
     handles.append(Patch(facecolor="white", edgecolor="black", hatch="//"))
     labels = providers + ["inaccurate (hatched); x = missing/failed"]
+    if tlx_fallback and any(tlx_fallback):
+        handles.append(Patch(facecolor="white", edgecolor="black", hatch=".."))
+        labels.append("no TLX kernel (dotted)")
     ax.legend(handles, labels, loc="upper right", fontsize=9)
 
     final_x_label = x_label if x_label else "x_val"

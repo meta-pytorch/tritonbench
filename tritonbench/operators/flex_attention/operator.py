@@ -144,6 +144,11 @@ def parse_op_args(args: List[str]):
     parser.add_argument(
         "--torch-tlx-config", choices=["64,2", "64,3", "128,2"], default=None
     )
+    parser.add_argument(
+        "--force-use-flex-attention",
+        action="store_true",
+        help="Set FORCE_USE_FLEX_ATTENTION so short-query --suite inputs skip flex decoding",
+    )
     return parser.parse_args(args)
 
 
@@ -172,10 +177,14 @@ class Operator(BenchmarkOperator):
         self.dynamic = args.dynamic
         self.torch_tlx_mode = self.tb_args.torch_tlx_mode or args.torch_tlx_mode
         self.torch_tlx_config = args.torch_tlx_config
+        self.force_use_flex_attention = args.force_use_flex_attention
         if IS_HOPPER and self.torch_tlx_config is not None:
             from tritonbench.utils.tlx_benchmark import configure_flex_bwd
 
             configure_flex_bwd(self, self.torch_tlx_config)
+        if self.tb_args.cudagraph and self.mode == BenchmarkMode.BWD:
+            # Warmup leaves CompiledFunctionBackward bound to the default stream.
+            torch.autograd.graph.set_override_stale_capture_stream(True)
 
     def get_input_iter(self) -> Generator:
         """Generate a single input configuration for benchmarking."""
@@ -330,7 +339,7 @@ class Operator(BenchmarkOperator):
             score if shape.mod == "score_mask" else None,
             block_mask,
             shape.mod,
-            {},
+            {"FORCE_USE_FLEX_ATTENTION": True} if self.force_use_flex_attention else {},
         )
 
     @register_x_val(label="(B, Hq, M, Hkv, N, D) | Mask Type")
