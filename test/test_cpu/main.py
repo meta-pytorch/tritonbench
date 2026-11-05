@@ -132,6 +132,52 @@ class TestTritonbenchCpu(unittest.TestCase):
             self.assertNotIn(reported_pass_key, metrics)
             self.assertEqual(output_files, [output_file])
 
+    def test_cpu_flex_attention_kernel_options(self):
+        from types import SimpleNamespace
+        from unittest.mock import Mock
+
+        from tritonbench.operators.flex_attention.input_loader import InputLoader
+
+        for defaults, expected in (
+            ({"BLOCK_M": 64, "BLOCK_N": 64}, {"BLOCK_M": 32, "BLOCK_N": 64}),
+            (None, {"BLOCK_M": 32}),
+        ):
+            with self.subTest(defaults=defaults):
+                prefix = (object(), object(), object(), None, None, "causal")
+                op = SimpleNamespace(
+                    name="flex_attention",
+                    _build_input=Mock(return_value=(*prefix, defaults)),
+                )
+                fields = {
+                    "B": "1",
+                    "Hq": "4",
+                    "M": "17",
+                    "Hkv": "4",
+                    "N": "17",
+                    "D": "32",
+                    "mod_type": "causal",
+                }
+                config = {
+                    op.name: [
+                        {
+                            "inputs": repr(
+                                ((), {**fields, "kernel_options": {"BLOCK_M": 32}})
+                            ),
+                            "count": 1,
+                        },
+                        {"inputs": repr(((), fields)), "count": 1},
+                    ]
+                }
+                inputs = list(InputLoader(op, config).get_input_iter()())
+                self.assertEqual(inputs[0][:-1], prefix)
+                self.assertEqual(inputs[0][-1], expected)
+                self.assertIs(inputs[1][-1], defaults)
+                if defaults is not None:
+                    self.assertEqual(defaults["BLOCK_M"], 64)
+                op._build_input.assert_called_with(
+                    (1, 4, 17, 32), (1, 4, 17, 32), "causal"
+                )
+
     def test_cpu_list_operators_by_collection(self):
         all_ops = list_operators_by_collection(op_collection="all")
         self.assertTrue("aten.add.Tensor" in all_ops)
