@@ -401,6 +401,7 @@ class Operator(BenchmarkOperator):
             score_mod=score_mod,
             block_mask=block_mask,
             kernel_options=kernel_options,
+            enable_gqa=q.shape[1] != k.shape[1],
         )
 
     @register_benchmark()
@@ -440,6 +441,7 @@ class Operator(BenchmarkOperator):
             score_mod=score_mod,
             block_mask=block_mask,
             kernel_options=kernel_options,
+            enable_gqa=q.shape[1] != k.shape[1],
         )
 
     @register_benchmark()
@@ -483,6 +485,7 @@ class Operator(BenchmarkOperator):
                 score_mod=score_mod,
                 block_mask=block_mask,
                 kernel_options=kernel_options,
+                enable_gqa=q.shape[1] != k.shape[1],
             )
 
         fn()
