@@ -86,7 +86,7 @@ if [ -z "${CUSTOM_TRITON_DIR:-}" ]; then
     export BOOTSTRAP_CONDA_ENV=pytorch
 else
     export BOOTSTRAP_CONDA_ENV=$CONDA_ENV
-fi    
+fi
 python3 tools/python_utils.py \
         --create-conda-env "${BOOTSTRAP_CONDA_ENV}"
 if [ -n "${UV_VENV_DIR:-}" ]; then
@@ -110,6 +110,11 @@ if [ -n "${USE_CUDA:-}" ]; then
         TORCH_INSTALL_ARGS+=(--install-torch-nightly)
     fi
     python -m tools.cuda_utils "${TORCH_INSTALL_ARGS[@]}"
+
+    if [ -n "${TRITONBENCH_CUDA_RUNTIME:-}" ]; then
+        uv pip install -r "${UV_OVERRIDE}"
+        uv pip install numpy pytest pytest-timeout torchao packaging
+    fi
 
     bash ./.ci/tritonbench/setup-nvidia-path.sh
 

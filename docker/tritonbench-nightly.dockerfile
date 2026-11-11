@@ -34,6 +34,10 @@ export PATH=/home/runner/bin:/home/runner/.local/bin\${PATH:+:\${PATH}}\n" >> "$
 RUN git clone --recurse-submodules -b "${TRITONBENCH_BRANCH}" --single-branch \
     "${TRITONBENCH_REPOSITORY}" "${WORKSPACE_DIR}/tritonbench"
 
+# WORKAROUND: older Torch wheels still pin the pre-fix CUDA toolkit.
+ENV UV_OVERRIDE=${WORKSPACE_DIR}/tritonbench/.ci/tritonbench/cuda-runtime-overrides.txt
+ENV TRITONBENCH_CUDA_RUNTIME=cu134-toolkit13.4.3-cublas13.8.1.7
+
 # Install and setup env
 # cleanup-build.sh must run in this layer, otherwise the downloads are not reclaimed
 RUN cd ${WORKSPACE_DIR}/tritonbench && bash ./.ci/tritonbench/setup-env.sh --cuda --triton-main --meta-triton --test-nvidia-driver && \
@@ -58,6 +62,11 @@ RUN cd "${WORKSPACE_DIR}"/tritonbench && \
 # Install Helion in the meta-triton venv
 RUN cd "${WORKSPACE_DIR}"/tritonbench && \
     bash .ci/helion/install.sh --conda-env "${CONDA_ENV_META_TRITON}"
+
+RUN for CONDA_ENV in pytorch triton-main meta-triton; do \
+    . "${SETUP_SCRIPT}" && \
+    python "${WORKSPACE_DIR}/tritonbench/.ci/tritonbench/check-cuda-runtime.py" || exit 1; \
+    done
 
 # Output setup script for inspection
 RUN cat "${SETUP_SCRIPT}"
