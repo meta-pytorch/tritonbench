@@ -34,10 +34,6 @@ export PATH=/home/runner/bin:/home/runner/.local/bin\${PATH:+:\${PATH}}\n" >> "$
 RUN git clone --recurse-submodules -b "${TRITONBENCH_BRANCH}" --single-branch \
     "${TRITONBENCH_REPOSITORY}" "${WORKSPACE_DIR}/tritonbench"
 
-# WORKAROUND: older Torch wheels still pin the pre-fix CUDA toolkit.
-ENV UV_OVERRIDE=${WORKSPACE_DIR}/tritonbench/.ci/tritonbench/cuda-runtime-overrides.txt
-ENV TRITONBENCH_CUDA_RUNTIME=cu134-toolkit13.4.3-cublas13.8.1.7
-
 # Install and setup env
 # cleanup-build.sh must run in this layer, otherwise the downloads are not reclaimed
 RUN cd ${WORKSPACE_DIR}/tritonbench && bash ./.ci/tritonbench/setup-env.sh --cuda --triton-main --meta-triton --test-nvidia-driver && \
@@ -63,10 +59,18 @@ RUN cd "${WORKSPACE_DIR}"/tritonbench && \
 RUN cd "${WORKSPACE_DIR}"/tritonbench && \
     bash .ci/helion/install.sh --conda-env "${CONDA_ENV_META_TRITON}"
 
-RUN for CONDA_ENV in pytorch triton-main meta-triton; do \
-    . "${SETUP_SCRIPT}" && \
-    python "${WORKSPACE_DIR}/tritonbench/.ci/tritonbench/check-cuda-runtime.py" || exit 1; \
-    done
+RUN set -eu; \
+    printf 'cuda-toolkit[crt,cudart,cufft,cufile,cupti,cusparse,nvjitlink,nvrtc,nvtx]==13.4.3\n' > /tmp/cuda-overrides.txt; \
+    for CONDA_ENV in pytorch triton-main meta-triton; do \
+        . "${SETUP_SCRIPT}"; \
+        python -c 'import importlib.metadata as m; print("torch==" + m.version("torch")); print("triton==" + m.version("triton"))' > /tmp/framework-constraints.txt; \
+        uv pip install -c /tmp/framework-constraints.txt pytest pytest-xdist pytest-timeout expecttest cloudpickle; \
+        uv pip install -c /tmp/framework-constraints.txt --pre torchao --index-url https://download.pytorch.org/whl/nightly/cu134; \
+        uv pip install -c /tmp/framework-constraints.txt --overrides /tmp/cuda-overrides.txt \
+            'cuda-toolkit[crt,cudart,cufft,cufile,cupti,cusparse,nvjitlink,nvrtc,nvtx]==13.4.3' 'nvidia-cublas==13.8.1.7'; \
+        python -c 'import importlib.metadata as m; import torch; from torchao.prototype.mx_formats.mx_tensor import MXTensor, ScaleCalculationMode; assert torch.version.cuda == "13.4"; assert m.version("cuda-toolkit") == "13.4.3"; assert m.version("nvidia-cublas") == "13.8.1.7"; print(torch.__version__, m.version("cuda-toolkit"), m.version("nvidia-cublas"))'; \
+    done; \
+    rm /tmp/cuda-overrides.txt /tmp/framework-constraints.txt
 
 # Output setup script for inspection
 RUN cat "${SETUP_SCRIPT}"

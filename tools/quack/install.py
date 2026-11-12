@@ -31,8 +31,6 @@ def install_quack():
     pip_cmd = get_pip_cmd()
     if override_file and Path(override_file).exists() and pip_cmd[:2] == ["uv", "pip"]:
         override_parameters = ["--overrides", override_file]
-        if os.getenv("TRITONBENCH_CUDA_RUNTIME"):
-            override_parameters += ["--overrides", os.environ["UV_OVERRIDE"]]
     install_quack_cmd = (
         pip_cmd
         + ["install", "-e", ".[dev]"]

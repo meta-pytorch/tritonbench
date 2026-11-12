@@ -1,9 +1,0 @@
-cuda-toolkit==13.4.3
-nvidia-cublas==13.8.1.7
-nvidia-cusolver==12.3.2.15
-cuda-bindings>=13.0.3,<14
-cupti-python==13.4.0
-nvidia-cudnn-cu13==9.26.0.51
-nvidia-cusparselt-cu13==0.8.1.post1
-nvidia-nccl-cu13==2.32.3
-nvidia-nvshmem-cu13==3.7.2

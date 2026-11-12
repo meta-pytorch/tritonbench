@@ -7,9 +7,6 @@ on:
     paths:
       - .github/workflows/docker.yaml
       - docker/tritonbench-nightly.dockerfile
-      - .ci/tritonbench/setup-env.sh
-      - .ci/tritonbench/cuda-runtime-overrides.txt
-      - .ci/tritonbench/check-cuda-runtime.py
       - submodules/ThunderKittens
       - submodules/flash-attention
       - install.py
@@ -54,7 +51,7 @@ jobs:
           cd tritonbench/docker
           docker build . --build-arg TRITONBENCH_REPOSITORY="${TRITONBENCH_REPOSITORY}" \
               --build-arg TRITONBENCH_BRANCH="${TRITONBENCH_BRANCH}" --build-arg FORCE_DATE="${NIGHTLY_DATE}" \
-              -f tritonbench-nightly.dockerfile -t ghcr.io/meta-pytorch/tritonbench:latest
+              -f tritonbench-nightly.dockerfile -t ghcr.io/meta-pytorch/tritonbench:latest          
       - name: Push docker to remote
         if: github.event_name != 'pull_request'
         run: |
