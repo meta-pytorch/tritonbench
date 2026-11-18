@@ -6,6 +6,9 @@ used by the other ops, where kwargs carry the flex_attention shape and mask type
 ``{'B', 'Hq', 'M', 'Hkv', 'N', 'D', 'mod_type'}`` (all string-valued). The tuple
 built for each entry is derived through the operator's shared ``_build_input`` so
 it matches the hardcoded ``get_input_iter`` path exactly.
+
+An optional ``kernel_options`` dict overrides individual options produced by
+``_build_input``. Options not specified in the record keep their existing values.
 """
 
 import ast
@@ -46,6 +49,12 @@ class InputLoader(OperatorInputLoader):
                 mod_type = spec["mod_type"]
                 q_shape = (B, Hq, M, D)
                 kv_shape = (B, Hkv, N, D)
-                yield self.op._build_input(q_shape, kv_shape, mod_type)
+                *inputs, kernel_options = self.op._build_input(
+                    q_shape, kv_shape, mod_type
+                )
+                overrides = spec.get("kernel_options", {})
+                if overrides:
+                    kernel_options = {**(kernel_options or {}), **overrides}
+                yield (*inputs, kernel_options)
 
         return _inner
