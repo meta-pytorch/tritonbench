@@ -9,7 +9,7 @@ def nop_kernel():
 
 @cute.jit
 def cutedsl_nop_kernel():
-    nop_kernel()
+    nop_kernel().launch(grid=(1, 1, 1), block=(1, 1, 1))
 
 
 @cute.kernel
@@ -61,4 +61,4 @@ def cutedsl_nop_with_args_kernel(
 ):
     nop_with_args_kernel(
         t1, t2, t3, t4, t5, i1, i2, i3, i4, i5, i6, i7, i8, i9, c1, c2, c3, c4, c5
-    )
+    ).launch(grid=(1, 1, 1), block=(1, 1, 1))
