@@ -22,15 +22,35 @@ except ModuleNotFoundError:
 # blob/main/benchmark/scripts/benchmark_swiglu.py
 
 
+def parse_op_args(args):
+    parser = argparse.ArgumentParser()
+    parser.add_argument("--batch", type=int, default=4, help="Batch size")
+    parser.add_argument(
+        "--seq-len", type=int, help="Fixed sequence length instead of the default sweep"
+    )
+    parser.add_argument(
+        "--hidden-size",
+        type=int,
+        default=4096,
+        help="MLP hidden size; LlamaConfig validation rules apply",
+    )
+    parser.add_argument(
+        "--intermediate-size", type=int, default=11008, help="MLP intermediate size"
+    )
+    return parser.parse_args(args or [])
+
+
 class Operator(BenchmarkOperator):
     def __init__(
         self, tb_args: argparse.Namespace, extra_args: Optional[List[str]] = None
     ):
         super().__init__(tb_args, extra_args)
-        self.B = 4
-        self.hidden_size = 4096
+        args = parse_op_args(self.extra_args)
+        self.B = args.batch
+        self.seq_len = args.seq_len
+        self.hidden_size = args.hidden_size
         self.dtype = torch.bfloat16
-        self.intermediate_size = 11008
+        self.intermediate_size = args.intermediate_size
         self.hidden_act = "silu"
         self.llama_config = LlamaConfig(
             hidden_size=self.hidden_size,
@@ -55,7 +75,11 @@ class Operator(BenchmarkOperator):
                 )
 
     def get_input_iter(self) -> Generator:
-        for seq_len in [2**i for i in range(10, 14)]:
+        for seq_len in (
+            [self.seq_len]
+            if self.seq_len is not None
+            else [2**i for i in range(10, 14)]
+        ):
             x_shape = (self.B, seq_len, self.hidden_size)
             x = torch.randn(
                 *x_shape, device=self.device, dtype=self.dtype, requires_grad=True
