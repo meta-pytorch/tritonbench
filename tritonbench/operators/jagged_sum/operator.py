@@ -121,6 +121,14 @@ class Operator(BenchmarkOperator):
 
         self.tensor_bytes_limit = get_tensor_bytes_limit(tb_args.test_only)
 
+        # The accuracy metric falls back to torch.testing.assert_close's fp32
+        # defaults (atol=1e-5) when unset, which summation-order differences
+        # over up to `seqlen` elements routinely exceed.
+        if self.tb_args.rtol is None:
+            self.tb_args.rtol = RELATIVE_TOLERANCE
+        if self.tb_args.atol is None:
+            self.tb_args.atol = ABSOLUTE_TOLERANCE
+
     @register_benchmark(baseline=True)
     def torch_jagged_sum_no_pad(
         self, x: torch.Tensor, B: int, M: int, seqlen: int, sparsity: float
@@ -220,13 +228,6 @@ class Operator(BenchmarkOperator):
                 # and max seq len.
                 batch_size, max_seq_len, _ = dense_0.shape
                 yield (nested_tensor, batch_size, 1, max_seq_len, 0.0)
-
-    def _get_accuracy(self, fn: Callable, baseline_fn: Callable) -> bool:
-        output = fn()
-        baseline_output = baseline_fn()
-        return torch.allclose(
-            output, baseline_output, atol=ABSOLUTE_TOLERANCE, rtol=RELATIVE_TOLERANCE
-        )
 
     @register_metric()
     def gbps(self, fn, example_inputs, metrics: BenchmarkOperatorMetrics):
