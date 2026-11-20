@@ -27,6 +27,11 @@ jobs:
       CONDA_ENV: ${{ inputs.conda_env }}
       TEST_MODULE: ${{ inputs.test_module }}
       DOCKER_IMAGE: "ghcr.io/meta-pytorch/tritonbench:rocm-latest"
+      # triton-lang/triton#12715 allocates AMD shared memory statically, but the
+      # Inductor static launcher still requests it again as dynamic LDS, which
+      # aborts kernels using over half the LDS limit. Drop this once the PyTorch
+      # nightly subtracts static LDS on ROCm.
+      TORCHINDUCTOR_USE_STATIC_CUDA_LAUNCHER: "0"
     steps:
       - name: Checkout Tritonbench
         uses: actions/checkout@v3
@@ -48,6 +53,7 @@ jobs:
             -e CONDA_ENV \
             -e TEST_MODULE \
             -e TRITON_HIP_USE_ASYNC_COPY \
+            -e TORCHINDUCTOR_USE_STATIC_CUDA_LAUNCHER \
             --ipc=host \
             --tty \
             --detach \
