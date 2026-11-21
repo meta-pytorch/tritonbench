@@ -108,6 +108,40 @@ class TestTritonbenchCpu(unittest.TestCase):
         self.assertNotIn(avg_key, partial_metrics)
         self.assertEqual(partial_metrics[pass_key], 0)
 
+    def test_average_row_skips_backend_with_errors(self):
+        test_op = self._get_test_op(
+            extra_args=[
+                "--metrics",
+                "test_metric_per_benchmark",
+            ]
+        )
+        test_op.run()
+        benchmark_result = test_op.output
+        for _, backend_metrics in benchmark_result.result:
+            metrics = next(iter(backend_metrics.values()))
+            metric_value = metrics.extra_metrics["test_metric_per_benchmark"]
+            metrics.extra_metrics["test_metric_per_benchmark"] = metric_value[0]
+        x_avg_key = (
+            "tritonbench_test_op_fwd[x_average-new_op_label]_test_metric_per_benchmark"
+        )
+
+        _, table = benchmark_result._table()
+        self.assertEqual(table[-1][0], "average")
+        self.assertAlmostEqual(table[-1][1], 23 / 3)
+
+        # The first and a later input both fail, the backend ran on one input.
+        for row_index in (0, 2):
+            failed_metrics = next(iter(benchmark_result.result[row_index][1].values()))
+            failed_metrics.error_msg = "test failure"
+            _, table = benchmark_result._table()
+            self.assertEqual(table[row_index][1], "test failure")
+            self.assertEqual(table[-1], ["average", None])
+            self.assertIsNone(benchmark_result.userbenchmark_dict[x_avg_key])
+
+        benchmark_result.simple_mode = True
+        _, table = benchmark_result._table()
+        self.assertEqual(table[-1], [""])
+
     def test_ci_callback_preserves_partial_failure(self):
         reported_pass_key = "tritonbench_test_op_fwd-pass"
         ci_pass_key = "tritonbench_configured_test_op-pass"

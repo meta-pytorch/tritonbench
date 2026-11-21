@@ -389,6 +389,9 @@ class BenchmarkOperatorResult:
         if "kernel_source_hash" in self.metrics:
             results = [*results, ("hashes", {})]
         avg_row = []
+        # Columns of a backend that failed on some input. Their average would
+        # only cover the inputs that ran, so it is left empty.
+        partial_avg_cols = set()
         for x_val, y_val in results:
             col_num = 0
             row = []
@@ -434,6 +437,7 @@ class BenchmarkOperatorResult:
                     for _ in range(num_metrics_to_skip):
                         if len(avg_row) <= col_num:
                             avg_row.append(None)
+                        partial_avg_cols.add(col_num)
                         col_num += 1
                     continue
                 for metric in key_metrics[backend]:
@@ -461,6 +465,8 @@ class BenchmarkOperatorResult:
                     col_num += 1
             table.append(row)
 
+        for col_num in partial_avg_cols:
+            avg_row[col_num] = None
         if self.simple_mode:
             # do not print header if in simple output mode
             new_avg_row = []
