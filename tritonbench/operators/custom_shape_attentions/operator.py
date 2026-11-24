@@ -57,6 +57,16 @@ from ..flash_attention.test_fmha_utils import permute_qkv
 from .generate_inputs import AttentionShape, customized_inputs
 
 
+def _masked_pairs(rows: int, cols: int, window: Optional[int]) -> int:
+    # Count the cells beyond one side of a bottom-right aligned window.
+    # Starting at the corner, successive rows exclude one fewer cell.
+    if window is None:
+        return 0
+    first = max(0, cols - window - 1)
+    count = min(rows, first)
+    return count * (2 * first - count + 1) // 2
+
+
 def parse_op_args(args: List[str]):
     parser = argparse.ArgumentParser()
     parser.add_argument(
@@ -251,10 +261,6 @@ class Operator(BenchmarkOperator):
             _extract_window_size(window_size[0]),
             _extract_window_size(window_size[1]),
         )
-
-    def _get_local(self) -> bool:
-        """Check if sliding window is enabled."""
-        return self._get_window_size() != (None, None)
 
     def _get_sm_scale(self) -> float:
         """Get softmax scale from current shape's d_head."""
@@ -517,33 +523,17 @@ class Operator(BenchmarkOperator):
             BATCH, H, N_CTX, D_HEAD = q.shape
             _, _, N_CTX_KV, _ = k.shape
 
-        local = self._get_local()
-        causal = self._get_causal()
-        window_size = self._get_window_size()
-
-        # Normalize N_CTX_KV to a list for variable-length support
-        if isinstance(N_CTX_KV, list):
-            kv_lens = N_CTX_KV
-        else:
-            kv_lens = [N_CTX_KV] * BATCH
-
-        if not local:
-            flops = sum(2.0 * 2 * H * N_CTX * kv_len * D_HEAD for kv_len in kv_lens)
-            if causal:
-                flops *= 0.5
-        else:
-            flops = 0
-            for kv_len in kv_lens:
-                row_idx = torch.arange(N_CTX, device="cuda")
-                col_left = torch.maximum(
-                    row_idx + kv_len - N_CTX - window_size[0], torch.tensor(0)
-                )
-                col_right = torch.minimum(
-                    row_idx + kv_len - N_CTX + window_size[1],
-                    torch.tensor(kv_len - 1),
-                )
-                avg_seqlen = (col_right - col_left + 1).float().mean().item()
-                flops += 2 * 2.0 * H * N_CTX * avg_seqlen * D_HEAD
+        left, right = self._get_window_size()
+        if self._get_causal():
+            right = 0
+        kv_lens = N_CTX_KV if isinstance(N_CTX_KV, list) else [N_CTX_KV] * BATCH
+        pairs = sum(
+            N_CTX * kv_len
+            - _masked_pairs(N_CTX, kv_len, left)
+            - _masked_pairs(kv_len, N_CTX, right)
+            for kv_len in kv_lens
+        )
+        flops = 4 * H * D_HEAD * pairs
 
         if self.mode == BenchmarkMode.BWD:
             flops *= 2.5  # 2.0(bwd) + 0.5(recompute)
