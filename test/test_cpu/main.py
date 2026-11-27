@@ -108,6 +108,49 @@ class TestTritonbenchCpu(unittest.TestCase):
         self.assertNotIn(avg_key, partial_metrics)
         self.assertEqual(partial_metrics[pass_key], 0)
 
+    def test_cpu_compile_worker_context(self):
+        from unittest.mock import patch
+
+        from tritonbench.utils.triton_op import BenchmarkOperatorMetrics
+
+        op = self._get_test_op()
+        for extra, loader, baseline, cold in (
+            (["--custom-shape", "17"], "fixtures.json", "reference", False),
+            (
+                ["--input-loader", "old.json", "--baseline", "old", "--only", "old"],
+                "new.json",
+                "reference",
+                False,
+            ),
+            (None, None, None, True),
+        ):
+            with self.subTest(loader=loader):
+                op._raw_extra_args = extra
+                op.tb_args.input_loader, op.tb_args.baseline = loader, baseline
+                op.tb_args.compile_cold_start = cold
+                with patch("tritonbench.operators.op_task.OpTask") as task:
+                    task.return_value.get_attribute.side_effect = [None, 12.0]
+                    result = op.compile_time(
+                        2, "test_op", BenchmarkOperatorMetrics(walltime=1.0)
+                    )
+                    args = task.return_value.make_operator_instance.call_args.kwargs[
+                        "args"
+                    ]
+                self.assertEqual(result, (11.0, None))
+                self.assertEqual(args[args.index("--input-id") + 1], "2")
+                self.assertNotIn("old.json", args)
+                self.assertNotIn("old", args)
+                for option, value in (
+                    ("--input-loader", loader),
+                    ("--baseline", baseline),
+                ):
+                    self.assertEqual(args.count(option), int(value is not None))
+                    if value is not None:
+                        self.assertEqual(args[args.index(option) + 1], value)
+                if extra and "--custom-shape" in extra:
+                    self.assertEqual(args[args.index("--custom-shape") + 1], "17")
+                self.assertEqual("--compile-cold-start" in args, cold)
+
     def test_ci_callback_preserves_partial_failure(self):
         reported_pass_key = "tritonbench_test_op_fwd-pass"
         ci_pass_key = "tritonbench_configured_test_op-pass"

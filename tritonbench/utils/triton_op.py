@@ -2807,8 +2807,15 @@ class BenchmarkOperator(metaclass=PostInitProcessor):
         # of multiple sample inputs and backends.
         from tritonbench.operators.op_task import OpTask
 
-        op_task_args = copy.deepcopy(self._raw_extra_args)
-        for override_option in ["--only", "--input-id", "--num-inputs", "--metrics"]:
+        op_task_args = copy.deepcopy(self._raw_extra_args or [])
+        for override_option in [
+            "--only",
+            "--input-id",
+            "--num-inputs",
+            "--metrics",
+            "--input-loader",
+            "--baseline",
+        ]:
             op_task_args = remove_cmd_parameter(op_task_args, override_option)
         op_task_args.extend(
             [
@@ -2832,6 +2839,13 @@ class BenchmarkOperator(metaclass=PostInitProcessor):
                 ),
             ]
         )
+        # Replay common-parser options to preserve the selected input context.
+        for option, value in (
+            ("--input-loader", self.tb_args.input_loader),
+            ("--baseline", self.tb_args.baseline),
+        ):
+            if value is not None:
+                op_task_args.extend([option, value])
         if self.tb_args.compile_cold_start:
             op_task_args.append("--compile-cold-start")
         # Set this env variable if you get a Permission denied issue
